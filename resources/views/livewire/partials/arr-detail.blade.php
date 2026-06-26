@@ -7,10 +7,7 @@
             // Use per-episode status from Sonarr /episode API when available —
             // this is authoritative; the lookup's statistics may be stale or absent.
 if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
-    $sonarrFileCount = collect($detailSonarrEpisodeStatus)
-        ->flatMap(fn($eps) => $eps)
-        ->filter()
-        ->count();
+    $sonarrFileCount = collect($detailSonarrEpisodeStatus)->flatMap(fn($eps) => $eps)->filter()->count();
     $detailIsDownloaded = $detailInLibrary && $sonarrFileCount > 0;
 } else {
     $detailIsDownloaded =
@@ -18,15 +15,13 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
         ($detailIsSonarr
             ? ($detailResult['episodeFileCount'] ?? 0) > 0
             : $detailResult['hasFile'] ?? false);
-        }
+            }
         @endphp
         <div class="relative flex-shrink-0">
             @if (!empty($detailResult['fanart']))
                 <div class="relative h-44 overflow-hidden">
-                    <img src="{{ $detailResult['fanart'] }}" alt=""
-                        class="w-full h-full object-cover">
-                    <div
-                        class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-gray-900/10">
+                    <img src="{{ $detailResult['fanart'] }}" alt="" class="w-full h-full object-cover">
+                    <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-gray-900/10">
                     </div>
                     <div class="absolute bottom-0 left-0 right-0 px-4 pb-3 pr-12">
                         <h2 class="text-white font-bold text-base leading-snug line-clamp-2">
@@ -40,8 +35,7 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                     class="px-1.5 text-xs border border-white/30 text-white/70 rounded leading-5">{{ $detailResult['certification'] }}</span>
                             @endif
                             @if (!empty($detailResult['status']))
-                                <span
-                                    class="text-white/60 text-xs">{{ ucfirst($detailResult['status']) }}</span>
+                                <span class="text-white/60 text-xs">{{ ucfirst($detailResult['status']) }}</span>
                             @endif
                         </div>
                     </div>
@@ -122,9 +116,7 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                     ->flatMap(fn($e) => $e)
                                     ->filter()
                                     ->count();
-                                $epTotalCount = collect($detailSonarrEpisodeStatus)
-                                    ->flatMap(fn($e) => $e)
-                                    ->count();
+                                $epTotalCount = collect($detailSonarrEpisodeStatus)->flatMap(fn($e) => $e)->count();
                             } else {
                                 $epFileCount = (int) ($detailResult['episodeFileCount'] ?? 0);
                                 $epTotalCount = (int) ($detailResult['totalEpisodeCount'] ?? 0);
@@ -201,16 +193,11 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                             $releaseBytes / 1_048_576,
                                                             2,
                                                         ) . ' MB',
-                                                        $releaseBytes > 0 => number_format(
-                                                            $releaseBytes / 1_024,
-                                                            2,
-                                                        ) . ' KB',
+                                                        $releaseBytes > 0 => number_format($releaseBytes / 1_024, 2) .
+                                                            ' KB',
                                                         default => '–',
                                                     };
-                                                    $rejectionReasons = implode(
-                                                        '; ',
-                                                        $release['rejections'] ?? [],
-                                                    );
+                                                    $rejectionReasons = implode('; ', $release['rejections'] ?? []);
                                                 @endphp
                                                 <div
                                                     class="flex items-start gap-2 px-3 py-2 {{ $release['approved'] ? '' : 'opacity-60' }}">
@@ -243,24 +230,21 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                             wire:target="downloadDetailRelease"
                                                             title="{{ __('Download this release') }}"
                                                             class="flex-shrink-0 p-1.5 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 transition-colors mt-0.5">
-                                                            <x-filament::icon icon="heroicon-o-arrow-down-tray" class="w-4 h-4" />
+                                                            <x-filament::icon icon="heroicon-o-arrow-down-tray"
+                                                                class="w-4 h-4" />
                                                         </button>
                                                     @else
                                                         <x-filament::icon-button
                                                             wire:click="mountAction('confirmForceDownload', {{ \Illuminate\Support\Js::from(['guid' => $release['guid'], 'indexerId' => (int) ($release['indexerId'] ?? 0)]) }})"
-                                                            icon="heroicon-o-arrow-down-tray"
-                                                            color="danger"
-                                                            size="sm"
-                                                            :label="__('Force download (rejected release)')"
-                                                            class="mt-0.5" />
+                                                            icon="heroicon-o-arrow-down-tray" color="danger"
+                                                            size="sm" :label="__('Force download (rejected release)')" class="mt-0.5" />
                                                     @endif
                                                 </div>
                                             @endforeach
                                         </div>
                                         <div
                                             class="px-3 py-2 border-t border-gray-100 dark:border-gray-800 flex justify-end">
-                                            <button wire:click="loadDetailReleases"
-                                                wire:loading.attr="disabled"
+                                            <button wire:click="loadDetailReleases" wire:loading.attr="disabled"
                                                 wire:target="loadDetailReleases,loadEpisodeReleases"
                                                 class="text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-40">{{ __('Refresh') }}</button>
                                         </div>
@@ -275,8 +259,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                 @endif
 
                 @if ($detailIntegration?->isSonarr() || $detailIntegration?->isRadarr())
-                    <x-filament::section :collapsible="true" compact :collapsed="true"
-                        heading="{{ __('Cast') }}" compact>
+                    <x-filament::section :collapsible="true" compact :collapsed="true" heading="{{ __('Cast') }}"
+                        compact>
                         <x-slot name="afterHeader">
                             <span wire:loading wire:target="loadDetailEpisodes">
                                 <x-filament::loading-indicator class="h-3 w-3 text-primary-500" />
@@ -315,12 +299,10 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                             <div
                                                 class="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-gray-200 dark:bg-gray-700">
                                                 @if (!empty($member['photo']))
-                                                    <img src="{{ $member['photo'] }}"
-                                                        alt="{{ $actorName }}"
+                                                    <img src="{{ $member['photo'] }}" alt="{{ $actorName }}"
                                                         class="w-full h-full object-cover" loading="lazy">
                                                 @else
-                                                    <div
-                                                        class="w-full h-full flex items-center justify-center">
+                                                    <div class="w-full h-full flex items-center justify-center">
                                                         <x-heroicon-o-user class="w-4 h-4 text-gray-400" />
                                                     </div>
                                                 @endif
@@ -331,8 +313,7 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                     {{ $actorName }}
                                                 </p>
                                                 @if (!empty($member['character']))
-                                                    <p
-                                                        class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
                                                         {{ $member['character'] }}
                                                     </p>
                                                 @endif
@@ -404,15 +385,13 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                             @if ($seasonFileCount !== null && $seasonEpTotal !== null)
                                                 @php
                                                     $seasonBadgeColor =
-                                                        $seasonFileCount === $seasonEpTotal &&
-                                                        $seasonEpTotal > 0
+                                                        $seasonFileCount === $seasonEpTotal && $seasonEpTotal > 0
                                                             ? 'success'
                                                             : ($seasonFileCount > 0
                                                                 ? 'warning'
                                                                 : 'gray');
                                                 @endphp
-                                                <x-filament::badge wire:loading.remove
-                                                    wire:target="loadDetailEpisodes"
+                                                <x-filament::badge wire:loading.remove wire:target="loadDetailEpisodes"
                                                     :color="$seasonBadgeColor">{{ $seasonFileCount }}/{{ $seasonEpTotal }}</x-filament::badge>
                                             @endif
                                         </button>
@@ -449,10 +428,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                                         $epBytes / 1_048_576,
                                                                         2,
                                                                     ) . ' MB',
-                                                                    $epBytes > 0 => number_format(
-                                                                        $epBytes / 1_024,
-                                                                        2,
-                                                                    ) . ' KB',
+                                                                    $epBytes > 0 => number_format($epBytes / 1_024, 2) .
+                                                                        ' KB',
                                                                     default => null,
                                                                 }
                                                                 : null;
@@ -480,7 +457,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                                     wire:target="requestEpisode"
                                                                     title="{{ __('Re-download this episode') }}"
                                                                     class="flex-shrink-0 p-1 rounded text-success-500 dark:text-success-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 transition-colors">
-                                                                    <x-filament::icon icon="heroicon-o-arrow-path" class="w-3.5 h-3.5" />
+                                                                    <x-filament::icon icon="heroicon-o-arrow-path"
+                                                                        class="w-3.5 h-3.5" />
                                                                 </button>
                                                             @else
                                                                 <button
@@ -489,7 +467,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                                     wire:target="requestEpisode"
                                                                     title="{{ __('Request episode') }}"
                                                                     class="flex-shrink-0 p-1 rounded text-gray-300 dark:text-gray-600 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 transition-colors">
-                                                                    <x-filament::icon icon="heroicon-o-arrow-down-tray" class="w-3.5 h-3.5" />
+                                                                    <x-filament::icon icon="heroicon-o-arrow-down-tray"
+                                                                        class="w-3.5 h-3.5" />
                                                                 </button>
                                                             @endif
                                                             @if (!$guestMode)
@@ -499,15 +478,16 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                                                     wire:target="loadEpisodeReleases,requestEpisode"
                                                                     title="{{ __('Pick a specific release for this episode') }}"
                                                                     class="flex-shrink-0 p-1 rounded text-gray-300 dark:text-gray-600 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 transition-colors">
-                                                                    <x-filament::icon icon="heroicon-o-magnifying-glass" class="w-3.5 h-3.5" />
+                                                                    <x-filament::icon
+                                                                        icon="heroicon-o-magnifying-glass"
+                                                                        class="w-3.5 h-3.5" />
                                                                 </button>
                                                             @endif
                                                         </div>
                                                     @endforeach
                                                 </div>
                                             @elseif($seasonEpisodes !== null)
-                                                <p
-                                                    class="text-xs text-gray-400 dark:text-gray-500 text-center py-3">
+                                                <p class="text-xs text-gray-400 dark:text-gray-500 text-center py-3">
                                                     {{ __('No episode details available.') }}</p>
                                             @endif
                                         </div>
@@ -534,10 +514,7 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                     $sonarrSizeBytes / 1_073_741_824,
                                     2,
                                 ) . ' GB',
-                                $sonarrSizeBytes >= 1_048_576 => number_format(
-                                    $sonarrSizeBytes / 1_048_576,
-                                    2,
-                                ) . ' MB',
+                                $sonarrSizeBytes >= 1_048_576 => number_format($sonarrSizeBytes / 1_048_576, 2) . ' MB',
                                 $sonarrSizeBytes > 0 => number_format($sonarrSizeBytes / 1_024, 2) . ' KB',
                                 default => null,
                             }
@@ -552,7 +529,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                                 <span
                                     class="text-success-700 dark:text-success-400">{{ __('Available in library') }}</span>
                             @else
-                                <x-filament::icon icon="heroicon-s-bookmark" class="w-4 h-4 text-amber-500 flex-shrink-0" />
+                                <x-filament::icon icon="heroicon-s-bookmark"
+                                    class="w-4 h-4 text-amber-500 flex-shrink-0" />
                                 <span
                                     class="text-amber-600 dark:text-amber-400">{{ __('Monitored — searching for releases') }}</span>
                             @endif
@@ -564,21 +542,13 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                     </div>
                     @if (!$guestMode)
                         <div class="flex gap-2">
-                            <x-filament::button
-                                wire:click="triggerAutomaticSearch"
-                                wire:loading.attr="disabled"
-                                wire:target="triggerAutomaticSearch"
-                                color="gray"
-                                icon="heroicon-o-magnifying-glass"
-                                class="flex-1">
+                            <x-filament::button wire:click="triggerAutomaticSearch" wire:loading.attr="disabled"
+                                wire:target="triggerAutomaticSearch" color="gray"
+                                icon="heroicon-o-magnifying-glass" class="flex-1">
                                 {{ __('Auto Search') }}
                             </x-filament::button>
-                            <x-filament::button
-                                wire:click="requestDetail"
-                                wire:loading.attr="disabled"
-                                :disabled="$monitoredCount === 0"
-                                icon="heroicon-o-arrow-path"
-                                class="flex-1">
+                            <x-filament::button wire:click="requestDetail" wire:loading.attr="disabled"
+                                :disabled="$monitoredCount === 0" icon="heroicon-o-arrow-path" class="flex-1">
                                 @if ($monitoredCount > 0)
                                     {{ __('Re-request :n Season(s)', ['n' => $monitoredCount]) }}
                                 @else
@@ -595,12 +565,9 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                     $radarrFileBytes = $detailResult['fileSize'] ?? null;
                     $radarrFileSize = $radarrFileBytes
                         ? match (true) {
-                            $radarrFileBytes >= 1_073_741_824 => number_format(
-                                $radarrFileBytes / 1_073_741_824,
-                                2,
-                            ) . ' GB',
-                            $radarrFileBytes >= 1_048_576 => number_format($radarrFileBytes / 1_048_576, 2) .
-                                ' MB',
+                            $radarrFileBytes >= 1_073_741_824 => number_format($radarrFileBytes / 1_073_741_824, 2) .
+                                ' GB',
+                            $radarrFileBytes >= 1_048_576 => number_format($radarrFileBytes / 1_048_576, 2) . ' MB',
                             $radarrFileBytes > 0 => number_format($radarrFileBytes / 1_024, 2) . ' KB',
                             default => null,
                         }
@@ -619,12 +586,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                         @endif
                     </div>
                     @if (!$guestMode)
-                        <x-filament::button
-                            wire:click="triggerAutomaticSearch"
-                            wire:loading.attr="disabled"
-                            wire:target="triggerAutomaticSearch"
-                            color="gray"
-                            icon="heroicon-o-magnifying-glass"
+                        <x-filament::button wire:click="triggerAutomaticSearch" wire:loading.attr="disabled"
+                            wire:target="triggerAutomaticSearch" color="gray" icon="heroicon-o-magnifying-glass"
                             class="w-full">
                             {{ __('Trigger Automatic Search') }}
                         </x-filament::button>
@@ -639,12 +602,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
                         {{ __('This title is monitored and searching for releases.') }}
                     </div>
                     @if (!$guestMode)
-                        <x-filament::button
-                            wire:click="triggerAutomaticSearch"
-                            wire:loading.attr="disabled"
-                            wire:target="triggerAutomaticSearch"
-                            color="gray"
-                            icon="heroicon-o-magnifying-glass"
+                        <x-filament::button wire:click="triggerAutomaticSearch" wire:loading.attr="disabled"
+                            wire:target="triggerAutomaticSearch" color="gray" icon="heroicon-o-magnifying-glass"
                             class="w-full">
                             {{ __('Trigger Automatic Search') }}
                         </x-filament::button>
@@ -653,12 +612,8 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
             @elseif($detailIsSonarr)
                 {{-- Sonarr not in library — initial request --}}
                 @php $monitoredCount = collect($selectedSeasons)->filter()->count(); @endphp
-                <x-filament::button
-                    wire:click="requestDetail"
-                    wire:loading.attr="disabled"
-                    :disabled="$monitoredCount === 0"
-                    icon="heroicon-o-plus"
-                    class="w-full">
+                <x-filament::button wire:click="requestDetail" wire:loading.attr="disabled" :disabled="$monitoredCount === 0"
+                    icon="heroicon-o-plus" class="w-full">
                     @if ($monitoredCount > 0)
                         {{ __('Request :count Season(s)', ['count' => $monitoredCount]) }}
                     @else
@@ -668,22 +623,14 @@ if ($detailIsSonarr && !empty($detailSonarrEpisodeStatus)) {
             @else
                 {{-- Radarr not in library --}}
                 <div class="flex gap-2">
-                    <x-filament::button
-                        wire:click="request({{ $detailIndex }})"
-                        wire:loading.attr="disabled"
-                        wire:target="request,addForInteractiveSearch"
-                        icon="heroicon-o-plus"
-                        class="flex-1">
+                    <x-filament::button wire:click="request({{ $detailIndex }})" wire:loading.attr="disabled"
+                        wire:target="request,addForInteractiveSearch" icon="heroicon-o-plus" class="flex-1">
                         {{ __('Request') }}
                     </x-filament::button>
                     @if (!$guestMode)
-                        <x-filament::button
-                            wire:click="addForInteractiveSearch"
-                            wire:loading.attr="disabled"
-                            wire:target="request,addForInteractiveSearch"
-                            color="gray"
-                            icon="heroicon-o-list-bullet"
-                            class="flex-1">
+                        <x-filament::button wire:click="addForInteractiveSearch" wire:loading.attr="disabled"
+                            wire:target="request,addForInteractiveSearch" color="gray"
+                            icon="heroicon-o-list-bullet" class="flex-1">
                             {{ __('Pick Release') }}
                         </x-filament::button>
                     @endif

@@ -47,8 +47,7 @@
                             <div class="flex flex-wrap gap-1.5">
                                 @foreach ($movieGenres as $genre)
                                     @php $isActive = in_array($genre['id'], $browseGenreIds) && $browseGenreType === 'movie'; @endphp
-                                    <button type="button"
-                                        wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'movie')"
+                                    <button type="button" wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'movie')"
                                         @class([
                                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
                                             'bg-primary-600 text-white border-primary-600' => $isActive,
@@ -70,8 +69,7 @@
                             <div class="flex flex-wrap gap-1.5">
                                 @foreach ($tvGenres as $genre)
                                     @php $isActive = in_array($genre['id'], $browseGenreIds) && $browseGenreType === 'tv'; @endphp
-                                    <button type="button"
-                                        wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'tv')"
+                                    <button type="button" wire:click="toggleBrowseGenre({{ $genre['id'] }}, 'tv')"
                                         @class([
                                             'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
                                             'bg-primary-600 text-white border-primary-600' => $isActive,
@@ -369,7 +367,7 @@
                 <div class="p-4">
                     @if ($browseLoading)
                         <div class="flex items-center justify-center py-10">
-                            <x-filament::loading-indicator class="h-6 w-6 text-primary-500" />
+                            <x-filament::loading-indicator class="h-5 w-5 text-primary-500" />
                         </div>
                     @elseif(count($browseResults) > 0)
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"
