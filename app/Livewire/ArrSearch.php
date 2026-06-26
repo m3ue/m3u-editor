@@ -479,6 +479,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         $this->detailEpisodeSeason = null;
         $this->detailEpisodeNumber = null;
         $this->detailReleasesLabel = null;
+        $this->showDetail = true;
         $this->mountAction('showDetail');
     }
 
