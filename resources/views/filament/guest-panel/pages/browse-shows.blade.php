@@ -55,8 +55,7 @@
             {{-- Poster Card Grid --}}
             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 @foreach ($groupedShows as $show)
-                    <div class="relative flex flex-col rounded-xl overflow-visible bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-white/10 shadow"
-                        style="content-visibility: auto; contain-intrinsic-size: 350px 520px;" x-data="{ menuOpen: false }">
+                    <div class="relative flex flex-col rounded-xl overflow-visible bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-white/10 shadow">
 
                         {{-- Poster area --}}
                         <button type="button"
@@ -116,46 +115,30 @@
                                 </p>
                             </button>
 
-                            {{-- Kebab menu --}}
-                            <div class="relative flex-shrink-0">
-                                <button @click.stop="menuOpen = !menuOpen"
-                                    class="p-1.5 rounded-lg text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition">
-                                    <x-filament::icon icon="heroicon-o-ellipsis-vertical" class="w-4 h-4" />
-                                </button>
-
-                                <div x-show="menuOpen" @click.outside="menuOpen = false"
-                                    x-transition:enter="transition ease-out duration-100"
-                                    x-transition:enter-start="opacity-0 scale-95"
-                                    x-transition:enter-end="opacity-100 scale-100"
-                                    x-transition:leave="transition ease-in duration-75"
-                                    x-transition:leave-start="opacity-100 scale-100"
-                                    x-transition:leave-end="opacity-0 scale-95"
-                                    class="absolute right-0 bottom-full mb-1 z-20 w-52 rounded-xl shadow-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 py-1 text-sm"
-                                    style="display: none;">
-                                    <button
+                            {{-- Actions menu --}}
+                            <x-filament::dropdown placement="top-end">
+                                <x-slot name="trigger">
+                                    <x-filament::icon-button icon="heroicon-o-ellipsis-vertical"
+                                        color="primary" size="sm" />
+                                </x-slot>
+                                <x-filament::dropdown.list>
+                                    <x-filament::dropdown.list.item
                                         wire:click="openShowDetail({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                        @click="menuOpen = false"
-                                        class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
-                                        <x-filament::icon icon="heroicon-o-information-circle"
-                                            class="w-4 h-4 opacity-60" />
+                                        icon="heroicon-o-information-circle">
                                         {{ __('View Details') }}
-                                    </button>
-                                    <button
+                                    </x-filament::dropdown.list.item>
+                                    <x-filament::dropdown.list.item
                                         wire:click="quickRecordNextAiring({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                        @click="menuOpen = false"
-                                        class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
-                                        <x-filament::icon icon="heroicon-o-play-circle" class="w-4 h-4 opacity-60" />
+                                        icon="heroicon-o-play-circle">
                                         {{ __('Quick Record Next Airing') }}
-                                    </button>
-                                    <button
+                                    </x-filament::dropdown.list.item>
+                                    <x-filament::dropdown.list.item
                                         wire:click="recordSeriesDefaults({{ \Illuminate\Support\Js::from($show['title']) }})"
-                                        @click="menuOpen = false"
-                                        class="w-full text-left px-4 py-2.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition flex items-center gap-2">
-                                        <x-filament::icon icon="heroicon-o-queue-list" class="w-4 h-4 opacity-60" />
+                                        icon="heroicon-o-queue-list">
                                         {{ __('Record Series (defaults)') }}
-                                    </button>
-                                </div>
-                            </div>
+                                    </x-filament::dropdown.list.item>
+                                </x-filament::dropdown.list>
+                            </x-filament::dropdown>
                         </div>
                     </div>
                 @endforeach
