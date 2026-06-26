@@ -258,6 +258,7 @@ class GuestBrowseShows extends Page
         $this->seriesChannelId = 0;
         $this->seriesChannelName = null;
         $this->selectedShowDetail = $this->buildShowDetail($title);
+        $this->mountAction('showDetail');
     }
 
     public function closeShowDetail(): void

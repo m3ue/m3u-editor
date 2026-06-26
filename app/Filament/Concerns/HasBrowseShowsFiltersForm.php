@@ -108,6 +108,20 @@ trait HasBrowseShowsFiltersForm
             ]);
     }
 
+    // --- Show detail slide-over ---
+
+    public function showDetailAction(): Action
+    {
+        return Action::make('showDetail')
+            ->slideOver()
+            ->modalHeading(fn (): string => $this->selectedShowTitle)
+            ->modalContent(fn () => view('filament.pages.browse-show-detail', [
+                'show' => $this->selectedShowDetail,
+            ]))
+            ->modalSubmitAction(false)
+            ->modalCancelAction(false);
+    }
+
     // --- Series options form ---
 
     public function seriesOptionsForm(Schema $schema): Schema
