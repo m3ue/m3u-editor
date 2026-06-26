@@ -118,32 +118,8 @@
             </div>
         @endif
 
-        {{-- Series options collapsible --}}
-        <div x-data="{ showOptions: false }" class="mt-2">
-            <button type="button" @click="showOptions = !showOptions"
-                class="flex items-center gap-1 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-500 transition">
-                <svg class="w-4 h-4 transition-transform" :class="showOptions ? 'rotate-90' : ''" fill="none"
-                    viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                </svg>
-                {{ __('Advanced options') }}
-                <span x-show="!showOptions" class="ml-1 text-gray-400 dark:text-gray-500 font-normal">
-                    &mdash; {{ $seriesHint }}
-                </span>
-            </button>
-
-            <div x-show="showOptions" x-collapse>
-                <div class="mt-3">
-                    {{ $this->seriesOptionsForm }}
-
-                    <x-filament::button
-                        wire:click="recordSeriesWithOptions({{ \Illuminate\Support\Js::from($show['title']) }})"
-                        color="primary" class="w-full mt-3">
-                        {{ __('Save Series Rule') }}
-                    </x-filament::button>
-                </div>
-            </div>
-        </div>
+        {{-- Series options --}}
+        {{ $this->seriesOptionsForm }}
     </div>
 @else
 <div class="flex flex-col items-center justify-center py-12 text-center">

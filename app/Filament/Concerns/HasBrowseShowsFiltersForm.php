@@ -4,9 +4,11 @@ namespace App\Filament\Concerns;
 
 use App\Models\Channel;
 use App\Models\Group;
+use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
@@ -113,35 +115,48 @@ trait HasBrowseShowsFiltersForm
         return $schema
             ->statePath(null)
             ->schema([
-                Grid::make(['default' => 1, 'sm' => 2])->schema([
-                    Select::make('seriesNewOnly')
-                        ->label(__('New episodes only'))
-                        ->options([0 => __('No'), 1 => __('Yes')]),
+                Section::make(__('Advanced options'))
+                    ->description(fn (): string => $this->seriesHint)
+                    ->compact()
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema([
+                        Grid::make(['default' => 1, 'sm' => 2])->schema([
+                            Select::make('seriesNewOnly')
+                                ->label(__('New episodes only'))
+                                ->options([0 => __('No'), 1 => __('Yes')]),
 
-                    $this->seriesChannelField(),
+                            $this->seriesChannelField(),
 
-                    TextInput::make('seriesPriority')
-                        ->label(__('Priority'))
-                        ->numeric()
-                        ->minValue(1)
-                        ->maxValue(99),
+                            TextInput::make('seriesPriority')
+                                ->label(__('Priority'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->maxValue(99),
 
-                    TextInput::make('seriesStartEarly')
-                        ->label(__('Start early (seconds)'))
-                        ->numeric()
-                        ->minValue(0),
+                            TextInput::make('seriesStartEarly')
+                                ->label(__('Start early (seconds)'))
+                                ->numeric()
+                                ->minValue(0),
 
-                    TextInput::make('seriesEndLate')
-                        ->label(__('End late (seconds)'))
-                        ->numeric()
-                        ->minValue(0),
+                            TextInput::make('seriesEndLate')
+                                ->label(__('End late (seconds)'))
+                                ->numeric()
+                                ->minValue(0),
 
-                    TextInput::make('seriesKeepLast')
-                        ->label(__('Keep last N recordings'))
-                        ->placeholder(__('All recordings'))
-                        ->numeric()
-                        ->minValue(1),
-                ]),
+                            TextInput::make('seriesKeepLast')
+                                ->label(__('Keep last N recordings'))
+                                ->placeholder(__('All recordings'))
+                                ->numeric()
+                                ->minValue(1),
+                        ]),
+                    ])
+                    ->footerActions([
+                        Action::make('saveSeriesRule')
+                            ->label(__('Save Series Rule'))
+                            ->color('primary')
+                            ->action(fn () => $this->recordSeriesWithOptions($this->selectedShowTitle)),
+                    ]),
             ]);
     }
 
