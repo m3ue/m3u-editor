@@ -64,8 +64,11 @@ class EpgProgrammeNormalizer
             return ['title' => '', 'isNew' => false];
         }
 
-        // Detect isNew from the specific ᴺᵉʷ marker before stripping all annotations.
-        $isNew = str_contains($title, 'ᴺᵉʷ');
+        // Detect isNew from ᴺᵉʷ (New) or any ᴸ-prefixed LIVE marker (ᴸᴵᵛᴱ, ᴸᵛᴱ, ᴸᵛᵉ, etc.)
+        // before stripping. Live broadcasts are first-run content by definition, so they
+        // are treated as new episodes for DVR scheduling purposes.
+        $isNew = str_contains($title, 'ᴺᵉʷ')
+            || (bool) preg_match('/\x{1D38}[\x{02B0}-\x{02FF}\x{1D00}-\x{1DBF}]*/u', $title);
 
         // Strip all superscript annotation markers (ᴸᴵᵛᴱ, ᴺᵉʷ, ᴴᴰ, etc.).
         $title = self::cleanForSearch($title);
