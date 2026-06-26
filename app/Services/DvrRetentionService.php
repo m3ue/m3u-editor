@@ -116,7 +116,7 @@ class DvrRetentionService
      */
     private function trimGroup(Builder $query, int $keep, DvrSetting $setting, string $groupLabel): void
     {
-        $completed = $query->orderByDesc('scheduled_start')->get();
+        $completed = $query->whereNotNull('file_path')->orderByDesc('scheduled_start')->get();
 
         if ($completed->count() <= $keep) {
             return;
@@ -140,6 +140,7 @@ class DvrRetentionService
         $old = DvrRecording::where('dvr_setting_id', $setting->id)
             ->where('status', DvrRecordingStatus::Completed->value)
             ->where('actual_end', '<', $cutoff)
+            ->whereNotNull('file_path')
             ->get();
 
         foreach ($old as $recording) {
