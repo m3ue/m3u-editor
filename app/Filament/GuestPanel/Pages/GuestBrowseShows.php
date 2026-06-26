@@ -148,20 +148,25 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * Lazily populated on first dropdown open. Not computed eagerly to avoid
-     * serialising thousands of channel names into the initial page HTML.
-     *
-     * @var array<int, string>
+     * True once channels have been dispatched to the browser for this DVR setting.
+     * Prevents redundant DB queries on repeat openings of Advanced options.
      */
-    public array $channelOptions = [];
+    public bool $channelOptionsDispatched = false;
+
+    /** Channel name of the resolved source channel for the current detail view. */
+    public ?string $sourceChannelName = null;
+
+    /** Channel name of a specifically-selected series channel (resolved on updatedSeriesChannelId). */
+    public ?string $seriesChannelName = null;
 
     public function loadChannelOptions(): void
     {
-        if (! empty($this->channelOptions)) {
+        if ($this->channelOptionsDispatched) {
             return;
         }
 
-        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
+        $dvrSetting = $this->getCachedDvrSetting();
+        $playlistId = $dvrSetting?->playlist_id;
         if (! $playlistId) {
             return;
         }
@@ -172,23 +177,31 @@ class GuestBrowseShows extends Page
             $channels->where('enabled', true);
         }
 
-        $this->channelOptions = $channels->get()
-            ->mapWithKeys(function (Channel $c) {
-                return [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name];
-            })
+        $options = $channels->get()
+            ->mapWithKeys(fn (Channel $c) => [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name])
             ->sortBy(fn (string $label) => mb_strtolower($label))
             ->all();
+
+        $this->channelOptionsDispatched = true;
+        $this->dispatch('channel-options-loaded', dvr_setting_id: $dvrSetting->id, options: $options);
+    }
+
+    public function updatedSeriesChannelId(): void
+    {
+        $this->seriesChannelName = $this->seriesChannelId > 0
+            ? $this->resolveChannelName($this->seriesChannelId)
+            : null;
     }
 
     public function getSeriesHintProperty(): string
     {
-        $channelOptions = $this->channelOptions;
-
         $channelName = match (true) {
-            $this->seriesChannelId === 0 => $this->sourceChannelId && isset($channelOptions[$this->sourceChannelId])
-                ? Str::limit($channelOptions[$this->sourceChannelId], 18)
+            $this->seriesChannelId === 0 => $this->sourceChannelName
+                ? Str::limit($this->sourceChannelName, 18)
                 : __('original source'),
-            $this->seriesChannelId > 0 && isset($channelOptions[$this->seriesChannelId]) => Str::limit($channelOptions[$this->seriesChannelId], 18),
+            $this->seriesChannelId > 0 => $this->seriesChannelName
+                ? Str::limit($this->seriesChannelName, 18)
+                : __('channel').' #'.$this->seriesChannelId,
             default => __('any channel'),
         };
 
@@ -215,10 +228,10 @@ class GuestBrowseShows extends Page
         $this->seriesStartEarly = 0;
         $this->seriesEndLate = 0;
         $this->seriesKeepLast = null;
-        $this->sourceChannelId = $this->resolveSourceChannelId($title);
+        [$this->sourceChannelId, $this->sourceChannelName] = $this->resolveSourceChannel($title);
         $this->seriesChannelId = 0;
+        $this->seriesChannelName = null;
         $this->selectedShowDetail = $this->buildShowDetail($title);
-        $this->loadChannelOptions();
     }
 
     public function closeShowDetail(): void
@@ -833,13 +846,16 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * Resolve the channel (within the DVR setting's playlist) that a show most likely airs on.
+     * Find the channel (within the DVR setting's playlist) that a show most likely airs on,
+     * returning the channel ID and display name together in a single final query.
+     *
+     * @return array{0: int|null, 1: string|null}
      */
-    private function resolveSourceChannelId(string $title): ?int
+    private function resolveSourceChannel(string $title): array
     {
         $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
-            return null;
+            return [null, null];
         }
 
         $programme = $this->buildBaseQuery()
@@ -848,16 +864,37 @@ class GuestBrowseShows extends Page
             ->first(['epg_channel_id']);
 
         if (! $programme?->epg_channel_id) {
-            return null;
+            return [null, null];
         }
 
         $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
         if (! $epgChannelPk) {
+            return [null, null];
+        }
+
+        $channel = Channel::where('playlist_id', $playlistId)
+            ->where('epg_channel_id', $epgChannelPk)
+            ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
+
+        if (! $channel) {
+            return [null, null];
+        }
+
+        $name = $channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name;
+
+        return [$channel->id, $name ?: null];
+    }
+
+    private function resolveChannelName(?int $channelId): ?string
+    {
+        if (! $channelId) {
             return null;
         }
 
-        return Channel::where('playlist_id', $playlistId)
-            ->where('epg_channel_id', $epgChannelPk)
-            ->value('id');
+        $channel = Channel::find($channelId, ['id', 'title', 'title_custom', 'name', 'name_custom']);
+
+        return $channel
+            ? ($channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name) ?: null
+            : null;
     }
 }

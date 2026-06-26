@@ -195,7 +195,7 @@ class BrowseShows extends Page
             ->all();
 
         $this->channelOptionsDispatched = true;
-        $this->dispatch('channel-options-loaded', options: $options);
+        $this->dispatch('channel-options-loaded', dvr_setting_id: $this->dvr_setting_id, options: $options);
     }
 
     private function resolveChannelName(?int $channelId): ?string
@@ -313,8 +313,7 @@ class BrowseShows extends Page
         $this->seriesStartEarly = 0;
         $this->seriesEndLate = 0;
         $this->seriesKeepLast = null;
-        $this->sourceChannelId = $this->resolveSourceChannelId($title);
-        $this->sourceChannelName = $this->resolveChannelName($this->sourceChannelId);
+        [$this->sourceChannelId, $this->sourceChannelName] = $this->resolveSourceChannel($title);
         $this->seriesChannelId = 0;
         $this->seriesChannelName = null;
         $this->selectedShowDetail = $this->buildShowDetail($title);
@@ -464,17 +463,18 @@ class BrowseShows extends Page
     // --- Internal ---
 
     /**
-     * Find the channel (within the selected DVR setting's playlist) that a show most
-     * likely airs on. Used to pre-populate the source channel when the slide-over opens
-     * and to set source_channel_id when creating a series rule with defaults.
+     * Find the channel (within the selected DVR setting's playlist) that a show most likely
+     * airs on, and return its ID and display name together in a single final query.
      *
-     * Returns null when the channel cannot be determined.
+     * Combining the ID and name lookup avoids a second Channel::find() call in openShowDetail.
+     *
+     * @return array{0: int|null, 1: string|null}
      */
-    private function resolveSourceChannelId(string $title): ?int
+    private function resolveSourceChannel(string $title): array
     {
         $playlistId = $this->getCachedDvrSetting()?->playlist_id;
         if (! $playlistId) {
-            return null;
+            return [null, null];
         }
 
         $programme = $this->buildBaseQuery()
@@ -483,17 +483,25 @@ class BrowseShows extends Page
             ->first(['epg_channel_id']);
 
         if (! $programme?->epg_channel_id) {
-            return null;
+            return [null, null];
         }
 
         $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
         if (! $epgChannelPk) {
-            return null;
+            return [null, null];
         }
 
-        return Channel::where('playlist_id', $playlistId)
+        $channel = Channel::where('playlist_id', $playlistId)
             ->where('epg_channel_id', $epgChannelPk)
-            ->value('id');
+            ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
+
+        if (! $channel) {
+            return [null, null];
+        }
+
+        $name = $channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name;
+
+        return [$channel->id, $name ?: null];
     }
 
     private function getCachedDvrSetting(): ?DvrSetting

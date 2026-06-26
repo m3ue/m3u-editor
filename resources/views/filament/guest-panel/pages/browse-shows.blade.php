@@ -97,7 +97,7 @@
             <div class="flex flex-col gap-1" x-data="{
                 open: false,
                 search: '',
-                get allOptions() { return window['__channelOptions_' + $wire.dvr_setting_id] ?? {}; },
+                allOptions: {},
                 get filtered() {
                     if (!this.search) return this.allOptions;
                     const q = this.search.toLowerCase();
@@ -106,7 +106,7 @@
                     );
                 }
             }" x-effect="if (!$wire.channel_id) search = ''"
-            @channel-options-loaded.window="window['__channelOptions_' + $wire.dvr_setting_id] = $event.detail.options">
+            @channel-options-loaded.window="allOptions = $event.detail.options">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span
                         class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>

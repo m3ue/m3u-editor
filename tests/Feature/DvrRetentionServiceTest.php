@@ -4,13 +4,13 @@
  * Tests for DvrRetentionService
  *
  * Covers:
- * - keepLast: deletes excess completed recordings beyond the keep_last limit
+ * - keepLast: hard-deletes excess completed recordings beyond the keep_last limit
  * - keepLast: keeps the most recent recordings (not the oldest)
- * - retention_days: deletes recordings older than the configured days
+ * - retention_days: hard-deletes recordings older than the configured days
  * - retention_days: retains recordings within the cutoff
  * - disk_quota: deletes oldest recordings when quota is exceeded
  * - disk_quota: no deletions when under quota
- * - File path is nulled out after deletion; recording row is preserved
+ * - Ghost rows (Completed + null file_path) are purged at the start of each run
  * - Disabled settings are skipped
  */
 
@@ -75,22 +75,22 @@ it('deletes excess completed recordings beyond keep_last', function () {
 
     $this->service->runAll();
 
-    // All 4 rows are preserved (history kept)
+    // 2 oldest rows are hard-deleted; 2 newest survive
     expect(
         DvrRecording::where('dvr_recording_rule_id', $rule->id)
             ->where('status', DvrRecordingStatus::Completed)
             ->count()
-    )->toBe(4);
+    )->toBe(2);
 
-    $recordings->each->refresh();
+    // 2 newest (subHours(1), subHours(2)) still exist with their files intact
+    expect(DvrRecording::find($recordings->get(0)->id))->not->toBeNull();
+    expect(DvrRecording::find($recordings->get(1)->id))->not->toBeNull();
 
-    // 2 newest (subHours(1), subHours(2)) keep their file_path
-    expect($recordings->get(0)->file_path)->not->toBeNull();
-    expect($recordings->get(1)->file_path)->not->toBeNull();
-
-    // 2 oldest (subHours(3), subHours(4)) have file_path nulled
-    expect($recordings->get(2)->file_path)->toBeNull();
-    expect($recordings->get(3)->file_path)->toBeNull();
+    // 2 oldest (subHours(3), subHours(4)) are hard-deleted
+    expect(DvrRecording::find($recordings->get(2)->id))->toBeNull();
+    expect(DvrRecording::find($recordings->get(3)->id))->toBeNull();
+    expect(Storage::disk('dvr')->exists('recordings/ep3.ts'))->toBeFalse();
+    expect(Storage::disk('dvr')->exists('recordings/ep4.ts'))->toBeFalse();
 });
 
 it('keeps only the most recent N recordings for a rule with keep_last', function () {
@@ -115,23 +115,17 @@ it('keeps only the most recent N recordings for a rule with keep_last', function
         ])
     );
 
-    // Place files on the fake disk
-    foreach ($recordings as $i => $recording) {
+    foreach ($recordings as $recording) {
         Storage::disk('dvr')->put($recording->file_path, 'fake-content');
     }
 
     $this->service->runAll();
 
-    // The 2 oldest (highest $i = subHours(3), subHours(4)) should be deleted
-    $recordings->each->refresh();
-
-    // Most recent 2 should still have file_path
-    expect($recordings->first()->file_path)->not->toBeNull(); // newest
-    expect($recordings->get(1)->file_path)->not->toBeNull();  // 2nd newest
-
-    // Oldest 2 should be nulled
-    expect($recordings->get(2)->file_path)->toBeNull();
-    expect($recordings->last()->file_path)->toBeNull();
+    // 2 newest survive, 2 oldest are hard-deleted
+    expect(DvrRecording::find($recordings->get(0)->id))->not->toBeNull(); // newest
+    expect(DvrRecording::find($recordings->get(1)->id))->not->toBeNull(); // 2nd newest
+    expect(DvrRecording::find($recordings->get(2)->id))->toBeNull();      // 3rd — deleted
+    expect(DvrRecording::find($recordings->get(3)->id))->toBeNull();      // oldest — deleted
 });
 
 // --- Retention days ---
@@ -152,8 +146,7 @@ it('deletes completed recordings older than retention_days', function () {
 
     $this->service->runAll();
 
-    $old->refresh();
-    expect($old->file_path)->toBeNull();
+    expect(DvrRecording::find($old->id))->toBeNull();
     expect(Storage::disk('dvr')->exists('recordings/old.ts'))->toBeFalse();
 });
 
@@ -208,12 +201,9 @@ it('deletes oldest recordings when disk quota is exceeded', function () {
 
     $this->service->runAll();
 
-    $old->refresh();
-    $newer->refresh();
-
-    // Total = 1.6 GB > 1 GB quota. The oldest should be evicted first.
-    expect($old->file_path)->toBeNull();
-    // Newer may or may not be deleted depending on remaining bytes; at least old is gone
+    // Total = 1.6 GB > 1 GB quota. The oldest should be evicted first and hard-deleted.
+    expect(DvrRecording::find($old->id))->toBeNull();
+    expect(Storage::disk('dvr')->exists('recordings/old.ts'))->toBeFalse();
 });
 
 it('does not delete any recordings when under the disk quota', function () {
@@ -235,6 +225,70 @@ it('does not delete any recordings when under the disk quota', function () {
 
     $recording->refresh();
     expect($recording->file_path)->not->toBeNull();
+});
+
+// --- Ghost row purge ---
+
+it('hard-deletes ghost rows (completed with null file_path) before enforcing other policies', function () {
+    $ghost = DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'file_path' => null,
+            'actual_end' => now()->subDays(1),
+        ]);
+
+    $this->service->runAll();
+
+    expect(DvrRecording::find($ghost->id))->toBeNull();
+});
+
+it('does not count ghost rows toward keep_last so real recordings are not over-pruned', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['keep_last' => 2, 'series_title' => 'Test Show']);
+
+    // 2 real recordings (have files)
+    $real = collect(range(1, 2))->map(fn ($i) => DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'Test Show',
+            'scheduled_start' => now()->subHours($i),
+            'file_path' => "recordings/real{$i}.ts",
+            'file_size_bytes' => 100_000_000,
+        ])
+    );
+
+    foreach ($real as $recording) {
+        Storage::disk('dvr')->put($recording->file_path, 'fake-content');
+    }
+
+    // 3 ghost rows from previous retention runs (no file)
+    collect(range(1, 3))->each(fn ($i) => DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'Test Show',
+            'scheduled_start' => now()->subDays($i),
+            'file_path' => null,
+        ])
+    );
+
+    $this->service->runAll();
+
+    // Both real recordings survive — ghost rows were purged first and don't inflate the count
+    expect(DvrRecording::find($real->get(0)->id))->not->toBeNull();
+    expect(DvrRecording::find($real->get(1)->id))->not->toBeNull();
+    expect(Storage::disk('dvr')->exists('recordings/real1.ts'))->toBeTrue();
+    expect(Storage::disk('dvr')->exists('recordings/real2.ts'))->toBeTrue();
 });
 
 // --- Disabled settings skipped ---

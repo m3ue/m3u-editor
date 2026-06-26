@@ -405,6 +405,18 @@ it('ignores another user dvr_setting_id injected into the component', function (
     expect(DvrRecordingRule::count())->toBe(0);
 });
 
+it('channel-options-loaded event includes dvr_setting_id in payload', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+    $this->setting->update(['playlist_id' => $playlist->id]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('loadChannelOptions')
+        ->assertDispatched('channel-options-loaded', function (string $event, array $params): bool {
+            return ($params['dvr_setting_id'] ?? null) === $this->setting->id;
+        });
+});
+
 it('hides disabled channels in channel options when include_disabled_channels is false', function () {
     $playlist = Playlist::factory()->for($this->user)->create();
     $this->setting->update([
