@@ -32,6 +32,7 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -525,12 +526,14 @@ class XtreamApiController extends Controller
                 'process' => true, // Always true
             ];
 
+            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $username, $password);
+
             return response()->json([
                 'user_info' => $userInfo,
                 'server_info' => $serverInfo,
                 'm3u_editor' => [
                     'version' => config('dev.version'),
-                    'features' => ['viewers', 'progress'],
+                    'features' => $features,
                 ],
             ]);
         } elseif ($action === 'get_live_streams') {
@@ -2460,6 +2463,67 @@ class XtreamApiController extends Controller
             }
 
             return $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve optional m3u-editor capabilities advertised to compatible clients.
+     *
+     * DVR is only advertised when the effective playlist has DVR enabled and,
+     * for PlaylistAuth credentials, the individual auth is allowed to use DVR.
+     * Owner/alias credentials keep access when the playlist itself has DVR enabled.
+     *
+     * @return array<int, string>
+     */
+    private function resolveM3uEditorFeatures($playlist, string $authMethod, string $username, string $password): array
+    {
+        $features = ['viewers', 'progress'];
+
+        if ($this->canAdvertiseDvrFeature($playlist, $authMethod, $username, $password)) {
+            $features[] = 'dvr';
+        }
+
+        return $features;
+    }
+
+    private function canAdvertiseDvrFeature($playlist, string $authMethod, string $username, string $password): bool
+    {
+        if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
+            return false;
+        }
+
+        $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
+        if (! $dvrPlaylist) {
+            return false;
+        }
+
+        $hasEnabledDvr = DvrSetting::where('playlist_id', $dvrPlaylist->id)
+            ->where('enabled', true)
+            ->exists();
+        if (! $hasEnabledDvr) {
+            return false;
+        }
+
+        if ($authMethod !== 'playlist_auth') {
+            return true;
+        }
+
+        return PlaylistAuth::where('username', $username)
+            ->where('password', $password)
+            ->where('dvr_enabled', true)
+            ->exists();
+    }
+
+    private function resolveDvrPlaylist($playlist): ?Playlist
+    {
+        if ($playlist instanceof Playlist) {
+            return $playlist;
+        }
+
+        if ($playlist instanceof PlaylistAlias) {
+            return $playlist->getEffectivePlaylist();
         }
 
         return null;
