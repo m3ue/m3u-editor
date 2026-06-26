@@ -421,13 +421,15 @@ it('hides disabled channels in channel options when include_disabled_channels is
         'enabled' => false,
     ]);
 
-    $component = Livewire::test(BrowseShows::class)
+    Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
-        ->call('loadChannelOptions');
+        ->call('loadChannelOptions')
+        ->assertDispatched('channel-options-loaded', function (string $event, array $params) use ($enabled): bool {
+            $options = $params['options'] ?? [];
 
-    expect($component->get('channelOptions'))
-        ->toHaveKey($enabled->id)
-        ->not->toContain('Disabled Channel');
+            return ($options[$enabled->id] ?? null) === 'Enabled Channel'
+                && ! in_array('Disabled Channel', $options, true);
+        });
 });
 
 it('includes disabled channels in channel options when include_disabled_channels is true', function () {
@@ -442,11 +444,12 @@ it('includes disabled channels in channel options when include_disabled_channels
         'enabled' => false,
     ]);
 
-    $component = Livewire::test(BrowseShows::class)
+    Livewire::test(BrowseShows::class)
         ->set('dvr_setting_id', $this->setting->id)
-        ->call('loadChannelOptions');
-
-    expect($component->get('channelOptions'))->toHaveKey($disabled->id);
+        ->call('loadChannelOptions')
+        ->assertDispatched('channel-options-loaded', function (string $event, array $params) use ($disabled): bool {
+            return ($params['options'][$disabled->id] ?? null) === 'Disabled Channel';
+        });
 });
 
 it('includes programmes from disabled channels when include_disabled_channels is true', function () {

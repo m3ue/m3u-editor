@@ -111,7 +111,7 @@
             <div class="flex flex-col gap-1" x-data="{
                 open: false,
                 search: '',
-                get allOptions() { return $wire.channelOptions; },
+                get allOptions() { return window['__channelOptions_' + $wire.dvr_setting_id] ?? {}; },
                 get filtered() {
                     if (!this.search) return this.allOptions;
                     const q = this.search.toLowerCase();
@@ -119,12 +119,14 @@
                         Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
                     );
                 }
-            }" x-effect="if (!$wire.channel_id) search = ''" @click.away="open = false">
+            }" x-effect="if (!$wire.channel_id) search = ''"
+            @channel-options-loaded.window="window['__channelOptions_' + $wire.dvr_setting_id] = $event.detail.options"
+            @click.away="open = false">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span
                         class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
                 </label>
-                <div class="relative">
+                <div class="relative" wire:ignore>
                     <input type="text" x-model="search"
                         @focus="$wire.loadChannelOptions(); open = true" @keydown.escape="open = false"
                         :disabled="!$wire.dvr_setting_id"
@@ -140,13 +142,13 @@
                                 'text-gray-600 dark:text-gray-300'">
                             {{ __('— Any —') }}
                         </button>
-                        <template x-for="[id, label] in Object.entries(filtered)" :key="id">
+                        <template x-for="entry in Object.entries(filtered)" :key="entry[0]">
                             <button type="button"
-                                @click="search = label; $wire.set('channel_id', parseInt(id)); open = false"
+                                @click="search = entry[1]; $wire.set('channel_id', parseInt(entry[0])); open = false"
                                 class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
-                                :class="$wire.channel_id == id ? 'text-primary-600 dark:text-primary-400 font-medium' :
+                                :class="$wire.channel_id == entry[0] ? 'text-primary-600 dark:text-primary-400 font-medium' :
                                     'text-gray-700 dark:text-gray-200'"
-                                x-text="label"></button>
+                                x-text="entry[1]"></button>
                         </template>
                         <div x-show="Object.keys(filtered).length === 0"
                             class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
@@ -444,7 +446,6 @@
             <div class="p-4 flex-1 overflow-y-auto">
                 @include('filament.pages.browse-show-detail', [
                     'show' => $selectedShowDetail,
-                    'channelOptions' => $this->channelOptions,
                     'seriesHint' => $this->seriesHint,
                     'sourceChannelId' => $sourceChannelId,
                 ])

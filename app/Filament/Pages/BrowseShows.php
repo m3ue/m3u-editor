@@ -158,16 +158,21 @@ class BrowseShows extends Page
     }
 
     /**
-     * Lazily populated on first dropdown open. Not computed eagerly to avoid
-     * serialising thousands of channel names into the initial page HTML.
-     *
-     * @var array<int, string>
+     * True once channels have been dispatched to the browser for this DVR setting.
+     * Prevents redundant DB queries on repeat openings of Advanced options.
+     * Reset when dvr_setting_id changes.
      */
-    public array $channelOptions = [];
+    public bool $channelOptionsDispatched = false;
+
+    /** Channel name of the resolved source channel for the current detail view. */
+    public ?string $sourceChannelName = null;
+
+    /** Channel name of a specifically-selected series channel (resolved on updatedSeriesChannelId). */
+    public ?string $seriesChannelName = null;
 
     public function loadChannelOptions(): void
     {
-        if (! empty($this->channelOptions) || ! $this->dvr_setting_id) {
+        if ($this->channelOptionsDispatched || ! $this->dvr_setting_id) {
             return;
         }
 
@@ -182,12 +187,35 @@ class BrowseShows extends Page
             $channels->where('enabled', true);
         }
 
-        $this->channelOptions = $channels->get()
+        $options = $channels->get()
             ->mapWithKeys(function (Channel $c) {
                 return [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name];
             })
             ->sortBy(fn (string $label) => mb_strtolower($label))
             ->all();
+
+        $this->channelOptionsDispatched = true;
+        $this->dispatch('channel-options-loaded', options: $options);
+    }
+
+    private function resolveChannelName(?int $channelId): ?string
+    {
+        if (! $channelId) {
+            return null;
+        }
+
+        $channel = Channel::find($channelId, ['id', 'title', 'title_custom', 'name', 'name_custom']);
+
+        return $channel
+            ? ($channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name)
+            : null;
+    }
+
+    public function updatedSeriesChannelId(): void
+    {
+        $this->seriesChannelName = $this->seriesChannelId > 0
+            ? $this->resolveChannelName($this->seriesChannelId)
+            : null;
     }
 
     // --- Lifecycle ---
@@ -202,13 +230,13 @@ class BrowseShows extends Page
 
     public function getSeriesHintProperty(): string
     {
-        $channelOptions = $this->channelOptions;
-
         $channelName = match (true) {
-            $this->seriesChannelId === 0 => $this->sourceChannelId && isset($channelOptions[$this->sourceChannelId])
-                ? Str::limit($channelOptions[$this->sourceChannelId], 18)
+            $this->seriesChannelId === 0 => $this->sourceChannelName
+                ? Str::limit($this->sourceChannelName, 18)
                 : __('original source'),
-            $this->seriesChannelId > 0 && isset($channelOptions[$this->seriesChannelId]) => Str::limit($channelOptions[$this->seriesChannelId], 18),
+            $this->seriesChannelId > 0 => $this->seriesChannelName
+                ? Str::limit($this->seriesChannelName, 18)
+                : __('channel').' #'.$this->seriesChannelId,
             default => __('any channel'),
         };
 
@@ -232,7 +260,7 @@ class BrowseShows extends Page
         $this->group_id = null;
         $this->channel_id = null;
         $this->channel_name = '';
-        $this->channelOptions = [];
+        $this->channelOptionsDispatched = false;
         $this->dvrSettingResolved = false;
         $this->cachedDvrSetting = null;
     }
@@ -286,9 +314,10 @@ class BrowseShows extends Page
         $this->seriesEndLate = 0;
         $this->seriesKeepLast = null;
         $this->sourceChannelId = $this->resolveSourceChannelId($title);
+        $this->sourceChannelName = $this->resolveChannelName($this->sourceChannelId);
         $this->seriesChannelId = 0;
+        $this->seriesChannelName = null;
         $this->selectedShowDetail = $this->buildShowDetail($title);
-        $this->loadChannelOptions();
     }
 
     public function closeShowDetail(): void

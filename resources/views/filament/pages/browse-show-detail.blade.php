@@ -120,7 +120,7 @@
 
         {{-- Series options collapsible --}}
         <div x-data="{ showOptions: false }" class="mt-2">
-            <button type="button" @click="showOptions = !showOptions"
+            <button type="button" @click="showOptions = !showOptions; showOptions && $wire.loadChannelOptions()"
                 class="flex items-center gap-1 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-500 transition">
                 <svg class="w-4 h-4 transition-transform" :class="showOptions ? 'rotate-90' : ''" fill="none"
                     viewBox="0 0 24 24" stroke="currentColor">
@@ -146,21 +146,63 @@
                         </x-filament::input.wrapper>
                     </div>
 
-                    <div class="flex flex-col gap-1">
+                    <div class="flex flex-col gap-1" x-data="{
+                        open: false,
+                        search: '',
+                        channelOptions: window['__channelOptions_' + $wire.dvr_setting_id] ?? {},
+                        get filtered() {
+                            if (!this.search) return this.channelOptions;
+                            const q = this.search.toLowerCase();
+                            return Object.fromEntries(
+                                Object.entries(this.channelOptions).filter(([id, label]) => label.toLowerCase().includes(q))
+                            );
+                        }
+                    }"
+                    @channel-options-loaded.window="channelOptions = $event.detail.options"
+                    @click.away="open = false">
                         <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                             <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Channel') }}</span>
                         </label>
-                        <x-filament::input.wrapper>
-                            <x-filament::input.select wire:model.live="seriesChannelId">
-                                <option value="0">
-                                    {{ __('From Original Source') }}{{ ($sourceChannelId ?? null) && isset($channelOptions[$sourceChannelId]) ? ' — ' . $channelOptions[$sourceChannelId] : '' }}
-                                </option>
-                                <option value="-1">{{ __('Any channel') }}</option>
-                                @foreach ($channelOptions ?? [] as $id => $label)
-                                    <option value="{{ $id }}">{{ $label }}</option>
-                                @endforeach
-                            </x-filament::input.select>
-                        </x-filament::input.wrapper>
+                        <div class="relative">
+                            <button type="button" @click="open = !open"
+                                class="w-full flex items-center justify-between rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-left shadow-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500">
+                                <span class="truncate">
+                                    <span x-show="$wire.seriesChannelId == 0">{{ __('From Original Source') }}<span x-show="$wire.sourceChannelName" x-text="' — ' + $wire.sourceChannelName" class="text-gray-500 dark:text-gray-400"></span></span>
+                                    <span x-show="$wire.seriesChannelId == -1">{{ __('Any channel') }}</span>
+                                    <span x-show="$wire.seriesChannelId > 0" x-text="channelOptions[$wire.seriesChannelId] ?? '{{ __('Channel') }} #' + $wire.seriesChannelId"></span>
+                                </span>
+                                <svg class="w-4 h-4 ml-2 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </button>
+                            <div x-show="open" x-transition
+                                class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                                <div class="sticky top-0 bg-white dark:bg-gray-800 p-2 border-b border-gray-100 dark:border-white/5">
+                                    <input type="text" x-model="search" placeholder="{{ __('Search channels…') }}"
+                                        class="w-full rounded border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm px-2 py-1 outline-none focus:border-primary-500" />
+                                </div>
+                                <button type="button" @click="$wire.seriesChannelId = 0; open = false; search = ''"
+                                    class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
+                                    :class="$wire.seriesChannelId == 0 ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-700 dark:text-gray-200'">
+                                    {{ __('From Original Source') }}<span x-show="$wire.sourceChannelName" x-text="' — ' + $wire.sourceChannelName" class="text-gray-500 dark:text-gray-400"></span>
+                                </button>
+                                <button type="button" @click="$wire.seriesChannelId = -1; open = false; search = ''"
+                                    class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
+                                    :class="$wire.seriesChannelId == -1 ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-700 dark:text-gray-200'">
+                                    {{ __('Any channel') }}
+                                </button>
+                                <template x-for="entry in Object.entries(filtered)" :key="entry[0]">
+                                    <button type="button" @click="$wire.seriesChannelId = parseInt(entry[0]); open = false; search = ''"
+                                        class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
+                                        :class="$wire.seriesChannelId == entry[0] ? 'text-primary-600 dark:text-primary-400 font-medium' : 'text-gray-700 dark:text-gray-200'"
+                                        x-text="entry[1]"></button>
+                                </template>
+                                <div x-show="search && Object.keys(filtered).length === 0"
+                                    class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
+                                    {{ __('No matches') }}
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex flex-col gap-1">
