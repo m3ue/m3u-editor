@@ -144,6 +144,14 @@ class DvrSchedulerService
         $epgChannelStringIds = $this->resolveSeriesEpgScope($rule);
 
         if (empty($epgChannelStringIds)) {
+            Log::warning('DVR: Series rule has no EPG channel scope — skipping', [
+                'rule_id' => $rule->id,
+                'series_title' => $rule->series_title,
+                'epg_channel_id' => $rule->epg_channel_id,
+                'channel_id' => $rule->channel_id,
+                'source_channel_id' => $rule->source_channel_id,
+            ]);
+
             return;
         }
 

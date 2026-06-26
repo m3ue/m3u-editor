@@ -24,6 +24,31 @@ namespace App\Support;
 class EpgProgrammeNormalizer
 {
     /**
+     * Strip all EPG superscript annotation markers from a title for use in
+     * metadata API lookups and series-rule badge matching.
+     *
+     * EPG providers append Unicode Modifier Letter and Phonetic Extension
+     * characters (U+02B0–U+02FF, U+1D00–U+1DBF) to signal programme attributes
+     * inline in the title string — e.g. ᴸᴵᵛᴱ (Live), ᴺᵉʷ (New), ᴴᴰ (HD).
+     * These corrupt TMDB/TVMaze search queries and break series-rule matching
+     * when the rule was recorded with a different variant of the title.
+     */
+    public static function cleanForSearch(?string $title): string
+    {
+        $title = trim((string) $title);
+        if ($title === '') {
+            return '';
+        }
+
+        // Replace any run of modifier/phonetic-extension characters with a single
+        // space, then collapse and trim. This handles all annotations regardless
+        // of position (end-of-title is most common but not guaranteed).
+        $cleaned = (string) preg_replace('/[\x{02B0}-\x{02FF}\x{1D00}-\x{1DBF}]+/u', ' ', $title);
+
+        return trim((string) preg_replace('/\s+/u', ' ', $cleaned));
+    }
+
+    /**
      * Detect and strip new-episode superscript markers from a title.
      *
      * Returns the cleaned title plus an `isNew` flag. Callers should OR the
@@ -39,18 +64,14 @@ class EpgProgrammeNormalizer
             return ['title' => '', 'isNew' => false];
         }
 
-        $isNew = false;
+        // Detect isNew from ᴺᵉʷ (New) or any ᴸ-prefixed LIVE marker (ᴸᴵᵛᴱ, ᴸᵛᴱ, ᴸᵛᵉ, etc.)
+        // before stripping. Live broadcasts are first-run content by definition, so they
+        // are treated as new episodes for DVR scheduling purposes.
+        $isNew = str_contains($title, 'ᴺᵉʷ')
+            || (bool) preg_match('/\x{1D38}[\x{02B0}-\x{02FF}\x{1D00}-\x{1DBF}]*/u', $title);
 
-        // "ᴺᵉʷ" — Unicode superscript "New" used by some XMLTV feeds.
-        // U+1D3A MODIFIER LETTER CAPITAL N + U+1D49 MODIFIER LETTER SMALL E
-        //   + U+02B7 MODIFIER LETTER SMALL W
-        if (str_contains($title, 'ᴺᵉʷ')) {
-            $isNew = true;
-            $title = str_replace('ᴺᵉʷ', '', $title);
-        }
-
-        // Collapse any runs of whitespace introduced by the strip and trim.
-        $title = trim((string) preg_replace('/\s+/u', ' ', $title));
+        // Strip all superscript annotation markers (ᴸᴵᵛᴱ, ᴺᵉʷ, ᴴᴰ, etc.).
+        $title = self::cleanForSearch($title);
 
         return ['title' => $title, 'isNew' => $isNew];
     }
