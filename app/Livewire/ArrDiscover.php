@@ -45,7 +45,8 @@ class ArrDiscover extends Component
     /** @var array<int, array{id: int, name: string}> */
     public array $tvGenres = [];
 
-    public ?int $browseGenreId = null;
+    /** @var array<int> */
+    public array $browseGenreIds = [];
 
     public ?string $browseGenreType = null;
 
@@ -158,41 +159,42 @@ class ArrDiscover extends Component
             ->get();
     }
 
-    public function browseGenre(int $genreId, string $type): void
+    /**
+     * Toggle a genre chip on/off. Switching tabs (movie ↔ TV) clears the
+     * selection first since the genre ID sets are different.
+     * Uses TMDB OR logic (pipe-separated) so results match ANY selected genre.
+     */
+    public function toggleBrowseGenre(int $genreId, string $type): void
     {
-        $this->browseGenreId = $genreId;
+        if ($this->browseGenreType !== null && $this->browseGenreType !== $type) {
+            $this->browseGenreIds = [];
+        }
+
         $this->browseGenreType = $type;
+
+        $key = array_search($genreId, $this->browseGenreIds);
+        if ($key !== false) {
+            array_splice($this->browseGenreIds, (int) $key, 1);
+        } else {
+            $this->browseGenreIds[] = $genreId;
+        }
+
+        if (empty($this->browseGenreIds)) {
+            $this->clearBrowse();
+
+            return;
+        }
+
         $this->browsePage = 1;
         $this->browseTotalPages = 0;
         $this->browseLoading = true;
         $this->browseResults = [];
-
-        $tmdb = app(TmdbService::class);
-        $libraryIds = $this->loadLibraryTmdbIds();
-
-        $this->availableProviders = $tmdb->getWatchProviders($type === 'tv' ? 'tv' : 'movie', $this->watchRegion ?: 'US');
-
-        $params = array_merge(['with_genres' => $genreId, 'page' => 1], $this->buildFilterParams($type));
-
-        $response = $type === 'tv'
-            ? $tmdb->discoverTv($params)
-            : $tmdb->discoverMovies($params);
-
-        $this->browseResults = array_map(function ($item) use ($libraryIds) {
-            $tmdbId = (int) ($item['tmdb_id'] ?? 0);
-            $item['existsInLibrary'] = array_key_exists($tmdbId, $libraryIds);
-            $item['isDownloaded'] = $libraryIds[$tmdbId] ?? false;
-
-            return $item;
-        }, $response['results']);
-
-        $this->browseTotalPages = $response['total_pages'];
-        $this->browseLoading = false;
+        $this->fetchBrowseResults();
     }
 
     public function clearBrowse(): void
     {
-        $this->browseGenreId = null;
+        $this->browseGenreIds = [];
         $this->browseGenreType = null;
         $this->browsePage = 1;
         $this->browseTotalPages = 0;
@@ -202,18 +204,35 @@ class ArrDiscover extends Component
 
     public function goToBrowsePage(int $page): void
     {
-        if ($this->browseGenreId === null || $this->browseGenreType === null) {
+        if (empty($this->browseGenreIds) || $this->browseGenreType === null) {
             return;
         }
 
         $this->browsePage = max(1, min($page, $this->browseTotalPages ?: $page));
+        $this->fetchBrowseResults();
+    }
 
+    public function reloadBrowse(): void
+    {
+        if (! empty($this->browseGenreIds) && $this->browseGenreType !== null) {
+            $this->fetchBrowseResults();
+        }
+    }
+
+    /**
+     * Fetch TMDB discover results for the current genre selection and page.
+     * Shared by toggleBrowseGenre, goToBrowsePage, and reloadBrowse.
+     */
+    private function fetchBrowseResults(): void
+    {
+        $type = $this->browseGenreType;
         $tmdb = app(TmdbService::class);
         $libraryIds = $this->loadLibraryTmdbIds();
-        $type = $this->browseGenreType;
+
+        $this->availableProviders = $tmdb->getWatchProviders($type === 'tv' ? 'tv' : 'movie', $this->watchRegion ?: 'US');
 
         $params = array_merge(
-            ['with_genres' => $this->browseGenreId, 'page' => $this->browsePage],
+            ['with_genres' => implode(',', $this->browseGenreIds), 'page' => $this->browsePage],
             $this->buildFilterParams($type)
         );
 
@@ -230,13 +249,7 @@ class ArrDiscover extends Component
         }, $response['results']);
 
         $this->browseTotalPages = $response['total_pages'];
-    }
-
-    public function reloadBrowse(): void
-    {
-        if ($this->browseGenreId !== null && $this->browseGenreType !== null) {
-            $this->browseGenre($this->browseGenreId, $this->browseGenreType);
-        }
+        $this->browseLoading = false;
     }
 
     public function resetFilters(): void
@@ -288,7 +301,7 @@ class ArrDiscover extends Component
 
     public function updatedWatchRegion(): void
     {
-        if ($this->browseGenreId !== null && $this->browseGenreType !== null) {
+        if (! empty($this->browseGenreIds) && $this->browseGenreType !== null) {
             $tmdb = app(TmdbService::class);
             $this->availableProviders = $tmdb->getWatchProviders(
                 $this->browseGenreType === 'tv' ? 'tv' : 'movie',
@@ -301,10 +314,28 @@ class ArrDiscover extends Component
 
     /**
      * Dispatch to the parent ArrSearch component to open the detail modal.
+     * Passes the title so ArrSearch can fall back to a title search if the
+     * tmdb:/tvdb: lookup returns nothing (common for newer or foreign titles).
      */
     public function requestFromDiscover(int $tmdbId, string $mediaType): void
     {
-        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType);
+        $allItems = array_merge(
+            $this->trendingItems,
+            $this->popularMovies,
+            $this->popularTv,
+            $this->upcomingMovies,
+            $this->browseResults,
+        );
+
+        $title = null;
+        foreach ($allItems as $item) {
+            if ((int) ($item['tmdb_id'] ?? 0) === $tmdbId) {
+                $title = $item['title'] ?? null;
+                break;
+            }
+        }
+
+        $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType, title: $title);
     }
 
     /**

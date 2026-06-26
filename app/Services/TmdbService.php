@@ -970,7 +970,7 @@ class TmdbService
             return [];
         }
 
-        $cacheKey = "tmdb_movie_cast_{$tmdbId}_{$this->language}";
+        $cacheKey = "tmdb_movie_cast_v2_{$tmdbId}_{$this->language}";
 
         return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
             $this->waitForRateLimit();
@@ -978,6 +978,51 @@ class TmdbService
             try {
                 $response = Http::timeout(15)->get(
                     self::BASE_URL."/movie/{$tmdbId}/credits",
+                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                );
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['cast'] ?? [])
+                    ->take(15)
+                    ->map(fn ($p) => [
+                        'id' => (int) ($p['id'] ?? 0),
+                        'actor' => $p['name'] ?? '',
+                        'character' => $p['character'] ?? '',
+                        'photo' => ! empty($p['profile_path'])
+                            ? 'https://image.tmdb.org/t/p/w185'.$p['profile_path']
+                            : null,
+                    ])
+                    ->values()
+                    ->all();
+            } catch (\Exception) {
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Get cast for a TV series from TMDB.
+     * Returns the same shape as TvMazeService cast so it can be used as a fallback.
+     *
+     * @return array<int, array{actor: string, character: string, photo: ?string}>
+     */
+    public function getTvCast(int $tmdbId): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_tv_cast_v1_{$tmdbId}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(
+                    self::BASE_URL."/tv/{$tmdbId}/credits",
                     ['api_key' => $this->apiKey, 'language' => $this->language]
                 );
 
@@ -2197,6 +2242,166 @@ class TmdbService
                 : null,
             'genre_ids' => $item['genre_ids'] ?? [],
         ];
+    }
+
+    /**
+     * Fetch a person's TMDB profile (name, photo, bio).
+     *
+     * @return array{name: string, photo: ?string, bio: ?string}|null
+     */
+    public function getPersonDetails(int $personId): ?array
+    {
+        if (! $this->isConfigured() || $personId <= 0) {
+            return null;
+        }
+
+        $cacheKey = "tmdb_person_{$personId}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addDay(), function () use ($personId) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL."/person/{$personId}", [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                ]);
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                $data = $response->json();
+
+                return [
+                    'name' => $data['name'] ?? 'Unknown',
+                    'photo' => ! empty($data['profile_path'])
+                        ? 'https://image.tmdb.org/t/p/w185'.$data['profile_path']
+                        : null,
+                    'bio' => $data['biography'] ?? null,
+                ];
+            } catch (\Exception $e) {
+                Log::error('TMDB getPersonDetails error', [
+                    'person_id' => $personId,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Fetch a person's combined movie + TV filmography from TMDB.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPersonCombinedCredits(int $personId): array
+    {
+        if (! $this->isConfigured() || $personId <= 0) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_person_combined_credits_{$personId}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addDay(), function () use ($personId) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL."/person/{$personId}/combined_credits", [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                $cast = $response->json()['cast'] ?? [];
+
+                return collect($cast)
+                    ->map(function ($item) {
+                        $mediaType = $item['media_type'] ?? 'movie';
+                        $title = $mediaType === 'tv'
+                            ? ($item['name'] ?? $item['original_name'] ?? 'Unknown')
+                            : ($item['title'] ?? $item['original_title'] ?? 'Unknown');
+                        $date = $mediaType === 'tv'
+                            ? ($item['first_air_date'] ?? null)
+                            : ($item['release_date'] ?? null);
+                        $year = $date ? substr((string) $date, 0, 4) : null;
+                        $yearInt = $year !== null ? (int) $year : 0;
+                        $sortDate = $date ?? '0000-00-00';
+
+                        return [
+                            'tmdb_id' => (int) ($item['id'] ?? 0),
+                            'title' => $title,
+                            'media_type' => $mediaType,
+                            'character' => $item['character'] ?? null,
+                            'year' => $year,
+                            'year_int' => $yearInt,
+                            'sort_date' => $sortDate,
+                            'poster_url' => ! empty($item['poster_path'])
+                                ? 'https://image.tmdb.org/t/p/w500'.$item['poster_path']
+                                : null,
+                        ];
+                    })
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->sortByDesc('sort_date')
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB getPersonCombinedCredits error', [
+                    'person_id' => $personId,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Search for a person by name on TMDB. Returns the top match's TMDB id, or null.
+     *
+     * Used as a fallback when a filmography page is opened with only a name and
+     * no personId (e.g. older cached cast data that lacks the person id field).
+     */
+    public function searchPersonIdByName(string $name): ?int
+    {
+        if (! $this->isConfigured() || trim($name) === '') {
+            return null;
+        }
+
+        $cacheKey = 'tmdb_person_search_'.md5($name.'_'.$this->language);
+
+        $id = Cache::remember($cacheKey, now()->addDay(), function () use ($name) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/search/person', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'query' => $name,
+                    'include_adult' => 'false',
+                ]);
+
+                if (! $response->successful()) {
+                    return null;
+                }
+
+                $first = $response->json()['results'][0] ?? null;
+
+                return $first ? (int) $first['id'] : null;
+            } catch (\Exception $e) {
+                Log::error('TMDB searchPersonIdByName error', [
+                    'name' => $name,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return null;
+            }
+        });
+
+        return $id ?: null;
     }
 
     /**

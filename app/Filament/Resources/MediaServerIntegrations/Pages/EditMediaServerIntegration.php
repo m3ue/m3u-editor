@@ -6,6 +6,7 @@ use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResourc
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
 use App\Models\MediaServerIntegration;
+use App\Models\PlaylistRequestSetting;
 use App\Services\MediaServerService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -183,6 +184,48 @@ class EditMediaServerIntegration extends EditRecord
                 DeleteAction::make(),
             ])->button(),
         ];
+    }
+
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        /** @var MediaServerIntegration $record */
+        $record = $this->getRecord();
+        $data['request_enabled'] = $record->playlist?->requestSetting?->enabled ?? false;
+
+        return $data;
+    }
+
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        foreach (array_keys($data) as $key) {
+            if (str_starts_with($key, 'request_')) {
+                unset($data[$key]);
+            }
+        }
+
+        return $data;
+    }
+
+    protected function afterSave(): void
+    {
+        /** @var MediaServerIntegration $record */
+        $record = $this->getRecord();
+
+        if (! $record->playlist_id) {
+            return;
+        }
+
+        $data = $this->form->getRawState();
+
+        if (isset($data['request_enabled'])) {
+            PlaylistRequestSetting::updateOrCreate(
+                ['playlist_id' => $record->playlist_id],
+                [
+                    'user_id' => $record->user_id,
+                    'enabled' => $data['request_enabled'] ?? false,
+                ]
+            );
+        }
     }
 
     protected function getRedirectUrl(): string

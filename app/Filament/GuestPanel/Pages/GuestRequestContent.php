@@ -5,8 +5,10 @@ namespace App\Filament\GuestPanel\Pages;
 use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestAuth;
 use App\Models\ArrIntegration;
+use App\Models\MediaRequest;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Models\PlaylistRequestSetting;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
@@ -94,6 +96,26 @@ class GuestRequestContent extends Page
     }
 
     /**
+     * Resolve the PlaylistAuth for the currently authenticated guest.
+     */
+    public function getPlaylistAuthProperty(): ?PlaylistAuth
+    {
+        $uuid = static::getCurrentUuid();
+        if (! $uuid) {
+            return null;
+        }
+
+        $prefix = base64_encode($uuid).'_';
+        $username = session("{$prefix}guest_auth_username");
+
+        if (! $username) {
+            return null;
+        }
+
+        return PlaylistAuth::where('username', $username)->first();
+    }
+
+    /**
      * Resolve the first guest-enabled integration for the playlist owner.
      */
     public function getIntegrationProperty(): ?ArrIntegration
@@ -128,6 +150,26 @@ class GuestRequestContent extends Page
             ->enabled()
             ->guestEnabled()
             ->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * All media requests submitted by the currently authenticated guest, newest first.
+     *
+     * @return Collection<int, MediaRequest>
+     */
+    public function getMyRequestsProperty(): Collection
+    {
+        $auth = $this->playlistAuth;
+        if (! $auth) {
+            return collect();
+        }
+
+        return MediaRequest::query()
+            ->where('playlist_auth_id', $auth->id)
+            ->with('arrIntegration')
+            ->orderByDesc('requested_at')
+            ->limit(50)
             ->get();
     }
 

@@ -4,7 +4,10 @@ namespace App\Livewire;
 
 use App\Models\ArrIntegration;
 use App\Models\ArrQueueEvent;
+use App\Models\MediaRequest;
 use App\Services\Arr\ArrService;
+use App\Services\Arr\SonarrService;
+use Filament\Notifications\Notification;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 use Illuminate\View\View;
@@ -18,17 +21,6 @@ class ArrQueueMonitor extends Component
      * @var array<int, array{integration: array<string, mixed>, items: array<int, array<string, mixed>>, error: bool}>
      */
     public array $queues = [];
-
-    /**
-     * Completed orphan items (no webhook event) captured between polls.
-     * Keyed by "{integrationId}_{downloadId}". Persists until dismissed.
-     * Capped at MAX_SNAPSHOTS_PER_INTEGRATION per integration to prevent unbounded growth.
-     *
-     * @var array<string, array<string, mixed>>
-     */
-    public array $completedSnapshots = [];
-
-    protected const MAX_SNAPSHOTS_PER_INTEGRATION = 25;
 
     /** @var array<string, string> */
     protected $listeners = ['refreshArrQueue' => 'loadQueues'];
@@ -71,6 +63,16 @@ class ArrQueueMonitor extends Component
             return;
         }
 
+        // Pre-load all pending MediaRequests for all integrations in one query to avoid N+1.
+        $integrationIds = $integrations->pluck('id')->all();
+        $pendingRequestsByIntegration = MediaRequest::query()
+            ->whereIn('arr_integration_id', $integrationIds)
+            ->where('status', 'pending')
+            ->with('playlistAuth')
+            ->orderBy('requested_at')
+            ->get()
+            ->groupBy('arr_integration_id');
+
         // Fire all queue HTTP requests in parallel instead of serially.
         $services = $integrations->map(fn ($i) => ArrService::make($i));
 
@@ -105,49 +107,56 @@ class ArrQueueMonitor extends Component
             $liveByDownloadId = $liveItems->keyBy('downloadId')->filter();
             $currentLiveDownloadIds = $liveItems->pluck('downloadId')->filter()->flip();
 
+            // Load DB events first so we know which downloadIds are already webhook-tracked,
+            // and so previously persisted snapshots are included without a second query.
+            $localEvents = ArrQueueEvent::query()
+                ->where('arr_integration_id', $integration->id)
+                ->orderByDesc('last_event_at')
+                ->get();
+
+            // downloadIds already covered by a real webhook event (not just a completed snapshot).
+            $webhookTrackedDownloadIds = $localEvents
+                ->where('event_type', '!=', 'CompletedSnapshot')
+                ->pluck('download_id')
+                ->filter()
+                ->flip()
+                ->all();
+
             // Snapshot orphan live items that vanished since the last poll.
-            // This lets us show "Completed" even when the item leaves the Arr queue.
+            // Persist to the DB so they survive page refreshes.
             $prevOrphans = collect($this->queues[$integration->id]['items'] ?? [])
                 ->where('source', 'live')
                 ->filter(fn ($i) => ! empty($i['downloadId']));
 
             foreach ($prevOrphans as $prevItem) {
                 $downloadId = $prevItem['downloadId'];
-                $key = "{$integration->id}_{$downloadId}";
 
-                if (! isset($currentLiveDownloadIds[$downloadId]) && ! isset($this->completedSnapshots[$key])) {
-                    $this->completedSnapshots[$key] = array_merge($prevItem, [
+                // Skip if still live or already tracked by a webhook event.
+                if (isset($currentLiveDownloadIds[$downloadId]) || isset($webhookTrackedDownloadIds[$downloadId])) {
+                    continue;
+                }
+
+                // Skip if a snapshot record already exists in the loaded collection.
+                $alreadySnapshotted = $localEvents->contains(
+                    fn ($e) => $e->download_id === $downloadId && $e->event_type === 'CompletedSnapshot'
+                );
+
+                if (! $alreadySnapshotted) {
+                    $newEvent = ArrQueueEvent::create([
+                        'arr_integration_id' => $integration->id,
+                        'user_id' => auth()->id(),
+                        'download_id' => $downloadId,
+                        'title' => $prevItem['title'],
+                        'event_type' => 'CompletedSnapshot',
                         'status' => 'completed',
+                        'quality' => $prevItem['quality'] ?? null,
+                        'size' => $prevItem['size'] ?? 0,
                         'progress' => 100,
-                        'timeLeft' => null,
-                        'integration_id' => $integration->id,
-                        'dismiss_source' => 'snapshot',
-                        'dismiss_key' => $key,
-                        'can_dismiss' => true,
-                        'source' => 'snapshot',
+                        'last_event_at' => now(),
                     ]);
-
-                    // Trim oldest snapshots for this integration to enforce the cap.
-                    $integrationSnapshots = array_filter(
-                        $this->completedSnapshots,
-                        fn ($s) => ($s['integration_id'] ?? null) === $integration->id
-                    );
-
-                    if (count($integrationSnapshots) > self::MAX_SNAPSHOTS_PER_INTEGRATION) {
-                        unset($this->completedSnapshots[(string) array_key_first($integrationSnapshots)]);
-                    }
+                    $localEvents->push($newEvent);
                 }
             }
-
-            // Webhook-sourced local events for the last 48 h (imported events age out after that).
-            $localEvents = ArrQueueEvent::query()
-                ->where('arr_integration_id', $integration->id)
-                ->where(function ($q) {
-                    $q->where('status', '!=', 'imported')
-                        ->orWhere('last_event_at', '>', now()->subHours(24));
-                })
-                ->orderByDesc('last_event_at')
-                ->get();
 
             // Build merged item list: local events take precedence (richer status vocabulary).
             // For items that are actively downloading, enrich with live progress.
@@ -166,6 +175,7 @@ class ArrQueueMonitor extends Component
                 );
 
                 $canDismiss = in_array($effectiveStatus, ['imported', 'completed', 'failed', 'monitored', 'manual_required']);
+                $isSnapshot = $event->event_type === 'CompletedSnapshot';
 
                 return [
                     'title' => $event->title,
@@ -180,7 +190,7 @@ class ArrQueueMonitor extends Component
                     'event_type' => $event->event_type,
                     'last_event_at' => $event->last_event_at?->toIso8601String(),
                     'formattedSize' => self::formatBytes($live ? (int) $live['size'] : (int) $event->size),
-                    'source' => 'webhook',
+                    'source' => $isSnapshot ? 'snapshot' : 'webhook',
                     'event_db_id' => $event->id,
                     'dismiss_source' => 'event',
                     'dismiss_key' => (string) $event->id,
@@ -210,10 +220,28 @@ class ArrQueueMonitor extends Component
                     'can_dismiss' => false,
                 ]);
 
-            // Merge in completed snapshots that belong to this integration.
-            $snapshotItems = collect($this->completedSnapshots)
-                ->filter(fn ($s) => ($s['integration_id'] ?? null) === $integration->id)
-                ->values();
+            // Pending media requests awaiting admin approval for this integration.
+            $pendingRequests = ($pendingRequestsByIntegration[$integration->id] ?? collect())
+                ->map(fn (MediaRequest $mr) => [
+                    'title' => $mr->title,
+                    'status' => 'pending_approval',
+                    'progress' => 0,
+                    'quality' => null,
+                    'protocol' => null,
+                    'indexer' => null,
+                    'episode' => $mr->request_type === 'episode'
+                        ? 'S'.str_pad((string) $mr->season_number, 2, '0', STR_PAD_LEFT).'E'.str_pad((string) $mr->episode_number, 2, '0', STR_PAD_LEFT)
+                        : null,
+                    'size' => 0,
+                    'timeLeft' => null,
+                    'event_type' => 'media_request',
+                    'last_event_at' => $mr->requested_at?->toIso8601String(),
+                    'formattedSize' => '–',
+                    'source' => 'media_request',
+                    'media_request_id' => $mr->id,
+                    'requested_by' => $mr->playlistAuth?->name ?? __('Guest'),
+                    'can_dismiss' => false,
+                ]);
 
             $this->queues[$integration->id] = [
                 'integration' => [
@@ -221,7 +249,7 @@ class ArrQueueMonitor extends Component
                     'name' => $integration->name,
                     'type' => $integration->type,
                 ],
-                'items' => $items->concat($orphanLive)->concat($snapshotItems)->values()->all(),
+                'items' => $items->concat($orphanLive)->concat($pendingRequests)->values()->all(),
                 'error' => $liveError && $localEvents->isEmpty(),
             ];
         }
@@ -230,19 +258,113 @@ class ArrQueueMonitor extends Component
     }
 
     /**
-     * Dismiss a queue item from the display.
-     * For webhook events: delete the local ArrQueueEvent record.
-     * For completed snapshots: remove from component state.
+     * Dismiss a queue item from the display by deleting its ArrQueueEvent record.
+     * Both webhook events and completed snapshots are stored in the DB.
      */
     public function dismissItem(string $source, string $key): void
     {
-        if ($source === 'event') {
-            ArrQueueEvent::where('id', (int) $key)
-                ->where('user_id', auth()->id())
-                ->delete();
-        } elseif ($source === 'snapshot') {
-            unset($this->completedSnapshots[$key]);
+        ArrQueueEvent::where('id', (int) $key)
+            ->where('user_id', auth()->id())
+            ->delete();
+
+        $this->loadQueues();
+    }
+
+    public function approveRequest(int $mediaRequestId): void
+    {
+        $request = MediaRequest::whereHas(
+            'arrIntegration',
+            fn ($q) => $q->where('user_id', auth()->id())
+        )->find($mediaRequestId);
+
+        if (! $request || ! $request->isPending()) {
+            return;
         }
+
+        $integration = ArrIntegration::where('id', $request->arr_integration_id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $service = ArrService::make($integration);
+        $payload = $request->payload;
+
+        if ($request->request_type === 'episode') {
+            /** @var SonarrService $service */
+            $result = $service->requestEpisode(
+                (int) ($payload['tvdbId'] ?? 0),
+                (int) ($payload['seasonNumber'] ?? 0),
+                (int) ($payload['episodeNumber'] ?? 0),
+                [
+                    'qualityProfileId' => $payload['qualityProfileId'] ?? null,
+                    'rootFolderPath' => $payload['rootFolderPath'] ?? null,
+                ]
+            );
+            $ok = ($result['ok'] ?? false) || ($result['queued'] ?? false);
+        } else {
+            $result = $service->add($payload);
+            $ok = $result['ok'] ?? false;
+        }
+
+        if ($ok) {
+            $request->update([
+                'status' => 'approved',
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => auth()->id(),
+            ]);
+
+            Notification::make()
+                ->success()
+                ->title(__('Request Approved'))
+                ->body(__(':title has been sent to :server.', [
+                    'title' => $request->title,
+                    'server' => $integration->name,
+                ]))
+                ->send();
+        } else {
+            Notification::make()
+                ->danger()
+                ->title(__('Approval Failed'))
+                ->body($result['error'] ?? 'Unknown error')
+                ->send();
+        }
+
+        $this->loadQueues();
+    }
+
+    public function rejectRequest(int $mediaRequestId): void
+    {
+        $request = MediaRequest::whereHas(
+            'arrIntegration',
+            fn ($q) => $q->where('user_id', auth()->id())
+        )->find($mediaRequestId);
+
+        if (! $request || ! $request->isPending()) {
+            return;
+        }
+
+        $integration = ArrIntegration::where('id', $request->arr_integration_id)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $integration) {
+            return;
+        }
+
+        $request->update([
+            'status' => 'rejected',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => auth()->id(),
+        ]);
+
+        Notification::make()
+            ->warning()
+            ->title(__('Request Rejected'))
+            ->body(__('":title" request has been rejected.', ['title' => $request->title]))
+            ->send();
 
         $this->loadQueues();
     }
@@ -295,6 +417,9 @@ class ArrQueueMonitor extends Component
     public static function statusBadge(string $status): array
     {
         return match (strtolower($status)) {
+            'pending_approval' => ['color' => 'warning', 'label' => 'Pending Approval'],
+            'approved' => ['color' => 'success', 'label' => 'Approved'],
+            'rejected' => ['color' => 'danger', 'label' => 'Rejected'],
             'monitored' => ['color' => 'gray', 'label' => 'Monitored'],
             'grabbing' => ['color' => 'warning', 'label' => 'Grabbing'],
             'downloading' => ['color' => 'primary', 'label' => 'Downloading'],

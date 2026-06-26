@@ -229,27 +229,41 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->nullable()
                                 ->columnSpan(1),
                         ]),
-                    TextInput::make('max_connections')
-                        ->label(__('Max Connections'))
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: __('Leave blank for unlimited. Only enforced when the assigned playlist has the proxy enabled.')
-                        )
-                        ->helperText(__('Maximum number of concurrent streams for this auth user.'))
-                        ->numeric()
-                        ->minValue(1)
-                        ->nullable()
-                        ->columnSpan(1),
-                    Toggle::make('stop_oldest_on_limit')
-                        ->label(__('Stop Oldest Stream on Limit'))
-                        ->inline(false)
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
-                        )
-                        ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
-                        ->nullable()
-                        ->columnSpan(1),
+                    Grid::make()
+                        ->columns(5)
+                        ->schema([
+                            TextInput::make('max_connections')
+                                ->label(__('Max Connections'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Leave blank for unlimited. Only enforced when the assigned playlist has the proxy enabled.')
+                                )
+                                ->helperText(__('Maximum number of concurrent streams for this auth user.'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->nullable()
+                                ->columnSpan(1),
+                            Toggle::make('stop_oldest_on_limit')
+                                ->label(__('Stop Oldest Stream on Limit'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
+                                )
+                                ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
+                                ->nullable()
+                                ->columnSpan(2),
+                            Toggle::make('auto_approve_requests')
+                                ->label(__('Auto-approve Content Requests'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('When enabled, content requests from this guest are sent directly to Sonarr/Radarr. When disabled, requests are held for admin approval in the Download Queue.')
+                                )
+                                ->helperText(__('Disable to require admin approval before media is added to Sonarr/Radarr.'))
+                                ->default(false)
+                                ->columnSpan(2),
+                        ]),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
                         ->options(function ($record) {

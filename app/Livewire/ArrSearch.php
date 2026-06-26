@@ -2,7 +2,10 @@
 
 namespace App\Livewire;
 
+use App\Jobs\MonitorArrSearch;
 use App\Models\ArrIntegration;
+use App\Models\MediaRequest;
+use App\Models\PlaylistAuth;
 use App\Services\Arr\ArrService;
 use App\Services\Arr\SonarrService;
 use App\Services\TmdbService;
@@ -14,6 +17,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 
 /**
@@ -32,10 +36,27 @@ class ArrSearch extends Component
      */
     public array $guestIntegrationIds = [];
 
+    /** Guest-mode: the PlaylistAuth ID for the authenticated guest. */
+    public ?int $playlistAuthId = null;
+
+    /**
+     * Resolved once at mount from PlaylistAuth. True = forward directly to Arr,
+     * false = hold for admin approval. Null when not in guest mode.
+     */
+    public ?bool $autoApproveRequests = null;
+
     public string $searchTerm = '';
 
     /** @var array<int, array<string, mixed>> */
     public array $results = [];
+
+    /**
+     * Active genre filters. Empty means "show all".
+     * Uses OR logic — a result is shown if it matches any selected genre.
+     *
+     * @var array<string>
+     */
+    public array $selectedGenres = [];
 
     public bool $isSearching = false;
 
@@ -113,12 +134,34 @@ class ArrSearch extends Component
 
     public bool $tmdbConfigured = false;
 
-    public function mount(array $guestIntegrationIds = [], bool $guestMode = false): void
+    public bool $autoOpen = false;
+
+    /**
+     * When true, suppress the visible search/results UI and only render the hidden detail slide-over.
+     * Used by filmography pages that embed ArrSearch solely to handle filmography item clicks.
+     */
+    public bool $detailOnly = false;
+
+    public function mount(array $guestIntegrationIds = [], bool $guestMode = false, bool $detailOnly = false, ?string $q = null, ?int $playlistAuthId = null): void
     {
         $this->guestIntegrationIds = $guestIntegrationIds;
         $this->guestMode = $guestMode;
-        $this->queuePolling = $guestMode;
+        $this->playlistAuthId = $playlistAuthId;
+        $this->detailOnly = $detailOnly;
+        $this->queuePolling = $guestMode && ! $detailOnly;
         $this->tmdbConfigured = app(TmdbService::class)->isConfigured();
+
+        if ($guestMode && $playlistAuthId) {
+            $this->autoApproveRequests = PlaylistAuth::find($playlistAuthId)?->auto_approve_requests ?? false;
+        }
+
+        if ($q !== null && $q !== '') {
+            $this->searchTerm = $q;
+            $this->autoOpen = true;
+            // Auto-trigger search so results are ready when the user lands on the page
+            // (e.g. from a filmography click). The search will re-render via Livewire.
+            $this->search();
+        }
 
         if ($guestMode) {
             $this->loadQueue();
@@ -164,12 +207,92 @@ class ArrSearch extends Component
             ->get();
     }
 
+    // ── Genre filter ──────────────────────────────────────────────────────────
+
+    /**
+     * Toggle a genre on/off in the active filter.
+     */
+    public function toggleGenre(string $genre): void
+    {
+        if (in_array($genre, $this->selectedGenres, true)) {
+            $this->selectedGenres = array_values(
+                array_filter($this->selectedGenres, fn ($g) => $g !== $genre)
+            );
+        } else {
+            $this->selectedGenres[] = $genre;
+        }
+    }
+
+    /**
+     * Sorted unique genres derived from the current result set.
+     *
+     * @return array<string>
+     */
+    public function getAvailableGenresProperty(): array
+    {
+        return collect($this->results)
+            ->flatMap(fn ($r) => $r['genres'] ?? [])
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Results filtered by the active genres (OR logic).
+     * Preserves original array keys so openDetail($index)/request($index) remain valid.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFilteredResultsProperty(): array
+    {
+        if (empty($this->selectedGenres)) {
+            return $this->results;
+        }
+
+        return array_filter(
+            $this->results,
+            fn ($r) => ! empty(array_intersect($r['genres'] ?? [], $this->selectedGenres))
+        );
+    }
+
+    // ── Guest request queuing ─────────────────────────────────────────────────
+
+    /**
+     * Write a pending MediaRequest row for a guest submission and notify.
+     * Returns true when the request was queued (caller should return early).
+     * Returns false when auto-approve is on or the guest context is missing (caller proceeds normally).
+     *
+     * @param  array<string, mixed>  $data  Fields for MediaRequest::create().
+     */
+    private function queueGuestRequest(array $data, string $notificationBody): bool
+    {
+        if (! $this->guestMode || ! $this->playlistAuthId || $this->autoApproveRequests) {
+            return false;
+        }
+
+        MediaRequest::create(array_merge($data, [
+            'playlist_auth_id' => $this->playlistAuthId,
+            'status' => 'pending',
+            'requested_at' => now(),
+        ]));
+
+        Notification::make()
+            ->info()
+            ->title(__('Request Submitted'))
+            ->body($notificationBody)
+            ->send();
+
+        return true;
+    }
+
     // ── Search ────────────────────────────────────────────────────────────────
 
     public function clearSearch(): void
     {
         $this->searchTerm = '';
         $this->results = [];
+        $this->selectedGenres = [];
         $this->isSearching = false;
     }
 
@@ -177,12 +300,14 @@ class ArrSearch extends Component
     {
         if (strlen(trim($this->searchTerm)) < 2) {
             $this->results = [];
+            $this->selectedGenres = [];
 
             return;
         }
 
         $this->isSearching = true;
         $this->results = [];
+        $this->selectedGenres = [];
 
         $integrations = $this->integrationsForSearch;
 
@@ -236,6 +361,14 @@ class ArrSearch extends Component
         }
 
         $this->isSearching = false;
+
+        // When arriving from a filmography click (autoOpen flag), immediately
+        // open the first result's detail side-sheet so the user doesn't have
+        // to click twice. Only fires once per mount — flag is cleared after.
+        if ($this->autoOpen && count($this->results) > 0) {
+            $this->autoOpen = false;
+            $this->openDetail(0);
+        }
     }
 
     /**
@@ -269,6 +402,21 @@ class ArrSearch extends Component
         $externalKey = $isSonarr ? 'tvdbId' : 'tmdbId';
         $payload[$externalKey] = $item[$externalKey] ?? null;
 
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $item['title'] ?? 'Unknown',
+                'external_id' => (string) ($payload[$externalKey] ?? ''),
+                'request_type' => $isSonarr ? 'series' : 'movie',
+                'payload' => $payload,
+            ],
+            __(':title has been submitted and is awaiting admin approval.', [
+                'title' => $item['title'] ?? 'Content',
+            ])
+        )) {
+            return;
+        }
+
         $result = ArrService::make($integration)->add($payload);
 
         if ($result['ok']) {
@@ -281,6 +429,16 @@ class ArrSearch extends Component
                 ]))
                 ->send();
 
+            $radarrLibraryId = ! $isSonarr ? (int) ($result['data']['id'] ?? 0) : 0;
+            if ($radarrLibraryId) {
+                MonitorArrSearch::dispatch(
+                    $integration->id,
+                    $radarrLibraryId,
+                    $item['title'] ?? 'Unknown',
+                    auth()->id(),
+                )->delay(now()->addSeconds(30));
+            }
+
             $this->loadQueue();
         } else {
             Notification::make()
@@ -291,6 +449,7 @@ class ArrSearch extends Component
         }
     }
 
+    #[Renderless]
     public function openDetail(int $index): void
     {
         if (! isset($this->results[$index])) {
@@ -316,6 +475,7 @@ class ArrSearch extends Component
         $this->showDetail = true;
     }
 
+    #[Renderless]
     public function closeDetail(): void
     {
         $this->showDetail = false;
@@ -359,6 +519,14 @@ class ArrSearch extends Component
             } catch (\Exception) {
                 $this->detailEpisodes = [];
                 $this->detailCast = [];
+            }
+
+            // Fall back to TMDB cast when TVMaze has none (e.g. newer/regional shows not yet indexed)
+            if (empty($this->detailCast)) {
+                $tmdbFallbackId = (int) ($this->detailResult['resolvedTmdbId'] ?? 0);
+                if ($tmdbFallbackId) {
+                    $this->detailCast = app(TmdbService::class)->getTvCast($tmdbFallbackId);
+                }
             }
 
             // Fetch authoritative per-episode hasFile status from Sonarr when the
@@ -428,6 +596,15 @@ class ArrSearch extends Component
                     'title' => $this->detailResult['title'] ?? 'this title',
                 ]))
                 ->send();
+
+            if ($this->detailIntegration->isRadarr()) {
+                MonitorArrSearch::dispatch(
+                    $this->detailIntegration->id,
+                    $libraryId,
+                    $this->detailResult['title'] ?? 'Unknown',
+                    auth()->id(),
+                )->delay(now()->addSeconds(30));
+            }
         } else {
             Notification::make()
                 ->danger()
@@ -766,6 +943,31 @@ class ArrSearch extends Component
             return;
         }
 
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $this->detailResult['title'] ?? 'Unknown',
+                'external_id' => (string) $tvdbId,
+                'request_type' => 'episode',
+                'season_number' => $seasonNumber,
+                'episode_number' => $episodeNumber,
+                'payload' => [
+                    'tvdbId' => $tvdbId,
+                    'seasonNumber' => $seasonNumber,
+                    'episodeNumber' => $episodeNumber,
+                    'qualityProfileId' => $integration->quality_profile_id,
+                    'rootFolderPath' => $integration->root_folder_path,
+                ],
+            ],
+            __('S:s E:e of ":title" has been submitted and is awaiting admin approval.', [
+                's' => str_pad((string) $seasonNumber, 2, '0', STR_PAD_LEFT),
+                'e' => str_pad((string) $episodeNumber, 2, '0', STR_PAD_LEFT),
+                'title' => $this->detailResult['title'] ?? 'the show',
+            ])
+        )) {
+            return;
+        }
+
         /** @var SonarrService $sonarrService */
         $sonarrService = ArrService::make($integration);
         $result = $sonarrService->requestEpisode(
@@ -855,6 +1057,23 @@ class ArrSearch extends Component
             'searchForMissingEpisodes' => true,
         ];
 
+        if ($this->queueGuestRequest(
+            [
+                'arr_integration_id' => $integration->id,
+                'title' => $item['title'] ?? 'Unknown',
+                'external_id' => (string) ($item['tvdbId'] ?? ''),
+                'request_type' => 'series',
+                'payload' => $payload,
+            ],
+            __(':title has been submitted and is awaiting admin approval.', [
+                'title' => $item['title'] ?? 'Content',
+            ])
+        )) {
+            $this->closeDetail();
+
+            return;
+        }
+
         $result = ArrService::make($integration)->add($payload);
 
         if ($result['ok']) {
@@ -911,9 +1130,9 @@ class ArrSearch extends Component
     // ── Discover ──────────────────────────────────────────────────────────────
 
     #[On('request-from-discover')]
-    public function requestFromDiscover(int $tmdbId, string $mediaType): void
+    public function requestFromDiscover(int $tmdbId, string $mediaType, ?string $title = null): void
     {
-        $resolved = $this->resolveDiscoverToArrResult($tmdbId, $mediaType);
+        $resolved = $this->resolveDiscoverToArrResult($tmdbId, $mediaType, $title);
 
         if (! $resolved) {
             Notification::make()
@@ -933,61 +1152,124 @@ class ArrSearch extends Component
 
     /**
      * Resolve a TMDB discover item to an Arr-native result shape.
-     * Movies go through Radarr's tmdb: lookup; TV goes through TMDB external IDs → Sonarr tvdb: lookup.
+     * Tries all Radarr/Sonarr integrations, not just the first.
+     * Falls back to a title search (verified by ID) when the tmdb:/tvdb: lookup returns nothing,
+     * which is common for newer, foreign, or recently-added titles.
      *
      * @return array<string, mixed>|null
      */
-    public function resolveDiscoverToArrResult(int $tmdbId, string $mediaType): ?array
+    public function resolveDiscoverToArrResult(int $tmdbId, string $mediaType, ?string $title = null): ?array
     {
         $integrations = $this->integrationsForSearch;
 
         if ($mediaType === 'movie') {
-            $radarr = $integrations->first(fn ($i) => $i->isRadarr());
+            $radarrs = $integrations->filter(fn ($i) => $i->isRadarr());
 
-            if (! $radarr) {
-                return null;
+            // Pass 1: tmdb: lookup across all Radarr integrations
+            foreach ($radarrs as $radarr) {
+                $items = ArrService::make($radarr)->search("tmdb:{$tmdbId}");
+                if ($items[0] ?? null) {
+                    return array_merge($items[0], [
+                        'integrationId' => $radarr->id,
+                        'integrationName' => $radarr->name,
+                        'integrationType' => 'radarr',
+                    ]);
+                }
             }
 
-            $items = ArrService::make($radarr)->search("tmdb:{$tmdbId}");
-            $item = $items[0] ?? null;
+            // Pass 2: title fallback — verify the returned item has the right tmdbId
+            if ($title) {
+                foreach ($radarrs as $radarr) {
+                    $items = ArrService::make($radarr)->search($title);
+                    $byId = collect($items)->first(fn ($i) => (int) ($i['tmdbId'] ?? 0) === $tmdbId);
+                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                    $singleResult = count($items) === 1 ? $items[0] : null;
 
-            if (! $item) {
-                return null;
+                    if ($singleResult && ! $byId && ! $byTitle) {
+                        Log::warning('ArrSearch: single-result title fallback used without ID verification', [
+                            'tmdb_id' => $tmdbId,
+                            'title' => $title,
+                            'matched_title' => $singleResult['title'] ?? null,
+                            'matched_tmdb_id' => $singleResult['tmdbId'] ?? null,
+                            'integration_id' => $radarr->id,
+                        ]);
+                    }
+
+                    $match = $byId ?? $byTitle ?? $singleResult;
+
+                    if ($match) {
+                        return array_merge($match, [
+                            'integrationId' => $radarr->id,
+                            'integrationName' => $radarr->name,
+                            'integrationType' => 'radarr',
+                        ]);
+                    }
+                }
             }
 
-            return array_merge($item, [
-                'integrationId' => $radarr->id,
-                'integrationName' => $radarr->name,
-                'integrationType' => 'radarr',
-            ]);
+            return null;
         }
 
         // TV: TMDB → TVDB → Sonarr
-        $sonarr = $integrations->first(fn ($i) => $i->isSonarr());
+        $sonarrs = $integrations->filter(fn ($i) => $i->isSonarr());
 
-        if (! $sonarr) {
+        if ($sonarrs->isEmpty()) {
             return null;
         }
 
         $externalIds = app(TmdbService::class)->getTvExternalIds($tmdbId);
         $tvdbId = $externalIds['tvdb_id'] ?? null;
 
-        if (! $tvdbId) {
-            return null;
+        if ($tvdbId) {
+            // Pass 1: tvdb: lookup across all Sonarr integrations
+            foreach ($sonarrs as $sonarr) {
+                $items = ArrService::make($sonarr)->search("tvdb:{$tvdbId}");
+                if ($items[0] ?? null) {
+                    return array_merge($items[0], [
+                        'integrationId' => $sonarr->id,
+                        'integrationName' => $sonarr->name,
+                        'integrationType' => 'sonarr',
+                        'resolvedTmdbId' => $tmdbId,
+                    ]);
+                }
+            }
         }
 
-        $items = ArrService::make($sonarr)->search("tvdb:{$tvdbId}");
-        $item = $items[0] ?? null;
+        // Pass 2: title fallback — verify by tvdbId when available, then by exact title
+        // (TMDB and TVDB sometimes disagree on the numeric ID for the same show)
+        if ($title) {
+            foreach ($sonarrs as $sonarr) {
+                $items = ArrService::make($sonarr)->search($title);
+                if ($tvdbId) {
+                    $byId = collect($items)->first(fn ($i) => (int) ($i['tvdbId'] ?? 0) === (int) $tvdbId);
+                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                    $match = $byId ?? $byTitle;
+                } else {
+                    $singleResult = count($items) === 1 ? $items[0] : null;
+                    if ($singleResult) {
+                        Log::warning('ArrSearch: single-result TV title fallback used without ID verification', [
+                            'tmdb_id' => $tmdbId,
+                            'title' => $title,
+                            'matched_title' => $singleResult['title'] ?? null,
+                            'matched_tvdb_id' => $singleResult['tvdbId'] ?? null,
+                            'integration_id' => $sonarr->id,
+                        ]);
+                    }
+                    $match = $singleResult;
+                }
 
-        if (! $item) {
-            return null;
+                if ($match) {
+                    return array_merge($match, [
+                        'integrationId' => $sonarr->id,
+                        'integrationName' => $sonarr->name,
+                        'integrationType' => 'sonarr',
+                        'resolvedTmdbId' => $tmdbId,
+                    ]);
+                }
+            }
         }
 
-        return array_merge($item, [
-            'integrationId' => $sonarr->id,
-            'integrationName' => $sonarr->name,
-            'integrationType' => 'sonarr',
-        ]);
+        return null;
     }
 
     public function render()
