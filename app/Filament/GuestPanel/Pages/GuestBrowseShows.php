@@ -162,6 +162,15 @@ class GuestBrowseShows extends Page
             'channel_id' => $this->channel_id,
             'days' => $this->days,
         ]);
+
+        $this->seriesOptionsForm->fill([
+            'seriesNewOnly' => $this->seriesNewOnly,
+            'seriesChannelId' => $this->seriesChannelId,
+            'seriesPriority' => $this->seriesPriority,
+            'seriesStartEarly' => $this->seriesStartEarly,
+            'seriesEndLate' => $this->seriesEndLate,
+            'seriesKeepLast' => $this->seriesKeepLast,
+        ]);
     }
 
     /**

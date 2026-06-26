@@ -6,7 +6,10 @@ use App\Models\Channel;
 use App\Models\Group;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 
 trait HasBrowseShowsFiltersForm
 {
@@ -101,6 +104,93 @@ trait HasBrowseShowsFiltersForm
                 14 => __('14 days'),
                 30 => __('30 days'),
             ]);
+    }
+
+    // --- Series options form ---
+
+    public function seriesOptionsForm(Schema $schema): Schema
+    {
+        return $schema
+            ->statePath(null)
+            ->schema([
+                Grid::make(['default' => 1, 'sm' => 2])->schema([
+                    Select::make('seriesNewOnly')
+                        ->label(__('New episodes only'))
+                        ->options([0 => __('No'), 1 => __('Yes')]),
+
+                    $this->seriesChannelField(),
+
+                    TextInput::make('seriesPriority')
+                        ->label(__('Priority'))
+                        ->numeric()
+                        ->minValue(1)
+                        ->maxValue(99),
+
+                    TextInput::make('seriesStartEarly')
+                        ->label(__('Start early (seconds)'))
+                        ->numeric()
+                        ->minValue(0),
+
+                    TextInput::make('seriesEndLate')
+                        ->label(__('End late (seconds)'))
+                        ->numeric()
+                        ->minValue(0),
+
+                    TextInput::make('seriesKeepLast')
+                        ->label(__('Keep last N recordings'))
+                        ->placeholder(__('All recordings'))
+                        ->numeric()
+                        ->minValue(1),
+                ]),
+            ]);
+    }
+
+    protected function seriesChannelField(): Select
+    {
+        return Select::make('seriesChannelId')
+            ->label(__('Channel'))
+            ->searchable()
+            ->options(fn (): array => [
+                0 => __('From Original Source').($this->sourceChannelName ? ' — '.Str::limit($this->sourceChannelName, 20) : ''),
+                -1 => __('Any channel'),
+            ])
+            ->getSearchResultsUsing(function (string $search): array {
+                $searchLower = mb_strtolower($search);
+                $playlistId = $this->getCachedDvrSetting()?->playlist_id;
+
+                $channelResults = $playlistId
+                    ? Channel::where('playlist_id', $playlistId)
+                        ->where(fn (Builder $q) => $q
+                            ->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                            ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                            ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                            ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"]))
+                        ->orderBy('title')
+                        ->limit(48)
+                        ->get()
+                        ->mapWithKeys(fn (Channel $c) => [$c->id => $c->title_custom ?: $c->title ?: $c->name_custom ?: $c->name])
+                        ->all()
+                    : [];
+
+                // Use + to preserve int keys 0 and -1 (array_merge renumbers numeric keys)
+                return [0 => __('From Original Source'), -1 => __('Any channel')] + $channelResults;
+            })
+            ->getOptionLabelUsing(function (mixed $value): ?string {
+                $id = (int) $value;
+                if ($id === 0) {
+                    return __('From Original Source').($this->sourceChannelName ? ' — '.Str::limit($this->sourceChannelName, 20) : '');
+                }
+                if ($id === -1) {
+                    return __('Any channel');
+                }
+
+                return $id > 0 ? $this->resolveChannelName($id) : null;
+            })
+            ->live()
+            ->afterStateUpdated(function (mixed $state): void {
+                $channelId = (int) $state;
+                $this->seriesChannelName = $channelId > 0 ? $this->resolveChannelName($channelId) : null;
+            });
     }
 
     private function resolveChannelName(?int $channelId): ?string

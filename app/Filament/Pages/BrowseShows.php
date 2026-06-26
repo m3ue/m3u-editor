@@ -173,7 +173,6 @@ class BrowseShows extends Page
                                 ->pluck('name', 'id')
                                 ->all()
                             : [])
-                        ->searchable()
                         ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id')),
 
                     $this->channelFilterField()
@@ -246,6 +245,15 @@ class BrowseShows extends Page
             'group_id' => $this->group_id,
             'channel_id' => $this->channel_id,
             'days' => $this->days,
+        ]);
+
+        $this->seriesOptionsForm->fill([
+            'seriesNewOnly' => $this->seriesNewOnly,
+            'seriesChannelId' => $this->seriesChannelId,
+            'seriesPriority' => $this->seriesPriority,
+            'seriesStartEarly' => $this->seriesStartEarly,
+            'seriesEndLate' => $this->seriesEndLate,
+            'seriesKeepLast' => $this->seriesKeepLast,
         ]);
     }
 
