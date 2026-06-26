@@ -14,6 +14,7 @@ use App\Models\EpgProgramme;
 use App\Models\Group;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
+use App\Support\EpgProgrammeNormalizer;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Database\Eloquent\Builder;
@@ -222,9 +223,9 @@ class BrowseShows extends Page
 
     public function mount(): void
     {
-        $settings = DvrSetting::where('user_id', Auth::id())->get();
-        if ($settings->count() === 1) {
-            $this->dvr_setting_id = $settings->first()->id;
+        $first = DvrSetting::where('user_id', Auth::id())->value('id');
+        if ($first) {
+            $this->dvr_setting_id = $first;
         }
     }
 
@@ -706,8 +707,13 @@ class BrowseShows extends Page
                 ->whereIn('type', [DvrRuleType::Series, DvrRuleType::Once])
                 ->get(['type', 'series_title', 'programme_id']);
 
+            // Normalize rule titles so variants with superscript annotations
+            // (ᴸᴵᵛᴱ, ᴺᵉʷ, ᴴᴰ) match the same show regardless of which
+            // EPG title variant was used when the rule was created.
             $seriesRuleTitles = $rules->where('type', DvrRuleType::Series)
-                ->pluck('series_title')->flip()->all();
+                ->pluck('series_title')
+                ->mapWithKeys(fn (string $t) => [mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($t)) => true])
+                ->all();
 
             $onceProgrammeIds = $rules->where('type', DvrRuleType::Once)
                 ->pluck('programme_id')->flip()->all();
@@ -752,7 +758,7 @@ class BrowseShows extends Page
                 ],
                 'epg_icon' => $first->icon,
                 'poster_url' => null,
-                'has_series_rule' => isset($seriesRuleTitles[(string) $title]),
+                'has_series_rule' => isset($seriesRuleTitles[mb_strtolower(EpgProgrammeNormalizer::cleanForSearch((string) $title))]),
                 'has_once_rule' => $airings->contains(fn (EpgProgramme $p) => isset($onceProgrammeIds[$p->id])),
                 'airing_count' => $airings->count(),
                 'category' => $first->category,
@@ -816,6 +822,18 @@ class BrowseShows extends Page
                 'premiere' => $p->premiere,
             ];
         })->values()->all();
+
+        // Propagate is_new across simultaneous airings (same start_time slot).
+        // EPG providers tag one channel's entry with ᴺᵉʷ and another with ᴸᴵᵛᴱ
+        // for what is the same broadcast — if any airing at a given time is new,
+        // all airings at that time are the same new episode.
+        $newSlots = array_flip(array_column(array_filter($airings, fn ($a) => $a['is_new']), 'start_time_human'));
+        if (! empty($newSlots)) {
+            $airings = array_map(
+                fn (array $a) => $a['is_new'] ? $a : [...$a, 'is_new' => isset($newSlots[$a['start_time_human']])],
+                $airings
+            );
+        }
 
         $seriesRuleExists = $this->dvr_setting_id
             ? DvrRecordingRule::where('user_id', Auth::id())

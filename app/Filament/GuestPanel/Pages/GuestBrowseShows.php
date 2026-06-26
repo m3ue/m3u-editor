@@ -14,6 +14,7 @@ use App\Models\EpgProgramme;
 use App\Models\Group;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
+use App\Support\EpgProgrammeNormalizer;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
@@ -597,7 +598,9 @@ class GuestBrowseShows extends Page
                 ->get(['type', 'series_title', 'programme_id']);
 
             $seriesRuleTitles = $rules->where('type', DvrRuleType::Series)
-                ->pluck('series_title')->flip()->all();
+                ->pluck('series_title')
+                ->mapWithKeys(fn (string $t) => [mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($t)) => true])
+                ->all();
 
             $onceProgrammeIds = $rules->where('type', DvrRuleType::Once)
                 ->pluck('programme_id')->flip()->all();
@@ -642,7 +645,7 @@ class GuestBrowseShows extends Page
                 ],
                 'epg_icon' => $first->icon,
                 'poster_url' => null,
-                'has_series_rule' => isset($seriesRuleTitles[(string) $title]),
+                'has_series_rule' => isset($seriesRuleTitles[mb_strtolower(EpgProgrammeNormalizer::cleanForSearch((string) $title))]),
                 'has_once_rule' => $airings->contains(fn (EpgProgramme $p) => isset($onceProgrammeIds[$p->id])),
                 'airing_count' => $airings->count(),
                 'category' => $first->category,
@@ -708,6 +711,14 @@ class GuestBrowseShows extends Page
                 'premiere' => $p->premiere,
             ];
         })->values()->all();
+
+        $newSlots = array_flip(array_column(array_filter($airings, fn ($a) => $a['is_new']), 'start_time_human'));
+        if (! empty($newSlots)) {
+            $airings = array_map(
+                fn (array $a) => $a['is_new'] ? $a : [...$a, 'is_new' => isset($newSlots[$a['start_time_human']])],
+                $airings
+            );
+        }
 
         $dvrSetting = $this->getCachedDvrSetting();
         $seriesRuleExists = $dvrSetting

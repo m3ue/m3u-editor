@@ -46,11 +46,13 @@
                 </label>
                 <x-filament::input.wrapper>
                     <x-filament::input.select wire:model.live="dvr_setting_id">
-                        <option value="">{{ __('— Any —') }}</option>
-                        @foreach ($this->dvrSettingOptions as $id => $label)
-                            <option value="{{ $id }}" @selected($dvr_setting_id == $id)>{{ $label }}
-                            </option>
-                        @endforeach
+                        @if (empty($this->dvrSettingOptions))
+                            <option value="" disabled>{{ __('No DVR settings configured') }}</option>
+                        @else
+                            @foreach ($this->dvrSettingOptions as $id => $label)
+                                <option value="{{ $id }}" @selected($dvr_setting_id == $id)>{{ $label }}</option>
+                            @endforeach
+                        @endif
                     </x-filament::input.select>
                 </x-filament::input.wrapper>
             </div>
