@@ -35,158 +35,16 @@
     </div>
 
     {{-- Filter Form --}}
-    <form wire:submit="search"
-        class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4 space-y-4">
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {{-- DVR Setting --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('DVR Setting (Playlist)') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input.select wire:model.live="dvr_setting_id">
-                        @if (empty($this->dvrSettingOptions))
-                            <option value="" disabled>{{ __('No DVR settings configured') }}</option>
-                        @else
-                            @foreach ($this->dvrSettingOptions as $id => $label)
-                                <option value="{{ $id }}" @selected($dvr_setting_id == $id)>{{ $label }}</option>
-                            @endforeach
-                        @endif
-                    </x-filament::input.select>
-                </x-filament::input.wrapper>
+    <div class="rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-gray-900 p-4">
+        <form wire:submit="search">
+            {{ $this->filtersForm }}
+            <div class="flex justify-end mt-4">
+                <x-filament::button type="submit" icon="heroicon-m-magnifying-glass">
+                    {{ __('Search') }}
+                </x-filament::button>
             </div>
-
-            {{-- Keyword --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Title Keyword') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input type="text" wire:model="keyword"
-                        placeholder="{{ __('e.g. Breaking Bad') }}" />
-                </x-filament::input.wrapper>
-            </div>
-
-            {{-- Category --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Category') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input type="text" wire:model="category" placeholder="{{ __('e.g. Drama') }}" />
-                </x-filament::input.wrapper>
-            </div>
-
-            {{-- Description Keyword --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Description Keyword') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input type="text" wire:model="description_keyword"
-                        placeholder="{{ __('e.g. detective') }}" />
-                </x-filament::input.wrapper>
-            </div>
-
-            {{-- Group --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Group') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input.select wire:model="group_id" :disabled="!$dvr_setting_id">
-                        <option value="">{{ __('— Any —') }}</option>
-                        @foreach ($this->groupOptions as $id => $name)
-                            <option value="{{ $id }}" @selected($group_id == $id)>{{ $name }}
-                            </option>
-                        @endforeach
-                    </x-filament::input.select>
-                </x-filament::input.wrapper>
-            </div>
-
-            {{-- Channel (searchable) --}}
-            <div class="flex flex-col gap-1" x-data="{
-                open: false,
-                search: '',
-                allOptions: window['__channelOptions_' + $wire.dvr_setting_id] ?? {},
-                get filtered() {
-                    if (!this.search) return this.allOptions;
-                    const q = this.search.toLowerCase();
-                    return Object.fromEntries(
-                        Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
-                    );
-                },
-                init() {
-                    this.$watch(() => this.$wire.dvr_setting_id, id => {
-                        this.allOptions = window['__channelOptions_' + id] ?? {};
-                    });
-                }
-            }" x-effect="if (!$wire.channel_id) search = ''"
-            @channel-options-loaded.window="window['__channelOptions_' + $event.detail.dvr_setting_id] = $event.detail.options; if ($event.detail.dvr_setting_id == $wire.dvr_setting_id) allOptions = $event.detail.options"
-            @click.away="open = false">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Channel') }}</span>
-                </label>
-                <div class="relative" wire:ignore>
-                    <input type="text" x-model="search"
-                        @focus="$wire.loadChannelOptions(); open = true" @keydown.escape="open = false"
-                        :disabled="!$wire.dvr_setting_id"
-                        :placeholder="!$wire.channel_id ? '{{ __('— Any —') }}' : ''"
-                        :class="!$wire.dvr_setting_id ? 'opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-700' : ''"
-                        class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white text-sm shadow-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 placeholder-gray-400 dark:placeholder-gray-500 py-2 pl-3" />
-                    <div x-show="open && Object.keys(filtered).length > 0" x-transition @click.stop
-                        @keydown.escape="open = false"
-                        class="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-white/10 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                        <button type="button" @click="search = ''; $wire.set('channel_id', null); open = false"
-                            class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition border-b border-gray-100 dark:border-white/5"
-                            :class="!$wire.channel_id ? 'text-primary-600 dark:text-primary-400 font-medium' :
-                                'text-gray-600 dark:text-gray-300'">
-                            {{ __('— Any —') }}
-                        </button>
-                        <template x-for="entry in Object.entries(filtered)" :key="entry[0]">
-                            <button type="button"
-                                @click="search = entry[1]; $wire.set('channel_id', parseInt(entry[0])); open = false"
-                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-white/10 transition"
-                                :class="$wire.channel_id == entry[0] ? 'text-primary-600 dark:text-primary-400 font-medium' :
-                                    'text-gray-700 dark:text-gray-200'"
-                                x-text="entry[1]"></button>
-                        </template>
-                        <div x-show="Object.keys(filtered).length === 0"
-                            class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">
-                            {{ __('No matches') }}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {{-- Days --}}
-            <div class="flex flex-col gap-1">
-                <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
-                    <span
-                        class="text-sm font-medium leading-6 text-gray-950 dark:text-white">{{ __('Look-ahead Window') }}</span>
-                </label>
-                <x-filament::input.wrapper>
-                    <x-filament::input.select wire:model="days">
-                        <option value="7">{{ __('7 days') }}</option>
-                        <option value="14">{{ __('14 days') }}</option>
-                        <option value="30">{{ __('30 days') }}</option>
-                    </x-filament::input.select>
-                </x-filament::input.wrapper>
-            </div>
-        </div>
-
-        <div class="flex justify-end">
-            <x-filament::button type="submit" icon="heroicon-m-magnifying-glass">
-                {{ __('Search') }}
-            </x-filament::button>
-        </div>
-    </form>
+        </form>
+    </div>
 
     {{-- Loading indicator --}}
     <div wire:loading wire:target="search,gotoPage" class="py-12">

@@ -4,6 +4,7 @@ namespace App\Filament\GuestPanel\Pages;
 
 use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
+use App\Filament\Concerns\HasBrowseShowsFiltersForm;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
@@ -11,12 +12,13 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
-use App\Models\Group;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
 use App\Support\EpgProgrammeNormalizer;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Schema;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -26,6 +28,7 @@ use Livewire\Attributes\On;
 
 class GuestBrowseShows extends Page
 {
+    use HasBrowseShowsFiltersForm;
     use HasGuestDvr;
 
     protected string $view = 'filament.guest-panel.pages.browse-shows';
@@ -131,21 +134,34 @@ class GuestBrowseShows extends Page
         return (int) ceil($this->totalShows / self::PER_PAGE);
     }
 
-    /**
-     * @return array<int, string>
-     */
-    public function getGroupOptionsProperty(): array
-    {
-        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
-        if (! $playlistId) {
-            return [];
-        }
+    // --- Filter form ---
 
-        return Group::where('playlist_id', $playlistId)
-            ->where('enabled', true)
-            ->orderBy('name')
-            ->pluck('name', 'id')
-            ->all();
+    public function filtersForm(Schema $schema): Schema
+    {
+        return $schema
+            ->statePath(null)
+            ->schema([
+                Grid::make(['default' => 1, 'sm' => 2, 'lg' => 3])->schema([
+                    $this->keywordFilterField(),
+                    $this->categoryFilterField(),
+                    $this->descriptionKeywordFilterField(),
+                    $this->groupFilterField(),
+                    $this->channelFilterField(),
+                    $this->daysFilterField(),
+                ]),
+            ]);
+    }
+
+    public function mount(): void
+    {
+        $this->filtersForm->fill([
+            'keyword' => $this->keyword,
+            'category' => $this->category,
+            'description_keyword' => $this->description_keyword,
+            'group_id' => $this->group_id,
+            'channel_id' => $this->channel_id,
+            'days' => $this->days,
+        ]);
     }
 
     /**
@@ -788,11 +804,6 @@ class GuestBrowseShows extends Page
             ->all();
     }
 
-    private function shouldIncludeDisabledChannels(): bool
-    {
-        return $this->getCachedDvrSetting()?->include_disabled_channels ?? false;
-    }
-
     /**
      * Resolve the set of XMLTV channel IDs in scope for the given playlist.
      *
@@ -896,18 +907,5 @@ class GuestBrowseShows extends Page
         $name = $channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name;
 
         return [$channel->id, $name ?: null];
-    }
-
-    private function resolveChannelName(?int $channelId): ?string
-    {
-        if (! $channelId) {
-            return null;
-        }
-
-        $channel = Channel::find($channelId, ['id', 'title', 'title_custom', 'name', 'name_custom']);
-
-        return $channel
-            ? ($channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name) ?: null
-            : null;
     }
 }

@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
+use App\Filament\Concerns\HasBrowseShowsFiltersForm;
 use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
@@ -15,8 +16,13 @@ use App\Models\Group;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
 use App\Support\EpgProgrammeNormalizer;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -26,6 +32,8 @@ use Livewire\Attributes\On;
 
 class BrowseShows extends Page
 {
+    use HasBrowseShowsFiltersForm;
+
     protected string $view = 'filament.pages.browse-shows';
 
     public static function getNavigationGroup(): ?string
@@ -126,36 +134,54 @@ class BrowseShows extends Page
         return (int) ceil($this->totalShows / self::PER_PAGE);
     }
 
-    /**
-     * @return array<int, string>
-     */
-    public function getDvrSettingOptionsProperty(): array
+    public function filtersForm(Schema $schema): Schema
     {
-        return DvrSetting::with('playlist')
-            ->where('user_id', Auth::id())
-            ->get()
-            ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->playlist?->name ?? "DVR #{$s->id}"])
-            ->all();
-    }
+        return $schema
+            ->statePath(null)
+            ->schema([
+                Grid::make(['default' => 1, 'sm' => 2, 'lg' => 3])->schema([
+                    Select::make('dvr_setting_id')
+                        ->label(__('DVR Setting (Playlist)'))
+                        ->placeholder(__('No DVR settings configured'))
+                        ->searchable()
+                        ->options(fn () => DvrSetting::with('playlist')
+                            ->where('user_id', Auth::id())
+                            ->get()
+                            ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->playlist?->name ?? "DVR #{$s->id}"])
+                            ->all())
+                        ->live()
+                        ->afterStateUpdated(function (Set $set): void {
+                            $set('group_id', null);
+                            $set('channel_id', null);
+                            $this->channelOptionsDispatched = false;
+                            $this->dvrSettingResolved = false;
+                            $this->cachedDvrSetting = null;
+                        }),
 
-    /**
-     * @return array<int, string>
-     */
-    public function getGroupOptionsProperty(): array
-    {
-        $playlistId = $this->dvr_setting_id
-            ? $this->getCachedDvrSetting()?->playlist_id
-            : null;
+                    $this->keywordFilterField(),
+                    $this->categoryFilterField(),
+                    $this->descriptionKeywordFilterField(),
 
-        if (! $playlistId) {
-            return [];
-        }
+                    $this->groupFilterField()
+                        ->options(fn (Get $get): array => ($dvrSettingId = $get('dvr_setting_id'))
+                            ? Group::where('playlist_id', DvrSetting::find($dvrSettingId)?->playlist_id ?? 0)
+                                ->where([
+                                    ['name', '!=', ''],
+                                    ['name', '!=', null],
+                                ])
+                                ->orderBy('name')
+                                ->pluck('name', 'id')
+                                ->all()
+                            : [])
+                        ->searchable()
+                        ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id')),
 
-        return Group::where('playlist_id', $playlistId)
-            ->where('enabled', true)
-            ->orderBy('name')
-            ->pluck('name', 'id')
-            ->all();
+                    $this->channelFilterField()
+                        ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id')),
+
+                    $this->daysFilterField(),
+                ]),
+            ]);
     }
 
     /**
@@ -199,19 +225,6 @@ class BrowseShows extends Page
         $this->dispatch('channel-options-loaded', dvr_setting_id: $this->dvr_setting_id, options: $options);
     }
 
-    private function resolveChannelName(?int $channelId): ?string
-    {
-        if (! $channelId) {
-            return null;
-        }
-
-        $channel = Channel::find($channelId, ['id', 'title', 'title_custom', 'name', 'name_custom']);
-
-        return $channel
-            ? ($channel->title_custom ?: $channel->title ?: $channel->name_custom ?: $channel->name)
-            : null;
-    }
-
     public function updatedSeriesChannelId(): void
     {
         $this->seriesChannelName = $this->seriesChannelId > 0
@@ -223,10 +236,17 @@ class BrowseShows extends Page
 
     public function mount(): void
     {
-        $first = DvrSetting::where('user_id', Auth::id())->orderBy('id')->value('id');
-        if ($first) {
-            $this->dvr_setting_id = $first;
-        }
+        $this->dvr_setting_id = DvrSetting::where('user_id', Auth::id())->orderBy('id')->value('id');
+
+        $this->filtersForm->fill([
+            'dvr_setting_id' => $this->dvr_setting_id,
+            'keyword' => $this->keyword,
+            'category' => $this->category,
+            'description_keyword' => $this->description_keyword,
+            'group_id' => $this->group_id,
+            'channel_id' => $this->channel_id,
+            'days' => $this->days,
+        ]);
     }
 
     public function getSeriesHintProperty(): string
@@ -255,16 +275,6 @@ class BrowseShows extends Page
     }
 
     // --- Slide-over actions ---
-
-    public function updatedDvrSettingId(): void
-    {
-        $this->group_id = null;
-        $this->channel_id = null;
-        $this->channel_name = '';
-        $this->channelOptionsDispatched = false;
-        $this->dvrSettingResolved = false;
-        $this->cachedDvrSetting = null;
-    }
 
     // --- Search & pagination ---
 
@@ -901,11 +911,6 @@ class BrowseShows extends Page
                     ?: $c->name,
             ])
             ->all();
-    }
-
-    private function shouldIncludeDisabledChannels(): bool
-    {
-        return $this->getCachedDvrSetting()?->include_disabled_channels ?? false;
     }
 
     /**
