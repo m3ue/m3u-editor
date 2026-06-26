@@ -10,7 +10,9 @@ Flow:
      FK / index constraints. This avoids all schema-drift conflicts on import.
   3. Import all data including the `migrations` table, so php artisan migrate knows
      which migrations were already applied and only runs new ones.
-  4. Reset sequences.
+  4. Create unique indexes and FK constraints from SQLite's PRAGMA metadata so that
+     post-import migrations which drop-then-recreate constraints can find them.
+  5. Reset sequences.
   (db-init.sh runs `php artisan migrate` afterwards to apply new migrations.)
 
 Run manually inside the container:
@@ -23,6 +25,7 @@ import os
 import re
 import sqlite3
 import subprocess
+from collections import defaultdict
 from datetime import datetime
 
 SQLITE_DB = os.getenv("SQLITE_DB", "/var/www/config/database/database.sqlite")
@@ -44,9 +47,12 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 os.makedirs(os.path.dirname(MIGRATION_LOG_FILE), exist_ok=True)
 
-# Ephemeral tables — skip schema creation and data import entirely.
-# They are recreated fresh by the app on startup.
-SKIP_TABLES = {
+# Tables whose schema we create from SQLite PRAGMA but whose data we do not import.
+# These tables are either ephemeral (cache, sessions, failed jobs) or too large/unnecessary
+# to migrate (telescope). Their migration records ARE imported (from the migrations table) so
+# php artisan migrate won't try to recreate them — but we must still create the table structure
+# here from PRAGMA, otherwise the tables simply won't exist.
+SKIP_DATA_TABLES = {
     "cache",
     "cache_locks",
     "sessions",
@@ -173,7 +179,6 @@ def build_postgres_schema(conn: sqlite3.Connection) -> dict:
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
-        if row[0] not in SKIP_TABLES
     ]
 
     bool_cols: dict = {}
@@ -293,11 +298,16 @@ def copy_table(conn: sqlite3.Connection, table_name: str, columns: list, bool_co
 
 
 def create_unique_indexes(conn: sqlite3.Connection) -> None:
-    """Create unique indexes in Postgres from SQLite's PRAGMA index_list.
+    """Create unique constraints in Postgres from SQLite's PRAGMA index_list.
 
-    Called after COPY so the import doesn't fight constraints, but before the app
-    starts so ON CONFLICT / uniqueness checks work at runtime.
-    Skips primary-key indexes (already handled as PRIMARY KEY in the schema).
+    Uses ALTER TABLE ADD CONSTRAINT ... UNIQUE (not CREATE UNIQUE INDEX) so that
+    Laravel migrations calling $table->dropUnique() — which generates ALTER TABLE
+    DROP CONSTRAINT — can find and remove them. CREATE UNIQUE INDEX produces a
+    plain index, which DROP CONSTRAINT cannot see.
+
+    Called after COPY so the import doesn't fight constraints, but before php artisan
+    migrate runs so ON CONFLICT clauses and dropUnique() calls both work correctly.
+    Skips primary-key indexes (already created as PRIMARY KEY in the schema).
     """
     table_names = [
         row[0]
@@ -305,7 +315,6 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
-        if row[0] not in SKIP_TABLES
     ]
 
     created = 0
@@ -328,13 +337,138 @@ def create_unique_indexes(conn: sqlite3.Connection) -> None:
             col_names = ", ".join(f'"{col[2]}"' for col in cols)
             try:
                 run_psql(
-                    f'CREATE UNIQUE INDEX IF NOT EXISTS "{idx_name}" ON "{table_name}" ({col_names})'
+                    f'ALTER TABLE "{table_name}" ADD CONSTRAINT "{idx_name}" UNIQUE ({col_names})'
                 )
                 created += 1
             except RuntimeError as e:
-                log(f"  Warning: could not create unique index {idx_name} on {table_name}: {e}")
+                log(f"  Warning: could not create unique constraint {idx_name} on {table_name}: {e}")
 
-    log(f"Created {created} unique index(es) from SQLite schema.")
+    log(f"Created {created} unique constraint(s) from SQLite schema.")
+
+
+def create_foreign_keys(conn: sqlite3.Connection) -> None:
+    """Create FK constraints in Postgres from SQLite's PRAGMA foreign_key_list.
+
+    Uses NOT VALID so orphaned rows don't block creation — we just need the
+    constraints to exist so that post-import migrations can safely dropForeign
+    them before re-adding with their new definition.
+
+    Constraint names follow Laravel's convention: {table}_{col}_foreign.
+    """
+    table_names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+        if row[0] not in SKIP_DATA_TABLES
+    ]
+
+    _on_action_map = {"CASCADE": "CASCADE", "SET NULL": "SET NULL", "SET DEFAULT": "SET DEFAULT", "RESTRICT": "RESTRICT"}
+
+    created = 0
+    for table_name in table_names:
+        rows = conn.execute(f"PRAGMA foreign_key_list('{table_name}')").fetchall()
+        if not rows:
+            continue
+
+        # Group by FK id — compound FKs have multiple rows with the same id.
+        # PRAGMA cols: id, seq, table, from, to, on_update, on_delete, match
+        fk_groups: dict = defaultdict(list)
+        for row in rows:
+            fk_groups[row[0]].append(row)
+
+        for _fk_id, fk_cols in fk_groups.items():
+            fk_cols.sort(key=lambda r: r[1])  # sort by seq
+            ref_table = fk_cols[0][2]
+            from_cols = [r[3] for r in fk_cols]
+            to_cols = [r[4] for r in fk_cols]
+            on_delete = fk_cols[0][6]
+            on_update = fk_cols[0][5]
+
+            constraint_name = f"{table_name}_{'_'.join(from_cols)}_foreign"
+            from_sql = ", ".join(f'"{c}"' for c in from_cols)
+            to_sql = ", ".join(f'"{c}"' for c in to_cols)
+
+            on_delete_clause = f" ON DELETE {_on_action_map[on_delete]}" if on_delete in _on_action_map else ""
+            on_update_clause = f" ON UPDATE {_on_action_map[on_update]}" if on_update in _on_action_map else ""
+
+            sql = (
+                f'ALTER TABLE "{table_name}" ADD CONSTRAINT "{constraint_name}" '
+                f'FOREIGN KEY ({from_sql}) REFERENCES "{ref_table}" ({to_sql})'
+                f"{on_delete_clause}{on_update_clause} NOT VALID"
+            )
+            try:
+                run_psql(sql)
+                created += 1
+            except RuntimeError as e:
+                log(f"  Warning: could not create FK {constraint_name}: {e}")
+
+    log(f"Created {created} FK constraint(s) from SQLite schema.")
+
+
+def convert_json_columns_from_migrations() -> None:
+    """Upgrade text→jsonb for every column declared as ->json() or ->jsonb() in migration files.
+
+    SQLite has no native JSON type — Laravel stores json() columns as TEXT, so the PRAGMA-based
+    schema builder creates them as `text` in Postgres.  This is fine for plain read/write through
+    Eloquent casts, but any code that uses Postgres JSON operators (->>, @>, whereJsonContains,
+    etc.) on a `text` column will fail.  We scan the migration PHP files to find every column
+    declared as ->json() / ->jsonb() and issue `ALTER COLUMN … TYPE jsonb USING col::jsonb` so
+    they become proper jsonb columns.
+
+    This runs BEFORE remove_pgsql_only_migrations() / php artisan migrate, so the pgsql-guarded
+    jsonb-conversion migrations will find the columns already typed as jsonb and treat the
+    ALTER as a no-op (jsonb → jsonb succeeds without error).
+    """
+    if not os.path.isdir(MIGRATION_FILES_DIR):
+        log("Migration files dir not found. Skipping json→jsonb column conversion.")
+        return
+
+    json_cols: dict = defaultdict(set)  # {table_name: {col_name, ...}}
+
+    for filename in sorted(os.listdir(MIGRATION_FILES_DIR)):
+        if not filename.endswith(".php"):
+            continue
+        filepath = os.path.join(MIGRATION_FILES_DIR, filename)
+        try:
+            with open(filepath, "r", encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+
+        current_table: str | None = None
+        for line in lines:
+            # Track which table the next ->json() calls belong to.
+            table_match = re.search(
+                r"Schema::(create|table)\(\s*['\"]([^'\"]+)['\"]", line
+            )
+            if table_match:
+                current_table = table_match.group(2)
+
+            if current_table:
+                col_match = re.search(
+                    r"\$table->jsonb?\s*\(\s*['\"]([^'\"]+)['\"]", line
+                )
+                if col_match:
+                    json_cols[current_table].add(col_match.group(1))
+
+    converted = 0
+    for table_name in sorted(json_cols):
+        for col_name in sorted(json_cols[table_name]):
+            try:
+                run_psql(
+                    f'ALTER TABLE "{table_name}" '
+                    f'ALTER COLUMN "{col_name}" TYPE jsonb '
+                    f'USING "{col_name}"::jsonb'
+                )
+                converted += 1
+            except RuntimeError:
+                # Column doesn't exist in this table (e.g. migration added column to a
+                # different DB version), or it's already jsonb — skip silently.
+                pass
+
+    log(f"Converted {converted} column(s) to jsonb from migration file analysis.")
 
 
 def remove_pgsql_only_migrations() -> None:
@@ -417,7 +551,7 @@ def main() -> None:
         for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         )
-        if row[0] not in SKIP_TABLES
+        if row[0] not in SKIP_DATA_TABLES
     ]
 
     log(f"Found {len(tables)} tables to import.")
@@ -441,7 +575,13 @@ def main() -> None:
     log("Creating unique indexes from SQLite schema...")
     create_unique_indexes(conn)
 
+    log("Creating foreign key constraints from SQLite schema...")
+    create_foreign_keys(conn)
+
     conn.close()
+
+    log("Converting json() columns from text to jsonb...")
+    convert_json_columns_from_migrations()
 
     log("Removing pgsql-only migration records so they re-run...")
     remove_pgsql_only_migrations()
