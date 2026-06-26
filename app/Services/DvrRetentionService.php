@@ -40,6 +40,9 @@ class DvrRetentionService
      */
     public function runForSetting(DvrSetting $setting): void
     {
+        // 0. Purge any ghost rows left from previous runs (Completed + no file on disk).
+        $this->purgeGhostRows($setting);
+
         // 1. keepLast per rule
         $this->enforceKeepLast($setting);
 
@@ -51,6 +54,26 @@ class DvrRetentionService
         // 3. Disk quota
         if ($setting->global_disk_quota_gb > 0) {
             $this->enforceDiskQuota($setting);
+        }
+    }
+
+    /**
+     * Hard-delete completed recording rows that have no file on disk.
+     *
+     * These "ghost" rows accumulate when a previous retention run deleted the file
+     * (setting file_path to null) but the row was left behind. They corrupt the
+     * keep_last counter because they count as completed recordings without consuming
+     * any storage. Runs at the start of each retention cycle before any other policy.
+     */
+    private function purgeGhostRows(DvrSetting $setting): void
+    {
+        $deleted = DvrRecording::where('dvr_setting_id', $setting->id)
+            ->where('status', DvrRecordingStatus::Completed->value)
+            ->whereNull('file_path')
+            ->delete();
+
+        if ($deleted > 0) {
+            Log::info("DVR retention: purged {$deleted} ghost recording row(s) for setting {$setting->id}");
         }
     }
 
@@ -113,6 +136,9 @@ class DvrRetentionService
 
     /**
      * Delete the file for any recording past position $keep when ordered by most-recent first.
+     *
+     * Ghost rows (file_path IS NULL) are purged at the start of each retention run, so
+     * every row here has a real file on disk and counts toward the keep threshold correctly.
      */
     private function trimGroup(Builder $query, int $keep, DvrSetting $setting, string $groupLabel): void
     {
@@ -125,8 +151,9 @@ class DvrRetentionService
         $toDelete = $completed->slice($keep);
 
         foreach ($toDelete as $recording) {
-            $this->deleteRecordingFile($recording, $setting);
-            Log::info("DVR retention: keepLast deleted recording {$recording->id} ({$recording->title}) [group {$groupLabel}, keep={$keep}]");
+            if ($this->deleteRecordingFile($recording, $setting)) {
+                Log::info("DVR retention: keepLast deleted recording {$recording->id} ({$recording->title}) [group {$groupLabel}, keep={$keep}]");
+            }
         }
     }
 
@@ -143,8 +170,9 @@ class DvrRetentionService
             ->get();
 
         foreach ($old as $recording) {
-            $this->deleteRecordingFile($recording, $setting);
-            Log::info("DVR retention: age-based deleted recording {$recording->id} ({$recording->title})");
+            if ($this->deleteRecordingFile($recording, $setting)) {
+                Log::info("DVR retention: age-based deleted recording {$recording->id} ({$recording->title})");
+            }
         }
     }
 
@@ -193,8 +221,15 @@ class DvrRetentionService
     }
 
     /**
-     * Delete the file on disk and set file_path to null on the recording.
-     * Does NOT delete the recording row itself (keep history).
+     * Delete the file on disk then mark the recording row as Purged.
+     *
+     * The row is kept (with status=Purged, file_path=null) as a permanent dedup sentinel
+     * so DvrRecordingRule::alreadyHaveEpisode() continues to block re-recording of the
+     * same episode after retention prunes the file. Hard-deleting the row would cause the
+     * scheduler to re-schedule the same episode on its next pass.
+     *
+     * Uses a raw query to bypass model hooks (avoids N+1 relation loads and rule cascades
+     * that are inappropriate in a bulk retention context).
      */
     private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting): bool
     {
@@ -202,16 +237,16 @@ class DvrRetentionService
             return true;
         }
 
-        $disk = $setting->storage_disk ?: config('dvr.storage_disk');
+        $storageDisk = $setting->storage_disk ?: config('dvr.storage_disk');
 
         try {
-            if (Storage::disk($disk)->exists($recording->file_path)) {
-                Storage::disk($disk)->delete($recording->file_path);
+            if (Storage::disk($storageDisk)->exists($recording->file_path)) {
+                Storage::disk($storageDisk)->delete($recording->file_path);
             }
 
-            $recording->update([
+            DvrRecording::where('id', $recording->id)->update([
+                'status' => DvrRecordingStatus::Purged->value,
                 'file_path' => null,
-                'file_size_bytes' => null,
             ]);
 
             return true;
