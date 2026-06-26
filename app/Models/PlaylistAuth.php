@@ -31,6 +31,7 @@ class PlaylistAuth extends Model
         'expires_at' => 'datetime',
         'max_connections' => 'integer',
         'stop_oldest_on_limit' => 'boolean',
+        'request_enabled' => 'boolean',
         'auto_approve_requests' => 'boolean',
     ];
 

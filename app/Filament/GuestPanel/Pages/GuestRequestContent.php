@@ -75,6 +75,26 @@ class GuestRequestContent extends Page
             return false;
         }
 
+        $prefix = base64_encode($uuid).'_';
+        $username = session("{$prefix}guest_auth_username");
+        $password = session("{$prefix}guest_auth_password");
+        $authResult = PlaylistFacade::authenticate($username, $password);
+
+        if (! $authResult || ! ($authResult[0] ?? null)) {
+            return false;
+        }
+
+        if (($authResult[1] ?? null) === 'playlist_auth') {
+            $auth = PlaylistAuth::where('username', $username)
+                ->where('password', $password)
+                ->where('enabled', true)
+                ->first();
+
+            if (! $auth?->request_enabled) {
+                return false;
+            }
+        }
+
         return ArrIntegration::query()
             ->where('user_id', $actualPlaylist->user_id)
             ->enabled()

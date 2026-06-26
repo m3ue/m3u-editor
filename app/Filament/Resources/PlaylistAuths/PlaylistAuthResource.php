@@ -230,7 +230,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->columnSpan(1),
                         ]),
                     Grid::make()
-                        ->columns(5)
+                        ->columns(6)
                         ->schema([
                             TextInput::make('max_connections')
                                 ->label(__('Max Connections'))
@@ -253,6 +253,16 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
                                 ->nullable()
                                 ->columnSpan(2),
+                            Toggle::make('request_enabled')
+                                ->label(__('Enable Content Requests'))
+                                ->inline(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Allow this guest to request content when the assigned playlist and ARR integration also allow guest requests.')
+                                )
+                                ->helperText(__('Controls access to content requests for this auth user.'))
+                                ->default(false)
+                                ->columnSpan(1),
                             Toggle::make('auto_approve_requests')
                                 ->label(__('Auto-approve Content Requests'))
                                 ->inline(false)

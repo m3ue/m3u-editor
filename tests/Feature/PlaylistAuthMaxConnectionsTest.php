@@ -11,9 +11,11 @@
  * - XtreamApiController returns PlaylistAuth.max_connections in user_info
  */
 
+use App\Models\ArrIntegration;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\PlaylistRequestSetting;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
@@ -272,4 +274,135 @@ test('playlist_auth_id is absent from metadata when no PlaylistAuth is used', fu
 
     expect($capturedPayload)->not->toBeNull()
         ->and(isset($capturedPayload['metadata']['playlist_auth_id']))->toBeFalse();
+});
+
+// ── Request integration feature access ────────────────────────────────────────
+
+test('PlaylistAuth request_enabled defaults to false', function () {
+    $auth = PlaylistAuth::factory()->for($this->user)->create();
+
+    expect($auth->request_enabled)->toBeFalse();
+});
+
+test('Xtream auth advertises requests when PlaylistAuth has request access and playlist request integration is enabled', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'uuid' => 'playlist-requests-uuid',
+    ]);
+    $auth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'request_enabled' => true,
+        'username' => 'request-user',
+        'password' => 'request-pass',
+    ]);
+    $auth->assignTo($playlist);
+
+    PlaylistRequestSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->for($this->user)->create([
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username=request-user&password=request-pass');
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress', 'requests']);
+});
+
+test('Xtream auth does not advertise requests when PlaylistAuth request access is disabled', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'uuid' => 'playlist-no-request-auth-uuid',
+    ]);
+    $auth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'request_enabled' => false,
+        'username' => 'no-request-user',
+        'password' => 'no-request-pass',
+    ]);
+    $auth->assignTo($playlist);
+
+    PlaylistRequestSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->for($this->user)->create([
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username=no-request-user&password=no-request-pass');
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
+});
+
+test('Xtream auth does not advertise requests when playlist request integration is disabled', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'uuid' => 'playlist-request-disabled-uuid',
+    ]);
+    $auth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'request_enabled' => true,
+        'username' => 'request-disabled-user',
+        'password' => 'request-disabled-pass',
+    ]);
+    $auth->assignTo($playlist);
+
+    PlaylistRequestSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => false,
+    ]);
+    ArrIntegration::factory()->for($this->user)->create([
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username=request-disabled-user&password=request-disabled-pass');
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
+});
+
+test('Xtream auth does not advertise requests when no guest-enabled ARR integration exists', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'uuid' => 'playlist-no-guest-arr-uuid',
+    ]);
+    $auth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'request_enabled' => true,
+        'username' => 'no-guest-arr-user',
+        'password' => 'no-guest-arr-pass',
+    ]);
+    $auth->assignTo($playlist);
+
+    PlaylistRequestSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->for($this->user)->create([
+        'enabled' => true,
+        'guest_enabled' => false,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username=no-guest-arr-user&password=no-guest-arr-pass');
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
+});
+
+test('Xtream owner auth advertises requests when playlist request integration is enabled', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'uuid' => 'owner-request-uuid',
+    ]);
+
+    PlaylistRequestSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->for($this->user)->create([
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password=owner-request-uuid');
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress', 'requests']);
 });
