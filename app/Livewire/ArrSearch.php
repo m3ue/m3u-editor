@@ -10,7 +10,12 @@ use App\Services\Arr\ArrService;
 use App\Services\Arr\SonarrService;
 use App\Services\TmdbService;
 use App\Services\TvMazeService;
+use Filament\Actions\Action;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Concerns\InteractsWithSchemas;
+use Filament\Schemas\Contracts\HasSchemas;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
@@ -27,8 +32,11 @@ use Livewire\Component;
  *
  * Also provides a TMDB-powered discover/browse mode when TMDB is configured.
  */
-class ArrSearch extends Component
+class ArrSearch extends Component implements HasActions, HasSchemas
 {
+    use InteractsWithActions;
+    use InteractsWithSchemas;
+
     /**
      * Guest-mode: restrict search to these specific integration IDs.
      *
@@ -449,7 +457,6 @@ class ArrSearch extends Component
         }
     }
 
-    #[Renderless]
     public function openDetail(int $index): void
     {
         if (! isset($this->results[$index])) {
@@ -472,7 +479,44 @@ class ArrSearch extends Component
         $this->detailEpisodeSeason = null;
         $this->detailEpisodeNumber = null;
         $this->detailReleasesLabel = null;
-        $this->showDetail = true;
+        $this->mountAction('showDetail');
+    }
+
+    public function showDetailAction(): Action
+    {
+        return Action::make('showDetail')
+            ->slideOver()
+            ->modalHeading(false)
+            ->modalContent(fn () => view('livewire.partials.arr-detail', [
+                'detailResult' => $this->detailResult,
+                'detailEpisodes' => $this->detailEpisodes,
+                'detailCast' => $this->detailCast,
+                'detailReleases' => $this->detailReleases,
+                'detailSonarrEpisodeStatus' => $this->detailSonarrEpisodeStatus,
+                'detailSonarrEpisodeFileInfo' => $this->detailSonarrEpisodeFileInfo,
+                'releasesLoading' => $this->releasesLoading,
+                'detailReleasesLabel' => $this->detailReleasesLabel,
+                'selectedSeasons' => $this->selectedSeasons,
+                'guestMode' => $this->guestMode,
+                'detailIndex' => $this->detailIndex,
+                'detailIntegration' => $this->detailIntegration,
+            ]))
+            ->modalSubmitAction(false)
+            ->modalCancelAction(false);
+    }
+
+    public function confirmForceDownloadAction(): Action
+    {
+        return Action::make('confirmForceDownload')
+            ->requiresConfirmation()
+            ->modalHeading(__('Force Download?'))
+            ->modalDescription(__('This release was rejected by your quality profile. Download anyway?'))
+            ->color('danger')
+            ->label(__('Download'))
+            ->action(fn (array $arguments) => $this->downloadDetailRelease(
+                $arguments['guid'] ?? '',
+                (int) ($arguments['indexerId'] ?? 0),
+            ));
     }
 
     #[Renderless]
