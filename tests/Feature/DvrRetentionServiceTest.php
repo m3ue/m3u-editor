@@ -75,7 +75,7 @@ it('deletes excess completed recordings beyond keep_last', function () {
 
     $this->service->runAll();
 
-    // 2 oldest rows are hard-deleted; 2 newest survive
+    // 2 newest survive as Completed with files; 2 oldest become Purged (file removed, row kept as dedup sentinel)
     expect(
         DvrRecording::where('dvr_recording_rule_id', $rule->id)
             ->where('status', DvrRecordingStatus::Completed)
@@ -86,9 +86,9 @@ it('deletes excess completed recordings beyond keep_last', function () {
     expect(DvrRecording::find($recordings->get(0)->id))->not->toBeNull();
     expect(DvrRecording::find($recordings->get(1)->id))->not->toBeNull();
 
-    // 2 oldest (subHours(3), subHours(4)) are hard-deleted
-    expect(DvrRecording::find($recordings->get(2)->id))->toBeNull();
-    expect(DvrRecording::find($recordings->get(3)->id))->toBeNull();
+    // 2 oldest (subHours(3), subHours(4)) are marked Purged; rows kept as dedup sentinels
+    expect(DvrRecording::find($recordings->get(2)->id)?->status)->toBe(DvrRecordingStatus::Purged);
+    expect(DvrRecording::find($recordings->get(3)->id)?->status)->toBe(DvrRecordingStatus::Purged);
     expect(Storage::disk('dvr')->exists('recordings/ep3.ts'))->toBeFalse();
     expect(Storage::disk('dvr')->exists('recordings/ep4.ts'))->toBeFalse();
 });
@@ -121,11 +121,11 @@ it('keeps only the most recent N recordings for a rule with keep_last', function
 
     $this->service->runAll();
 
-    // 2 newest survive, 2 oldest are hard-deleted
-    expect(DvrRecording::find($recordings->get(0)->id))->not->toBeNull(); // newest
-    expect(DvrRecording::find($recordings->get(1)->id))->not->toBeNull(); // 2nd newest
-    expect(DvrRecording::find($recordings->get(2)->id))->toBeNull();      // 3rd — deleted
-    expect(DvrRecording::find($recordings->get(3)->id))->toBeNull();      // oldest — deleted
+    // 2 newest survive as Completed; 2 oldest become Purged (files removed, rows kept)
+    expect(DvrRecording::find($recordings->get(0)->id))->not->toBeNull();                         // newest — Completed
+    expect(DvrRecording::find($recordings->get(1)->id))->not->toBeNull();                         // 2nd newest — Completed
+    expect(DvrRecording::find($recordings->get(2)->id)?->status)->toBe(DvrRecordingStatus::Purged); // 3rd — Purged
+    expect(DvrRecording::find($recordings->get(3)->id)?->status)->toBe(DvrRecordingStatus::Purged); // oldest — Purged
 });
 
 // --- Retention days ---
@@ -146,7 +146,7 @@ it('deletes completed recordings older than retention_days', function () {
 
     $this->service->runAll();
 
-    expect(DvrRecording::find($old->id))->toBeNull();
+    expect(DvrRecording::find($old->id)?->status)->toBe(DvrRecordingStatus::Purged);
     expect(Storage::disk('dvr')->exists('recordings/old.ts'))->toBeFalse();
 });
 
@@ -201,8 +201,8 @@ it('deletes oldest recordings when disk quota is exceeded', function () {
 
     $this->service->runAll();
 
-    // Total = 1.6 GB > 1 GB quota. The oldest should be evicted first and hard-deleted.
-    expect(DvrRecording::find($old->id))->toBeNull();
+    // Total = 1.6 GB > 1 GB quota. The oldest is evicted first and marked Purged.
+    expect(DvrRecording::find($old->id)?->status)->toBe(DvrRecordingStatus::Purged);
     expect(Storage::disk('dvr')->exists('recordings/old.ts'))->toBeFalse();
 });
 

@@ -304,7 +304,7 @@ class ShowMetadataService
 
         // Match each lookup to its TVMaze episode and compare airdate to cutoff
         foreach ($unique as $key => $lookup) {
-            $titleKey = md5(mb_strtolower(trim($lookup['title'])));
+            $titleKey = md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($lookup['title'])));
             $episodes = $titleEpisodes[$titleKey] ?? [];
 
             foreach ($episodes as $ep) {

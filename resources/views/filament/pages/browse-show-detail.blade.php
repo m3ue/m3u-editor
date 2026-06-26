@@ -158,7 +158,7 @@
                             );
                         }
                     }"
-                    @channel-options-loaded.window="channelOptions = $event.detail.options"
+                    @channel-options-loaded.window="if (!$event.detail.dvr_setting_id || $event.detail.dvr_setting_id == $wire.dvr_setting_id) channelOptions = $event.detail.options"
                     @click.away="open = false">
                         <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                             <span class="text-sm font-medium text-gray-950 dark:text-white">{{ __('Channel') }}</span>

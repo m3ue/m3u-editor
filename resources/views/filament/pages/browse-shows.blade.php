@@ -113,16 +113,21 @@
             <div class="flex flex-col gap-1" x-data="{
                 open: false,
                 search: '',
-                get allOptions() { return window['__channelOptions_' + $wire.dvr_setting_id] ?? {}; },
+                allOptions: window['__channelOptions_' + $wire.dvr_setting_id] ?? {},
                 get filtered() {
                     if (!this.search) return this.allOptions;
                     const q = this.search.toLowerCase();
                     return Object.fromEntries(
                         Object.entries(this.allOptions).filter(([id, label]) => label.toLowerCase().includes(q))
                     );
+                },
+                init() {
+                    this.$watch(() => this.$wire.dvr_setting_id, id => {
+                        this.allOptions = window['__channelOptions_' + id] ?? {};
+                    });
                 }
             }" x-effect="if (!$wire.channel_id) search = ''"
-            @channel-options-loaded.window="window['__channelOptions_' + $event.detail.dvr_setting_id] = $event.detail.options"
+            @channel-options-loaded.window="window['__channelOptions_' + $event.detail.dvr_setting_id] = $event.detail.options; if ($event.detail.dvr_setting_id == $wire.dvr_setting_id) allOptions = $event.detail.options"
             @click.away="open = false">
                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
                     <span

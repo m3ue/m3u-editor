@@ -223,7 +223,7 @@ class BrowseShows extends Page
 
     public function mount(): void
     {
-        $first = DvrSetting::where('user_id', Auth::id())->value('id');
+        $first = DvrSetting::where('user_id', Auth::id())->orderBy('id')->value('id');
         if ($first) {
             $this->dvr_setting_id = $first;
         }
@@ -541,11 +541,12 @@ class BrowseShows extends Page
             return;
         }
 
+        $normalizedTitle = mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title));
         $exists = DvrRecordingRule::where('user_id', Auth::id())
             ->where('dvr_setting_id', $this->dvr_setting_id)
             ->where('type', DvrRuleType::Series)
-            ->where('series_title', $title)
-            ->exists();
+            ->get(['series_title'])
+            ->contains(fn (DvrRecordingRule $r) => mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($r->series_title)) === $normalizedTitle);
 
         if ($exists) {
             Notification::make()
@@ -835,12 +836,13 @@ class BrowseShows extends Page
             );
         }
 
+        $normalizedTitle = mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title));
         $seriesRuleExists = $this->dvr_setting_id
             ? DvrRecordingRule::where('user_id', Auth::id())
                 ->where('dvr_setting_id', $this->dvr_setting_id)
                 ->where('type', DvrRuleType::Series)
-                ->where('series_title', $title)
-                ->exists()
+                ->get(['series_title'])
+                ->contains(fn (DvrRecordingRule $r) => mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($r->series_title)) === $normalizedTitle)
             : false;
 
         return [

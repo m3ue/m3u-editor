@@ -221,11 +221,14 @@ class DvrRetentionService
     }
 
     /**
-     * Delete the file on disk then hard-delete the recording row.
+     * Delete the file on disk then mark the recording row as Purged.
      *
-     * Hard-deleting instead of nulling file_path prevents ghost rows from accumulating
-     * and corrupting keep_last counts on subsequent retention runs.
-     * Uses a raw query to bypass model hooks (avoiding N+1 relation loads and rule cascades
+     * The row is kept (with status=Purged, file_path=null) as a permanent dedup sentinel
+     * so DvrRecordingRule::alreadyHaveEpisode() continues to block re-recording of the
+     * same episode after retention prunes the file. Hard-deleting the row would cause the
+     * scheduler to re-schedule the same episode on its next pass.
+     *
+     * Uses a raw query to bypass model hooks (avoids N+1 relation loads and rule cascades
      * that are inappropriate in a bulk retention context).
      */
     private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting): bool
@@ -241,7 +244,10 @@ class DvrRetentionService
                 Storage::disk($storageDisk)->delete($recording->file_path);
             }
 
-            DvrRecording::where('id', $recording->id)->delete();
+            DvrRecording::where('id', $recording->id)->update([
+                'status' => DvrRecordingStatus::Purged->value,
+                'file_path' => null,
+            ]);
 
             return true;
         } catch (\Exception $e) {

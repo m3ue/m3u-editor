@@ -438,10 +438,11 @@ class GuestBrowseShows extends Page
             return;
         }
 
+        $normalizedTitle = mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title));
         $exists = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
             ->where('type', DvrRuleType::Series)
-            ->where('series_title', $title)
-            ->exists();
+            ->get(['series_title'])
+            ->contains(fn (DvrRecordingRule $r) => mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($r->series_title)) === $normalizedTitle);
 
         if ($exists) {
             Notification::make()
@@ -721,11 +722,12 @@ class GuestBrowseShows extends Page
         }
 
         $dvrSetting = $this->getCachedDvrSetting();
+        $normalizedTitle = mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title));
         $seriesRuleExists = $dvrSetting
             ? DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
                 ->where('type', DvrRuleType::Series)
-                ->where('series_title', $title)
-                ->exists()
+                ->get(['series_title'])
+                ->contains(fn (DvrRecordingRule $r) => mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($r->series_title)) === $normalizedTitle)
             : false;
 
         return [
