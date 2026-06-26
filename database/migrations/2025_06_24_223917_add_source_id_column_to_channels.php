@@ -29,9 +29,13 @@ return new class extends Migration
         Channel::whereNotNull('url')
             ->chunkById(100, function ($channels) {
                 foreach ($channels as $channel) {
-                    $urlParts = explode('/', $channel->url);
+                    // Strip the query string first so pathinfo only sees the path segment.
+                    // Without this, URLs like ".../master.m3u8?very=long&query=string" produce
+                    // a source_id longer than varchar(255), which fails on Postgres.
+                    $urlPath = parse_url($channel->url, PHP_URL_PATH) ?? $channel->url;
+                    $urlParts = explode('/', $urlPath);
                     $streamIdWithExtension = end($urlParts);
-                    $streamId = pathinfo($streamIdWithExtension, PATHINFO_FILENAME);
+                    $streamId = substr(pathinfo($streamIdWithExtension, PATHINFO_FILENAME), 0, 255);
 
                     // Use DB::table for direct update to avoid model events and potential issues
                     DB::table('channels')

@@ -550,7 +550,7 @@ class ChannelResource extends Resource implements CopilotResource
                                 'type' => 'live',
                                 'user_id' => auth()->id(),
                                 'playlist_id' => $get('playlist'),
-                            ])->get(['name', 'id'])->pluck('name', 'id'))
+                            ])->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
                             ->searchable()
                             ->disabled(fn (Get $get) => $get('playlist') === null),
                     ])
@@ -1680,7 +1680,7 @@ class ChannelResource extends Resource implements CopilotResource
                             Select::make('group_id')
                                 ->label(__('Group'))
                                 ->hint(__('group-title'))
-                                ->options(fn (Get $get) => Group::where('playlist_id', $get('playlist_id'))->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get) => Group::where('playlist_id', $get('playlist_id'))->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
                                 ->columnSpanFull()
                                 ->placeholder(__('Select a group'))
                                 ->searchable()

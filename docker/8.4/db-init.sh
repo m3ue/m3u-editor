@@ -79,11 +79,29 @@ fi
 # we can now run any necessary application-level initialization tasks.
 # NOTE: If using an external database, we assume it is already configured correctly and ready to accept connections by the time this script runs.
 
-# Run Laravel migrations
-echo "[db-init] Running migrations..."
-/usr/bin/php /var/www/html/artisan migrate --force
+# Note: start-container already removes bootstrap/cache/*.php and runs `php artisan optimize`
+# with the correct runtime env (DB_CONNECTION, APP_KEY, etc.) before supervisord starts.
+# No cache clearing is needed here — by the time db-init runs, the caches are already correct.
+
+# Run Laravel migrations (or migrate from SQLite first if requested)
+if [ "${SQLITE_MIGRATE:-false}" = "true" ] && [ "${DB_CONNECTION:-sqlite}" = "pgsql" ]; then
+    # The migration script drops all Postgres tables, recreates them from SQLite's
+    # schema via PRAGMA (bare columns, no constraints), imports all data including
+    # the migrations table, then resets sequences. php artisan migrate then applies
+    # only the migrations that post-date the user's SQLite install.
+    echo "[db-init] SQLITE_MIGRATE=true — importing SQLite data into PostgreSQL..."
+    /bin/bash /var/www/html/docker/8.4/migrate-sqlite-to-postgres.sh
+    echo "[db-init] SQLite import complete."
+
+    echo "[db-init] Running post-import migrations..."
+    /usr/bin/php /var/www/html/artisan migrate --force
+    echo "[db-init] Post-import migrations complete."
+else
+    echo "[db-init] Running migrations..."
+    /usr/bin/php /var/www/html/artisan migrate --force
+    echo "[db-init] Migrations complete."
+fi
 /usr/bin/php /var/www/html/artisan migrate --database=jobs --force
-echo "[db-init] Migrations complete."
 
 # Reset any stale sync processes left over from a previous run
 echo "[db-init] Resetting sync process..."
@@ -99,3 +117,9 @@ echo "[db-init] Stale file cleanup complete."
 echo "[db-init] Syncing official plugins..."
 /usr/bin/php /var/www/html/artisan plugins:sync-official
 echo "[db-init] Official plugins synced."
+
+# Rebuild application caches with runtime env vars (DB_CONNECTION, APP_KEY, etc.).
+# Must run AFTER all migrations so route:cache can boot the fully-migrated app.
+echo "[db-init] Rebuilding application caches..."
+/usr/bin/php /var/www/html/artisan optimize --quiet 2>/dev/null || true
+echo "[db-init] Application caches rebuilt."
