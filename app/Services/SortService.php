@@ -147,6 +147,46 @@ class SortService
         }
     }
 
+    /**
+     * Bulk recount enabled live channel numbers across multiple groups in deterministic sort order.
+     */
+    public function bulkRecountActiveLiveGroupsByOrder(Collection $groups, int $start = 1): void
+    {
+        $currentStart = max(1, $start);
+
+        $orderedGroups = $groups
+            ->sort(function (Group $first, Group $second): int {
+                $sortOrderComparison = ((float) $first->sort_order) <=> ((float) $second->sort_order);
+
+                if ($sortOrderComparison !== 0) {
+                    return $sortOrderComparison;
+                }
+
+                $nameComparison = strcasecmp($first->name, $second->name);
+
+                if ($nameComparison !== 0) {
+                    return $nameComparison;
+                }
+
+                return $first->id <=> $second->id;
+            })
+            ->values();
+
+        foreach ($orderedGroups as $record) {
+            $channels = $record->live_channels()
+                ->where('enabled', true)
+                ->orderBy('sort')
+                ->get();
+
+            if ($channels->isEmpty()) {
+                continue;
+            }
+
+            $this->bulkRecountChannels($channels, $currentStart);
+            $currentStart += $channels->count();
+        }
+    }
+
     public function bulkRecountChannels(Collection $channels, $start = 1): void
     {
         $offset = max(0, $start - 1);

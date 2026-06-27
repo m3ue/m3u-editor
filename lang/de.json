@@ -2954,5 +2954,9 @@
     "YYYY or YYYY-MM-DD": "JJJJ oder JJJJ-MM-TT",
     "YYYY-MM-DD": "JJJJ-MM-TT",
     "Z to A or 9 to 0": "Z bis A oder 9 bis 0",
-    "—": "—"
+    "—": "—",
+    "Recount Active Channels in Selected Groups": "Recount Active Channels in Selected Groups",
+    "Active Channels Recounted": "Active Channels Recounted",
+    "The enabled live channels in the selected groups have been recounted sequentially.": "The enabled live channels in the selected groups have been recounted sequentially.",
+    "Recount only enabled live channels across the selected groups. Groups are processed by sort order, then name, then id, while enabled live channels in each group are processed by sort. Disabled channels keep their current numbers.": "Recount only enabled live channels across the selected groups. Groups are processed by sort order, then name, then id, while enabled live channels in each group are processed by sort. Disabled channels keep their current numbers."
 }

@@ -617,6 +617,33 @@ class GroupResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-hashtag')
                         ->modalDescription(__('Recount channels across the selected groups. Groups are processed by sort order, then name, then id, while channels in each group are processed by sort.')),
+                    BulkAction::make('recount_active_channels')
+                        ->label(__('Recount Active Channels in Selected Groups'))
+                        ->icon('heroicon-o-hashtag')
+                        ->form([
+                            TextInput::make('start')
+                                ->label(__('Start Number'))
+                                ->numeric()
+                                ->default(1)
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            SortFacade::bulkRecountActiveLiveGroupsByOrder(
+                                $records,
+                                (int) $data['start']
+                            );
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Active Channels Recounted'))
+                                ->body(__('The enabled live channels in the selected groups have been recounted sequentially.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-hashtag')
+                        ->modalDescription(__('Recount only enabled live channels across the selected groups. Groups are processed by sort order, then name, then id, while enabled live channels in each group are processed by sort. Disabled channels keep their current numbers.')),
                     BulkAction::make('find-replace')
                         ->label(__('Find & Replace'))
                         ->schema(fn () => FindReplaceService::getBulkActionSchema('groups'))
