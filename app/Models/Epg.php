@@ -42,6 +42,9 @@ class Epg extends Model
         'sd_metadata' => 'array',
         'sd_debug' => 'boolean',
         'is_merged' => 'boolean',
+        'auto_resync_on_failure' => 'boolean',
+        'auto_resync_retries' => 'integer',
+        'resync_attempt' => 'integer',
     ];
 
     /**

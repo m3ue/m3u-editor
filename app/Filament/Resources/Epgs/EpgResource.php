@@ -212,6 +212,7 @@ class EpgResource extends Resource implements CopilotResource
                                 'progress' => 0,
                                 'sd_progress' => 0,
                                 'cache_progress' => 0,
+                                'resync_attempt' => 0,
                             ]);
                             app('Illuminate\Contracts\Bus\Dispatcher')
                                 ->dispatch(new ProcessEpgImport($record, force: true));
@@ -280,6 +281,7 @@ class EpgResource extends Resource implements CopilotResource
                                 'cache_progress' => 0,
                                 'synced' => null,
                                 'errors' => null,
+                                'resync_attempt' => 0,
                             ]);
                         })->after(function () {
                             Notification::make()
@@ -313,6 +315,7 @@ class EpgResource extends Resource implements CopilotResource
                                     'progress' => 0,
                                     'sd_progress' => 0,
                                     'cache_progress' => 0,
+                                    'resync_attempt' => 0,
                                 ]);
                                 app('Illuminate\Contracts\Bus\Dispatcher')
                                     ->dispatch(new ProcessEpgImport($record, force: true));
@@ -763,23 +766,47 @@ class EpgResource extends Resource implements CopilotResource
                 ->description(__('Auto sync and scheduling options'))
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_sync')
-                        ->label(__('Automatically sync EPG'))
-                        ->helperText(__('When enabled, the EPG will be automatically re-synced at the specified interval.'))
-                        ->live()
-                        ->inline(false)
-                        ->default(true),
-                    TextInput::make('sync_interval')
-                        ->label(__('Sync Schedule'))
-                        ->suffix(config('app.timezone'))
-                        ->rules([new Cron])
-                        ->live()
-                        ->placeholder(__('0 */6 * * *'))
-                        ->hintAction(CronHelperAction::make(name: 'epg-sync-cron', cronField: 'sync_interval'))
-                        ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                            ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
-                            : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
-                        ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
+                    Grid::make()
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('auto_sync')
+                                ->label(__('Automatically sync EPG'))
+                                ->helperText(__('When enabled, the EPG will be automatically re-synced at the specified interval.'))
+                                ->live()
+                                ->inline(false)
+                                ->default(true),
+                            TextInput::make('sync_interval')
+                                ->label(__('Sync Schedule'))
+                                ->suffix(config('app.timezone'))
+                                ->rules([new Cron])
+                                ->live()
+                                ->placeholder(__('0 */6 * * *'))
+                                ->hintAction(CronHelperAction::make(name: 'epg-sync-cron', cronField: 'sync_interval'))
+                                ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
+                                    ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
+                                    : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
+                                ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
+                        ]),
+                    Grid::make()
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('auto_resync_on_failure')
+                                ->label(__('Auto resync on failure'))
+                                ->helperText(__('When enabled, automatically re-syncs if the EPG fails or returns 0 channels after sync.'))
+                                ->live()
+                                ->inline(false)
+                                ->default(false),
+                            TextInput::make('auto_resync_retries')
+                                ->label(__('Max retry attempts'))
+                                ->numeric()
+                                ->default(3)
+                                ->minValue(1)
+                                ->maxValue(10)
+                                ->helperText(__('Number of retry attempts before giving up. Each retry waits attempt × 60 seconds (1 min, 2 min, 3 min…).'))
+                                ->hidden(fn (Get $get): bool => ! $get('auto_resync_on_failure')),
+                        ])->hidden(fn (Get $get): bool => ! $get('auto_sync')),
                     Placeholder::make('synced')
                         ->columnSpanFull()
                         ->label(__('Last Synced'))

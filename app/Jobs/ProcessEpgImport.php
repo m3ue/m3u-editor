@@ -157,6 +157,8 @@ class ProcessEpgImport implements ShouldQueue
                     // Fire the epg synced event
                     event(new SyncCompleted($this->epg));
 
+                    static::scheduleResyncIfNeeded($this->epg);
+
                     return;
                 } else {
                     // Sync the EPG data from SchedulesDirect
@@ -280,6 +282,8 @@ class ProcessEpgImport implements ShouldQueue
 
                 // Fire the epg synced event
                 event(new SyncCompleted($this->epg));
+
+                static::scheduleResyncIfNeeded($this->epg);
 
                 return;
             }
@@ -441,6 +445,7 @@ class ProcessEpgImport implements ShouldQueue
                             'processing_phase' => null,
                         ]);
                         event(new SyncCompleted($epg));
+                        ProcessEpgImport::scheduleResyncIfNeeded($epg);
                     })->dispatch();
             } else {
                 // Log the exception
@@ -502,8 +507,40 @@ class ProcessEpgImport implements ShouldQueue
 
             // Fire the epg synced event
             event(new SyncCompleted($this->epg));
+
+            static::scheduleResyncIfNeeded($this->epg);
         }
 
+    }
+
+    /**
+     * Schedule an automatic resync with linear backoff if the EPG is configured for it.
+     * Returns true if a retry was dispatched (caller should skip further processing).
+     */
+    public static function scheduleResyncIfNeeded(Epg $epg): bool
+    {
+        $epg->refresh();
+
+        if (! $epg->auto_resync_on_failure || $epg->resync_attempt >= $epg->auto_resync_retries) {
+            return false;
+        }
+
+        $newAttempt = $epg->resync_attempt + 1;
+        $delaySeconds = $newAttempt * 60;
+
+        $epg->update(['resync_attempt' => $newAttempt]);
+
+        Log::info("ProcessEpgImport: scheduling resync attempt {$newAttempt}/{$epg->auto_resync_retries} for EPG {$epg->id} in {$delaySeconds}s");
+
+        Notification::make()
+            ->warning()
+            ->title('EPG resync queued')
+            ->body("Retry {$newAttempt} of {$epg->auto_resync_retries} scheduled for \"{$epg->name}\" (delay: {$delaySeconds}s).")
+            ->sendToDatabase($epg->user);
+
+        dispatch(new self($epg, force: true))->delay(now()->addSeconds($delaySeconds));
+
+        return true;
     }
 
     private function resolveEpgSourceFilePath(Epg $epg): ?string

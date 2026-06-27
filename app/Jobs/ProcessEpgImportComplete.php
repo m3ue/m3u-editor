@@ -11,6 +11,7 @@ use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 
 class ProcessEpgImportComplete implements ShouldQueue
 {
@@ -63,6 +64,33 @@ class ProcessEpgImportComplete implements ShouldQueue
         // Clear out the jobs
         Job::where('batch_no', $this->batchNo)->delete();
 
+        // Before marking complete, check if we need to auto-resync due to 0 channels.
+        // This must happen before mapping is triggered.
+        if ($epg->channel_count === 0 && $epg->auto_resync_on_failure && $epg->resync_attempt < $epg->auto_resync_retries) {
+            $newAttempt = $epg->resync_attempt + 1;
+            $delaySeconds = $newAttempt * 60;
+
+            Log::info("ProcessEpgImportComplete: channel count is 0, scheduling resync attempt {$newAttempt}/{$epg->auto_resync_retries} for EPG {$epg->id} in {$delaySeconds}s");
+
+            Notification::make()
+                ->warning()
+                ->title('EPG resync queued')
+                ->body("Channel count is 0. Retry {$newAttempt} of {$epg->auto_resync_retries} scheduled for \"{$epg->name}\" (delay: {$delaySeconds}s).")
+                ->sendToDatabase($epg->user);
+
+            $epg->update([
+                'status' => Status::Pending,
+                'progress' => 0,
+                'processing' => false,
+                'errors' => 'Channel count is 0 after sync, retrying...',
+                'resync_attempt' => $newAttempt,
+            ]);
+
+            dispatch(new ProcessEpgImport($epg, force: true))->delay(now()->addSeconds($delaySeconds));
+
+            return;
+        }
+
         // Update the epg
         $epg->update([
             'status' => Status::Completed,
@@ -71,6 +99,7 @@ class ProcessEpgImportComplete implements ShouldQueue
             'sync_time' => $completedIn,
             'progress' => 100,
             'processing' => false,
+            'resync_attempt' => 0,
         ]);
 
         // Check if there are any sync jobs that should be re-run
