@@ -150,7 +150,20 @@ Check sibling files, related controllers, models, or tests for established patte
 - Default to `ORDER BY id DESC` or `created_at DESC`; `mb_*` for UTF-8 safety
 - `defer()` for post-response work; `Context` for request-scoped data; `Concurrency::run()` for parallel execution
 
-### 16. Migrations → `rules/migrations.md`
+### 16. Filament-First UI → `rules/filament-first.md`
+
+- `<x-filament::badge>` not hand-rolled `<span class="rounded-full ...">` for status labels
+- `<x-filament::icon icon="heroicon-*">` not raw SVGs or `<x-heroicon-*>` in Filament views
+- `<x-filament::button>` not `<button class="inline-flex ...">` for actions
+- `<x-filament::loading-indicator class="h-5 w-5">` (always h-5 w-5) not CSS spinners
+- `<x-filament::dropdown>` not Alpine.js hand-rolled menus
+- `<x-filament::section :collapsible="true">` not hand-rolled `x-data="{ open: false }"` accordions
+- `Action::make()->slideOver()` not hand-rolled Alpine slide-overs
+- `->requiresConfirmation()` not `window.confirm()` in Alpine handlers
+- `->modalContent(fn () => view(..., $data))` — always pass data explicitly; guard with `@if` in view
+- `placeholder()` must return `view()`, not a raw HTML heredoc string
+
+### 17. Migrations → `rules/migrations.md`
 
 - Generate migrations with `php artisan make:migration`
 - `constrained()` for foreign keys
