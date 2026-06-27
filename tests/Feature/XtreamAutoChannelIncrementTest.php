@@ -3,6 +3,7 @@
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -74,4 +75,30 @@ it('Xtream API get_vod_streams uses auto channel increment before imported provi
 
     expect($streams)->toBeArray()->toHaveCount(2)
         ->and(array_column($streams, 'num'))->toBe([6000, 6001]);
+});
+
+it('Xtream API get_series uses auto channel increment from the configured channel start', function () {
+    $this->playlist->update([
+        'auto_channel_increment' => true,
+        'channel_start' => 7000,
+    ]);
+
+    Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'sort' => 1,
+        'name' => 'Series One',
+    ]);
+    Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'sort' => 2,
+        'name' => 'Series Two',
+    ]);
+
+    $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password='.urlencode($this->playlist->uuid).'&action=get_series');
+
+    $response->assertStatus(200);
+    $series = $response->json();
+
+    expect($series)->toBeArray()->toHaveCount(2)
+        ->and(array_column($series, 'num'))->toBe([7000, 7001]);
 });
