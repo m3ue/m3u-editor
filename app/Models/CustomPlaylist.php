@@ -32,6 +32,7 @@ class CustomPlaylist extends Model
         'id' => 'integer',
         'user_id' => 'integer',
         'dummy_epg' => 'boolean',
+        'dummy_epg_id_fallbacks' => 'array',
         'output_tvg_type' => 'boolean',
         'short_urls' => 'array',
         'proxy_options' => 'array',

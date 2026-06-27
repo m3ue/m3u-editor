@@ -280,6 +280,13 @@ class PlaylistAlias extends Model
         return $effectivePlaylist ? (bool) $effectivePlaylist->dummy_epg_category : false;
     }
 
+    public function getDummyEpgIdFallbacksAttribute(): array
+    {
+        $effectivePlaylist = $this->getEffectivePlaylist();
+
+        return $effectivePlaylist ? (array) ($effectivePlaylist->dummy_epg_id_fallbacks ?? []) : [];
+    }
+
     /**
      * Get groups through the effective playlist
      */

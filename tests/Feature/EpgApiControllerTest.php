@@ -2,6 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Events\EpgCreated;
+use App\Events\EpgDeleted;
+use App\Events\EpgUpdated;
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistDeleted;
+use App\Events\PlaylistUpdated;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
@@ -10,6 +16,9 @@ use App\Models\Playlist;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
+use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
 
 class EpgApiControllerTest extends TestCase
@@ -23,6 +32,19 @@ class EpgApiControllerTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        Event::fake([
+            EpgCreated::class,
+            EpgDeleted::class,
+            EpgUpdated::class,
+            PlaylistCreated::class,
+            PlaylistDeleted::class,
+            PlaylistUpdated::class,
+        ]);
+        $this->withoutMiddleware([
+            ThrottleRequests::class,
+            ThrottleRequestsWithRedis::class,
+        ]);
 
         $this->user = User::factory()->create();
         $this->playlist = Playlist::factory()->for($this->user)->create([

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\MergedPlaylist;
@@ -134,32 +135,14 @@ class EpgGenerateController extends Controller
                 $channelNo = ++$channelNumber;
             }
 
-            // Get the `tvg-id` based on the playlist setting
-            switch ($idChannelBy) {
-                case PlaylistChannelId::ChannelId:
-                    $tvgId = $channel->id;
-                    break;
-                case PlaylistChannelId::Number:
-                    $tvgId = $channelNo;
-                    break;
-                case PlaylistChannelId::Name:
-                    $tvgId = $channel->name_custom ?? $channel->name;
-                    break;
-                case PlaylistChannelId::Title:
-                    $tvgId = $channel->title_custom ?? $channel->title;
-                    break;
-                default:
-                    $tvgId = $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id;
-                    break;
-            }
+            $tvgId = $this->getChannelIdentifier($channel, $channelNo, $idChannelBy);
 
             // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
             if (empty($tvgId)) {
                 $tvgId = $channel->source_id ?? $channel->id;
             }
 
-            // Make sure TVG ID only contains characters and numbers
-            $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
+            $tvgId = $this->sanitizeChannelIdentifier($tvgId);
 
             // Output the <channel> tag
             $title = $channel->title_custom ?? $channel->title;
@@ -223,7 +206,7 @@ class EpgGenerateController extends Controller
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
                 $dummyEpgChannels[] = [
-                    'tvg_id' => $tvgId,
+                    'tvg_ids' => $this->getDummyEpgChannelIds($channel, $channelNo, $tvgId, $playlist->dummy_epg_id_fallbacks ?? []),
                     'channel_id' => $channel->id,
                     'channel_no' => $channelNo,
                     'title' => $title,
@@ -232,16 +215,17 @@ class EpgGenerateController extends Controller
                     'include_category' => $playlist->dummy_epg_category,
                 ];
 
-                // Output the <channel> tag
-                echo '  <channel id="'.$tvgId.'">'.PHP_EOL;
-                echo '    <display-name>'.$title.'</display-name>';
-                if ($channelNo !== null) {
-                    echo PHP_EOL.'    <display-name>'.$channelNo.'</display-name>';
+                foreach ($dummyEpgChannels[array_key_last($dummyEpgChannels)]['tvg_ids'] as $dummyTvgId) {
+                    echo '  <channel id="'.$dummyTvgId.'">'.PHP_EOL;
+                    echo '    <display-name>'.$title.'</display-name>';
+                    if ($channelNo !== null) {
+                        echo PHP_EOL.'    <display-name>'.$channelNo.'</display-name>';
+                    }
+                    if ($icon) {
+                        echo PHP_EOL.'    <icon src="'.$icon.'"/>';
+                    }
+                    echo PHP_EOL.'  </channel>'.PHP_EOL;
                 }
-                if ($icon) {
-                    echo PHP_EOL.'    <icon src="'.$icon.'"/>';
-                }
-                echo PHP_EOL.'  </channel>'.PHP_EOL;
             }
         }
 
@@ -412,7 +396,7 @@ class EpgGenerateController extends Controller
 
             // Generate programmes for each channel using pre-calculated time slots
             foreach ($dummyEpgChannels as $dummyEpgChannel) {
-                $tvgId = $this->escapeXml($dummyEpgChannel['tvg_id']);
+                $tvgIds = array_map(fn (string $tvgId): string => $this->escapeXml($tvgId), $dummyEpgChannel['tvg_ids']);
                 $title = $dummyEpgChannel['title'];
                 $icon = $dummyEpgChannel['icon'];
                 $group = $this->escapeXml($dummyEpgChannel['group']);
@@ -420,17 +404,19 @@ class EpgGenerateController extends Controller
 
                 // Build all programmes for this channel in one string buffer
                 $buffer = '';
-                foreach ($timeSlots as $slot) {
-                    $buffer .= '  <programme channel="'.$tvgId.'" start="'.$slot['start'].'" stop="'.$slot['end'].'">'.PHP_EOL;
-                    $buffer .= '    <title>'.$title.'</title>'.PHP_EOL;
-                    if ($icon) {
-                        $buffer .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                foreach ($tvgIds as $tvgId) {
+                    foreach ($timeSlots as $slot) {
+                        $buffer .= '  <programme channel="'.$tvgId.'" start="'.$slot['start'].'" stop="'.$slot['end'].'">'.PHP_EOL;
+                        $buffer .= '    <title>'.$title.'</title>'.PHP_EOL;
+                        if ($icon) {
+                            $buffer .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                        }
+                        $buffer .= '    <desc>'.$title.'</desc>'.PHP_EOL;
+                        if ($includeCategory) {
+                            $buffer .= '    <category lang="en">'.$group.'</category>'.PHP_EOL;
+                        }
+                        $buffer .= '  </programme>'.PHP_EOL;
                     }
-                    $buffer .= '    <desc>'.$title.'</desc>'.PHP_EOL;
-                    if ($includeCategory) {
-                        $buffer .= '    <category lang="en">'.$group.'</category>'.PHP_EOL;
-                    }
-                    $buffer .= '  </programme>'.PHP_EOL;
                 }
                 // Single echo per channel instead of 600+ echoes
                 echo $buffer;
@@ -695,6 +681,45 @@ class EpgGenerateController extends Controller
         } catch (Exception $e) {
             return null;
         }
+    }
+
+    private function getChannelIdentifier(Channel $channel, int|string|null $channelNo, PlaylistChannelId|string|null $strategy): mixed
+    {
+        $strategyValue = $strategy instanceof PlaylistChannelId ? $strategy->value : $strategy;
+
+        return match ($strategyValue) {
+            PlaylistChannelId::ChannelId->value => $channel->id,
+            PlaylistChannelId::Number->value => $channelNo,
+            PlaylistChannelId::Name->value => $channel->name_custom ?? $channel->name,
+            PlaylistChannelId::Title->value => $channel->title_custom ?? $channel->title,
+            default => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
+        };
+    }
+
+    private function sanitizeChannelIdentifier(mixed $identifier): string
+    {
+        return (string) preg_replace(config('dev.tvgid.regex'), '', (string) $identifier);
+    }
+
+    /**
+     * @param  array<int, string>  $fallbackStrategies
+     * @return array<int, string>
+     */
+    private function getDummyEpgChannelIds(Channel $channel, int|string|null $channelNo, string $primaryTvgId, array $fallbackStrategies): array
+    {
+        $channelIds = [$primaryTvgId];
+
+        foreach ($fallbackStrategies as $fallbackStrategy) {
+            $fallbackId = $this->sanitizeChannelIdentifier(
+                $this->getChannelIdentifier($channel, $channelNo, $fallbackStrategy)
+            );
+
+            if ($fallbackId !== '') {
+                $channelIds[] = $fallbackId;
+            }
+        }
+
+        return array_values(array_unique($channelIds));
     }
 
     /**

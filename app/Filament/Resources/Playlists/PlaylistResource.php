@@ -3016,6 +3016,20 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->required()
                         ->default('stream_id') // Default to stream_id
                         ->columnSpan(1),
+                    Select::make('dummy_epg_id_fallbacks')
+                        ->label(__('Additional Dummy EPG IDs'))
+                        ->helperText(__('Generate matching dummy EPG channel and programme entries for these additional IDs, so clients can fall back between channel name, title, number, channel ID, or TVG/stream ID.'))
+                        ->options([
+                            'stream_id' => 'TVG ID/Stream ID',
+                            'channel_id' => 'Channel ID',
+                            'number' => 'Channel Number',
+                            'name' => 'Channel Name',
+                            'title' => 'Channel Title',
+                        ])
+                        ->multiple()
+                        ->preload()
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
+                        ->columnSpan(1),
                     Toggle::make('dummy_epg_category')
                         ->label(__('Channel group as category'))
                         ->columnSpan(1)

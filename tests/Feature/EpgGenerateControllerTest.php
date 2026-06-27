@@ -150,3 +150,38 @@ test('epg xml generation preserves albanian characters with explicit utf8 escapi
         ini_set('default_charset', $previousCharset ?: 'UTF-8');
     }
 });
+
+test('dummy epg can generate fallback channel ids for title and stream id', function () {
+    $user = User::factory()->create();
+
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 60,
+        'id_channel_by' => 'name',
+        'dummy_epg_id_fallbacks' => ['title', 'stream_id'],
+    ]);
+
+    Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $user->id,
+        'enabled' => true,
+        'is_vod' => false,
+        'name' => 'News Name',
+        'title' => 'News Title',
+        'stream_id' => 'news-stream-id',
+        'channel' => 7,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertStatus(200);
+    $content = gzdecode($response->getContent());
+
+    expect($content)
+        ->toContain('<channel id="NewsName">')
+        ->toContain('<channel id="NewsTitle">')
+        ->toContain('<channel id="news-stream-id">')
+        ->toContain('<programme channel="NewsName"')
+        ->toContain('<programme channel="NewsTitle"')
+        ->toContain('<programme channel="news-stream-id"');
+});
