@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
+use App\Http\Controllers\BackupDownloadController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
@@ -108,6 +109,11 @@ Route::get('/logo-proxy/{encodedUrl}/{filename?}', [LogoProxyController::class, 
 Route::get('/assets/{asset}/preview', AssetPreviewController::class)
     ->middleware(['auth'])
     ->name('assets.preview');
+
+Route::get('/admin/backups/download/{disk}/{path}', BackupDownloadController::class)
+    ->middleware(['auth'])
+    ->where('path', '[A-Za-z0-9\-_]+')
+    ->name('backups.download');
 
 Route::get('/extension-plugins/{plugin}/runs/{run}/report', PluginRunReportController::class)
     ->middleware(['auth'])
