@@ -17,7 +17,6 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -126,7 +125,11 @@ class BackupDestinationListRecords extends Component implements HasActions, HasF
                     ->icon('heroicon-o-arrow-down-tray')
                     ->visible(auth()->user()->can('download-backup'))
                     ->button()->hiddenLabel()->size('sm')
-                    ->action(fn (array $record) => Storage::disk($record['disk'])->download($record['path'])),
+                    ->url(fn (array $record): string => route('backups.download', [
+                        'disk' => $record['disk'],
+                        'path' => rtrim(strtr(base64_encode($record['path']), '+/', '-_'), '='),
+                    ]))
+                    ->openUrlInNewTab(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
