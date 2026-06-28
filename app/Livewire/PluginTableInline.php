@@ -111,13 +111,17 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     {
         $tableName = $this->tableName();
 
+        if (! $tableName) {
+            return Plugin::query()->whereRaw('1 = 0');
+        }
+
         /** @var Plugin $plugin */
         $plugin = $this->record;
 
         return app(PluginUiTableRegistry::class)->applyTableScope(
             $this->newModel()->newQuery(),
             $plugin,
-            $tableName ?? '',
+            $tableName,
             $this->runId,
             $this->playlistId,
         );
