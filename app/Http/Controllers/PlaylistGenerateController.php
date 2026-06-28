@@ -13,6 +13,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\PlaylistUrlService;
 use Illuminate\Http\Request;
+use Illuminate\Support\LazyCollection;
 
 class PlaylistGenerateController extends Controller
 {
@@ -293,16 +294,15 @@ class PlaylistGenerateController extends Controller
                 // If the playlist includes series in M3U, include the series episodes
                 if ($playlist->include_series_in_m3u) {
                     // Get the seasons
-                    foreach ($playlist->series()
+                    $seriesQuery = $playlist->series()
                         ->where('series.enabled', true)
                         ->with([
                             'category',
                             'episodes' => function ($q) {
                                 $q->where('episodes.enabled', true);
                             },
-                        ])
-                        ->orderBy('sort')
-                        ->lazyById(50) as $s) {
+                        ]);
+                    foreach (self::seriesKeysetLazy($seriesQuery, 50) as $s) {
                         // Get series movie DB ID's as fallbacks for episode
                         $movieDbIds = $s->getMovieDbIds() ?? [];
                         $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
@@ -835,5 +835,29 @@ class PlaylistGenerateController extends Controller
             'Content-Disposition' => 'inline; filename="'.$playlist->name.'.m3u"',
             'Cache-Control' => 'no-cache, no-store, must-revalidate',
         ]);
+    }
+
+    /**
+     * Streams series using Laravel's cursor pagination ordered by (sort, id).
+     * cursorPaginate() builds the compound WHERE clause and handles NULL sort values automatically.
+     */
+    public static function seriesKeysetLazy($query, int $chunkSize = 500): LazyCollection
+    {
+        return LazyCollection::make(function () use ($query, $chunkSize): \Generator {
+            $cursor = null;
+
+            do {
+                $page = (clone $query)
+                    ->orderBy('series.sort', 'asc')
+                    ->orderBy('series.id', 'asc')
+                    ->cursorPaginate($chunkSize, ['*'], 'cursor', $cursor);
+
+                foreach ($page->items() as $item) {
+                    yield $item;
+                }
+
+                $cursor = $page->nextCursor();
+            } while ($cursor !== null);
+        });
     }
 }

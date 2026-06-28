@@ -834,9 +834,9 @@ class XtreamApiController extends Controller
                 }
             }
 
-            // Batch-load in groups of 500 to avoid pulling all series into memory at once.
-            // Tags and category are eager-loaded per batch so no N+1 queries occur.
-            $seriesIterable = $seriesQuery->lazyById(500);
+            // Keyset pagination: compound (sort, id) cursor avoids the O(n²) offset
+            // degradation of lazy() while still delivering correct sort order.
+            $seriesIterable = PlaylistGenerateController::seriesKeysetLazy($seriesQuery, 500);
 
             // Custom playlists need tag-based ordering — materialise to sort, then stream.
             if ($isCustomPlaylist) {
