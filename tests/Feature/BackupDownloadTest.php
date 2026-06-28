@@ -9,6 +9,7 @@ function encodedBackupPath(string $path): string
 }
 
 it('streams backup downloads through an authenticated admin route', function () {
+    config(['backup.backup.destination.disks' => ['local']]);
     Storage::fake('local');
 
     $backupPath = 'm3u-editor-backups/large-backup.zip';
@@ -42,12 +43,25 @@ it('prevents non-admin users from downloading backups', function () {
 });
 
 it('returns not found for missing backup files', function () {
+    config(['backup.backup.destination.disks' => ['local']]);
     Storage::fake('local');
 
     $this->actingAs(User::factory()->admin()->create())
         ->get(route('backups.download', [
             'disk' => 'local',
             'path' => encodedBackupPath('m3u-editor-backups/missing.zip'),
+        ]))
+        ->assertNotFound();
+});
+
+it('rejects path traversal sequences', function () {
+    config(['backup.backup.destination.disks' => ['local']]);
+    Storage::fake('local');
+
+    $this->actingAs(User::factory()->admin()->create())
+        ->get(route('backups.download', [
+            'disk' => 'local',
+            'path' => encodedBackupPath('../../etc/passwd'),
         ]))
         ->assertNotFound();
 });

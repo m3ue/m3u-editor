@@ -20,20 +20,21 @@ class BackupDownloadController extends Controller
         $stream = Storage::disk($disk)->readStream($decodedPath);
         abort_if($stream === false, 404);
 
+        $contentType = str_ends_with($decodedPath, '.tar.gz') ? 'application/gzip' : 'application/zip';
+
         $headers = [
-            'Content-Type' => 'application/zip',
+            'Content-Type' => $contentType,
+            'Content-Length' => (string) Storage::disk($disk)->size($decodedPath),
         ];
-
-        $size = Storage::disk($disk)->size($decodedPath);
-
-        if ($size !== null) {
-            $headers['Content-Length'] = (string) $size;
-        }
 
         return response()->streamDownload(function () use ($stream): void {
             try {
                 while (! feof($stream)) {
-                    echo fread($stream, 1024 * 1024);
+                    $chunk = fread($stream, 1024 * 1024);
+                    if ($chunk === false) {
+                        break;
+                    }
+                    echo $chunk;
                     flush();
                 }
             } finally {
@@ -49,7 +50,7 @@ class BackupDownloadController extends Controller
         $paddedPath = str_pad(strtr($path, '-_', '+/'), strlen($path) % 4 === 0 ? strlen($path) : strlen($path) + 4 - (strlen($path) % 4), '=', STR_PAD_RIGHT);
         $decodedPath = base64_decode($paddedPath, true);
 
-        if ($decodedPath === false || $decodedPath === '' || str_contains($decodedPath, "\0")) {
+        if ($decodedPath === false || $decodedPath === '' || str_contains($decodedPath, "\0") || str_contains($decodedPath, '..')) {
             return null;
         }
 

@@ -128,7 +128,8 @@ class BackupDestinationListRecords extends Component implements HasActions, HasF
                     ->url(fn (array $record): string => route('backups.download', [
                         'disk' => $record['disk'],
                         'path' => rtrim(strtr(base64_encode($record['path']), '+/', '-_'), '='),
-                    ])),
+                    ]))
+                    ->openUrlInNewTab(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
