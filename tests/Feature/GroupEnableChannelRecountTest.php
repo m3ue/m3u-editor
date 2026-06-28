@@ -159,7 +159,7 @@ it('starts at 1 when no other enabled channels exist in the playlist', function 
         ]);
     }
 
-    // Enable group — no other enabled channels exist
+    // Enable group. No other enabled channels exist.
     $group->channels()->update(['enabled' => true]);
 
     $maxChannel = Channel::query()
@@ -362,4 +362,145 @@ it('uses stable name and id fallback when sort_order is the same for selected gr
     expect($alphaChannels)->toBe([10]);
     expect($alphaDuplicateChannels)->toBe([11]);
     expect($zuluChannels)->toBe([12]);
+});
+
+it('recounts only active live channels across selected groups in group order', function () {
+    $groupA = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Group A',
+        'sort_order' => 1,
+        'type' => 'live',
+    ]);
+    $groupB = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Group B',
+        'sort_order' => 2,
+        'type' => 'live',
+    ]);
+
+    $groupADisabled = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $groupA->id,
+        'enabled' => false,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => 674,
+    ]);
+    foreach ([2, 3] as $sort) {
+        Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $groupA->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'sort' => $sort,
+            'channel' => 900 + $sort,
+        ]);
+    }
+
+    $groupBDisabled = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $groupB->id,
+        'enabled' => false,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => 981,
+    ]);
+    foreach ([2, 3, 4] as $sort) {
+        Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $groupB->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'sort' => $sort,
+            'channel' => 800 + $sort,
+        ]);
+    }
+
+    $groups = Group::query()
+        ->whereIn('id', [$groupB->id, $groupA->id])
+        ->get();
+
+    SortFacade::bulkRecountActiveLiveGroupsByOrder($groups, 1);
+
+    expect(Channel::query()
+        ->where('group_id', $groupA->id)
+        ->where('enabled', true)
+        ->orderBy('sort')
+        ->pluck('channel')
+        ->all())->toBe([1, 2]);
+
+    expect(Channel::query()
+        ->where('group_id', $groupB->id)
+        ->where('enabled', true)
+        ->orderBy('sort')
+        ->pluck('channel')
+        ->all())->toBe([3, 4, 5]);
+
+    expect($groupADisabled->refresh()->channel)->toBe(674);
+    expect($groupBDisabled->refresh()->channel)->toBe(981);
+});
+
+it('runs the active channels table bulk recount across selected groups by group order', function () {
+    $groupA = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Group A',
+        'sort_order' => 20,
+        'type' => 'live',
+    ]);
+    $groupB = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Group B',
+        'sort_order' => 10,
+        'type' => 'live',
+    ]);
+
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $groupA->id,
+        'enabled' => false,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => 777,
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $groupA->id,
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'channel' => 900,
+    ]);
+
+    foreach ([1, 2] as $sort) {
+        Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $groupB->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'sort' => $sort,
+            'channel' => 800 + $sort,
+        ]);
+    }
+
+    Livewire::test(ListGroups::class)
+        ->callTableBulkAction('recount_active_channels', collect([$groupA, $groupB]), [
+            'start' => 100,
+        ]);
+
+    expect(Channel::query()
+        ->where('group_id', $groupB->id)
+        ->where('enabled', true)
+        ->orderBy('sort')
+        ->pluck('channel')
+        ->all())->toBe([100, 101]);
+
+    expect(Channel::query()
+        ->where('group_id', $groupA->id)
+        ->where('enabled', true)
+        ->orderBy('sort')
+        ->pluck('channel')
+        ->all())->toBe([102]);
 });
