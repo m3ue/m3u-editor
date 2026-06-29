@@ -348,3 +348,16 @@ test('Xtream auth does not advertise dvr when playlist has disabled DVR settings
     $response->assertOk()
         ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
 });
+
+test('Xtream owner auth advertises dvr when playlist has enabled DVR settings', function () {
+    $playlist = Playlist::factory()->for($this->user)->create();
+
+    DvrSetting::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+    ]);
+
+    $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password='.$playlist->uuid);
+
+    $response->assertOk()
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress', 'dvr']);
+});

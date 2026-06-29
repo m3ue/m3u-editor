@@ -32,7 +32,6 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -2512,7 +2511,12 @@ class XtreamApiController extends Controller
 
         return PlaylistAuth::where('username', $username)
             ->where('password', $password)
+            ->where('enabled', true)
             ->where('dvr_enabled', true)
+            ->where(function ($query) {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
             ->exists();
     }
 
@@ -2523,7 +2527,9 @@ class XtreamApiController extends Controller
         }
 
         if ($playlist instanceof PlaylistAlias) {
-            return $playlist->getEffectivePlaylist();
+            $effective = $playlist->getEffectivePlaylist();
+
+            return $effective instanceof Playlist ? $effective : null;
         }
 
         return null;
