@@ -719,8 +719,7 @@ class GroupResource extends Resource implements CopilotResource
                 ->searchable()
                 ->preload()
                 ->nullable()
-                ->placeholder(__('None — use standard dummy EPG'))
-                ->columnSpanFull(),
+                ->placeholder(__('None — use standard dummy EPG')),
         ];
 
         return [
