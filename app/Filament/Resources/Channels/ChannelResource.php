@@ -17,6 +17,7 @@ use App\Jobs\ChannelFindAndReplaceReset;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\SyncPlexDvrJob;
+use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\CustomPlaylist;
@@ -158,6 +159,7 @@ class ChannelResource extends Resource implements CopilotResource
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with([
                     'epgChannel' => fn ($q) => $q->select('id', 'name', 'icon', 'icon_custom'),
+                    'aedProfile' => fn ($q) => $q->select('id', 'name'),
                     'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort', 'enable_proxy', 'user_id')
                         ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
                     'customPlaylist' => fn ($q) => $q->select('id', 'name', 'uuid', 'enable_proxy', 'user_id')
@@ -356,6 +358,16 @@ class ChannelResource extends Resource implements CopilotResource
                 })
                 ->limit(40)
                 ->sortable(),
+            TextColumn::make('aedProfile.name')
+                ->label(__('AED Profile'))
+                ->toggleable()
+                ->searchable(query: function (Builder $query, string $search): Builder {
+                    return $query->orWhereHas('aedProfile', function (Builder $query) use ($search) {
+                        $query->whereRaw('LOWER(aed_profiles.name) LIKE ?', ['%'.strtolower($search).'%']);
+                    });
+                })
+                ->limit(40)
+                ->sortable(),
             TextInputColumn::make('tvg_shift')
                 ->label(__('EPG Shift'))
                 ->rules(['numeric'])
@@ -436,6 +448,18 @@ class ChannelResource extends Resource implements CopilotResource
                 ->toggle()
                 ->query(function ($query) {
                     return $query->where('epg_channel_id', '=', null);
+                }),
+            Filter::make('aed_profile')
+                ->label(__('AED Profile applied'))
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('aed_profile_id', '!=', null);
+                }),
+            Filter::make('un_mapped')
+                ->label(__('AED Profile not applied'))
+                ->toggle()
+                ->query(function ($query) {
+                    return $query->where('aed_profile_id', '=', null);
                 }),
             Filter::make('probed')
                 ->label(__('Probed'))
@@ -804,6 +828,53 @@ class ChannelResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-calendar')
                     ->modalDescription(__('Don\\\'t map EPG to selected channels when running EPG mapping jobs.'))
                     ->modalSubmitActionLabel(__('Disable now')),
+                BulkAction::make('set-aed-profile')
+                    ->label(__('Set AED Profile'))
+                    ->schema([
+                        Select::make('aed_profile_id')
+                            ->label(__('AED Profile'))
+                            ->options(fn () => AedProfile::where('user_id', auth()->id())->orderBy('name')->pluck('name', 'id'))
+                            ->searchable()
+                            ->required()
+                            ->helperText(__('Assign an AED profile to generate smart dummy EPG from channel titles.')),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => $data['aed_profile_id']]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('AED Profile assigned'))
+                            ->body(__('The AED profile has been assigned to the selected channels.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-cpu-chip')
+                    ->modalIcon('heroicon-o-cpu-chip')
+                    ->modalDescription(__('Assign an AED profile to the selected channels for smart dummy EPG generation.'))
+                    ->modalSubmitActionLabel(__('Assign profile')),
+                BulkAction::make('remove-aed-profile')
+                    ->label(__('Remove AED Profile'))
+                    ->color('warning')
+                    ->action(function (Collection $records): void {
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => null]);
+                        }
+                    })->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('AED Profile removed'))
+                            ->body(__('The AED profile has been removed from the selected channels.'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-cpu-chip')
+                    ->modalIcon('heroicon-o-cpu-chip')
+                    ->modalDescription(__('Remove the AED profile from the selected channels. They will revert to standard dummy EPG.'))
+                    ->modalSubmitActionLabel(__('Remove profile')),
                 BulkAction::make('set-timeshift')
                     ->label(__('Set Timeshift'))
                     ->schema([
@@ -1553,7 +1624,8 @@ class ChannelResource extends Resource implements CopilotResource
         return [
             // Customizable channel fields
             Toggle::make('enabled')
-                ->default(true),
+                ->default(true)
+                ->inline(false),
             TextInput::make('sort')
                 ->label(__('Sort Order'))
                 ->numeric()
@@ -1891,6 +1963,18 @@ class ChannelResource extends Resource implements CopilotResource
                         ->type('number')
                         ->helperText(__('Indicates the shift of the program schedule, use the values -2,-1,0,1,2,.. and so on.'))
                         ->rules(['nullable', 'numeric']),
+                    Select::make('aed_profile_id')
+                        ->label(__('AED Profile (Advanced EPG Dummy)'))
+                        ->helperText(__('Override the group\'s AED profile for this channel. Only applies when no EPG channel is matched. Leave blank to inherit from group.'))
+                        ->relationship(
+                            name: 'aedProfile',
+                            titleAttribute: 'name',
+                            modifyQueryUsing: fn ($query) => $query->where('user_id', auth()->id()),
+                        )
+                        ->searchable()
+                        ->preload()
+                        ->nullable()
+                        ->placeholder(__('Inherit from group')),
                 ]),
             Fieldset::make(__('Failover Channels'))
                 ->schema([

@@ -731,7 +731,8 @@ class PlaylistGenerateController extends Controller
             // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
             ->selectRaw('channels.*')
             ->selectRaw('groups.name as group_name')
-            ->selectRaw('groups.sort_order as group_sort_order');
+            ->selectRaw('groups.sort_order as group_sort_order')
+            ->selectRaw('groups.aed_profile_id as group_aed_profile_id');
 
         // Join EPG channel data to avoid N+1 queries and select common fields
         $query->leftJoin('epg_channels', 'channels.epg_channel_id', '=', 'epg_channels.id')

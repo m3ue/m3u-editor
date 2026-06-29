@@ -330,6 +330,7 @@ return [
         'ea53a22fdb1d', // PostProcessPivot
         '11d5a0f3298d', // MergedPlaylistPivot
         'a6558982e4e4', // PlaylistAuthPivot
+        'b06385c305da', // AedProfile
 
         // Experimental branch — new models managed via Filament forms,
         // same rationale as all other models above.
