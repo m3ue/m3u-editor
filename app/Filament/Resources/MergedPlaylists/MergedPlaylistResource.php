@@ -300,7 +300,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
-                ->columns(2)
+                ->columns(3)
                 ->schema([
                     Toggle::make('dummy_epg')
                         ->label(__('Enable dummy EPG'))
@@ -330,6 +330,26 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->default(120)
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
                         ->required(),
+                    Repeater::make('dummy_epg_fallback_order')
+                        ->label(__('Dummy EPG Title Source'))
+                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order — first non-empty value wins. Leave empty to use the channel title.'))
+                        ->schema([
+                            Select::make('method')
+                                ->label(__('Field'))
+                                ->options(fn (Get $get): array => collect([
+                                    'stream_id' => __('TVG ID / Stream ID'),
+                                    'name' => __('Channel Name'),
+                                    'title' => __('Channel Title'),
+                                    'number' => __('Channel Number'),
+                                ])->all())
+                                ->required()
+                                ->columnSpanFull(),
+                        ])
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->addActionLabel(__('Add title source'))
+                        ->columnSpanFull()
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                 ]),
             Section::make(__('Streaming Output'))
                 ->description(__('Output processing options'))

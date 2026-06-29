@@ -8,6 +8,7 @@ enum DvrRecordingStatus: string
     case Recording = 'recording';
     case PostProcessing = 'post_processing';
     case Completed = 'completed';
+    case Purged = 'purged';
     case Failed = 'failed';
     case Cancelled = 'cancelled';
 
@@ -18,6 +19,7 @@ enum DvrRecordingStatus: string
             self::Recording => __('Recording'),
             self::PostProcessing => __('Post Processing'),
             self::Completed => __('Completed'),
+            self::Purged => __('Purged'),
             self::Failed => __('Failed'),
             self::Cancelled => __('Cancelled'),
         };
@@ -30,6 +32,7 @@ enum DvrRecordingStatus: string
             self::Recording => 'warning',
             self::PostProcessing => 'warning',
             self::Completed => 'success',
+            self::Purged => 'gray',
             self::Failed => 'danger',
             self::Cancelled => 'gray',
         };
@@ -42,6 +45,7 @@ enum DvrRecordingStatus: string
             self::Recording => 'heroicon-o-signal',
             self::PostProcessing => 'heroicon-o-cog-6-tooth',
             self::Completed => 'heroicon-o-check-circle',
+            self::Purged => 'heroicon-o-archive-box-x-mark',
             self::Failed => 'heroicon-o-x-circle',
             self::Cancelled => 'heroicon-o-minus-circle',
         };

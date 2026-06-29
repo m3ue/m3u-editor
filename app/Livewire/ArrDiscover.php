@@ -419,14 +419,9 @@ class ArrDiscover extends Component
         return $map;
     }
 
-    public function placeholder(): string
+    public function placeholder(): \Illuminate\Contracts\View\View
     {
-        return <<<'HTML'
-        <div class="flex items-center justify-center py-16">
-            <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
-            <span class="ml-3 text-sm text-gray-500 dark:text-gray-400">Loading discover...</span>
-        </div>
-        HTML;
+        return view('livewire.partials.arr-discover-placeholder');
     }
 
     public function render(): View

@@ -34,6 +34,7 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -458,6 +459,11 @@ class XtreamApiController extends Controller
             if ($authMethod === 'playlist_auth') {
                 $playlistAuth = PlaylistAuth::where('username', $username)
                     ->where('password', $password)
+                    ->where('enabled', true)
+                    ->where(function ($query) {
+                        $query->whereNull('expires_at')
+                            ->orWhere('expires_at', '>', now());
+                    })
                     ->first();
                 if ($playlistAuth?->max_connections) {
                     $streams = $playlistAuth->max_connections;
@@ -528,10 +534,7 @@ class XtreamApiController extends Controller
                 'process' => true, // Always true
             ];
 
-            $features = ['viewers', 'progress'];
-            if ($this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
-                $features[] = 'requests';
-            }
+            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
 
             return response()->json([
                 'user_info' => $userInfo,
@@ -842,9 +845,9 @@ class XtreamApiController extends Controller
                 }
             }
 
-            // Batch-load in groups of 500 to avoid pulling all series into memory at once.
-            // Tags and category are eager-loaded per batch so no N+1 queries occur.
-            $seriesIterable = $seriesQuery->lazyById(500);
+            // Keyset pagination: compound (sort, id) cursor avoids the O(n²) offset
+            // degradation of lazy() while still delivering correct sort order.
+            $seriesIterable = PlaylistGenerateController::seriesKeysetLazy($seriesQuery, 500);
 
             // Custom playlists need tag-based ordering — materialise to sort, then stream.
             if ($isCustomPlaylist) {
@@ -2468,6 +2471,70 @@ class XtreamApiController extends Controller
             }
 
             return $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve optional m3u-editor capabilities advertised to compatible clients.
+     *
+     * DVR is only advertised when the effective playlist has DVR enabled and,
+     * for PlaylistAuth credentials, the individual auth is allowed to use DVR.
+     * Owner/alias credentials keep access when the playlist itself has DVR enabled.
+     *
+     * @return array<int, string>
+     */
+    private function resolveM3uEditorFeatures($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): array
+    {
+        $features = ['viewers', 'progress'];
+
+        if ($this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'dvr';
+        }
+
+        if ($this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'requests';
+        }
+
+        return $features;
+    }
+
+    private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
+            return false;
+        }
+
+        $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
+        if (! $dvrPlaylist) {
+            return false;
+        }
+
+        $hasEnabledDvr = DvrSetting::where('playlist_id', $dvrPlaylist->id)
+            ->where('enabled', true)
+            ->exists();
+        if (! $hasEnabledDvr) {
+            return false;
+        }
+
+        if ($authMethod !== 'playlist_auth') {
+            return true;
+        }
+
+        return (bool) $playlistAuth?->dvr_enabled;
+    }
+
+    private function resolveDvrPlaylist($playlist): ?Playlist
+    {
+        if ($playlist instanceof Playlist) {
+            return $playlist;
+        }
+
+        if ($playlist instanceof PlaylistAlias) {
+            $effective = $playlist->getEffectivePlaylist();
+
+            return $effective instanceof Playlist ? $effective : null;
         }
 
         return null;

@@ -42,6 +42,9 @@ class Epg extends Model
         'sd_metadata' => 'array',
         'sd_debug' => 'boolean',
         'is_merged' => 'boolean',
+        'auto_resync_on_failure' => 'boolean',
+        'auto_resync_retries' => 'integer',
+        'resync_attempt' => 'integer',
     ];
 
     /**
@@ -172,12 +175,15 @@ class Epg extends Model
      */
     public function getPlaylists(): Collection
     {
-        return Playlist::select('playlists.*')
-            ->join('channels', 'channels.playlist_id', '=', 'playlists.id')
+        $ids = Playlist::join('channels', 'channels.playlist_id', '=', 'playlists.id')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('epg_channels.epg_id', $this->id)
-            ->distinct()
-            ->get();
+            ->pluck('playlists.id')
+            ->unique()
+            ->values()
+            ->all();
+
+        return $ids ? Playlist::whereIn('id', $ids)->get() : collect();
     }
 
     /**

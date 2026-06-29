@@ -345,6 +345,10 @@ class NetworkBroadcastService
             'preset' => $network->transcode_preset,
             'hwaccel' => $network->hwaccel,
             'callback_url' => $callbackUrl,
+            // Pre-compute next programme config for zero-round-trip auto-transition.
+            // The proxy will start the next programme immediately when the current
+            // FFmpeg exits with code 0, without waiting for a Laravel callback.
+            'next_stream_config' => $this->computeNextStreamConfig($network, $programme),
             // Tell the proxy exactly where to write broadcast segments.
             // Honors BROADCAST_TEMP_DIR (default /dev/shm) so ephemeral .ts files
             // are written to RAM and never touch persistent disk.
@@ -1319,5 +1323,109 @@ class NetworkBroadcastService
         Log::warning('BOOT RECOVERY: Proxy did not become ready within timeout — cleanup calls may fail');
 
         return false;
+    }
+
+    /**
+     * Compute the next programme's stream configuration for proxy auto-transition.
+     *
+     * Returns a payload array suitable for the `next_stream_config` key in the
+     * broadcast start request. The proxy uses it to immediately start the next
+     * FFmpeg process when the current one exits with code 0, eliminating the
+     * Laravel callback round-trip and reducing the inter-programme gap.
+     *
+     * Returns null when no next programme exists or its stream URL cannot be resolved.
+     */
+    protected function computeNextStreamConfig(Network $network, NetworkProgramme $currentProgramme): ?array
+    {
+        $nextProgramme = $network->getNextProgramme();
+
+        if (! $nextProgramme) {
+            return null;
+        }
+
+        $nextStreamUrl = $this->getStreamUrl($network, $nextProgramme, 0);
+
+        if (! $nextStreamUrl) {
+            Log::debug('computeNextStreamConfig: could not resolve next stream URL', [
+                'network_id' => $network->id,
+                'next_programme_id' => $nextProgramme->id,
+            ]);
+
+            return null;
+        }
+
+        $nextDuration = (int) $nextProgramme->start_time->diffInSeconds($nextProgramme->end_time);
+        $callbackUrl = $this->getProxyService()->getBroadcastCallbackUrl();
+
+        $config = [
+            'stream_url' => $nextStreamUrl,
+            'seek_seconds' => 0,
+            'duration_seconds' => $nextDuration,
+            'segment_duration' => $network->segment_duration ?? 6,
+            'hls_list_size' => $network->hls_list_size ?? 20,
+            'transcode' => ($network->transcode_mode ?? null) === TranscodeMode::Local,
+            'video_bitrate' => $network->video_bitrate ? (string) $network->video_bitrate : null,
+            'audio_bitrate' => $network->audio_bitrate ?? 192,
+            'video_resolution' => $network->video_resolution,
+            'video_codec' => $network->video_codec,
+            'audio_codec' => $network->audio_codec,
+            'preset' => $network->transcode_preset,
+            'hwaccel' => $network->hwaccel,
+            'callback_url' => $callbackUrl,
+        ];
+
+        // Attach provider-specific headers (same logic as startViaProxy).
+        try {
+            $integration = $network->mediaServerIntegration;
+
+            if ($integration && $integration->isPlex()) {
+                $parsed = parse_url($nextStreamUrl);
+                parse_str($parsed['query'] ?? '', $qs);
+                $isServerTranscode = ($network->transcode_mode ?? null) === TranscodeMode::Server;
+
+                if ($isServerTranscode) {
+                    $headers = [
+                        'X-Plex-Product' => 'Plex Web',
+                        'X-Plex-Client-Identifier' => 'm3u-proxy',
+                        'X-Plex-Platform' => 'Chrome',
+                        'X-Plex-Device' => 'OSX',
+                    ];
+
+                    if (! empty($qs['X-Plex-Token'])) {
+                        $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
+                    }
+
+                    if (! empty($qs['session'])) {
+                        $headers['X-Plex-Session-Identifier'] = $qs['session'];
+                        $headers['X-Plex-Playback-Session-Id'] = $qs['session'];
+                    }
+
+                    if (str_contains($nextStreamUrl, 'start.mpd')) {
+                        $headers['Accept'] = 'application/dash+xml';
+                    } else {
+                        $headers['Accept'] = 'application/vnd.apple.mpegurl';
+                    }
+
+                    $config['headers'] = $headers;
+                } else {
+                    $headers = [];
+
+                    if (! empty($qs['X-Plex-Token'])) {
+                        $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
+                    }
+
+                    if (! empty($headers)) {
+                        $config['headers'] = $headers;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('computeNextStreamConfig: failed to attach provider headers', [
+                'network_id' => $network->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
+        return $config;
     }
 }

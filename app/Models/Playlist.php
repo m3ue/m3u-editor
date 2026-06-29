@@ -38,6 +38,7 @@ class Playlist extends Model
         'sync_time' => 'float',
         'processing' => 'array',
         'dummy_epg' => 'boolean',
+        'dummy_epg_fallback_order' => 'array',
         'output_tvg_type' => 'boolean',
         'import_prefs' => 'array',
         'groups' => 'array',
@@ -437,6 +438,18 @@ class Playlist extends Model
 
         $config = $this->xtream_config;
         $config['url'] = $normalizedWorking;
+
+        // Update the associated EPG URL if one exists for this playlist's Xtream endpoint
+        $oldBaseUrl = str($this->xtream_config['url'] ?? '')->replace(' ', '%20')->toString();
+        $username = urlencode($this->xtream_config['username'] ?? '');
+        $password = urlencode($this->xtream_config['password'] ?? '');
+        $oldEpgUrl = "{$oldBaseUrl}/xmltv.php?username={$username}&password={$password}";
+        $newEpgUrl = "{$normalizedWorking}/xmltv.php?username={$username}&password={$password}";
+
+        Epg::where('user_id', $this->user_id)
+            ->where('url', $oldEpgUrl)
+            ->first()
+            ?->update(['url' => $newEpgUrl]);
         $this->update([
             'xtream_config' => $config,
             'xtream_fallback_urls' => $newFallbacks,

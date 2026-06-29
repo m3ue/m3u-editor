@@ -1,0 +1,659 @@
+<?php
+
+namespace App\Filament\Resources\AedProfiles;
+
+use App\Filament\Actions\AssetPickerAction;
+use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
+use App\Filament\Resources\AedProfiles\Pages\EditAedProfile;
+use App\Filament\Resources\AedProfiles\Pages\ListAedProfiles;
+use App\Models\AedProfile;
+use App\Models\Channel;
+use App\Models\Group;
+use App\Services\AedExtractorService;
+use App\Services\DateFormatService;
+use App\Settings\GeneralSettings;
+use App\Traits\HasUserFiltering;
+use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
+use Filament\Actions\Action;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Repeater\TableColumn;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
+use Filament\Resources\Resource;
+use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Table;
+
+use function Laravel\Ai\agent;
+
+class AedProfileResource extends Resource implements CopilotResource
+{
+    use HasCopilotSupport;
+    use HasUserFiltering;
+
+    protected static ?string $model = AedProfile::class;
+
+    protected static ?string $recordTitleAttribute = 'name';
+
+    protected static ?string $label = 'AED Profile';
+
+    protected static ?string $pluralLabel = 'AED Profiles';
+
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['name'];
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('EPG');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('AED Profile');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('AED Profiles');
+    }
+
+    public static function getNavigationSort(): ?int
+    {
+        return 10;
+    }
+
+    public static function form(Schema $schema): Schema
+    {
+        return $schema->components(self::getForm());
+    }
+
+    public static function getForm(): array
+    {
+        return [
+            TextInput::make('name')
+                ->label(__('Profile Name'))
+                ->required()
+                ->maxLength(255)
+                ->placeholder(__('e.g. DAZN PPV')),
+            Toggle::make('override')
+                ->label(__('Override'))
+                ->live()
+                ->helperText(fn (Get $get): string => $get('override')
+                    ? __('Always use this profile, even if an EPG channel is assigned.')
+                    : __('Only use this profile if no EPG channel is assigned.'))
+                ->default(true)
+                ->inline(false),
+
+            Section::make(__('Source Extraction'))
+                ->compact()
+                ->afterHeader(
+                    Action::make('ai_regex')
+                        ->label(__('AI Regex'))
+                        ->icon('heroicon-o-sparkles')
+                        ->visible(fn () => (bool) app(GeneralSettings::class)->copilot_enabled)
+                        ->slideOver()
+                        ->modalWidth('2xl')
+                        ->modalHeading(__('AI Regex Builder'))
+                        ->modalDescription(__('Load sample titles from your channels and let AI suggest regex patterns. Review and edit the suggestions before applying.'))
+                        ->modalSubmitActionLabel(__('Apply Suggestions'))
+                        ->schema(function (): array {
+                            return [
+                                Hidden::make('_ai_generated')->default(false),
+                                Hidden::make('_ai_raw')->default(''),
+
+                                self::channelSelectorGrid(['_ai_generated' => false, '_ai_raw' => '']),
+
+                                Textarea::make('samples')
+                                    ->label(__('Sample Titles'))
+                                    ->placeholder(__('Select a group or channel above, or paste titles here — one per line'))
+                                    ->rows(5)
+                                    ->columnSpanFull(),
+
+                                Actions::make([
+                                    Action::make('generate_regex')
+                                        ->label(__('Generate Regex'))
+                                        ->icon('heroicon-o-sparkles')
+                                        ->color('primary')
+                                        ->action(function (Get $get, Set $set): void {
+                                            $raw = (string) ($get('samples') ?? '');
+                                            $titles = array_values(array_filter(array_map('trim', explode("\n", $raw))));
+
+                                            if (empty($titles)) {
+                                                Notification::make()
+                                                    ->title(__('No titles to analyse'))
+                                                    ->body(__('Select a group or channel, or paste titles into the box above.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $settings = app(GeneralSettings::class);
+
+                                            // Prefer titles that contain structured content (colon + non-empty text after it)
+                                            // so the AI doesn't get confused by placeholder-only entries like "EVENT 22"
+                                            $structured = array_values(array_filter($titles, fn ($t) => (bool) preg_match('/:\s*\S/', $t)));
+                                            $sampleList = implode("\n", array_slice($structured ?: $titles, 0, 20));
+
+                                            $systemPrompt = <<<'SYS'
+You are an expert PHP regex engineer. Your task is to analyse IPTV channel titles and write PHP regex patterns that extract event information from them.
+
+The titles may contain a mix of simple entries (e.g. "EVENT 22") and structured entries (e.g. "EVENT 01: WWE Monday Night Raw (6.29 6:00 PM ET)"). Always write patterns that target the STRUCTURED entries.
+
+Your response must be a single JSON object with exactly these 6 keys. Never return empty strings — always write the best possible pattern based on the samples provided:
+
+1. title_regex — extracts the meaningful event name (NOT the numeric prefix). Must use capture group 1. Example: if titles look like "PREFIX 01: The Event Name (details)", use a pattern like `^PREFIX \d+:\s*(.+?)\s*\(` to capture "The Event Name".
+2. time_regex — extracts the time string using capture group 1. Example: `(\d{1,2}:\d{2}\s*[AP]M)\s+ET` for "6:00 PM ET".
+3. time_format — PHP date format to parse the extracted time. Example: `g:i A` for "6:00 PM".
+4. date_regex — extracts the date string using capture group 1. Example: `\((\d{1,2}\.\d{2})` for "(6.29".
+5. date_format — PHP date format for the extracted date. Example: `n.d` for "6.29".
+6. source_timezone — PHP timezone. Infer from abbreviations: ET/EST/EDT → America/New_York, CT/CST/CDT → America/Chicago, MT/MST/MDT → America/Denver, PT/PST/PDT → America/Los_Angeles, GMT/UTC → UTC, BST → Europe/London, CET → Europe/Paris.
+
+Return ONLY the JSON object. No markdown. No explanation. No code fences.
+
+Example output for "EVENT 01: WWE Monday Night Raw (6.29 6:00 PM ET)":
+{"title_regex":"^EVENT \\d+:\\s*(.+?)\\s*\\(","time_regex":"(\\d{1,2}:\\d{2}\\s*[AP]M)\\s+ET","time_format":"g:i A","date_regex":"\\((\\d{1,2}\\.\\d{2})","date_format":"n.d","source_timezone":"America/New_York"}
+SYS;
+
+                                            try {
+                                                $response = agent($systemPrompt)->prompt(
+                                                    "Analyse these channel titles:\n\n{$sampleList}",
+                                                    provider: $settings->copilot_provider,
+                                                    model: $settings->copilot_model ?: null,
+                                                );
+
+                                                $text = $response->text;
+                                                $set('_ai_raw', $text);
+
+                                                // Strip markdown code fences if the model wrapped the JSON
+                                                $clean = preg_replace('/^```(?:json)?\s*/m', '', trim($text));
+                                                $clean = preg_replace('/```\s*$/m', '', $clean);
+
+                                                // Extract the first JSON object if extra prose was included
+                                                if (preg_match('/\{.*\}/s', $clean, $jsonMatch)) {
+                                                    $clean = $jsonMatch[0];
+                                                }
+
+                                                $suggestions = json_decode(trim($clean), true);
+
+                                                if (! is_array($suggestions)) {
+                                                    throw new \RuntimeException('AI returned invalid JSON: '.substr($text, 0, 300));
+                                                }
+
+                                                $set('ai_title_regex', $suggestions['title_regex'] ?? '');
+                                                $set('ai_time_regex', $suggestions['time_regex'] ?? '');
+                                                $set('ai_time_format', $suggestions['time_format'] ?? '');
+                                                $set('ai_date_regex', $suggestions['date_regex'] ?? '');
+                                                $set('ai_date_format', $suggestions['date_format'] ?? '');
+                                                $set('ai_source_timezone', $suggestions['source_timezone'] ?? 'UTC');
+                                                $set('_ai_generated', true);
+                                            } catch (\Throwable $e) {
+                                                Notification::make()
+                                                    ->title(__('AI generation failed'))
+                                                    ->body($e->getMessage())
+                                                    ->danger()
+                                                    ->send();
+                                            }
+                                        }),
+                                ]),
+
+                                Section::make(__('Suggested Patterns'))
+                                    ->compact()
+                                    ->description(__('Review and edit the AI suggestions before applying them to the form.'))
+                                    ->schema([
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_title_regex')->label(__('Title Regex')),
+                                            TextInput::make('ai_time_regex')->label(__('Time Regex')),
+                                        ]),
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_time_format')->label(__('Time Format')),
+                                            TextInput::make('ai_date_regex')->label(__('Date Regex')),
+                                        ]),
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_date_format')->label(__('Date Format')),
+                                            TextInput::make('ai_source_timezone')->label(__('Source Timezone')),
+                                        ]),
+                                        Textarea::make('_ai_raw')
+                                            ->label(__('Raw AI Response (debug)'))
+                                            ->rows(4)
+                                            ->disabled()
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => filled($get('_ai_raw'))),
+                                    ])
+                                    ->visible(fn (Get $get): bool => (bool) $get('_ai_generated')),
+                            ];
+                        })
+                        ->action(function (array $data, Set $set): void {
+                            $set('title_regex', $data['ai_title_regex'] ?? '');
+                            $set('time_regex', $data['ai_time_regex'] ?? '');
+                            $set('time_format', $data['ai_time_format'] ?? '');
+                            $set('date_regex', $data['ai_date_regex'] ?? '');
+                            $set('date_format', $data['ai_date_format'] ?? '');
+                            $set('source_timezone', $data['ai_source_timezone'] ?? 'UTC');
+                        })
+                )
+                ->description(__('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
+                ->schema([
+                    Grid::make(2)->schema([
+                        TextInput::make('title_regex')
+                            ->label(__('Title Regex'))
+                            ->placeholder(__('^(.*?)\\\\s*\\\\[DAZN\\\\]'))
+                            ->helperText(__('Extracts the event title. Leave blank to use the full channel title.'))
+                            ->maxLength(500),
+
+                        TextInput::make('team_delimiter')
+                            ->label(__('Team Delimiter (Optional)'))
+                            ->placeholder(__('vs.'))
+                            ->helperText(__('Split the extracted title into {team1} / {team2} using this delimiter.'))
+                            ->maxLength(20),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('time_regex')
+                            ->label(__('Time Regex'))
+                            ->placeholder('\((\d{1,2}:\d{2}\s*[AP]M)\s+ET\)')
+                            ->helperText(__('Extracts the start time string. Capture group 1 recommended.'))
+                            ->maxLength(500),
+
+                        TextInput::make('time_format')
+                            ->label(__('Time Format'))
+                            ->placeholder(__('g:i A|H:i'))
+                            ->helperText(__('PHP date format(s) to parse the extracted time. Separate multiple with |'))
+                            ->maxLength(100),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('date_regex')
+                            ->label(__('Date Regex (Leave Blank if Entry Contains no Date)'))
+                            ->placeholder('\((\d{2}\.\d{2})\s')
+                            ->helperText(__('Extracts the start date. Leave blank if the title contains no date.'))
+                            ->maxLength(500),
+
+                        TextInput::make('date_format')
+                            ->label(__('Date Format (Leave Blank if Entry Contains no Date)'))
+                            ->placeholder(__('m.d'))
+                            ->helperText(__('PHP date format(s) to parse the extracted date. Separate multiple with |'))
+                            ->maxLength(100),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        Select::make('source_timezone')
+                            ->label(__('Timezone of Source'))
+                            ->options(fn () => collect(timezone_identifiers_list())->mapWithKeys(fn ($tz) => [$tz => $tz]))
+                            ->searchable()
+                            ->default('UTC'),
+
+                        TextInput::make('logo_url')
+                            ->label(__('Logo URL (Optional)'))
+                            ->url()
+                            ->maxLength(500)
+                            ->placeholder(__('https://example.com/logo.png'))
+                            ->suffixActions([
+                                AssetPickerAction::upload('logo_url'),
+                                AssetPickerAction::browse('logo_url'),
+                            ]),
+                    ]),
+                ]),
+
+            Section::make(__('Output Format'))
+                ->compact()
+                ->description(__('Define how the extracted data is formatted in the generated EPG programme.'))
+                ->schema([
+                    Grid::make(2)->schema([
+                        Select::make('output_timezone')
+                            ->label(__('Output Timezone'))
+                            ->options(fn () => collect(timezone_identifiers_list())->mapWithKeys(fn ($tz) => [$tz => $tz]))
+                            ->searchable()
+                            ->default(fn () => config('dev.timezone') ?: 'UTC'),
+
+                        TextInput::make('event_duration_minutes')
+                            ->label(__('Event Duration (minutes)'))
+                            ->numeric()
+                            ->default(180)
+                            ->minValue(1)
+                            ->maxValue(1440)
+                            ->helperText(__('How long the generated EPG event lasts (default: 180 = 3 hours).')),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('title_format')
+                            ->label(__('Title Output Format'))
+                            ->default('{title}')
+                            ->maxLength(500)
+                            ->helperText(__('Available: {title}, {team1}, {team2}, {channel}, {date}, {time}')),
+
+                        TextInput::make('description_format')
+                            ->label(__('Description Output Format'))
+                            ->placeholder('{title} — {date} at {time}')
+                            ->maxLength(500)
+                            ->helperText(__('Leave blank to use the title. Same variables as title format.')),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('pre_event_format')
+                            ->label(__('Pre-Event Format'))
+                            ->default('Live in {time_until}: {title}')
+                            ->maxLength(500)
+                            ->helperText(__('Padding slots before the event. Available: {time_until}, {title}, {channel}, {date}, {time}')),
+
+                        TextInput::make('post_event_format')
+                            ->label(__('Post-Event Format'))
+                            ->default('Signing Off')
+                            ->maxLength(500)
+                            ->helperText(__('Padding slots after the event ends. Available: {title}, {channel}, {date}, {time}')),
+                    ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('no_event_format')
+                            ->label(__('No Event Format (Optional)'))
+                            ->default('{channel}')
+                            ->maxLength(500)
+                            ->helperText(__('Used when regex extraction fails entirely. {channel} = original channel title.')),
+
+                        TextInput::make('category')
+                            ->label(__('EPG Category (Optional)'))
+                            ->placeholder(__('Sports'))
+                            ->maxLength(100),
+                    ]),
+                ]),
+
+            Actions::make([
+                Action::make('test_extraction')
+                    ->label(__('Test Extraction'))
+                    ->icon('heroicon-o-beaker')
+                    ->color('gray')
+                    ->slideOver()
+                    ->modalWidth('2xl')
+                    ->modalHeading(__('Test Extraction'))
+                    ->modalDescription(__('Select a group or channel to load sample titles, then run the test to see extraction results inline.'))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel(__('Close'))
+                    ->schema(function (Get $get): array {
+                        return [
+                            // Seed hidden fields from the parent form so the inner Run Test action can read them
+                            Hidden::make('_title_regex')->default($get('title_regex')),
+                            Hidden::make('_time_regex')->default($get('time_regex')),
+                            Hidden::make('_time_format')->default($get('time_format')),
+                            Hidden::make('_source_timezone')->default($get('source_timezone') ?? 'UTC'),
+                            Hidden::make('_date_regex')->default($get('date_regex')),
+                            Hidden::make('_date_format')->default($get('date_format')),
+                            Hidden::make('_team_delimiter')->default($get('team_delimiter')),
+                            Hidden::make('_output_timezone')->default($get('output_timezone') ?? 'UTC'),
+                            Hidden::make('_event_duration_minutes')->default($get('event_duration_minutes') ?? 180),
+                            Hidden::make('_title_format')->default($get('title_format') ?? '{title}'),
+                            Hidden::make('_description_format')->default($get('description_format')),
+                            Hidden::make('_no_event_format')->default($get('no_event_format') ?? '{channel}'),
+                            Hidden::make('_pre_event_format')->default($get('pre_event_format') ?? 'Live in {time_until}: {title}'),
+                            Hidden::make('_post_event_format')->default($get('post_event_format') ?? 'Signing Off'),
+                            Hidden::make('tested')->default(false),
+                            Hidden::make('match_count')->default(''),
+
+                            self::channelSelectorGrid(['results' => [], 'tested' => false, 'match_count' => '']),
+
+                            Textarea::make('samples')
+                                ->label(__('Sample Titles'))
+                                ->placeholder(__('Select a group or channel above, or paste titles here — one per line'))
+                                ->rows(6)
+                                ->columnSpanFull(),
+
+                            Actions::make([
+                                Action::make('run_test')
+                                    ->label(__('Run Test'))
+                                    ->icon('heroicon-o-play')
+                                    ->color('primary')
+                                    ->action(function (Get $get, Set $set): void {
+                                        $titles = array_values(array_filter(array_map('trim', explode("\n", (string) ($get('samples') ?? '')))));
+
+                                        if (empty($titles)) {
+                                            Notification::make()
+                                                ->title(__('No titles to test'))
+                                                ->body(__('Select a group or channel, or paste titles into the box above.'))
+                                                ->warning()
+                                                ->send();
+
+                                            return;
+                                        }
+
+                                        $profile = new AedProfile;
+                                        $profile->title_regex = $get('_title_regex');
+                                        $profile->time_regex = $get('_time_regex');
+                                        $profile->time_format = $get('_time_format');
+                                        $profile->source_timezone = $get('_source_timezone') ?? 'UTC';
+                                        $profile->date_regex = $get('_date_regex');
+                                        $profile->date_format = $get('_date_format');
+                                        $profile->team_delimiter = $get('_team_delimiter');
+                                        $profile->output_timezone = $get('_output_timezone') ?? 'UTC';
+                                        $profile->event_duration_minutes = (int) ($get('_event_duration_minutes') ?? 180);
+                                        $profile->title_format = $get('_title_format') ?? '{title}';
+                                        $profile->description_format = $get('_description_format');
+                                        $profile->no_event_format = $get('_no_event_format') ?? '{channel}';
+                                        $profile->pre_event_format = $get('_pre_event_format') ?? 'Live in {time_until}: {title}';
+                                        $profile->post_event_format = $get('_post_event_format') ?? 'Signing Off';
+
+                                        $service = app(AedExtractorService::class);
+                                        $rows = [];
+                                        foreach ($titles as $title) {
+                                            $result = $service->extract($profile, $title);
+                                            $rows[] = [
+                                                'input' => $title,
+                                                'status' => $result ? __('Match') : __('No match'),
+                                                'extracted_title' => $result?->title ?? '',
+                                                'time' => $result?->hasTime()
+                                                    ? $result->start->format('M j g:i A T').' – '.$result->end->format('g:i A')
+                                                    : '',
+                                            ];
+                                        }
+
+                                        $matched = count(array_filter($rows, fn ($r) => $r['status'] === __('Match')));
+                                        $total = count($rows);
+                                        $set('match_count', __("{$matched} of {$total} titles matched"));
+                                        $set('results', $rows);
+                                        $set('tested', true);
+                                    }),
+                            ]),
+
+                            TextEntry::make('match_count_display')
+                                ->label('')
+                                ->state(fn (Get $get): string => (string) ($get('match_count') ?? ''))
+                                ->visible(fn (Get $get): bool => filled($get('match_count')))
+                                ->columnSpanFull(),
+
+                            Repeater::make('results')
+                                ->label('')
+                                ->table([
+                                    TableColumn::make(__('Input'))->width('35%'),
+                                    TableColumn::make(__('Status'))->width('15%'),
+                                    TableColumn::make(__('Extracted Title'))->width('25%'),
+                                    TableColumn::make(__('Time'))->width('25%'),
+                                ])
+                                ->schema([
+                                    TextInput::make('input')->hiddenLabel()->disabled(),
+                                    TextEntry::make('status')
+                                        ->hiddenLabel()
+                                        ->badge()
+                                        ->color(fn (string $state): string => $state === __('Match') ? 'success' : 'gray'),
+                                    TextInput::make('extracted_title')->hiddenLabel()->disabled(),
+                                    TextInput::make('time')->hiddenLabel()->disabled(),
+                                ])
+                                ->default([])
+                                ->addable(false)
+                                ->deletable(false)
+                                ->reorderable(false)
+                                ->visible(fn (Get $get): bool => (bool) $get('tested') && filled($get('match_count')))
+                                ->columnSpanFull(),
+                        ];
+                    }),
+            ]),
+        ];
+    }
+
+    public static function table(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('name')
+                    ->label(__('Name'))
+                    ->searchable()
+                    ->sortable(),
+
+                TextColumn::make('channels_count')
+                    ->label(__('Channels'))
+                    ->counts('channels')
+                    ->sortable()
+                    ->toggleable(),
+
+                TextColumn::make('groups_count')
+                    ->label(__('Groups'))
+                    ->counts('groups')
+                    ->sortable()
+                    ->toggleable(),
+
+                TextColumn::make('event_duration_minutes')
+                    ->label(__('Duration (min)'))
+                    ->sortable()
+                    ->toggleable(),
+
+                TextColumn::make('output_timezone')
+                    ->label(__('Output TZ'))
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('created_at')
+                    ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+            ])
+            ->recordActions([
+                DeleteAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
+                EditAction::make()
+                    ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+            ], position: RecordActionsPosition::BeforeCells)
+            ->toolbarActions([
+                BulkActionGroup::make([
+                    DeleteBulkAction::make(),
+                ]),
+            ]);
+    }
+
+    public static function getPages(): array
+    {
+        return [
+            'index' => ListAedProfiles::route('/'),
+            // 'create' => CreateAedProfile::route('/create'),
+            // 'edit' => EditAedProfile::route('/{record}/edit'),
+        ];
+    }
+
+    /**
+     * Shared group + channel picker grid used by both the AI Regex and Test Extraction slide-overs.
+     * Selecting a group bulk-loads that group's channel titles into the `samples` textarea.
+     * Selecting a specific channel loads just that channel's title.
+     *
+     * @param  array<string, mixed>  $extraReset  Additional field => value pairs to reset on selection change.
+     */
+    protected static function channelSelectorGrid(array $extraReset = []): Grid
+    {
+        return Grid::make(2)->schema([
+            Select::make('group_id')
+                ->label(__('Filter by Group'))
+                ->placeholder(__('All groups'))
+                ->options(fn () => Group::where([
+                    'type' => 'live',
+                    'user_id' => auth()->id(),
+                ])->get(['name', 'id'])->pluck('name', 'id'))
+                ->searchable()
+                ->live()
+                ->afterStateUpdated(function (Set $set, ?int $state) use ($extraReset): void {
+                    $set('channel_id', null);
+                    foreach ($extraReset as $field => $value) {
+                        $set($field, $value);
+                    }
+                    if ($state) {
+                        $titles = auth()->user()->channels()
+                            ->withoutEagerLoads()
+                            ->where('group_id', $state)
+                            ->limit(100)
+                            ->pluck('title')
+                            ->filter()
+                            ->unique()
+                            ->values();
+                        $set('samples', $titles->implode("\n"));
+                    }
+                }),
+
+            Select::make('channel_id')
+                ->label(__('Specific Channel'))
+                ->placeholder(__('Search channels...'))
+                ->searchable()
+                ->live()
+                ->getOptionLabelUsing(function (?int $state): ?string {
+                    if (! $state) {
+                        return null;
+                    }
+                    $channel = Channel::find($state);
+                    if (! $channel) {
+                        return null;
+                    }
+                    $displayTitle = $channel->title_custom ?: $channel->title;
+                    $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+
+                    return "{$displayTitle} [{$playlistName}]";
+                })
+                ->getSearchResultsUsing(function (string $search, Get $get) {
+                    $searchLower = strtolower($search);
+                    $channels = auth()->user()->channels()
+                        ->withoutEagerLoads()
+                        ->with('playlist')
+                        ->when($get('group_id'), fn ($q, $gid) => $q->where('group_id', $gid))
+                        ->where(function ($query) use ($searchLower): void {
+                            $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
+                        })
+                        ->limit(50)
+                        ->get();
+
+                    $options = [];
+                    foreach ($channels as $channel) {
+                        $displayTitle = $channel->title_custom ?: $channel->title;
+                        $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                        $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                    }
+
+                    return $options;
+                })
+                ->afterStateUpdated(function (Set $set, ?int $state) use ($extraReset): void {
+                    foreach ($extraReset as $field => $value) {
+                        $set($field, $value);
+                    }
+                    if ($state) {
+                        $channel = Channel::find($state);
+                        $set('samples', $channel?->title ?? $channel?->name ?? '');
+                    }
+                }),
+        ]);
+    }
+}

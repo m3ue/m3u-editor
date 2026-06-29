@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
+use App\Models\AedProfile;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Services\AedExtractorService;
 use App\Services\EpgCacheService;
 use App\Services\NetworkEpgService;
 use Carbon\Carbon;
@@ -104,11 +106,24 @@ class EpgGenerateController extends Controller
         $dummyEpgChannels = [];
         $channels = PlaylistGenerateController::getChannelQuery($playlist);
 
+        // Pre-load AED profile IDs that have override=true for this playlist's owner
+        // so we can short-circuit EPG matching for channels with those profiles assigned
+        $overrideAedProfileIds = AedProfile::where('override', true)
+            ->where('user_id', $playlist->user_id)
+            ->pluck('id')
+            ->flip()
+            ->all();
+
         // Get playlist settings
         $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
         $idChannelBy = $playlist->id_channel_by;
         $dummyEpgEnabled = $playlist->dummy_epg;
         $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120); // Default to 120 minutes if not set
+        $dummyEpgFallbackOrder = collect($playlist->dummy_epg_fallback_order ?? [])
+            ->pluck('method')
+            ->filter()
+            ->values()
+            ->all();
         $proxyEnabled = $playlist->enable_proxy;
         $logoProxyEnabled = $playlist->enable_logo_proxy;
 
@@ -153,7 +168,7 @@ class EpgGenerateController extends Controller
                     break;
             }
 
-            // If no TVG ID still, fallback to the channel source ID or internal ID as a last resort
+            // Ultimate last resort
             if (empty($tvgId)) {
                 $tvgId = $channel->source_id ?? $channel->id;
             }
@@ -168,8 +183,12 @@ class EpgGenerateController extends Controller
             // Get the EPG channel data
             $epgData = $channel->epgChannel ?? null;
 
+            // Resolve effective AED profile and check for override flag
+            $aedProfileId = $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null;
+            $hasAedOverride = $aedProfileId && isset($overrideAedProfileIds[$aedProfileId]);
+
             // Output the <channel> tag
-            if ($epgData) {
+            if ($epgData && ! $hasAedOverride) {
                 // Keep track of which EPGs have which channels mapped
                 // Need this to output the <programme> tags later
                 if (! array_key_exists($epgData->epg_id, $epgChannels)) {
@@ -220,21 +239,42 @@ class EpgGenerateController extends Controller
                 }
                 $icon = $this->escapeXml($icon);
 
+                // Resolve dummy EPG display title using the configured fallback order.
+                // Each method is tried in order; the first non-empty value wins.
+                // When no order is configured, fall back to title_custom ?? title.
+                $dummyTitle = null;
+                foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
+                    $dummyTitle = match ($fallbackMethod) {
+                        'title' => $channel->title_custom ?? $channel->title,
+                        'name' => $channel->name_custom ?? $channel->name,
+                        'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
+                        'number' => $channelNo ? (string) $channelNo : '',
+                        default => null,
+                    };
+                    if (! empty($dummyTitle)) {
+                        break;
+                    }
+                }
+                $dummyTitle ??= $channel->title_custom ?? $channel->title;
+                $dummyTitleEscaped = $this->escapeXml($dummyTitle);
+
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
                 $dummyEpgChannels[] = [
                     'tvg_id' => $tvgId,
                     'channel_id' => $channel->id,
                     'channel_no' => $channelNo,
-                    'title' => $title,
+                    'title' => $dummyTitleEscaped,
+                    'raw_title' => $channel->title_custom ?? $channel->title,
                     'icon' => $icon,
                     'group' => $channel->group ?? $channel->group_internal,
                     'include_category' => $playlist->dummy_epg_category,
+                    'aed_profile_id' => $aedProfileId,
                 ];
 
                 // Output the <channel> tag
                 echo '  <channel id="'.$tvgId.'">'.PHP_EOL;
-                echo '    <display-name>'.$title.'</display-name>';
+                echo '    <display-name>'.$dummyTitleEscaped.'</display-name>';
                 if ($channelNo !== null) {
                     echo PHP_EOL.'    <display-name>'.$channelNo.'</display-name>';
                 }
@@ -397,7 +437,7 @@ class EpgGenerateController extends Controller
 
         // If dummy EPG channels, generate dummy programmes
         if (count($dummyEpgChannels) > 0) {
-            // Pre-calculate all time slots once (major optimization)
+            // Pre-calculate standard repeating time slots once (used for non-AED channels)
             $timeSlots = [];
             $startTime = Carbon::now()->startOf('day')->subMinutes($dummyEpgLength);
             $iterations = (int) ((5 * 24 * 60) / $dummyEpgLength);
@@ -410,6 +450,15 @@ class EpgGenerateController extends Controller
                 ];
             }
 
+            // Bulk-load all AED profiles referenced by any dummy channel (avoids N+1)
+            $aedProfileIds = array_filter(array_unique(
+                array_column($dummyEpgChannels, 'aed_profile_id')
+            ));
+            $aedProfiles = count($aedProfileIds)
+                ? AedProfile::whereIn('id', $aedProfileIds)->get()->keyBy('id')
+                : collect();
+            $aedExtractor = count($aedProfileIds) ? app(AedExtractorService::class) : null;
+
             // Generate programmes for each channel using pre-calculated time slots
             foreach ($dummyEpgChannels as $dummyEpgChannel) {
                 $tvgId = $this->escapeXml($dummyEpgChannel['tvg_id']);
@@ -417,22 +466,130 @@ class EpgGenerateController extends Controller
                 $icon = $dummyEpgChannel['icon'];
                 $group = $this->escapeXml($dummyEpgChannel['group']);
                 $includeCategory = $dummyEpgChannel['include_category'];
+                $aedProfileId = $dummyEpgChannel['aed_profile_id'] ?? null;
 
-                // Build all programmes for this channel in one string buffer
                 $buffer = '';
-                foreach ($timeSlots as $slot) {
-                    $buffer .= '  <programme channel="'.$tvgId.'" start="'.$slot['start'].'" stop="'.$slot['end'].'">'.PHP_EOL;
-                    $buffer .= '    <title>'.$title.'</title>'.PHP_EOL;
-                    if ($icon) {
-                        $buffer .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+
+                // AED path: extract event info from stream title and generate a single event
+                if ($aedProfileId && $aedExtractor && $aedProfiles->has($aedProfileId)) {
+                    $aedProfile = $aedProfiles->get($aedProfileId);
+                    $rawTitle = $dummyEpgChannel['raw_title'];
+                    $aedEvent = $aedExtractor->extract($aedProfile, $rawTitle)
+                        ?? $aedExtractor->fallback($aedProfile, $rawTitle);
+
+                    $aedIcon = $aedProfile->logo_url
+                        ? $this->escapeXml($aedProfile->logo_url)
+                        : $icon;
+                    $aedCategory = $aedProfile->category
+                        ? $this->escapeXml($aedProfile->category)
+                        : ($includeCategory ? $group : null);
+
+                    if ($aedEvent->hasTime()) {
+                        $aedTitle = $this->escapeXml($aedEvent->title);
+                        $aedDesc = $aedEvent->description
+                            ? $this->escapeXml($aedEvent->description)
+                            : $aedTitle;
+
+                        $slotMinutes = $aedProfile->event_duration_minutes;
+                        $windowStart = Carbon::now()->startOfDay();
+                        $windowEnd = Carbon::now()->startOfDay()->addDays(5);
+                        $postTitle = $this->escapeXml($aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent));
+
+                        $emitSlot = function (string $slotTitle, Carbon $slotStart, Carbon $slotEnd) use (&$buffer, $tvgId, $aedIcon, $aedCategory): void {
+                            $s = str_replace(':', '', $slotStart->format('YmdHis P'));
+                            $e = str_replace(':', '', $slotEnd->format('YmdHis P'));
+                            $buffer .= '  <programme channel="'.$tvgId.'" start="'.$s.'" stop="'.$e.'">'.PHP_EOL;
+                            $buffer .= '    <title>'.$slotTitle.'</title>'.PHP_EOL;
+                            if ($aedIcon) {
+                                $buffer .= '    <icon src="'.$aedIcon.'"/>'.PHP_EOL;
+                            }
+                            $buffer .= '    <desc>'.$slotTitle.'</desc>'.PHP_EOL;
+                            if ($aedCategory) {
+                                $buffer .= '    <category lang="en">'.$aedCategory.'</category>'.PHP_EOL;
+                            }
+                            $buffer .= '  </programme>'.PHP_EOL;
+                        };
+
+                        // Pre-event fill: window start → event start
+                        $cursor = $windowStart->copy();
+                        while ($cursor->lt($aedEvent->start)) {
+                            $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                            if ($slotEnd->gt($aedEvent->start)) {
+                                $slotEnd = $aedEvent->start->copy();
+                            }
+                            $preTitle = $this->escapeXml($aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor));
+                            $emitSlot($preTitle, $cursor, $slotEnd);
+                            $cursor = $slotEnd;
+                        }
+
+                        // The event itself
+                        $start = str_replace(':', '', $aedEvent->start->format('YmdHis P'));
+                        $stop = str_replace(':', '', $aedEvent->end->format('YmdHis P'));
+                        $buffer .= '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
+                        $buffer .= '    <title>'.$aedTitle.'</title>'.PHP_EOL;
+                        if ($aedIcon) {
+                            $buffer .= '    <icon src="'.$aedIcon.'"/>'.PHP_EOL;
+                        }
+                        $buffer .= '    <desc>'.$aedDesc.'</desc>'.PHP_EOL;
+                        if ($aedCategory) {
+                            $buffer .= '    <category lang="en">'.$aedCategory.'</category>'.PHP_EOL;
+                        }
+                        $buffer .= '  </programme>'.PHP_EOL;
+
+                        // Post-event fill: event end → window end
+                        $cursor = $aedEvent->end->copy();
+                        while ($cursor->lt($windowEnd)) {
+                            $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                            if ($slotEnd->gt($windowEnd)) {
+                                $slotEnd = $windowEnd->copy();
+                            }
+                            $emitSlot($postTitle, $cursor, $slotEnd);
+                            $cursor = $slotEnd;
+                        }
+                    } else {
+                        // Extraction failed or no time — use AED title with standard repeating slots
+                        $aedTitle = $this->escapeXml($aedEvent->title);
+                        $aedDesc = $aedEvent->description
+                            ? $this->escapeXml($aedEvent->description)
+                            : $aedTitle;
+                        $aedSlotLength = $aedProfile->event_duration_minutes;
+                        $aedStart = Carbon::now()->startOf('day')->subMinutes($aedSlotLength);
+                        $aedIterations = (int) ((5 * 24 * 60) / $aedSlotLength);
+
+                        for ($i = 0; $i < $aedIterations; $i++) {
+                            $aedStart->addMinutes($aedSlotLength);
+                            $start = str_replace(':', '', $aedStart->format('YmdHis P'));
+                            $stop = str_replace(':', '', $aedStart->copy()->addMinutes($aedSlotLength)->format('YmdHis P'));
+
+                            $buffer .= '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
+                            $buffer .= '    <title>'.$aedTitle.'</title>'.PHP_EOL;
+                            if ($aedIcon) {
+                                $buffer .= '    <icon src="'.$aedIcon.'"/>'.PHP_EOL;
+                            }
+                            $buffer .= '    <desc>'.$aedDesc.'</desc>'.PHP_EOL;
+                            if ($aedCategory) {
+                                $buffer .= '    <category lang="en">'.$aedCategory.'</category>'.PHP_EOL;
+                            }
+                            $buffer .= '  </programme>'.PHP_EOL;
+                        }
                     }
-                    $buffer .= '    <desc>'.$title.'</desc>'.PHP_EOL;
-                    if ($includeCategory) {
-                        $buffer .= '    <category lang="en">'.$group.'</category>'.PHP_EOL;
+                } else {
+                    // Standard dummy EPG: repeating slots using the channel title
+                    foreach ($timeSlots as $slot) {
+                        $buffer .= '  <programme channel="'.$tvgId.'" start="'.$slot['start'].'" stop="'.$slot['end'].'">'.PHP_EOL;
+                        $buffer .= '    <title>'.$title.'</title>'.PHP_EOL;
+                        if ($icon) {
+                            $buffer .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
+                        }
+                        $buffer .= '    <desc>'.$title.'</desc>'.PHP_EOL;
+                        if ($includeCategory) {
+                            $buffer .= '    <category lang="en">'.$group.'</category>'.PHP_EOL;
+                        }
+                        $buffer .= '  </programme>'.PHP_EOL;
                     }
-                    $buffer .= '  </programme>'.PHP_EOL;
                 }
-                // Single echo per channel instead of 600+ echoes
+
+                // Single echo per channel instead of multiple echoes
                 echo $buffer;
             }
         }

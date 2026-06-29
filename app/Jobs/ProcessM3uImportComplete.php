@@ -538,7 +538,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         $removedChannels->limit($limit)->cursor()->each(function ($channel) use ($sync, &$bulk, $now) {
             $bulk[] = [
                 'playlist_sync_status_id' => $sync->id,
-                'name' => $channel->title,
+                'name' => $channel->title ?? $channel->name,
                 'type' => 'channel',
                 'status' => 'removed',
                 'meta' => $channel,
@@ -555,7 +555,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         $newChannels->limit($limit)->cursor()->each(function ($channel) use ($sync, &$bulk, $now) {
             $bulk[] = [
                 'playlist_sync_status_id' => $sync->id,
-                'name' => $channel->title,
+                'name' => $channel->title ?? $channel->name,
                 'type' => 'channel',
                 'status' => 'added',
                 'meta' => $channel,

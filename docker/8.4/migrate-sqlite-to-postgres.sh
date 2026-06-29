@@ -39,28 +39,21 @@ fi
 
 log "Starting SQLite → PostgreSQL migration..."
 
-# Step 1: Pre-migrate the SQLite database so its migrations table is fully up-to-date.
-# This ensures that when we import the migrations table to Postgres, every migration
-# (including FK-dropping, index-dropping, etc.) is already recorded as run.
-# php artisan migrate will then only re-run the pgsql-specific ones.
-log "Pre-migrating SQLite database to record all pending migrations..."
-DB_CONNECTION=sqlite DB_DATABASE="${SQLITE_DB}" "${PHP_CMD}" "${ARTISAN}" migrate --force 2>&1 \
-    | while IFS= read -r line; do log "  [sqlite] ${line}"; done
-log "SQLite pre-migration complete."
-
-# Step 2: Checkpoint WAL mode to merge sidecar files (.sqlite-wal, .sqlite-shm) into main file
+# Step 1: Checkpoint WAL mode to merge sidecar files (.sqlite-wal, .sqlite-shm) into main file
 sqlite3 "${SQLITE_DB}" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
 
-# Step 3: Backup before touching anything
+# Step 2: Backup before touching anything
 mkdir -p "${BACKUP_DIR}"
 BACKUP_TS=$(date +%Y%m%d_%H%M%S)
 cp "${SQLITE_DB}" "${BACKUP_DIR}/database.sqlite.${BACKUP_TS}.bak"
 log "Backup created: ${BACKUP_DIR}/database.sqlite.${BACKUP_TS}.bak"
 
-# Step 4: Run the Python migration script (drop Postgres tables, recreate from SQLite PRAGMA, import data)
+# Step 3: Run the Python migration script (drop Postgres tables, recreate from SQLite PRAGMA,
+# import all data including the migrations table, create unique indexes and FK constraints,
+# remove pgsql-only migration records so they re-run, reset sequences).
 MIGRATION_LOG_FILE="${MIGRATION_LOG_FILE}" \
     python3 "${MIGRATION_SCRIPT_DIR}/migrate-sqlite-to-postgres.py"
 
-# Step 5: Write idempotency flag — persisted on the host volume so it survives container restarts
+# Step 4: Write idempotency flag — persisted on the host volume so it survives container restarts
 echo "Migrated on $(date) to ${DB_HOST:-localhost}:${DB_PORT:-5432}/${DB_DATABASE:-m3ue}" > "${FLAG_FILE}"
 log "Flag written to ${FLAG_FILE}. Safe to leave SQLITE_MIGRATE=true — migration will not re-run."

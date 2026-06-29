@@ -800,8 +800,8 @@ class PlaylistService
                 $stamp = preg_replace('/:(\d{2})$/', '', $stamp); // Remove seconds if present
             }
 
-            // Need to convert from app timezone to provider timezone
-            $stamp = Carbon::createFromFormat('Y-m-d:H-i', $stamp, config('app.timezone', 'UTC'))
+            // Incoming Xtream date is always UTC (Xtream standard); convert to provider timezone
+            $stamp = Carbon::createFromFormat('Y-m-d:H-i', $stamp, 'UTC')
                 ->setTimezone($providerTz)
                 ->format('Y-m-d:H-i');
 

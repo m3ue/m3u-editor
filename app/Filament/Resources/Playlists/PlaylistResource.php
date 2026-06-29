@@ -3042,6 +3042,26 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->type('number')
                         ->default(120)
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                    Repeater::make('dummy_epg_fallback_order')
+                        ->label(__('Dummy EPG Title Source'))
+                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order — first non-empty value wins. Leave empty to use the channel title.'))
+                        ->schema([
+                            Select::make('method')
+                                ->label(__('Field'))
+                                ->options(fn (Get $get): array => collect([
+                                    'stream_id' => __('TVG ID / Stream ID'),
+                                    'name' => __('Channel Name'),
+                                    'title' => __('Channel Title'),
+                                    'number' => __('Channel Number'),
+                                ])->all())
+                                ->required()
+                                ->columnSpanFull(),
+                        ])
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->addActionLabel(__('Add title source'))
+                        ->columnSpanFull()
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                 ]),
 
         ];
@@ -3313,11 +3333,11 @@ class PlaylistResource extends Resource implements CopilotResource
         // Requests tab — per-playlist opt-in for content requests via Sonarr/Radarr.
         // Fields are prefixed with request_ and hydrated/dehydrated via EditPlaylist hooks.
         $tabs[] = Tab::make(__('Requests'))
-            ->icon('heroicon-m-magnifying-glass-circle')
+            ->icon('heroicon-m-squares-plus')
             ->hidden(fn () => ! auth()->user()->canUseIntegrations())
             ->schema([
                 Section::make(__('Content Requests'))
-                    ->icon('heroicon-m-magnifying-glass-circle')
+                    ->icon('heroicon-m-squares-plus')
                     ->description(__('Allow guests to browse and request content from your Sonarr and Radarr servers on this playlist.'))
                     ->schema([
                         Toggle::make('request_enabled')

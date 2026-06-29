@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Series;
 use App\Settings\GeneralSettings;
+use App\Support\EpgProgrammeNormalizer;
 use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
@@ -85,7 +86,8 @@ class ShowMetadataService
         }
 
         $titles = array_keys($remaining);
-        $pending = $this->filterCached($titles, fn (string $title) => 'showmeta.tmdb.'.md5($title));
+        $cacheKey = fn (string $title) => 'showmeta.tmdb.'.md5(EpgProgrammeNormalizer::cleanForSearch($title));
+        $pending = $this->filterCached($titles, $cacheKey);
 
         foreach ($pending['hits'] as $title => $url) {
             if ($url !== null) {
@@ -98,13 +100,13 @@ class ShowMetadataService
             return;
         }
 
-        // TV search — concurrent
+        // TV search — concurrent (use cleaned title for API query)
         $tvResponses = Http::pool(fn (Pool $pool) => array_map(
-            fn (string $title) => $pool->as(md5($title))
+            fn (string $title) => $pool->as(md5(EpgProgrammeNormalizer::cleanForSearch($title)))
                 ->timeout(10)
                 ->get('https://api.themoviedb.org/3/search/tv', [
                     'api_key' => $apiKey,
-                    'query' => $title,
+                    'query' => EpgProgrammeNormalizer::cleanForSearch($title),
                 ]),
             $pending['misses'],
         ));
@@ -116,7 +118,7 @@ class ShowMetadataService
             if (isset($tvUrls[$title])) {
                 $results[$title] = $tvUrls[$title];
                 unset($remaining[$title]);
-                Cache::put('showmeta.tmdb.'.md5($title), $tvUrls[$title], self::CACHE_TTL_SECONDS);
+                Cache::put($cacheKey($title), $tvUrls[$title], self::CACHE_TTL_SECONDS);
             } else {
                 $stillMissing[] = $title;
             }
@@ -128,11 +130,11 @@ class ShowMetadataService
 
         // Movie search — concurrent (fallback)
         $movieResponses = Http::pool(fn (Pool $pool) => array_map(
-            fn (string $title) => $pool->as(md5($title))
+            fn (string $title) => $pool->as(md5(EpgProgrammeNormalizer::cleanForSearch($title)))
                 ->timeout(10)
                 ->get('https://api.themoviedb.org/3/search/movie', [
                     'api_key' => $apiKey,
-                    'query' => $title,
+                    'query' => EpgProgrammeNormalizer::cleanForSearch($title),
                 ]),
             $stillMissing,
         ));
@@ -145,7 +147,7 @@ class ShowMetadataService
                 $results[$title] = $url;
                 unset($remaining[$title]);
             }
-            Cache::put('showmeta.tmdb.'.md5($title), $url, self::CACHE_TTL_SECONDS);
+            Cache::put($cacheKey($title), $url, self::CACHE_TTL_SECONDS);
         }
     }
 
@@ -159,7 +161,7 @@ class ShowMetadataService
         $urls = [];
 
         foreach ($titles as $title) {
-            $key = md5($title);
+            $key = md5(EpgProgrammeNormalizer::cleanForSearch($title));
             $response = $responses[$key] ?? null;
 
             if ($response instanceof Response && $response->successful()) {
@@ -183,7 +185,7 @@ class ShowMetadataService
         $urls = [];
 
         foreach ($titles as $title) {
-            $key = md5($title);
+            $key = md5(EpgProgrammeNormalizer::cleanForSearch($title));
             $response = $responses[$key] ?? null;
 
             if ($response instanceof Response && $response->successful()) {
@@ -248,10 +250,11 @@ class ShowMetadataService
         $results = array_fill_keys(array_keys($unique), false);
         $cutoff = now()->subDays($thresholdDays);
 
-        // Group lookups by normalised title key so we make one TVMaze call per show
+        // Group lookups by normalised title key so we make one TVMaze call per show.
+        // Clean superscript annotations before keying so ᴸᴵᵛᴱ/ᴺᵉʷ variants share a cache entry.
         $titleKeyToItems = [];
         foreach ($unique as $key => $lookup) {
-            $titleKey = md5(mb_strtolower(trim($lookup['title'])));
+            $titleKey = md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($lookup['title'])));
             $titleKeyToItems[$titleKey][] = ['key' => $key, 'lookup' => $lookup];
         }
 
@@ -275,7 +278,7 @@ class ShowMetadataService
                 fn (string $titleKey) => $pool->as($titleKey)
                     ->timeout(10)
                     ->get(self::TVMAZE_BASE_URL.'/singlesearch/shows', [
-                        'q' => $titlesToFetch[$titleKey],
+                        'q' => EpgProgrammeNormalizer::cleanForSearch($titlesToFetch[$titleKey]),
                         'embed' => 'episodes',
                     ]),
                 array_keys($titlesToFetch),
@@ -301,7 +304,7 @@ class ShowMetadataService
 
         // Match each lookup to its TVMaze episode and compare airdate to cutoff
         foreach ($unique as $key => $lookup) {
-            $titleKey = md5(mb_strtolower(trim($lookup['title'])));
+            $titleKey = md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($lookup['title'])));
             $episodes = $titleEpisodes[$titleKey] ?? [];
 
             foreach ($episodes as $ep) {
@@ -329,7 +332,8 @@ class ShowMetadataService
     private function resolveFromTvMaze(array &$results, array &$remaining): void
     {
         $titles = array_keys($remaining);
-        $pending = $this->filterCached($titles, fn (string $title) => 'showmeta.tvmaze.'.md5(mb_strtolower(trim($title))));
+        $tvmazeCacheKey = fn (string $title) => 'showmeta.tvmaze.'.md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title)));
+        $pending = $this->filterCached($titles, $tvmazeCacheKey);
 
         foreach ($pending['hits'] as $title => $url) {
             if ($url !== null) {
@@ -343,16 +347,16 @@ class ShowMetadataService
         }
 
         $responses = Http::pool(fn (Pool $pool) => array_map(
-            fn (string $title) => $pool->as(md5(mb_strtolower(trim($title))))
+            fn (string $title) => $pool->as(md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title))))
                 ->timeout(10)
                 ->get(self::TVMAZE_BASE_URL.'/singlesearch/shows', [
-                    'q' => $title,
+                    'q' => EpgProgrammeNormalizer::cleanForSearch($title),
                 ]),
             $pending['misses'],
         ));
 
         foreach ($pending['misses'] as $title) {
-            $key = md5(mb_strtolower(trim($title)));
+            $key = md5(mb_strtolower(EpgProgrammeNormalizer::cleanForSearch($title)));
             $response = $responses[$key] ?? null;
 
             $url = null;
@@ -371,7 +375,7 @@ class ShowMetadataService
                 unset($remaining[$title]);
             }
 
-            Cache::put('showmeta.tvmaze.'.md5(mb_strtolower(trim($title))), $url, self::CACHE_TTL_SECONDS);
+            Cache::put($tvmazeCacheKey($title), $url, self::CACHE_TTL_SECONDS);
         }
     }
 }

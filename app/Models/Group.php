@@ -33,6 +33,7 @@ class Group extends Model
         'user_id' => 'integer',
         'playlist_id' => 'integer',
         'stream_profile_id' => 'integer',
+        'aed_profile_id' => 'integer',
     ];
 
     public function user(): BelongsTo
@@ -53,6 +54,11 @@ class Group extends Model
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);
+    }
+
+    public function aedProfile(): BelongsTo
+    {
+        return $this->belongsTo(AedProfile::class);
     }
 
     public function channels(): HasMany

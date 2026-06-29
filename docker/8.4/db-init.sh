@@ -79,6 +79,10 @@ fi
 # we can now run any necessary application-level initialization tasks.
 # NOTE: If using an external database, we assume it is already configured correctly and ready to accept connections by the time this script runs.
 
+# Note: start-container already removes bootstrap/cache/*.php and runs `php artisan optimize`
+# with the correct runtime env (DB_CONNECTION, APP_KEY, etc.) before supervisord starts.
+# No cache clearing is needed here — by the time db-init runs, the caches are already correct.
+
 # Run Laravel migrations (or migrate from SQLite first if requested)
 if [ "${SQLITE_MIGRATE:-false}" = "true" ] && [ "${DB_CONNECTION:-sqlite}" = "pgsql" ]; then
     # The migration script drops all Postgres tables, recreates them from SQLite's
@@ -113,3 +117,9 @@ echo "[db-init] Stale file cleanup complete."
 echo "[db-init] Syncing official plugins..."
 /usr/bin/php /var/www/html/artisan plugins:sync-official
 echo "[db-init] Official plugins synced."
+
+# Rebuild application caches with runtime env vars (DB_CONNECTION, APP_KEY, etc.).
+# Must run AFTER all migrations so route:cache can boot the fully-migrated app.
+echo "[db-init] Rebuilding application caches..."
+/usr/bin/php /var/www/html/artisan optimize --quiet 2>/dev/null || true
+echo "[db-init] Application caches rebuilt."

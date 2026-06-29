@@ -15,6 +15,7 @@ use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Pages\Preferences;
 use App\Filament\Pages\ReleaseLogs;
 use App\Filament\Pages\RequestContent;
+use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
@@ -243,6 +244,7 @@ class AdminPanelProvider extends PanelProvider
                                 ...MergedEpgResource::getNavigationItems(),
                                 ...EpgChannelResource::getNavigationItems(),
                                 ...EpgMapResource::getNavigationItems(),
+                                ...AedProfileResource::getNavigationItems(),
                             ]),
                         ...(config('proxy.proxy_integration_enabled', true) && auth()->user()?->canUseProxy() ? [
                             NavigationGroup::make(fn () => __('Proxy'))

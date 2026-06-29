@@ -152,6 +152,7 @@ class DvrRecordingRule extends Model
                 DvrRecordingStatus::Recording,
                 DvrRecordingStatus::PostProcessing,
                 DvrRecordingStatus::Completed,
+                DvrRecordingStatus::Purged,
             ])
             ->exists();
     }
