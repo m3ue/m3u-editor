@@ -10,6 +10,7 @@ use App\Enums\DvrSeriesMode;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Models\ArrIntegration;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -23,6 +24,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Models\PlaylistRequestSetting;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
@@ -32,6 +34,7 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -452,12 +455,18 @@ class XtreamApiController extends Controller
             }
             // Override max_connections when the request is authenticated via a PlaylistAuth
             // that has a specific per-auth limit configured.
+            $playlistAuth = null;
             if ($authMethod === 'playlist_auth') {
-                $authMaxConnections = PlaylistAuth::where('username', $username)
+                $playlistAuth = PlaylistAuth::where('username', $username)
                     ->where('password', $password)
-                    ->value('max_connections');
-                if ($authMaxConnections) {
-                    $streams = $authMaxConnections;
+                    ->where('enabled', true)
+                    ->where(function ($query) {
+                        $query->whereNull('expires_at')
+                            ->orWhere('expires_at', '>', now());
+                    })
+                    ->first();
+                if ($playlistAuth?->max_connections) {
+                    $streams = $playlistAuth->max_connections;
                 }
             }
 
@@ -525,7 +534,7 @@ class XtreamApiController extends Controller
                 'process' => true, // Always true
             ];
 
-            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $username, $password);
+            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
 
             return response()->json([
                 'user_info' => $userInfo,
@@ -2476,18 +2485,22 @@ class XtreamApiController extends Controller
      *
      * @return array<int, string>
      */
-    private function resolveM3uEditorFeatures($playlist, string $authMethod, string $username, string $password): array
+    private function resolveM3uEditorFeatures($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): array
     {
         $features = ['viewers', 'progress'];
 
-        if ($this->canAdvertiseDvrFeature($playlist, $authMethod, $username, $password)) {
+        if ($this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth)) {
             $features[] = 'dvr';
+        }
+
+        if ($this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'requests';
         }
 
         return $features;
     }
 
-    private function canAdvertiseDvrFeature($playlist, string $authMethod, string $username, string $password): bool
+    private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
     {
         if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
             return false;
@@ -2509,15 +2522,7 @@ class XtreamApiController extends Controller
             return true;
         }
 
-        return PlaylistAuth::where('username', $username)
-            ->where('password', $password)
-            ->where('enabled', true)
-            ->where('dvr_enabled', true)
-            ->where(function ($query) {
-                $query->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
-            })
-            ->exists();
+        return (bool) $playlistAuth?->dvr_enabled;
     }
 
     private function resolveDvrPlaylist($playlist): ?Playlist
@@ -2905,6 +2910,35 @@ class XtreamApiController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Determine whether Xtream clients should be told request integrations are available.
+     */
+    private function requestsFeatureEnabled($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($authMethod === 'playlist_auth' && ! ($playlistAuth?->request_enabled)) {
+            return false;
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return false;
+        }
+
+        if (! PlaylistRequestSetting::where('playlist_id', $effectivePlaylist->id)
+            ->where('enabled', true)
+            ->exists()) {
+            return false;
+        }
+
+        return ArrIntegration::where('user_id', $effectivePlaylist->user_id)
+            ->enabled()
+            ->guestEnabled()
+            ->exists();
     }
 
     /**

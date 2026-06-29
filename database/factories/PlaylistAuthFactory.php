@@ -31,6 +31,7 @@ class PlaylistAuthFactory extends Factory
             'dvr_storage_quota_gb' => null,
             'max_connections' => null,
             'stop_oldest_on_limit' => null,
+            'request_enabled' => false,
             'auto_approve_requests' => false,
         ];
     }
