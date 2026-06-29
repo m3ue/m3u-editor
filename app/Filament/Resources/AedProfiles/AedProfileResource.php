@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\AedProfiles;
 
+use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\EditAedProfile;
@@ -11,6 +12,7 @@ use App\Models\Channel;
 use App\Models\Group;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
+use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -36,6 +38,8 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+
+use function Laravel\Ai\agent;
 
 class AedProfileResource extends Resource implements CopilotResource
 {
@@ -91,6 +95,152 @@ class AedProfileResource extends Resource implements CopilotResource
 
             Section::make(__('Source Extraction'))
                 ->compact()
+                ->afterHeader(
+                    Action::make('ai_regex')
+                        ->label(__('AI Regex'))
+                        ->icon('heroicon-o-sparkles')
+                        ->visible(fn () => (bool) app(GeneralSettings::class)->copilot_enabled)
+                        ->slideOver()
+                        ->modalWidth('2xl')
+                        ->modalHeading(__('AI Regex Builder'))
+                        ->modalDescription(__('Load sample titles from your channels and let AI suggest regex patterns. Review and edit the suggestions before applying.'))
+                        ->modalSubmitActionLabel(__('Apply Suggestions'))
+                        ->schema(function (): array {
+                            return [
+                                Hidden::make('_ai_generated')->default(false),
+                                Hidden::make('_ai_raw')->default(''),
+
+                                self::channelSelectorGrid(['_ai_generated' => false, '_ai_raw' => '']),
+
+                                Textarea::make('samples')
+                                    ->label(__('Sample Titles'))
+                                    ->placeholder(__('Select a group or channel above, or paste titles here — one per line'))
+                                    ->rows(5)
+                                    ->columnSpanFull(),
+
+                                Actions::make([
+                                    Action::make('generate_regex')
+                                        ->label(__('Generate Regex'))
+                                        ->icon('heroicon-o-sparkles')
+                                        ->color('primary')
+                                        ->action(function (Get $get, Set $set): void {
+                                            $raw = (string) ($get('samples') ?? '');
+                                            $titles = array_values(array_filter(array_map('trim', explode("\n", $raw))));
+
+                                            if (empty($titles)) {
+                                                Notification::make()
+                                                    ->title(__('No titles to analyse'))
+                                                    ->body(__('Select a group or channel, or paste titles into the box above.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $settings = app(GeneralSettings::class);
+
+                                            // Prefer titles that contain structured content (colon + non-empty text after it)
+                                            // so the AI doesn't get confused by placeholder-only entries like "EVENT 22"
+                                            $structured = array_values(array_filter($titles, fn ($t) => (bool) preg_match('/:\s*\S/', $t)));
+                                            $sampleList = implode("\n", array_slice($structured ?: $titles, 0, 20));
+
+                                            $systemPrompt = <<<'SYS'
+You are an expert PHP regex engineer. Your task is to analyse IPTV channel titles and write PHP regex patterns that extract event information from them.
+
+The titles may contain a mix of simple entries (e.g. "EVENT 22") and structured entries (e.g. "EVENT 01: WWE Monday Night Raw (6.29 6:00 PM ET)"). Always write patterns that target the STRUCTURED entries.
+
+Your response must be a single JSON object with exactly these 6 keys. Never return empty strings — always write the best possible pattern based on the samples provided:
+
+1. title_regex — extracts the meaningful event name (NOT the numeric prefix). Must use capture group 1. Example: if titles look like "PREFIX 01: The Event Name (details)", use a pattern like `^PREFIX \d+:\s*(.+?)\s*\(` to capture "The Event Name".
+2. time_regex — extracts the time string using capture group 1. Example: `(\d{1,2}:\d{2}\s*[AP]M)\s+ET` for "6:00 PM ET".
+3. time_format — PHP date format to parse the extracted time. Example: `g:i A` for "6:00 PM".
+4. date_regex — extracts the date string using capture group 1. Example: `\((\d{1,2}\.\d{2})` for "(6.29".
+5. date_format — PHP date format for the extracted date. Example: `n.d` for "6.29".
+6. source_timezone — PHP timezone. Infer from abbreviations: ET/EST/EDT → America/New_York, CT/CST/CDT → America/Chicago, MT/MST/MDT → America/Denver, PT/PST/PDT → America/Los_Angeles, GMT/UTC → UTC, BST → Europe/London, CET → Europe/Paris.
+
+Return ONLY the JSON object. No markdown. No explanation. No code fences.
+
+Example output for "EVENT 01: WWE Monday Night Raw (6.29 6:00 PM ET)":
+{"title_regex":"^EVENT \\d+:\\s*(.+?)\\s*\\(","time_regex":"(\\d{1,2}:\\d{2}\\s*[AP]M)\\s+ET","time_format":"g:i A","date_regex":"\\((\\d{1,2}\\.\\d{2})","date_format":"n.d","source_timezone":"America/New_York"}
+SYS;
+
+                                            try {
+                                                $response = agent($systemPrompt)->prompt(
+                                                    "Analyse these channel titles:\n\n{$sampleList}",
+                                                    provider: $settings->copilot_provider,
+                                                    model: $settings->copilot_model ?: null,
+                                                );
+
+                                                $text = $response->text;
+                                                $set('_ai_raw', $text);
+
+                                                // Strip markdown code fences if the model wrapped the JSON
+                                                $clean = preg_replace('/^```(?:json)?\s*/m', '', trim($text));
+                                                $clean = preg_replace('/```\s*$/m', '', $clean);
+
+                                                // Extract the first JSON object if extra prose was included
+                                                if (preg_match('/\{.*\}/s', $clean, $jsonMatch)) {
+                                                    $clean = $jsonMatch[0];
+                                                }
+
+                                                $suggestions = json_decode(trim($clean), true);
+
+                                                if (! is_array($suggestions)) {
+                                                    throw new \RuntimeException('AI returned invalid JSON: '.substr($text, 0, 300));
+                                                }
+
+                                                $set('ai_title_regex', $suggestions['title_regex'] ?? '');
+                                                $set('ai_time_regex', $suggestions['time_regex'] ?? '');
+                                                $set('ai_time_format', $suggestions['time_format'] ?? '');
+                                                $set('ai_date_regex', $suggestions['date_regex'] ?? '');
+                                                $set('ai_date_format', $suggestions['date_format'] ?? '');
+                                                $set('ai_source_timezone', $suggestions['source_timezone'] ?? 'UTC');
+                                                $set('_ai_generated', true);
+                                            } catch (\Throwable $e) {
+                                                Notification::make()
+                                                    ->title(__('AI generation failed'))
+                                                    ->body($e->getMessage())
+                                                    ->danger()
+                                                    ->send();
+                                            }
+                                        }),
+                                ]),
+
+                                Section::make(__('Suggested Patterns'))
+                                    ->compact()
+                                    ->description(__('Review and edit the AI suggestions before applying them to the form.'))
+                                    ->schema([
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_title_regex')->label(__('Title Regex')),
+                                            TextInput::make('ai_time_regex')->label(__('Time Regex')),
+                                        ]),
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_time_format')->label(__('Time Format')),
+                                            TextInput::make('ai_date_regex')->label(__('Date Regex')),
+                                        ]),
+                                        Grid::make(2)->schema([
+                                            TextInput::make('ai_date_format')->label(__('Date Format')),
+                                            TextInput::make('ai_source_timezone')->label(__('Source Timezone')),
+                                        ]),
+                                        Textarea::make('_ai_raw')
+                                            ->label(__('Raw AI Response (debug)'))
+                                            ->rows(4)
+                                            ->disabled()
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => filled($get('_ai_raw'))),
+                                    ])
+                                    ->visible(fn (Get $get): bool => (bool) $get('_ai_generated')),
+                            ];
+                        })
+                        ->action(function (array $data, Set $set): void {
+                            $set('title_regex', $data['ai_title_regex'] ?? '');
+                            $set('time_regex', $data['ai_time_regex'] ?? '');
+                            $set('time_format', $data['ai_time_format'] ?? '');
+                            $set('date_regex', $data['ai_date_regex'] ?? '');
+                            $set('date_format', $data['ai_date_format'] ?? '');
+                            $set('source_timezone', $data['ai_source_timezone'] ?? 'UTC');
+                        })
+                )
                 ->description(__('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
                 ->schema([
                     Grid::make(2)->schema([
@@ -146,7 +296,11 @@ class AedProfileResource extends Resource implements CopilotResource
                             ->label(__('Logo URL (Optional)'))
                             ->url()
                             ->maxLength(500)
-                            ->placeholder(__('https://example.com/logo.png')),
+                            ->placeholder(__('https://example.com/logo.png'))
+                            ->suffixActions([
+                                AssetPickerAction::upload('logo_url'),
+                                AssetPickerAction::browse('logo_url'),
+                            ]),
                     ]),
                 ]),
 
@@ -243,75 +397,7 @@ class AedProfileResource extends Resource implements CopilotResource
                             Hidden::make('tested')->default(false),
                             Hidden::make('match_count')->default(''),
 
-                            Grid::make(2)->schema([
-                                Select::make('group_id')
-                                    ->label(__('Filter by Group'))
-                                    ->placeholder(__('All groups'))
-                                    ->options(fn () => Group::where([
-                                        'type' => 'live',
-                                        'user_id' => auth()->id(),
-                                    ])->get(['name', 'id'])->pluck('name', 'id'))
-                                    ->searchable()
-                                    ->live()
-                                    ->afterStateUpdated(function (Set $set, ?int $state): void {
-                                        $set('channel_id', null);
-                                        if ($state) {
-                                            $titles = auth()->user()->channels()
-                                                ->withoutEagerLoads()
-                                                ->where('group_id', $state)
-                                                ->limit(100)
-                                                ->pluck('title')
-                                                ->filter()
-                                                ->unique()
-                                                ->values();
-                                            $set('samples', $titles->implode("\n"));
-                                            $set('results', []);
-                                            $set('tested', false);
-                                            $set('match_count', '');
-                                        }
-                                    }),
-
-                                Select::make('channel_id')
-                                    ->label(__('Specific Channel'))
-                                    ->placeholder(__('Search channels...'))
-                                    ->searchable()
-                                    ->live()
-                                    ->getSearchResultsUsing(function (string $search, Get $get) {
-                                        $searchLower = strtolower($search);
-                                        $channels = auth()->user()->channels()
-                                            ->withoutEagerLoads()
-                                            ->with('playlist')
-                                            ->when($get('group_id'), fn ($q, $gid) => $q->where('group_id', $gid))
-                                            ->where(function ($query) use ($searchLower) {
-                                                $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
-                                                    ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
-                                            })
-                                            ->limit(50)
-                                            ->get();
-
-                                        $options = [];
-                                        foreach ($channels as $channel) {
-                                            $displayTitle = $channel->title_custom ?: $channel->title;
-                                            $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
-                                            $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
-                                        }
-
-                                        return $options;
-                                    })
-                                    ->afterStateUpdated(function (Set $set, ?int $state): void {
-                                        if ($state) {
-                                            $channel = Channel::find($state);
-                                            $set('samples', $channel?->title ?? $channel?->name ?? '');
-                                            $set('results', []);
-                                            $set('tested', false);
-                                            $set('match_count', '');
-                                        }
-                                    }),
-                            ]),
+                            self::channelSelectorGrid(['results' => [], 'tested' => false, 'match_count' => '']),
 
                             Textarea::make('samples')
                                 ->label(__('Sample Titles'))
@@ -467,5 +553,98 @@ class AedProfileResource extends Resource implements CopilotResource
             // 'create' => CreateAedProfile::route('/create'),
             // 'edit' => EditAedProfile::route('/{record}/edit'),
         ];
+    }
+
+    /**
+     * Shared group + channel picker grid used by both the AI Regex and Test Extraction slide-overs.
+     * Selecting a group bulk-loads that group's channel titles into the `samples` textarea.
+     * Selecting a specific channel loads just that channel's title.
+     *
+     * @param  array<string, mixed>  $extraReset  Additional field => value pairs to reset on selection change.
+     */
+    protected static function channelSelectorGrid(array $extraReset = []): Grid
+    {
+        return Grid::make(2)->schema([
+            Select::make('group_id')
+                ->label(__('Filter by Group'))
+                ->placeholder(__('All groups'))
+                ->options(fn () => Group::where([
+                    'type' => 'live',
+                    'user_id' => auth()->id(),
+                ])->get(['name', 'id'])->pluck('name', 'id'))
+                ->searchable()
+                ->live()
+                ->afterStateUpdated(function (Set $set, ?int $state) use ($extraReset): void {
+                    $set('channel_id', null);
+                    foreach ($extraReset as $field => $value) {
+                        $set($field, $value);
+                    }
+                    if ($state) {
+                        $titles = auth()->user()->channels()
+                            ->withoutEagerLoads()
+                            ->where('group_id', $state)
+                            ->limit(100)
+                            ->pluck('title')
+                            ->filter()
+                            ->unique()
+                            ->values();
+                        $set('samples', $titles->implode("\n"));
+                    }
+                }),
+
+            Select::make('channel_id')
+                ->label(__('Specific Channel'))
+                ->placeholder(__('Search channels...'))
+                ->searchable()
+                ->live()
+                ->getOptionLabelUsing(function (?int $state): ?string {
+                    if (! $state) {
+                        return null;
+                    }
+                    $channel = Channel::find($state);
+                    if (! $channel) {
+                        return null;
+                    }
+                    $displayTitle = $channel->title_custom ?: $channel->title;
+                    $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+
+                    return "{$displayTitle} [{$playlistName}]";
+                })
+                ->getSearchResultsUsing(function (string $search, Get $get) {
+                    $searchLower = strtolower($search);
+                    $channels = auth()->user()->channels()
+                        ->withoutEagerLoads()
+                        ->with('playlist')
+                        ->when($get('group_id'), fn ($q, $gid) => $q->where('group_id', $gid))
+                        ->where(function ($query) use ($searchLower): void {
+                            $query->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(name_custom) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(stream_id) LIKE ?', ["%{$searchLower}%"])
+                                ->orWhereRaw('LOWER(stream_id_custom) LIKE ?', ["%{$searchLower}%"]);
+                        })
+                        ->limit(50)
+                        ->get();
+
+                    $options = [];
+                    foreach ($channels as $channel) {
+                        $displayTitle = $channel->title_custom ?: $channel->title;
+                        $playlistName = $channel->getEffectivePlaylist()->name ?? 'Unknown';
+                        $options[$channel->id] = "{$displayTitle} [{$playlistName}]";
+                    }
+
+                    return $options;
+                })
+                ->afterStateUpdated(function (Set $set, ?int $state) use ($extraReset): void {
+                    foreach ($extraReset as $field => $value) {
+                        $set($field, $value);
+                    }
+                    if ($state) {
+                        $channel = Channel::find($state);
+                        $set('samples', $channel?->title ?? $channel?->name ?? '');
+                    }
+                }),
+        ]);
     }
 }

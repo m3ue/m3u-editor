@@ -34,8 +34,7 @@ class ListAedProfiles extends ListRecords
                         ->success()
                         ->title(__('AED Profile created'))
                         ->body(__('Assign this profile to channels or groups to enable smart EPG extraction.')),
-                )
-                ->successRedirectUrl(fn ($record): string => EditAedProfile::getUrl(['record' => $record])),
+                ),
         ];
     }
 
