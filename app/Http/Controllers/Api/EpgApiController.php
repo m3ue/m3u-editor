@@ -313,6 +313,11 @@ class EpgApiController extends Controller
             $idChannelBy = $playlist->id_channel_by;
             $dummyEpgEnabled = $playlist->dummy_epg;
             $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120); // Default to 120 minutes if not set
+            $dummyEpgFallbackOrder = collect($playlist->dummy_epg_fallback_order ?? [])
+                ->pluck('method')
+                ->filter()
+                ->values()
+                ->all();
 
             // Pre-load AED profile IDs that have override=true for this playlist's owner
             // so we can short-circuit EPG matching for channels with those profiles assigned
@@ -388,10 +393,26 @@ class EpgApiController extends Controller
                         $icon = LogoProxyController::generateProxyUrl($icon, internal: true);
                     }
 
+                    // Resolve dummy EPG display title using the configured fallback order.
+                    $dummyTitle = null;
+                    foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
+                        $dummyTitle = match ($fallbackMethod) {
+                            'title' => $channel->title_custom ?? $channel->title,
+                            'name' => $channel->name_custom ?? $channel->name,
+                            'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
+                            'number' => $channelNo ? (string) $channelNo : '',
+                            default => null,
+                        };
+                        if (! empty($dummyTitle)) {
+                            break;
+                        }
+                    }
+                    $dummyTitle ??= $channel->title_custom ?? $channel->title;
+
                     // Keep track of which channels need a dummy EPG program
                     $dummyEpgChannels[] = [
                         'playlist_channel_id' => $channelKey,
-                        'display_name' => $channel->title_custom ?? $channel->title,
+                        'display_name' => $dummyTitle,
                         'display_title' => $channel->display_title,
                         'title' => $channel->name_custom ?? $channel->name,
                         'raw_title' => $channel->title,

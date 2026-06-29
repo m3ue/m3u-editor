@@ -168,22 +168,6 @@ class EpgGenerateController extends Controller
                     break;
             }
 
-            // If no TVG ID still, try fallback methods in the configured order before using last resort
-            if (empty($tvgId) && ! empty($dummyEpgFallbackOrder)) {
-                foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
-                    $tvgId = match ($fallbackMethod) {
-                        'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
-                        'name' => $channel->name_custom ?? $channel->name,
-                        'title' => $channel->title_custom ?? $channel->title,
-                        'number' => $channelNo,
-                        default => null,
-                    };
-                    if (! empty($tvgId)) {
-                        break;
-                    }
-                }
-            }
-
             // Ultimate last resort
             if (empty($tvgId)) {
                 $tvgId = $channel->source_id ?? $channel->id;
@@ -255,13 +239,32 @@ class EpgGenerateController extends Controller
                 }
                 $icon = $this->escapeXml($icon);
 
+                // Resolve dummy EPG display title using the configured fallback order.
+                // Each method is tried in order; the first non-empty value wins.
+                // When no order is configured, fall back to title_custom ?? title.
+                $dummyTitle = null;
+                foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
+                    $dummyTitle = match ($fallbackMethod) {
+                        'title' => $channel->title_custom ?? $channel->title,
+                        'name' => $channel->name_custom ?? $channel->name,
+                        'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
+                        'number' => $channelNo ? (string) $channelNo : '',
+                        default => null,
+                    };
+                    if (! empty($dummyTitle)) {
+                        break;
+                    }
+                }
+                $dummyTitle ??= $channel->title_custom ?? $channel->title;
+                $dummyTitleEscaped = $this->escapeXml($dummyTitle);
+
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
                 $dummyEpgChannels[] = [
                     'tvg_id' => $tvgId,
                     'channel_id' => $channel->id,
                     'channel_no' => $channelNo,
-                    'title' => $title,
+                    'title' => $dummyTitleEscaped,
                     'raw_title' => $channel->title_custom ?? $channel->title,
                     'icon' => $icon,
                     'group' => $channel->group ?? $channel->group_internal,
@@ -271,7 +274,7 @@ class EpgGenerateController extends Controller
 
                 // Output the <channel> tag
                 echo '  <channel id="'.$tvgId.'">'.PHP_EOL;
-                echo '    <display-name>'.$title.'</display-name>';
+                echo '    <display-name>'.$dummyTitleEscaped.'</display-name>';
                 if ($channelNo !== null) {
                     echo PHP_EOL.'    <display-name>'.$channelNo.'</display-name>';
                 }
