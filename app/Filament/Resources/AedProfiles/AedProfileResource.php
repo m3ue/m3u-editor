@@ -26,6 +26,7 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -92,6 +93,14 @@ class AedProfileResource extends Resource implements CopilotResource
                 ->required()
                 ->maxLength(255)
                 ->placeholder(__('e.g. DAZN PPV')),
+            Toggle::make('override')
+                ->label(__('Override'))
+                ->live()
+                ->helperText(fn (Get $get): string => $get('override')
+                    ? __('Always use this profile, even if an EPG channel is assigned.')
+                    : __('Only use this profile if no EPG channel is assigned.'))
+                ->default(true)
+                ->inline(false),
 
             Section::make(__('Source Extraction'))
                 ->compact()

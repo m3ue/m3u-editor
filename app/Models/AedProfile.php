@@ -14,6 +14,7 @@ class AedProfile extends Model
     protected $casts = [
         'id' => 'integer',
         'user_id' => 'integer',
+        'override' => 'boolean',
         'event_duration_minutes' => 'integer',
     ];
 

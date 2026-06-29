@@ -313,6 +313,14 @@ class EpgApiController extends Controller
             $dummyEpgEnabled = $playlist->dummy_epg;
             $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120); // Default to 120 minutes if not set
 
+            // Pre-load AED profile IDs that have override=true for this playlist's owner
+            // so we can short-circuit EPG matching for channels with those profiles assigned
+            $overrideAedProfileIds = AedProfile::where('override', true)
+                ->where('user_id', $playlist->user_id)
+                ->pluck('id')
+                ->flip()
+                ->all();
+
             // Group channels by EPG and collect EPG data
             $epgChannelMap = [];
             $epgIds = [];
@@ -329,7 +337,11 @@ class EpgApiController extends Controller
                 // Always use the database primary key as the array key to guarantee uniqueness.
                 // Duplicate channel numbers would otherwise overwrite earlier entries.
                 $channelKey = $channel->id;
-                if ($epgId) {
+                // Resolve effective AED profile and check for override flag
+                $aedProfileId = $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null;
+                $hasAedOverride = $aedProfileId && isset($overrideAedProfileIds[$aedProfileId]);
+
+                if ($epgId && ! $hasAedOverride) {
                     $epgIds[] = $epgId;
                     if (! isset($epgChannelMap[$epgId])) {
                         $epgChannelMap[$epgId] = [];
@@ -382,7 +394,7 @@ class EpgApiController extends Controller
                         'display_title' => $channel->display_title,
                         'title' => $channel->name_custom ?? $channel->name,
                         'raw_title' => $channel->title,
-                        'aed_profile_id' => $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null,
+                        'aed_profile_id' => $aedProfileId,
                         'icon' => $icon,
                         'channel_number' => $channelNo,
                         'group' => $channel->group ?? $channel->group_internal,

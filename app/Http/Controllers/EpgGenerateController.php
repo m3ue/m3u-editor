@@ -106,6 +106,14 @@ class EpgGenerateController extends Controller
         $dummyEpgChannels = [];
         $channels = PlaylistGenerateController::getChannelQuery($playlist);
 
+        // Pre-load AED profile IDs that have override=true for this playlist's owner
+        // so we can short-circuit EPG matching for channels with those profiles assigned
+        $overrideAedProfileIds = AedProfile::where('override', true)
+            ->where('user_id', $playlist->user_id)
+            ->pluck('id')
+            ->flip()
+            ->all();
+
         // Get playlist settings
         $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
         $idChannelBy = $playlist->id_channel_by;
@@ -191,8 +199,12 @@ class EpgGenerateController extends Controller
             // Get the EPG channel data
             $epgData = $channel->epgChannel ?? null;
 
+            // Resolve effective AED profile and check for override flag
+            $aedProfileId = $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null;
+            $hasAedOverride = $aedProfileId && isset($overrideAedProfileIds[$aedProfileId]);
+
             // Output the <channel> tag
-            if ($epgData) {
+            if ($epgData && ! $hasAedOverride) {
                 // Keep track of which EPGs have which channels mapped
                 // Need this to output the <programme> tags later
                 if (! array_key_exists($epgData->epg_id, $epgChannels)) {
@@ -242,9 +254,6 @@ class EpgGenerateController extends Controller
                     $icon = LogoProxyController::generateProxyUrl($icon);
                 }
                 $icon = $this->escapeXml($icon);
-
-                // Resolve the effective AED profile ID: channel-level overrides group-level
-                $aedProfileId = $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null;
 
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
