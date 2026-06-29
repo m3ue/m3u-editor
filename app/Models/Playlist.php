@@ -38,6 +38,7 @@ class Playlist extends Model
         'sync_time' => 'float',
         'processing' => 'array',
         'dummy_epg' => 'boolean',
+        'dummy_epg_fallback_order' => 'array',
         'output_tvg_type' => 'boolean',
         'import_prefs' => 'array',
         'groups' => 'array',

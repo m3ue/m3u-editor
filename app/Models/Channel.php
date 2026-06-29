@@ -59,6 +59,7 @@ class Channel extends Model
         'movie_data' => 'array',
         'sync_settings' => 'array',
         'last_metadata_fetch' => 'datetime',
+        'aed_profile_id' => 'integer',
         'epg_map_enabled' => 'boolean',
         'logo_type' => ChannelLogoType::class,
         'sort' => 'decimal:4',
@@ -163,6 +164,11 @@ class Channel extends Model
     {
         return $this->belongsTo(EpgChannel::class)
             ->withoutEagerLoads();
+    }
+
+    public function aedProfile(): BelongsTo
+    {
+        return $this->belongsTo(AedProfile::class);
     }
 
     public function customPlaylist(): BelongsTo

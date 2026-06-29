@@ -1891,6 +1891,19 @@ class ChannelResource extends Resource implements CopilotResource
                         ->type('number')
                         ->helperText(__('Indicates the shift of the program schedule, use the values -2,-1,0,1,2,.. and so on.'))
                         ->rules(['nullable', 'numeric']),
+                    Select::make('aed_profile_id')
+                        ->label(__('AED Profile (Advanced EPG Dummy)'))
+                        ->helperText(__('Override the group\'s AED profile for this channel. Only applies when no EPG channel is matched. Leave blank to inherit from group.'))
+                        ->relationship(
+                            name: 'aedProfile',
+                            titleAttribute: 'name',
+                            modifyQueryUsing: fn ($query) => $query->where('user_id', auth()->id()),
+                        )
+                        ->searchable()
+                        ->preload()
+                        ->nullable()
+                        ->placeholder(__('Inherit from group'))
+                        ->columnSpanFull(),
                 ]),
             Fieldset::make(__('Failover Channels'))
                 ->schema([

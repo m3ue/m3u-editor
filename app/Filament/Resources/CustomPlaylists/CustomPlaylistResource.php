@@ -392,7 +392,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
-                ->columns(2)
+                ->columns(3)
                 ->schema([
                     Toggle::make('dummy_epg')
                         ->label(__('Enable dummy EPG'))
@@ -422,6 +422,26 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->default(120)
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
                         ->required(),
+                    Repeater::make('dummy_epg_fallback_order')
+                        ->label(__('EPG Match Fallback Order'))
+                        ->helperText(__('If the primary method above produces no EPG match, these alternatives are tried in order (top = first). Drag to reorder. The primary method is excluded automatically.'))
+                        ->schema([
+                            Select::make('method')
+                                ->label(__('Method'))
+                                ->options(fn (Get $get): array => collect([
+                                    'stream_id' => __('TVG ID / Stream ID'),
+                                    'name' => __('Channel Name'),
+                                    'title' => __('Channel Title'),
+                                    'number' => __('Channel Number'),
+                                ])->except($get('../../id_channel_by'))->all())
+                                ->required()
+                                ->columnSpanFull(),
+                        ])
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->addActionLabel(__('Add fallback method'))
+                        ->columnSpanFull()
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                 ]),
             Section::make(__('Streaming Output'))
                 ->description(__('Output processing options'))

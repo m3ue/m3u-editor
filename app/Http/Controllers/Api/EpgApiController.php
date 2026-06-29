@@ -8,9 +8,11 @@ use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Models\AedProfile;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
+use App\Services\AedExtractorService;
 use App\Services\EpgCacheService;
 use Carbon\Carbon;
 use Exception;
@@ -379,6 +381,8 @@ class EpgApiController extends Controller
                         'display_name' => $channel->title_custom ?? $channel->title,
                         'display_title' => $channel->display_title,
                         'title' => $channel->name_custom ?? $channel->name,
+                        'raw_title' => $channel->title,
+                        'aed_profile_id' => $channel->aed_profile_id ?? $channel->group_aed_profile_id ?? null,
                         'icon' => $icon,
                         'channel_number' => $channelNo,
                         'group' => $channel->group ?? $channel->group_internal,
@@ -577,6 +581,18 @@ class EpgApiController extends Controller
             if (count($dummyEpgChannels) > 0) {
                 Log::debug('Generating dummy EPG for '.count($dummyEpgChannels).' channels');
 
+                // Bulk-load any referenced AED profiles to avoid N+1
+                $aedProfileIds = collect($dummyEpgChannels)
+                    ->pluck('aed_profile_id')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+                $aedProfiles = $aedProfileIds
+                    ? AedProfile::whereIn('id', $aedProfileIds)->get()->keyBy('id')
+                    : collect();
+                $aedExtractor = new AedExtractorService;
+
                 foreach ($dummyEpgChannels as $dummyEpgChannel) {
                     $playlistChannelId = $dummyEpgChannel['playlist_channel_id'];
 
@@ -590,34 +606,107 @@ class EpgApiController extends Controller
                     $icon = $dummyEpgChannel['icon'];
                     $group = $dummyEpgChannel['group'];
                     $includeCategory = $dummyEpgChannel['include_category'];
-
-                    // Generate dummy programmes for the requested date range
                     $dummyProgrammes = [];
 
-                    // Start from the beginning of the requested start date
-                    $currentTime = Carbon::parse($startDate)->startOfDay();
-                    $endDateTime = Carbon::parse($endDate)->endOfDay();
+                    $aedProfileId = $dummyEpgChannel['aed_profile_id'] ?? null;
+                    $aedProfile = $aedProfileId ? $aedProfiles->get($aedProfileId) : null;
 
-                    // Generate programmes in chunks of $dummyEpgLength minutes
-                    while ($currentTime->lt($endDateTime)) {
-                        $programmeEnd = (clone $currentTime)->addMinutes($dummyEpgLength);
+                    if ($aedProfile) {
+                        $rawTitle = $dummyEpgChannel['raw_title'] ?? $title;
+                        $event = $aedExtractor->extract($aedProfile, $rawTitle)
+                            ?? $aedExtractor->fallback($aedProfile, $rawTitle);
 
-                        // Format times in ISO 8601 format (matching cache format)
-                        $programme = [
-                            'start' => $currentTime->toIso8601String(),
-                            'stop' => $programmeEnd->toIso8601String(),
-                            'title' => $title,
-                            'desc' => $displayName,
-                            'icon' => $icon,
-                        ];
+                        $eventIcon = $aedProfile->logo_url ?: $icon;
+                        $slotMinutes = $event->durationMinutes;
 
-                        // Add category if enabled
-                        if ($includeCategory && $group) {
-                            $programme['category'] = $group;
+                        if ($event->hasTime() && $event->start !== null) {
+                            $windowStart = Carbon::parse($startDate)->startOfDay();
+                            $windowEnd = Carbon::parse($endDate)->endOfDay();
+                            $postTitle = $aedExtractor->postEventTitle($aedProfile, $rawTitle, $event);
+
+                            $buildProgramme = function (Carbon $start, Carbon $stop, string $evtTitle, ?string $evtDesc) use ($eventIcon, $aedProfile, $includeCategory, $group): array {
+                                $p = [
+                                    'start' => $start->toIso8601String(),
+                                    'stop' => $stop->toIso8601String(),
+                                    'title' => $evtTitle,
+                                    'desc' => $evtDesc ?? $evtTitle,
+                                    'icon' => $eventIcon,
+                                ];
+                                if ($aedProfile->category) {
+                                    $p['category'] = $aedProfile->category;
+                                } elseif ($includeCategory && $group) {
+                                    $p['category'] = $group;
+                                }
+
+                                return $p;
+                            };
+
+                            // Pre-event fill: window start → event start
+                            $cursor = $windowStart->copy();
+                            while ($cursor->lt($event->start)) {
+                                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                                if ($slotEnd->gt($event->start)) {
+                                    $slotEnd = $event->start->copy();
+                                }
+                                $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $event, $cursor);
+                                $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $preTitle, $preTitle);
+                                $cursor = $slotEnd;
+                            }
+
+                            // The event itself
+                            $dummyProgrammes[] = $buildProgramme($event->start, $event->end, $event->title, $event->description);
+
+                            // Post-event fill: event end → window end
+                            $cursor = $event->end->copy();
+                            while ($cursor->lt($windowEnd)) {
+                                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                                if ($slotEnd->gt($windowEnd)) {
+                                    $slotEnd = $windowEnd->copy();
+                                }
+                                $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $postTitle, $postTitle);
+                                $cursor = $slotEnd;
+                            }
+                        } else {
+                            // No time extracted — fill the date range with repeating slots
+                            $currentTime = Carbon::parse($startDate)->startOfDay();
+                            $endDateTime = Carbon::parse($endDate)->endOfDay();
+                            while ($currentTime->lt($endDateTime)) {
+                                $programmeEnd = (clone $currentTime)->addMinutes($slotMinutes);
+                                $programme = [
+                                    'start' => $currentTime->toIso8601String(),
+                                    'stop' => $programmeEnd->toIso8601String(),
+                                    'title' => $event->title,
+                                    'desc' => $event->description ?? $displayName,
+                                    'icon' => $eventIcon,
+                                ];
+                                if ($aedProfile->category) {
+                                    $programme['category'] = $aedProfile->category;
+                                } elseif ($includeCategory && $group) {
+                                    $programme['category'] = $group;
+                                }
+                                $dummyProgrammes[] = $programme;
+                                $currentTime = $programmeEnd;
+                            }
                         }
-
-                        $dummyProgrammes[] = $programme;
-                        $currentTime = $programmeEnd;
+                    } else {
+                        // Standard repeating dummy slots
+                        $currentTime = Carbon::parse($startDate)->startOfDay();
+                        $endDateTime = Carbon::parse($endDate)->endOfDay();
+                        while ($currentTime->lt($endDateTime)) {
+                            $programmeEnd = (clone $currentTime)->addMinutes($dummyEpgLength);
+                            $programme = [
+                                'start' => $currentTime->toIso8601String(),
+                                'stop' => $programmeEnd->toIso8601String(),
+                                'title' => $title,
+                                'desc' => $displayName,
+                                'icon' => $icon,
+                            ];
+                            if ($includeCategory && $group) {
+                                $programme['category'] = $group;
+                            }
+                            $dummyProgrammes[] = $programme;
+                            $currentTime = $programmeEnd;
+                        }
                     }
 
                     // Add to programmes array

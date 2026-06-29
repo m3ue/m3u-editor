@@ -708,6 +708,19 @@ class GroupResource extends Resource implements CopilotResource
                 ->default(9999)
                 ->helperText(__('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.'))
                 ->rules(['integer', 'min:0']),
+            Select::make('aed_profile_id')
+                ->label(__('AED Profile (Advanced EPG Dummy)'))
+                ->helperText(__('Channels in this group will use this profile to extract smart EPG data from their stream title. Individual channels can override this.'))
+                ->relationship(
+                    name: 'aedProfile',
+                    titleAttribute: 'name',
+                    modifyQueryUsing: fn ($query) => $query->where('user_id', auth()->id()),
+                )
+                ->searchable()
+                ->preload()
+                ->nullable()
+                ->placeholder(__('None — use standard dummy EPG'))
+                ->columnSpanFull(),
         ];
 
         return [
