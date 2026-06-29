@@ -88,6 +88,10 @@ class GuestRequestContent extends Page
             $auth = PlaylistAuth::where('username', $username)
                 ->where('password', $password)
                 ->where('enabled', true)
+                ->where(function ($query) {
+                    $query->whereNull('expires_at')
+                        ->orWhere('expires_at', '>', now());
+                })
                 ->first();
 
             if (! $auth?->request_enabled) {
