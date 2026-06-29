@@ -1395,6 +1395,17 @@ class NetworkBroadcastService
                         $headers['X-Plex-Token'] = $qs['X-Plex-Token'];
                     }
 
+                    if (! empty($qs['session'])) {
+                        $headers['X-Plex-Session-Identifier'] = $qs['session'];
+                        $headers['X-Plex-Playback-Session-Id'] = $qs['session'];
+                    }
+
+                    if (str_contains($nextStreamUrl, 'start.mpd')) {
+                        $headers['Accept'] = 'application/dash+xml';
+                    } else {
+                        $headers['Accept'] = 'application/vnd.apple.mpegurl';
+                    }
+
                     $config['headers'] = $headers;
                 } else {
                     $headers = [];

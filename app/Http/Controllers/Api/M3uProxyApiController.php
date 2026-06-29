@@ -475,8 +475,17 @@ class M3uProxyApiController extends Controller
             // The proxy already started the next programme — update DB state atomically
             // to reflect the running broadcast without an intermediate null state that
             // the tick loop could misread as "stopped".
+            $endedProgrammeId = $network->broadcast_programme_id;
             $network->refresh();
-            $nextProgramme = $network->getCurrentProgramme() ?? $network->getNextProgramme();
+
+            // Guard: getCurrentProgramme() uses end_time > now(), so a callback that
+            // arrives before the wall clock crosses end_time returns the just-ended
+            // programme. Skip it so we always resolve the next one.
+            $nextProgramme = $network->getCurrentProgramme();
+            if ($nextProgramme?->id === $endedProgrammeId) {
+                $nextProgramme = null;
+            }
+            $nextProgramme ??= $network->getNextProgramme();
 
             $network->update([
                 'broadcast_segment_sequence' => $finalSegment + 1,
@@ -488,6 +497,7 @@ class M3uProxyApiController extends Controller
                 'broadcast_fail_count' => 0,
                 'broadcast_last_exit_code' => null,
                 'broadcast_transcode_session_id' => null,
+                'broadcast_restart_locked' => false,
             ]);
 
             $network->increment('broadcast_discontinuity_sequence');

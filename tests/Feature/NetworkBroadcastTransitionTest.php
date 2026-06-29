@@ -141,6 +141,92 @@ it('auto_transitioned callback increments discontinuity sequence', function () {
     Carbon::setTestNow();
 });
 
+it('auto_transitioned callback clears broadcast_restart_locked even if it was stuck true', function () {
+    Carbon::setTestNow(now());
+
+    $network = Network::factory()->create([
+        'enabled' => true,
+        'broadcast_enabled' => true,
+        'broadcast_requested' => true,
+        'broadcast_pid' => 5678,
+        'broadcast_started_at' => now()->subMinutes(60),
+        'broadcast_restart_locked' => true,
+    ]);
+
+    $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('cleanupTranscodeSession')->once();
+    $service->shouldNotReceive('start');
+    app()->instance(NetworkBroadcastService::class, $service);
+
+    $this->postJson('/api/m3u-proxy/broadcast/callback', [
+        'network_id' => $network->uuid,
+        'event' => 'programme_ended',
+        'data' => [
+            'final_segment_number' => 10,
+            'auto_transitioned' => true,
+            'new_pid' => 33333,
+        ],
+    ])->assertOk();
+
+    expect($network->fresh()->broadcast_restart_locked)->toBeFalse('auto-transition must clear a stuck restart lock');
+
+    Carbon::setTestNow();
+});
+
+it('auto_transitioned callback resolves correct next programme when callback arrives before wall clock crosses end_time', function () {
+    // Simulate a fast callback: the ended programme's end_time is still in the future
+    // (i.e. the stream ended a couple of seconds early), so getCurrentProgramme() would
+    // naively return the ended programme. The fix must skip it and find the real next one.
+    Carbon::setTestNow(now());
+
+    $network = Network::factory()->create([
+        'enabled' => true,
+        'broadcast_enabled' => true,
+        'broadcast_requested' => true,
+        'broadcast_pid' => 5678,
+        'broadcast_started_at' => now()->subMinutes(60),
+    ]);
+
+    // Ended programme: end_time is 10 seconds in the future (callback arrived early)
+    $endedProgramme = NetworkProgramme::factory()->create([
+        'network_id' => $network->id,
+        'start_time' => now()->subMinutes(60),
+        'end_time' => now()->addSeconds(10),
+        'duration_seconds' => 3610,
+    ]);
+
+    // Actual next programme
+    $nextProgramme = NetworkProgramme::factory()->create([
+        'network_id' => $network->id,
+        'start_time' => now()->addSeconds(10),
+        'end_time' => now()->addMinutes(70),
+        'duration_seconds' => 3600,
+    ]);
+
+    // Set network's current broadcast_programme_id to the ended programme
+    $network->update(['broadcast_programme_id' => $endedProgramme->id]);
+
+    $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('cleanupTranscodeSession')->once();
+    $service->shouldNotReceive('start');
+    app()->instance(NetworkBroadcastService::class, $service);
+
+    $this->postJson('/api/m3u-proxy/broadcast/callback', [
+        'network_id' => $network->uuid,
+        'event' => 'programme_ended',
+        'data' => [
+            'final_segment_number' => 100,
+            'auto_transitioned' => true,
+            'new_pid' => 44444,
+        ],
+    ])->assertOk();
+
+    // Must resolve to the *next* programme, not the ended one
+    expect($network->fresh()->broadcast_programme_id)->toBe($nextProgramme->id);
+
+    Carbon::setTestNow();
+});
+
 /*
 |--------------------------------------------------------------------------
 | Normal programme transition (callback round-trip path)
