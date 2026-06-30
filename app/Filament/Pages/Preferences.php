@@ -944,11 +944,22 @@ class Preferences extends SettingsPage
                                                     ->placeholder(__('Optional message body'))
                                                     ->columnSpanFull(),
                                                 Grid::make()->columns(2)->schema([
-                                                    TextInput::make('channel')
+                                                    Select::make('channel')
                                                         ->label(__('Channel'))
                                                         ->default('general')
                                                         ->required()
-                                                        ->helperText(__('Category tag for the notification (e.g. general, error, billing).')),
+                                                        ->searchable()
+                                                        ->options(function (): array {
+                                                            $channels = app(GeneralSettings::class)->tv_notification_channels;
+
+                                                            return collect($channels)
+                                                                ->filter(fn (array $c) => ! empty($c['name']))
+                                                                ->mapWithKeys(fn (array $c) => [
+                                                                    $c['name'] => $c['label'] ?: $c['name'],
+                                                                ])
+                                                                ->all();
+                                                        })
+                                                        ->helperText(__('Category tag for the notification.')),
                                                     Toggle::make('admin_only')
                                                         ->inline(false)
                                                         ->label(__('Admin only'))
@@ -1004,6 +1015,31 @@ class Preferences extends SettingsPage
                                         Callout::make()
                                             ->info()
                                             ->description(__('Use the "Send Notification" button above to dispatch a test TV notification to any playlist target.')),
+                                    ]),
+
+                                Section::make(__('Notification Channels'))
+                                    ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable — they appear automatically once a notification arrives on that channel.'))
+                                    ->icon('heroicon-m-tag')
+                                    ->schema([
+                                        Repeater::make('tv_notification_channels')
+                                            ->label(__('Default Notification Channels'))
+                                            ->schema([
+                                                Grid::make()->columns(2)->schema([
+                                                    TextInput::make('name')
+                                                        ->label(__('Channel slug'))
+                                                        ->required()
+                                                        ->regex('/^[a-z0-9_]+$/')
+                                                        ->placeholder('dvr_recording_completed')
+                                                        ->helperText(__('Lowercase letters, numbers, and underscores only.')),
+                                                    TextInput::make('label')
+                                                        ->label(__('Display label'))
+                                                        ->placeholder('DVR Recording Completed')
+                                                        ->helperText(__('Optional — shown in the TV app instead of the raw slug.')),
+                                                ]),
+                                            ])
+                                            ->addActionLabel(__('Add channel'))
+                                            ->reorderable()
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
 

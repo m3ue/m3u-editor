@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
 use App\Models\TvNotification;
+use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,11 +38,20 @@ class TvApiController extends Controller
 
         $scheme = config('broadcasting.connections.reverb.options.scheme', 'http');
 
+        $configuredChannels = collect(app(GeneralSettings::class)->tv_notification_channels)
+            ->map(fn (array $c) => [
+                'name' => $c['name'] ?? '',
+                'label' => $c['label'] ?? '',
+            ])
+            ->filter(fn (array $c) => $c['name'] !== '')
+            ->values();
+
         return response()->json([
             'notifiable_id' => $playlist->id,
             'notifiable_type' => $playlist->getMorphClass(),
             'is_admin' => $auth['isAdmin'],
             'notifications' => $query->get(),
+            'available_channels' => $configuredChannels,
             'reverb' => [
                 'host' => config('broadcasting.connections.reverb.options.host', 'localhost'),
                 'port' => (int) config('broadcasting.connections.reverb.options.port', 36800),

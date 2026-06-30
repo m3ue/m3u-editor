@@ -279,6 +279,13 @@ class GeneralSettings extends Settings
     /** Forward playlist import failures to enabled alert channels */
     public ?bool $alerts_on_import_failed = false;
 
+    /**
+     * TV App notification channels available for subscription.
+     * Each entry: ['name' => 'channel_slug', 'label' => 'Optional display label'].
+     * Empty array means no predefined channels (discovery only via received notifications).
+     */
+    public array $tv_notification_channels = [];
+
     public static function group(): string
     {
         return 'general';
