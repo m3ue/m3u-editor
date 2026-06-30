@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
+use App\Http\Controllers\Api\TvApiController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -68,4 +69,16 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
     Route::get('movies/{streamId}/providers', [DispatcharrController::class, 'vodMovieProviders'])
         ->name('dispatcharr.vod.movie.providers')
         ->whereNumber('streamId');
+});
+
+/*
+ * TV app API routes (authenticated via Xtream credentials in URL path — no Sanctum)
+ */
+Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(function () {
+    Route::get('notifications', [TvApiController::class, 'notifications'])
+        ->name('tv.notifications');
+    Route::post('notifications/{id}/read', [TvApiController::class, 'markRead'])
+        ->name('tv.notifications.read');
+    Route::post('broadcasting/auth', [TvApiController::class, 'broadcastingAuth'])
+        ->name('tv.broadcasting.auth');
 });

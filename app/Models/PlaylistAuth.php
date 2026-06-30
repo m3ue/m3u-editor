@@ -98,7 +98,7 @@ class PlaylistAuth extends Model
         // Create new assignment
         PlaylistAuthPivot::create([
             'playlist_auth_id' => $this->id,
-            'authenticatable_type' => get_class($model),
+            'authenticatable_type' => $model->getMorphClass(),
             'authenticatable_id' => $model->id,
         ]);
     }

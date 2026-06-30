@@ -62,6 +62,7 @@ use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobFailed;
@@ -133,6 +134,14 @@ class AppServiceProvider extends ServiceProvider
     {
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
+
+        // Short morph aliases for playlist types used in tv_notifications
+        Relation::morphMap([
+            'playlist' => Playlist::class,
+            'merged_playlist' => MergedPlaylist::class,
+            'custom_playlist' => CustomPlaylist::class,
+            'alias' => PlaylistAlias::class,
+        ]);
 
         // App URL generation based on context
         if (app()->runningInConsole()) {
