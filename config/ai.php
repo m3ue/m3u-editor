@@ -74,6 +74,12 @@ return [
             'key' => env('DEEPSEEK_API_KEY'),
         ],
 
+        'opencode_go' => [
+            'driver' => 'deepseek',
+            'key' => env('OPENCODE_GO_API_KEY'),
+            'url' => env('OPENCODE_GO_URL', 'https://opencode.ai/zen/v1'),
+        ],
+
         'eleven' => [
             'driver' => 'eleven',
             'key' => env('ELEVENLABS_API_KEY'),
@@ -115,6 +121,12 @@ return [
             'driver' => 'openai',
             'key' => env('OPENAI_API_KEY'),
             'url' => env('OPENAI_URL', 'https://api.openai.com/v1'),
+        ],
+
+        'opencode_zen' => [
+            'driver' => 'openai',
+            'key' => env('OPENCODE_ZEN_API_KEY'),
+            'url' => env('OPENCODE_ZEN_URL', 'https://opencode.ai/zen/v1'),
         ],
 
         'openrouter' => [
