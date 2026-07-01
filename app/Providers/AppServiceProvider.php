@@ -44,6 +44,7 @@ use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Settings\GeneralSettings;
+use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\Events\LocaleChanged;
 use Dedoc\Scramble\Scramble;
 use Dedoc\Scramble\Support\Generator\OpenApi;
@@ -909,7 +910,7 @@ class AppServiceProvider extends ServiceProvider
                 config(["ai.providers.{$settings->copilot_provider}.key" => $settings->copilot_api_key]);
             }
 
-            if (! empty($settings->copilot_url) && in_array($settings->copilot_provider, ['openai', 'ollama'], true)) {
+            if (! empty($settings->copilot_url) && CopilotProvider::supportsCustomUrl($settings->copilot_provider)) {
                 config(["ai.providers.{$settings->copilot_provider}.url" => $settings->copilot_url]);
             }
         } catch (Throwable) {
