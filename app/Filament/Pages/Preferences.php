@@ -27,6 +27,7 @@ use App\Services\DateFormatService;
 use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
+use App\Support\CopilotProvider;
 use Cron\CronExpression;
 use Exception;
 use Filament\Actions\Action;
@@ -1783,35 +1784,13 @@ class Preferences extends SettingsPage
                                                 Select::make('copilot_provider')
                                                     ->label(__('Provider'))
                                                     ->searchable()
-                                                    ->options([
-                                                        'openai' => 'OpenAI',
-                                                        'anthropic' => 'Anthropic',
-                                                        'gemini' => 'Google Gemini',
-                                                        'mistral' => 'Mistral',
-                                                        'groq' => 'Groq',
-                                                        'deepseek' => 'DeepSeek',
-                                                        'xai' => 'xAI (Grok)',
-                                                        'minimax' => 'MiniMax',
-                                                        'openrouter' => 'OpenRouter',
-                                                        'ollama' => 'Ollama (Local)',
-                                                    ])
+                                                    ->options(CopilotProvider::options())
                                                     ->live()
                                                     ->required(fn (Get $get): bool => (bool) $get('copilot_enabled'))
                                                     ->helperText(__('The AI provider to use for the Copilot assistant.')),
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
-                                                    ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4-6',
-                                                        'gemini' => 'gemini-2.5-flash',
-                                                        'mistral' => 'mistral-large-latest',
-                                                        'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-v4-flash',
-                                                        'xai' => 'grok-3',
-                                                        'minimax' => 'MiniMax-M2.7',
-                                                        'openrouter' => 'openai/gpt-5.4',
-                                                        'ollama' => 'llama3',
-                                                        default => 'gpt-5.4-mini',
-                                                    })
+                                                    ->placeholder(fn (Get $get): string => CopilotProvider::defaultModel($get('copilot_provider')))
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
                                         TextInput::make('copilot_api_key')
@@ -1825,12 +1804,8 @@ class Preferences extends SettingsPage
                                         TextInput::make('copilot_url')
                                             ->label(__('Base URL'))
                                             ->url()
-                                            ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                'ollama' => 'http://localhost:11434',
-                                                'minimax' => 'https://api.minimax.io/v1',
-                                                default => 'https://api.openai.com/v1',
-                                            })
-                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama', 'minimax']))
+                                            ->placeholder(fn (Get $get): string => CopilotProvider::defaultUrl($get('copilot_provider')))
+                                            ->visible(fn (Get $get): bool => CopilotProvider::supportsCustomUrl($get('copilot_provider')))
                                             ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))
