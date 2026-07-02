@@ -4,9 +4,9 @@ namespace App\Support;
 
 final class CopilotProvider
 {
-    private const DEFAULT_OPENAI_URL = 'https://api.openai.com/v1';
+    public const OPENCODE_URL = 'https://opencode.ai/zen/v1';
 
-    private const OPENCODE_URL = 'https://opencode.ai/zen/v1';
+    private const DEFAULT_OPENAI_URL = 'https://api.openai.com/v1';
 
     /**
      * @return array<string, string>
@@ -29,15 +29,6 @@ final class CopilotProvider
         ];
     }
 
-    public static function driver(string $provider): string
-    {
-        return match ($provider) {
-            'opencode_zen' => 'openai',
-            'opencode_go' => 'deepseek',
-            default => $provider,
-        };
-    }
-
     public static function defaultModel(?string $provider): string
     {
         return match ($provider) {
@@ -51,7 +42,6 @@ final class CopilotProvider
             'minimax' => 'MiniMax-M2.7',
             'openrouter' => 'openai/gpt-5.4',
             'ollama' => 'llama3',
-            'opencode_zen' => 'gpt-5.4-mini',
             default => 'gpt-5.4-mini',
         };
     }

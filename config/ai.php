@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\CopilotProvider;
+
 return [
 
     /*
@@ -77,7 +79,7 @@ return [
         'opencode_go' => [
             'driver' => 'deepseek',
             'key' => env('OPENCODE_GO_API_KEY'),
-            'url' => env('OPENCODE_GO_URL', 'https://opencode.ai/zen/v1'),
+            'url' => env('OPENCODE_GO_URL', CopilotProvider::OPENCODE_URL),
         ],
 
         'eleven' => [
@@ -126,7 +128,7 @@ return [
         'opencode_zen' => [
             'driver' => 'openai',
             'key' => env('OPENCODE_ZEN_API_KEY'),
-            'url' => env('OPENCODE_ZEN_URL', 'https://opencode.ai/zen/v1'),
+            'url' => env('OPENCODE_ZEN_URL', CopilotProvider::OPENCODE_URL),
         ],
 
         'openrouter' => [
