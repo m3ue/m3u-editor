@@ -960,7 +960,7 @@ class VodResource extends Resource implements CopilotResource
                     ->schema([
                         Toggle::make('overwrite_existing')
                             ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\\\'t already have them.'))
+                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\'t already have them.'))
                             ->default(false),
                     ])
                     ->action(function ($records, $data) {
@@ -1244,7 +1244,7 @@ class VodResource extends Resource implements CopilotResource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrows-pointing-in')
                     ->modalIcon('heroicon-o-arrows-pointing-in')
-                    ->modalDescription(__('Don\\\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
+                    ->modalDescription(__('Don\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('failover')
                     ->label(__('Add as failover'))

@@ -798,7 +798,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                         ->color('success')
                                         ->requiresConfirmation()
                                         ->modalHeading(__('Register HDHomeRun Tuner'))
-                                        ->modalDescription(__('This will register the playlist\\\'s HDHR endpoint as a DVR tuner in Plex and configure the EPG guide. The HDHR URL must be reachable from your Plex server.'))
+                                        ->modalDescription(__('This will register the playlist\'s HDHR endpoint as a DVR tuner in Plex and configure the EPG guide. The HDHR URL must be reachable from your Plex server.'))
                                         ->form([
                                             Select::make('playlist_uuid')
                                                 ->label(__('Playlist'))

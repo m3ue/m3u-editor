@@ -353,7 +353,7 @@ class EditPlugin extends EditRecord
                     ->icon('heroicon-o-archive-box')
                     ->requiresConfirmation()
                     ->color('warning')
-                    ->modalDescription(__('Creates a new security review of this plugin\\\'s current files. Use this after updating plugin files on disk or after a failed install to re-trigger the review process without re-uploading.'))
+                    ->modalDescription(__('Creates a new security review of this plugin\'s current files. Use this after updating plugin files on disk or after a failed install to re-trigger the review process without re-uploading.'))
                     ->modalSubmitActionLabel(__('Submit for review'))
                     ->visible(fn () => $canManagePlugins && filled($this->record->path) && $this->record->available)
                     ->action(function () use ($record): void {
@@ -399,7 +399,7 @@ class EditPlugin extends EditRecord
                     ->hidden(fn () => ! $this->record->isInstalled())
                     ->requiresConfirmation()
                     ->modalHeading(__('Uninstall plugin'))
-                    ->modalDescription(__('Uninstalling disables the plugin immediately. You can keep the plugin\\\'s data for a future reinstall, or delete everything it created. Active jobs will be cancelled first.'))
+                    ->modalDescription(__('Uninstalling disables the plugin immediately. You can keep the plugin\'s data for a future reinstall, or delete everything it created. Active jobs will be cancelled first.'))
                     ->schema([
                         Select::make('cleanup_mode')
                             ->label(__('What to do with plugin data'))
@@ -409,7 +409,7 @@ class EditPlugin extends EditRecord
                             ])
                             ->default(fn () => $record->defaultCleanupMode())
                             ->required()
-                            ->helperText(__('Disabling is reversible. Uninstalling changes the plugin\\\'s status and optionally removes its database tables, files, and reports.')),
+                            ->helperText(__('Disabling is reversible. Uninstalling changes the plugin\'s status and optionally removes its database tables, files, and reports.')),
                     ])
                     ->action(function (array $data) use ($record): void {
                         try {

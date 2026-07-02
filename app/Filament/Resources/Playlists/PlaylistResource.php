@@ -1185,7 +1185,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                             'heroicon-m-question-mark-circle',
                                             tooltip: 'Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.'
                                         )
-                                        ->helperText(__('When enabled, the proxy will attempt to start streams even if the provider\\\'s reported connection limit has been reached.'))
+                                        ->helperText(__('When enabled, the proxy will attempt to start streams even if the provider\'s reported connection limit has been reached.'))
                                         ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
                                         ->inline(false)
                                         ->live()
@@ -2795,7 +2795,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'heroicon-m-question-mark-circle',
                                     tooltip: 'When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).'
                                 )
-                                ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\\\'s catch-up doesn\\\'t work or is unreliable.')),
+                                ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\'s catch-up doesn\'t work or is unreliable.')),
                             Toggle::make('disable_m3u_xtream_format')
                                 ->label(__('Disable Xtream URL format in M3U output'))
                                 ->inline(false)
@@ -2946,7 +2946,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->helperText('')
                                 ->inline(false)
                                 ->default(false)
-                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\\\'t use load balancing.')),
+                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
                     Fieldset::make(__('Transcoding Settings (optional)'))

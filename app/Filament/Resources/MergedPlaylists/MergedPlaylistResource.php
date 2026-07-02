@@ -432,7 +432,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 ->helperText('')
                                 ->inline(false)
                                 ->default(false)
-                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\\\'t use load balancing.')),
+                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
                     Fieldset::make(__('Transcoding Settings (optional)'))

@@ -767,7 +767,7 @@ class Preferences extends SettingsPage
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.'
                                             )
-                                            ->helperText(__('Automatically trigger failover when a stream\\\'s audio goes silent. Disabled by default.')),
+                                            ->helperText(__('Automatically trigger failover when a stream\'s audio goes silent. Disabled by default.')),
 
                                         Fieldset::make(__('Silence Detection Settings'))
                                             ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))

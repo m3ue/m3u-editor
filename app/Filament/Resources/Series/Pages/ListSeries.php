@@ -145,7 +145,7 @@ class ListSeries extends ListRecords
                     ->schema([
                         Toggle::make('overwrite_existing')
                             ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\\\'t have them.'))
+                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\'t have them.'))
                             ->default(false),
                         Toggle::make('all_playlists')
                             ->label(__('All Playlists'))

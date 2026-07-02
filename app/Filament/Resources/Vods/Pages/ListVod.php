@@ -130,7 +130,7 @@ class ListVod extends ListRecords
                     ->schema([
                         Toggle::make('overwrite_existing')
                             ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\\\'t have them.'))
+                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\'t have them.'))
                             ->default(false),
                         Select::make('playlist')
                             ->label(__('Playlist'))

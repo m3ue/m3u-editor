@@ -826,7 +826,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-calendar')
                     ->modalIcon('heroicon-o-calendar')
-                    ->modalDescription(__('Don\\\'t map EPG to selected channels when running EPG mapping jobs.'))
+                    ->modalDescription(__('Don\'t map EPG to selected channels when running EPG mapping jobs.'))
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('set-aed-profile')
                     ->label(__('Set AED Profile'))
@@ -1152,7 +1152,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->requiresConfirmation()
                     ->icon('heroicon-o-arrows-pointing-in')
                     ->modalIcon('heroicon-o-arrows-pointing-in')
-                    ->modalDescription(__('Don\\\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
+                    ->modalDescription(__('Don\'t allow merging for selected channels when running "Merge Same ID" jobs.'))
                     ->modalSubmitActionLabel(__('Disable now')),
                 BulkAction::make('failover')
                     ->label(__('Add as failover'))
