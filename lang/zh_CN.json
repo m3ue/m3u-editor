@@ -932,7 +932,7 @@
     "Enter Token Name": "输入令牌名称",
     "Enter words, symbols or prefixes to remove. Press Enter after each pattern.": "输入要删除的单词、符号或前缀。每个模式输入后按回车键。",
     "Enter your TMDB API Key (v3 auth)": "输入您的 TMDB API 密钥 (v3 认证)",
-    "Entered your desired locale - if you\\'re not sure what to put here, look at your EPG source. If you see entries like \"CHANNEL.en\", then \"en\" would be a good choice if you prefer english. This is used when mapping the EPG to a playlist. If the EPG has multiple locales, this will be used as the preferred locale when a direct match is not found.": "输入您所在的区域。如果不确定，请查看您的 EPG 源。如果您看到类似“CHANNEL.en”的条目，且您偏好英语，那么“en”是一个好选择。这用于将 EPG 映射到播放列表，当 EPG 包含多个区域设置且找不到直接匹配项时，将以此作为首选。",
+    "Enter your desired locale - if you're not sure what to put here, look at your EPG source. If you see entries like \"CHANNEL.en\", then \"en\" would be a good choice if you prefer English. This is used when mapping the EPG to a playlist. If the EPG has multiple locales, this will be used as the preferred locale when a direct match is not found.": "输入您所在的区域。如果不确定，请查看您的 EPG 源。如果您看到类似“CHANNEL.en”的条目，且您偏好英语，那么“en”是一个好选择。这用于将 EPG 映射到播放列表，当 EPG 包含多个区域设置且找不到直接匹配项时，将以此作为首选。",
     "Ep #": "剧集编号",
     "EPG": "EPG",
     "EPG Cache is being generated": "正在生成 EPG 缓存",
