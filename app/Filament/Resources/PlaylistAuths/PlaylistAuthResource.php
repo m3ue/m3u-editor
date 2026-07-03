@@ -230,7 +230,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->columnSpan(1),
                         ]),
                     Grid::make()
-                        ->columns(6)
+                        ->columns(2)
                         ->schema([
                             TextInput::make('max_connections')
                                 ->label(__('Max Connections'))
@@ -241,8 +241,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->helperText(__('Maximum number of concurrent streams for this auth user.'))
                                 ->numeric()
                                 ->minValue(1)
-                                ->nullable()
-                                ->columnSpan(1),
+                                ->nullable(),
                             Toggle::make('stop_oldest_on_limit')
                                 ->label(__('Stop Oldest Stream on Limit'))
                                 ->inline(false)
@@ -251,18 +250,17 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
                                 )
                                 ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
-                                ->nullable()
-                                ->columnSpan(2),
+                                ->nullable(),
                             Toggle::make('request_enabled')
                                 ->label(__('Enable Content Requests'))
                                 ->inline(false)
+                                ->live()
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
                                     tooltip: __('Allow this guest to request content when the assigned playlist and ARR integration also allow guest requests.')
                                 )
                                 ->helperText(__('Controls access to content requests for this auth user.'))
-                                ->default(false)
-                                ->columnSpan(1),
+                                ->default(false),
                             Toggle::make('auto_approve_requests')
                                 ->label(__('Auto-approve Content Requests'))
                                 ->inline(false)
@@ -271,8 +269,8 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     tooltip: __('When enabled, content requests from this guest are sent directly to Sonarr/Radarr. When disabled, requests are held for admin approval in the Download Queue.')
                                 )
                                 ->helperText(__('Disable to require admin approval before media is added to Sonarr/Radarr.'))
-                                ->default(false)
-                                ->columnSpan(2),
+                                ->hidden(fn ($get) => ! $get('request_enabled'))
+                                ->default(false),
                         ]),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
