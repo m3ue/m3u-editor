@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Facades\ProxyFacade;
 use App\Models\Epg;
 use Carbon\Carbon;
 use Exception;
@@ -710,10 +711,7 @@ class SchedulesDirectService
 
         // If we have an EPG UUID, use the proxy URL
         if ($epgUuid) {
-            return route('schedules-direct.image.proxy', [
-                'epg' => $epgUuid,
-                'imageHash' => $uri,
-            ]);
+            return ProxyFacade::getBaseUrl().'/schedules-direct/'.$epgUuid.'/image/'.$uri;
         }
 
         // Fallback to direct URL (will require authentication)
