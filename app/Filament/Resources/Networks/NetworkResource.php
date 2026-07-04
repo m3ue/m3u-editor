@@ -253,10 +253,15 @@ class NetworkResource extends Resource implements CopilotResource
                                         ->relationship(
                                             'networkPlaylist',
                                             'name',
-                                            fn (Builder $query) => $query->where('is_network_playlist', true)
+                                            fn (Builder $query) => $query
+                                                ->where('user_id', Auth::id())
+                                                ->where('is_network_playlist', true)
                                         )
+                                        ->searchable()
+                                        ->preload()
                                         ->required()
-                                        ->helperText(__('Assign this network to a playlist for M3U/EPG output. Create one if none exist.'))
+                                        ->helperText(__('Select a network output playlist. Only playlists created for Networks are eligible. New playlists created here are marked for network output.'))
+                                        ->noSearchResultsMessage(__('No network output playlists found. Use the plus button to create one.'))
                                         ->createOptionForm([
                                             TextInput::make('name')
                                                 ->label(__('Playlist Name'))
@@ -426,9 +431,14 @@ class NetworkResource extends Resource implements CopilotResource
                                 ->relationship(
                                     'networkPlaylist',
                                     'name',
-                                    fn (Builder $query) => $query->where('is_network_playlist', true)
+                                    fn (Builder $query) => $query
+                                        ->where('user_id', Auth::id())
+                                        ->where('is_network_playlist', true)
                                 )
-                                ->helperText(__('Assign to a network playlist for M3U/EPG output.'))
+                                ->searchable()
+                                ->preload()
+                                ->helperText(__('Select a network output playlist. Only playlists created for Networks are eligible. New playlists created here are marked for network output.'))
+                                ->noSearchResultsMessage(__('No network output playlists found. Use the plus button to create one.'))
                                 ->createOptionForm([
                                     TextInput::make('name')
                                         ->label(__('Playlist Name'))
