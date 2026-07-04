@@ -93,6 +93,11 @@ class ProcessM3uVodImportChunk implements ShouldQueue
 
                     return $item;
                 })
+                // Deduplicate on (source_id, playlist_id) so PostgreSQL's upsert does not
+                // encounter the same conflict target twice in one statement. This guards
+                // against Xtream providers that return duplicate stream_ids in their catalog.
+                ->unique(fn ($item) => ($item['source_id'] ?? '').($item['playlist_id'] ?? ''))
+                ->values()
                 ->toArray();
 
             // Upsert the channels
