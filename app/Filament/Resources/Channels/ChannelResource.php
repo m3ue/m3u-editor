@@ -158,7 +158,8 @@ class ChannelResource extends Resource implements CopilotResource
             })
             ->modifyQueryUsing(function (Builder $query) {
                 $query->with([
-                    'epgChannel' => fn ($q) => $q->select('id', 'name', 'icon', 'icon_custom'),
+                    'epgChannel' => fn ($q) => $q->select('id', 'epg_id', 'name', 'icon', 'icon_custom')
+                        ->with('epg'),
                     'aedProfile' => fn ($q) => $q->select('id', 'name'),
                     'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort', 'enable_proxy', 'user_id')
                         ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
@@ -358,6 +359,15 @@ class ChannelResource extends Resource implements CopilotResource
                 })
                 ->limit(40)
                 ->sortable(),
+            TextColumn::make('epgChannel.epg.name')
+                ->label(__('EPG Source'))
+                ->toggleable()
+                ->searchable(query: function (Builder $query, string $search): Builder {
+                    return $query->orWhereHas('epgChannel.epg', function (Builder $query) use ($search) {
+                        $query->whereRaw('LOWER(epgs.name) LIKE ?', ['%'.strtolower($search).'%']);
+                    });
+                })
+                ->limit(40),
             TextColumn::make('aedProfile.name')
                 ->label(__('AED Profile'))
                 ->toggleable()
@@ -1587,7 +1597,7 @@ class ChannelResource extends Resource implements CopilotResource
                             ->state(function ($record) {
                                 $when = $record?->stream_stats_probed_at?->diffForHumans();
 
-                                return __('Last probe returned no data — the stream may have been unreachable.')
+                                return __('Last probe returned no data. The stream may have been unreachable.')
                                     .($when ? " ({$when})" : '');
                             })
                             ->visible(fn ($record) => self::resolveTechnicalDetailsState($record) === 'failed'),
