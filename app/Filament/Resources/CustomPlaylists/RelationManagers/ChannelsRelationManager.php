@@ -188,7 +188,7 @@ class ChannelsRelationManager extends RelationManager
             ->modifyQueryUsing(function (Builder $query) use ($ownerRecord) {
                 $query->with(['tags' => function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
-                }, 'epgChannel.epg', 'playlist'])
+                }, 'epgChannel', 'playlist'])
                     ->withCount(['failovers'])
                     ->where('is_vod', false); // Only show live channels
             })
