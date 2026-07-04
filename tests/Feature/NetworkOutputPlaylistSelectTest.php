@@ -40,7 +40,7 @@ it('preloads eligible network output playlists on the create form', function () 
         ->assertFormFieldExists('network_playlist_id', function (Select $field) use ($eligiblePlaylist, $regularPlaylist, $otherUserPlaylist): bool {
             $encodedOptions = json_encode($field->getOptionsForJs(), JSON_THROW_ON_ERROR);
 
-            Assert::assertStringContainsString('"value":"' . $eligiblePlaylist->getKey() . '"', $encodedOptions);
+            Assert::assertStringContainsString('"value":"'.$eligiblePlaylist->getKey().'"', $encodedOptions);
             Assert::assertStringContainsString($eligiblePlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($regularPlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($otherUserPlaylist->name, $encodedOptions);
@@ -91,7 +91,7 @@ it('scopes network output playlists to the current user on the edit form', funct
         ->assertFormFieldExists('network_playlist_id', function (Select $field) use ($eligiblePlaylist, $regularPlaylist, $otherUserPlaylist): bool {
             $encodedOptions = json_encode($field->getOptionsForJs(), JSON_THROW_ON_ERROR);
 
-            Assert::assertStringContainsString('"value":"' . $eligiblePlaylist->getKey() . '"', $encodedOptions);
+            Assert::assertStringContainsString('"value":"'.$eligiblePlaylist->getKey().'"', $encodedOptions);
             Assert::assertStringContainsString($eligiblePlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($regularPlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($otherUserPlaylist->name, $encodedOptions);
