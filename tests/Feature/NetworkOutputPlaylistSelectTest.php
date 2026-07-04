@@ -1,6 +1,8 @@
 <?php
 
 use App\Filament\Resources\Networks\Pages\CreateNetwork;
+use App\Filament\Resources\Networks\Pages\EditNetwork;
+use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
@@ -38,7 +40,7 @@ it('preloads eligible network output playlists on the create form', function () 
         ->assertFormFieldExists('network_playlist_id', function (Select $field) use ($eligiblePlaylist, $regularPlaylist, $otherUserPlaylist): bool {
             $encodedOptions = json_encode($field->getOptionsForJs(), JSON_THROW_ON_ERROR);
 
-            Assert::assertStringContainsString((string) $eligiblePlaylist->getKey(), $encodedOptions);
+            Assert::assertStringContainsString('"value":"' . $eligiblePlaylist->getKey() . '"', $encodedOptions);
             Assert::assertStringContainsString($eligiblePlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($regularPlaylist->name, $encodedOptions);
             Assert::assertStringNotContainsString($otherUserPlaylist->name, $encodedOptions);
@@ -60,5 +62,40 @@ it('creates and selects a network output playlist from the create form', functio
             Assert::assertSame($this->user->id, $playlist->user_id);
             Assert::assertTrue($playlist->is_network_playlist);
             Assert::assertEquals($playlist->getKey(), $state['network_playlist_id']);
+        });
+});
+
+it('scopes network output playlists to the current user on the edit form', function () {
+    $network = Network::factory()->create([
+        'user_id' => $this->user->id,
+    ]);
+
+    $eligiblePlaylist = Playlist::factory()->create([
+        'name' => 'Network Output',
+        'user_id' => $this->user->id,
+        'is_network_playlist' => true,
+    ]);
+
+    $regularPlaylist = Playlist::factory()->create([
+        'name' => 'Regular Playlist',
+        'user_id' => $this->user->id,
+        'is_network_playlist' => false,
+    ]);
+
+    $otherUserPlaylist = Playlist::factory()->create([
+        'name' => 'Other User Output',
+        'is_network_playlist' => true,
+    ]);
+
+    Livewire::test(EditNetwork::class, ['record' => $network->getKey()])
+        ->assertFormFieldExists('network_playlist_id', function (Select $field) use ($eligiblePlaylist, $regularPlaylist, $otherUserPlaylist): bool {
+            $encodedOptions = json_encode($field->getOptionsForJs(), JSON_THROW_ON_ERROR);
+
+            Assert::assertStringContainsString('"value":"' . $eligiblePlaylist->getKey() . '"', $encodedOptions);
+            Assert::assertStringContainsString($eligiblePlaylist->name, $encodedOptions);
+            Assert::assertStringNotContainsString($regularPlaylist->name, $encodedOptions);
+            Assert::assertStringNotContainsString($otherUserPlaylist->name, $encodedOptions);
+
+            return true;
         });
 });

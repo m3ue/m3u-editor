@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Networks;
 
+use App\Enums\PlaylistChannelId;
 use App\Enums\TranscodeMode;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Concerns\HasCopilotSupport;
@@ -259,7 +260,6 @@ class NetworkResource extends Resource implements CopilotResource
                                         )
                                         ->searchable()
                                         ->preload()
-                                        ->required()
                                         ->helperText(__('Select a network output playlist. Only playlists created for Networks are eligible. New playlists created here are marked for network output.'))
                                         ->noSearchResultsMessage(__('No network output playlists found. Use the plus button to create one.'))
                                         ->createOptionForm([
@@ -274,6 +274,7 @@ class NetworkResource extends Resource implements CopilotResource
                                                 'uuid' => (string) Str::uuid(),
                                                 'user_id' => Auth::id(),
                                                 'is_network_playlist' => true,
+                                                'id_channel_by' => PlaylistChannelId::TvgId,
                                             ]);
 
                                             return $playlist->id;
@@ -451,6 +452,7 @@ class NetworkResource extends Resource implements CopilotResource
                                         'uuid' => (string) Str::uuid(),
                                         'user_id' => Auth::id(),
                                         'is_network_playlist' => true,
+                                        'id_channel_by' => PlaylistChannelId::TvgId,
                                     ]);
 
                                     return $playlist->id;
