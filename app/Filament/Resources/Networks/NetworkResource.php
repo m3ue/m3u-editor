@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Networks;
 
+use App\Enums\PlaylistChannelId;
 use App\Enums\TranscodeMode;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Concerns\HasCopilotSupport;
@@ -253,10 +254,14 @@ class NetworkResource extends Resource implements CopilotResource
                                         ->relationship(
                                             'networkPlaylist',
                                             'name',
-                                            fn (Builder $query) => $query->where('is_network_playlist', true)
+                                            fn (Builder $query) => $query
+                                                ->where('user_id', Auth::id())
+                                                ->where('is_network_playlist', true)
                                         )
-                                        ->required()
-                                        ->helperText(__('Assign this network to a playlist for M3U/EPG output. Create one if none exist.'))
+                                        ->searchable()
+                                        ->preload()
+                                        ->helperText(__('Select a network output playlist. Only playlists created for Networks are eligible. New playlists created here are marked for network output.'))
+                                        ->noSearchResultsMessage(__('No network output playlists found. Use the plus button to create one.'))
                                         ->createOptionForm([
                                             TextInput::make('name')
                                                 ->label(__('Playlist Name'))
@@ -269,6 +274,7 @@ class NetworkResource extends Resource implements CopilotResource
                                                 'uuid' => (string) Str::uuid(),
                                                 'user_id' => Auth::id(),
                                                 'is_network_playlist' => true,
+                                                'id_channel_by' => PlaylistChannelId::TvgId,
                                             ]);
 
                                             return $playlist->id;
@@ -426,9 +432,14 @@ class NetworkResource extends Resource implements CopilotResource
                                 ->relationship(
                                     'networkPlaylist',
                                     'name',
-                                    fn (Builder $query) => $query->where('is_network_playlist', true)
+                                    fn (Builder $query) => $query
+                                        ->where('user_id', Auth::id())
+                                        ->where('is_network_playlist', true)
                                 )
-                                ->helperText(__('Assign to a network playlist for M3U/EPG output.'))
+                                ->searchable()
+                                ->preload()
+                                ->helperText(__('Select a network output playlist. Only playlists created for Networks are eligible. New playlists created here are marked for network output.'))
+                                ->noSearchResultsMessage(__('No network output playlists found. Use the plus button to create one.'))
                                 ->createOptionForm([
                                     TextInput::make('name')
                                         ->label(__('Playlist Name'))
@@ -441,6 +452,7 @@ class NetworkResource extends Resource implements CopilotResource
                                         'uuid' => (string) Str::uuid(),
                                         'user_id' => Auth::id(),
                                         'is_network_playlist' => true,
+                                        'id_channel_by' => PlaylistChannelId::TvgId,
                                     ]);
 
                                     return $playlist->id;
