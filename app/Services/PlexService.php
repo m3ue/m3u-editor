@@ -418,6 +418,45 @@ class PlexService implements MediaServer
         );
     }
 
+    /**
+     * Resolve a Plex audio or subtitle stream ID from a user preference.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    protected function resolvePreferredStreamId(array $metadata, int $streamType, string $preference): ?string
+    {
+        $preference = trim($preference);
+
+        if ($preference === '') {
+            return null;
+        }
+
+        if (ctype_digit($preference)) {
+            return $preference;
+        }
+
+        $normalizedPreference = strtolower($preference);
+        $streams = $metadata['Media'][0]['Part'][0]['Stream'] ?? [];
+
+        foreach ($streams as $stream) {
+            if ((int) ($stream['streamType'] ?? 0) !== $streamType) {
+                continue;
+            }
+
+            foreach (['languageCode', 'language', 'title', 'displayTitle', 'extendedDisplayTitle'] as $key) {
+                $value = strtolower((string) ($stream[$key] ?? ''));
+
+                if ($value === $normalizedPreference || str_contains($value, $normalizedPreference)) {
+                    $id = (string) ($stream['id'] ?? '');
+
+                    return $id !== '' ? $id : null;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public function getDirectStreamUrl(Request $request, string $itemId, string $container = 'ts', array $transcodeOptions = []): string
     {
         try {
@@ -449,6 +488,30 @@ class PlexService implements MediaServer
                         $params['subtitleStreamID'] = $request->input('SubtitleStreamIndex');
                     }
 
+                    if ($request->has('PreferredAudioTrack')) {
+                        $audioStreamId = $this->resolvePreferredStreamId(
+                            $metadata,
+                            2,
+                            (string) $request->input('PreferredAudioTrack')
+                        );
+
+                        if ($audioStreamId !== null) {
+                            $params['audioStreamID'] = $audioStreamId;
+                        }
+                    }
+
+                    if ($request->has('PreferredSubtitleTrack')) {
+                        $subtitleStreamId = $this->resolvePreferredStreamId(
+                            $metadata,
+                            3,
+                            (string) $request->input('PreferredSubtitleTrack')
+                        );
+
+                        if ($subtitleStreamId !== null) {
+                            $params['subtitleStreamID'] = $subtitleStreamId;
+                        }
+                    }
+
                     // If transcode options are provided use Plex's transcode endpoint
                     // UNLESS the caller explicitly requests to skip Plex transcoding via the
                     // 'skip_plex_transcode' flag. This allows direct file access for better
@@ -473,6 +536,8 @@ class PlexService implements MediaServer
                             'videoBitrate' => $videoBitrate,
                             'audioBitrate' => $audioBitrate,
                             'videoResolution' => $resolution,
+                            'audioStreamID' => $params['audioStreamID'] ?? null,
+                            'subtitleStreamID' => $params['subtitleStreamID'] ?? null,
                         ]);
 
                         // Preferred flow: ask Plex's universal decision endpoint for the correct
