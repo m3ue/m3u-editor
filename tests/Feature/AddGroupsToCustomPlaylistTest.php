@@ -1,5 +1,7 @@
 <?php
 
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistUpdated;
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Models\Category;
 use App\Models\Channel;
@@ -8,11 +10,17 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\PlaylistService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
+    Notification::fake();
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
     $this->customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
@@ -252,4 +260,160 @@ it('skips missing group ids gracefully', function () {
     ))->handle();
 
     expect($this->customPlaylist->channels()->count())->toBe(0);
+});
+
+it('only offers eligible unattached VOD groups for auto-sync group options', function () {
+    $liveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Live News',
+        'type' => 'live',
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $liveGroup->id,
+        'is_vod' => false,
+    ]);
+
+    $attachedVodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Already Added VOD',
+        'type' => 'vod',
+    ]);
+    $attachedVodChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $attachedVodGroup->id,
+        'is_vod' => true,
+    ]);
+    $this->customPlaylist->channels()->attach($attachedVodChannel->id);
+
+    $eligibleVodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Eligible VOD',
+        'type' => 'vod',
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $eligibleVodGroup->id,
+        'is_vod' => true,
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'vod_groups');
+
+    expect($options)
+        ->toHaveKey($eligibleVodGroup->id)
+        ->not->toHaveKey($attachedVodGroup->id)
+        ->not->toHaveKey($liveGroup->id);
+});
+
+it('keeps partially attached VOD groups eligible when they still contain unattached VOD channels', function () {
+    $group = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Partially Added VOD',
+        'type' => 'vod',
+    ]);
+
+    $attachedChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $group->id,
+        'is_vod' => true,
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $group->id,
+        'is_vod' => true,
+    ]);
+    $this->customPlaylist->channels()->attach($attachedChannel->id);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'vod_groups');
+
+    expect($options)->toHaveKey($group->id);
+});
+
+it('only offers eligible unattached live groups for auto-sync group options', function () {
+    $attachedLiveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Already Added Live',
+        'type' => 'live',
+    ]);
+    $attachedLiveChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $attachedLiveGroup->id,
+        'is_vod' => false,
+    ]);
+    $this->customPlaylist->channels()->attach($attachedLiveChannel->id);
+
+    $eligibleLiveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Eligible Live',
+        'type' => 'live',
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $eligibleLiveGroup->id,
+        'is_vod' => false,
+    ]);
+
+    $vodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'VOD Movies',
+        'type' => 'vod',
+    ]);
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $vodGroup->id,
+        'is_vod' => true,
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'live_groups');
+
+    expect($options)
+        ->toHaveKey($eligibleLiveGroup->id)
+        ->not->toHaveKey($attachedLiveGroup->id)
+        ->not->toHaveKey($vodGroup->id);
+});
+
+it('only offers eligible unattached series categories for auto-sync group options', function () {
+    $attachedCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Already Added Series',
+    ]);
+    $attachedSeries = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $attachedCategory->id,
+    ]);
+    $this->customPlaylist->series()->attach($attachedSeries->id);
+
+    $eligibleCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Eligible Series',
+    ]);
+    Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $eligibleCategory->id,
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'series_categories');
+
+    expect($options)
+        ->toHaveKey($eligibleCategory->id)
+        ->not->toHaveKey($attachedCategory->id);
 });

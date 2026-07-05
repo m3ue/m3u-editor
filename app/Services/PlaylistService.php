@@ -7,6 +7,7 @@ use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
 use App\Jobs\UnmergeEpisodes;
+use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -876,6 +877,46 @@ class PlaylistService
                 ->required(fn (Get $get) => $get('mode') === 'create')
                 ->visible(fn (Get $get) => $get('playlist') && $get('mode') === 'create'),
         ];
+    }
+
+    /**
+     * Get selectable source groups for auto-sync rules.
+     *
+     * @return array<int, string>
+     */
+    public static function getEligibleAutoSyncGroupOptions(Playlist $playlist, ?int $customPlaylistId, string $type): array
+    {
+        if ($type === 'series_categories') {
+            return Category::query()
+                ->where('playlist_id', $playlist->id)
+                ->when($customPlaylistId, function (Builder $query) use ($customPlaylistId): void {
+                    $query->whereHas('series', function (Builder $query) use ($customPlaylistId): void {
+                        $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
+                            $query->whereKey($customPlaylistId);
+                        });
+                    });
+                })
+                ->orderBy('name')
+                ->pluck('name', 'id')
+                ->toArray();
+        }
+
+        $isVod = $type === 'vod_groups';
+        $channelRelation = $isVod ? 'vod_channels' : 'live_channels';
+
+        return Group::query()
+            ->where('playlist_id', $playlist->id)
+            ->where('type', $isVod ? 'vod' : 'live')
+            ->when($customPlaylistId, function (Builder $query) use ($channelRelation, $customPlaylistId): void {
+                $query->whereHas($channelRelation, function (Builder $query) use ($customPlaylistId): void {
+                    $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
+                        $query->whereKey($customPlaylistId);
+                    });
+                });
+            })
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->toArray();
     }
 
     /**

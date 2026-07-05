@@ -29,7 +29,6 @@ use App\Livewire\PlaylistInfo;
 use App\Livewire\PlaylistM3uUrl;
 use App\Livewire\XtreamApiInfo;
 use App\Livewire\XtreamDnsStatus;
-use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
@@ -45,6 +44,7 @@ use App\Rules\UrlIsAllowed;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
+use App\Services\PlaylistService;
 use App\Services\ProfileService;
 use App\Services\SyncPipelineService;
 use App\Services\XtreamService;
@@ -2615,21 +2615,12 @@ class PlaylistResource extends Resource implements CopilotResource
                                     if (! $record) {
                                         return [];
                                     }
-                                    $type = $get('type') ?? 'live_groups';
-                                    if ($type === 'series_categories') {
-                                        return Category::where('playlist_id', $record->id)
-                                            ->orderBy('name')
-                                            ->pluck('name', 'id')
-                                            ->toArray();
-                                    }
 
-                                    $groupType = $type === 'vod_groups' ? 'vod' : 'live';
-
-                                    return Group::where('playlist_id', $record->id)
-                                        ->where('type', $groupType)
-                                        ->orderBy('name')
-                                        ->pluck('name', 'id')
-                                        ->toArray();
+                                    return PlaylistService::getEligibleAutoSyncGroupOptions(
+                                        playlist: $record,
+                                        customPlaylistId: $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
+                                        type: $get('type') ?? 'live_groups',
+                                    );
                                 })
                                 ->multiple()
                                 ->searchable()
