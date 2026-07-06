@@ -420,6 +420,17 @@ class VodResource extends Resource implements CopilotResource
                 })
                 ->toggleable(isToggledHiddenByDefault: true),
 
+            TextColumn::make('release_date')
+                ->label(__('Release Date'))
+                ->getStateUsing(fn (Channel $record): string => static::getVodReleaseDate($record))
+                ->sortable(
+                    query: fn (Builder $query, string $direction): Builder => static::sortByVodReleaseDate(
+                        $query,
+                        $direction
+                    )
+                )
+                ->toggleable(),
+
             TextColumn::make('created_at')
                 ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                 ->sortable()
@@ -2202,6 +2213,57 @@ class VodResource extends Resource implements CopilotResource
      * @throws QueryException
      * @throws Exception
      */
+    private static function getVodReleaseDate(Channel $record): string
+    {
+        return (string) (
+            $record->info['release_date']
+            ?? $record->info['releasedate']
+            ?? $record->movie_data['release_date']
+            ?? $record->movie_data['releasedate']
+            ?? $record->year
+            ?? ''
+        );
+    }
+
+    private static function sortByVodReleaseDate(Builder $query, string $direction): Builder
+    {
+        $direction = strtolower($direction) === 'desc' ? 'desc' : 'asc';
+        $driver = $query->getConnection()->getDriverName();
+
+        $expressions = match ($driver) {
+            'pgsql' => [
+                'NULLIF(channels.info->>\'release_date\', \'\')',
+                'NULLIF(channels.info->>\'releasedate\', \'\')',
+                'NULLIF(channels.movie_data->>\'release_date\', \'\')',
+                'NULLIF(channels.movie_data->>\'releasedate\', \'\')',
+                'channels.year::text',
+                "''",
+            ],
+            'mysql', 'mariadb' => [
+                'NULLIF(JSON_UNQUOTE(JSON_EXTRACT(channels.info, \'$.release_date\')), \'\')',
+                'NULLIF(JSON_UNQUOTE(JSON_EXTRACT(channels.info, \'$.releasedate\')), \'\')',
+                'NULLIF(JSON_UNQUOTE(JSON_EXTRACT(channels.movie_data, \'$.release_date\')), \'\')',
+                'NULLIF(JSON_UNQUOTE(JSON_EXTRACT(channels.movie_data, \'$.releasedate\')), \'\')',
+                'CAST(channels.year AS CHAR)',
+                "''",
+            ],
+            default => [
+                'NULLIF(json_extract(channels.info, \'$.release_date\'), \'\')',
+                'NULLIF(json_extract(channels.info, \'$.releasedate\'), \'\')',
+                'NULLIF(json_extract(channels.movie_data, \'$.release_date\'), \'\')',
+                'NULLIF(json_extract(channels.movie_data, \'$.releasedate\'), \'\')',
+                'CAST(channels.year AS TEXT)',
+                "''",
+            ],
+        };
+        $expression = 'COALESCE('.implode(', ', $expressions).')';
+
+        return $query
+            ->orderBy(DB::raw($expression), $direction)
+            ->orderBy('channels.title', $direction)
+            ->orderBy('channels.id', $direction);
+    }
+
     public static function createCustomChannel(array $data, string $model): Model
     {
         $data['user_id'] = auth()->id();
