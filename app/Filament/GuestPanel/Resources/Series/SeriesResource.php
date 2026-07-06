@@ -29,6 +29,11 @@ class SeriesResource extends Resource
 
     protected static ?string $slug = 'series';
 
+    public static function canViewAny(): bool
+    {
+        return true;
+    }
+
     public static function getNavigationBadge(): ?string
     {
         $playlist = PlaylistFacade::resolvePlaylistByUuid(static::getCurrentUuid());
@@ -169,7 +174,8 @@ class SeriesResource extends Resource
                     ->openUrlInNewTab()
                     ->icon('heroicon-s-play'),
                 Tables\Columns\TextColumn::make('release_date')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('rating')
                     ->badge()
                     ->color('success')

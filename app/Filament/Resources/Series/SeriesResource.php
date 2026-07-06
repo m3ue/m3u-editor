@@ -259,7 +259,8 @@ class SeriesResource extends Resource implements CopilotResource
                 ->openUrlInNewTab()
                 ->icon('heroicon-s-play'),
             TextColumn::make('release_date')
-                ->searchable(),
+                ->searchable()
+                ->sortable(),
             TextColumn::make('rating')
                 ->badge()
                 ->color('success')
