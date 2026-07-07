@@ -1283,23 +1283,30 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                 TextColumn::make('host')
                     ->label(__('Server'))
-                    ->formatStateUsing(fn ($record): string => match ($record->type) {
-                        'local' => 'Local filesystem',
-                        'aiostreams' => $record->manifest_url
-                            ? parse_url($record->manifest_url, PHP_URL_HOST) ?? 'AIOStreams'
-                            : 'Not configured',
-                        'webdav' => "{$record->host}:{$record->port}",
-                        default => "{$record->host}:{$record->port}",
+                    ->getStateUsing(function ($record): string {
+                        if ($record->type === 'local') {
+                            return 'Local filesystem';
+                        }
+                        if ($record->isAioStreams()) {
+                            if (! $record->manifest_url) {
+                                return 'Not configured';
+                            }
+                            $scheme = parse_url($record->manifest_url, PHP_URL_SCHEME) ?? 'https';
+                            $host = parse_url($record->manifest_url, PHP_URL_HOST) ?? '';
+                            $port = parse_url($record->manifest_url, PHP_URL_PORT);
+
+                            return $scheme.'://'.$host.($port ? ':'.$port : '');
+                        }
+
+                        return "{$record->host}:{$record->port}";
                     })
                     ->toggleable(),
 
                 TextColumn::make('selected_library_ids')
                     ->label(__('Libraries'))
-                    ->formatStateUsing(function ($record, $state): string {
+                    ->getStateUsing(function ($record): string {
                         if ($record->isAioStreams()) {
-                            $catalogs = $record->aiostreams_catalogs ?? [];
-
-                            return empty($catalogs) ? 'Not configured' : count($catalogs).' catalogs';
+                            return 'Movies · TV Shows';
                         }
 
                         $available = $record->available_libraries ?? [];
@@ -1308,8 +1315,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             return 'Not configured';
                         }
 
+                        $selected = $record->selected_library_ids;
+                        $selectedId = is_array($selected) ? ($selected[0] ?? '') : (string) $selected;
+
                         return collect($available)
-                            ->where('id', '=', (string) $state)->first()['name'] ?? 'N/A';
+                            ->where('id', '=', $selectedId)->first()['name'] ?? 'N/A';
                     })
                     ->toggleable()
                     ->badge()
@@ -1329,15 +1339,15 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                 TextColumn::make('channels_count')
                     ->label(__('Movies'))
-                    ->state(fn ($record) => $record->channels_count ?? 0)
-                    ->description(fn ($record): string => 'Active: '.($record->enabled_channels_count ?? 0))
+                    ->state(fn ($record) => $record->isAioStreams() ? '∞' : ($record->channels_count ?? 0))
+                    ->description(fn ($record): ?string => $record->isAioStreams() ? null : 'Active: '.($record->enabled_channels_count ?? 0))
                     ->toggleable()
                     ->sortable(),
 
                 TextColumn::make('series_count')
                     ->label(__('Series'))
-                    ->state(fn ($record) => $record->series_count ?? 0)
-                    ->description(fn ($record): string => 'Active: '.($record->enabled_series_count ?? 0))
+                    ->state(fn ($record) => $record->isAioStreams() ? '∞' : ($record->series_count ?? 0))
+                    ->description(fn ($record): ?string => $record->isAioStreams() ? null : 'Active: '.($record->enabled_series_count ?? 0))
                     ->toggleable()
                     ->sortable(),
 
