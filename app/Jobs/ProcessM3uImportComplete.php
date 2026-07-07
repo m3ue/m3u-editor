@@ -22,6 +22,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class ProcessM3uImportComplete implements ShouldQueue
 {
@@ -300,7 +301,22 @@ class ProcessM3uImportComplete implements ShouldQueue
                         'user_agent' => $playlist->user_agent,
                         'disable_ssl_verification' => $playlist->disable_ssl_verification,
                     ]);
-                    $msg = "\"{$playlist->name}\" EPG was created and will sync shortly.";
+
+                    // Create a mapping too so that once sync is complete, the EPG will be mapped to the playlist channels
+                    $epg->epgMaps()->create([
+                        'name' => $playlist->name.' EPG -> '.$playlist->name.' mapping',
+                        'playlist_id' => $playlist->id,
+                        'user_id' => $user->id,
+                        'uuid' => Str::orderedUuid()->toString(),
+                        'status' => Status::Completed, // Mark as completed so that the EPG sync can run and map to the playlist channels once EPG sync completes
+                        'progress' => 100,
+                        'processing' => false,
+                        'override' => false,
+                        'recurring' => true, // Flag as recurring so that the EPG will be mapped to the playlist channels on every EPG sync
+                        'mapped_at' => now(),
+                    ]);
+
+                    $msg = "\"{$playlist->name}\" EPG was created and will sync and map shortly.";
                     Notification::make()
                         ->success()
                         ->title('EPG created for Playlist')
