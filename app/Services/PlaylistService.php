@@ -890,10 +890,13 @@ class PlaylistService
             return Category::query()
                 ->where('playlist_id', $playlist->id)
                 ->when($customPlaylistId, function (Builder $query) use ($customPlaylistId): void {
-                    $query->whereHas('series', function (Builder $query) use ($customPlaylistId): void {
-                        $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
-                            $query->whereKey($customPlaylistId);
-                        });
+                    $query->where(function (Builder $query) use ($customPlaylistId): void {
+                        $query->whereDoesntHave('series')
+                            ->orWhereHas('series', function (Builder $query) use ($customPlaylistId): void {
+                                $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
+                                    $query->whereKey($customPlaylistId);
+                                });
+                            });
                     });
                 })
                 ->orderBy('name')
@@ -908,10 +911,13 @@ class PlaylistService
             ->where('playlist_id', $playlist->id)
             ->where('type', $isVod ? 'vod' : 'live')
             ->when($customPlaylistId, function (Builder $query) use ($channelRelation, $customPlaylistId): void {
-                $query->whereHas($channelRelation, function (Builder $query) use ($customPlaylistId): void {
-                    $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
-                        $query->whereKey($customPlaylistId);
-                    });
+                $query->where(function (Builder $query) use ($channelRelation, $customPlaylistId): void {
+                    $query->whereDoesntHave($channelRelation)
+                        ->orWhereHas($channelRelation, function (Builder $query) use ($customPlaylistId): void {
+                            $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
+                                $query->whereKey($customPlaylistId);
+                            });
+                        });
                 });
             })
             ->orderBy('name')

@@ -2641,6 +2641,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     $set('mode', 'original');
                                     $set('category', null);
                                     $set('new_category', null);
+                                    $set('groups', []);
                                 })
                                 ->columnSpan(3),
                             Select::make('sync_mode')

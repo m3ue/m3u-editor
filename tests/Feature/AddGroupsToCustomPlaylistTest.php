@@ -417,3 +417,41 @@ it('only offers eligible unattached series categories for auto-sync group option
         ->toHaveKey($eligibleCategory->id)
         ->not->toHaveKey($attachedCategory->id);
 });
+
+it('includes empty VOD groups in auto-sync options so they can be targeted before channels are synced', function () {
+    $emptyVodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'PPV Events',
+        'type' => 'vod',
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'vod_groups');
+
+    expect($options)->toHaveKey($emptyVodGroup->id);
+});
+
+it('includes empty live groups in auto-sync options so they can be targeted before channels are synced', function () {
+    $emptyLiveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Sports Events',
+        'type' => 'live',
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'live_groups');
+
+    expect($options)->toHaveKey($emptyLiveGroup->id);
+});
+
+it('includes empty series categories in auto-sync options so they can be targeted before series are synced', function () {
+    $emptyCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Upcoming Shows',
+    ]);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions($this->playlist, $this->customPlaylist->id, 'series_categories');
+
+    expect($options)->toHaveKey($emptyCategory->id);
+});
