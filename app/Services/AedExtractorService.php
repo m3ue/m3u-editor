@@ -55,9 +55,12 @@ class AedExtractorService
      * Build the title for a pre-event padding slot.
      * Supports {time_until} (e.g. "2h 30m"), {title}, {channel}, {date}, {time}.
      */
-    public function preEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event, Carbon $slotStart): string
+    public function preEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event, Carbon $slotStart): ?string
     {
-        $format = $profile->pre_event_format ?: 'Live in {time_until}: {title}';
+        if (empty($profile->pre_event_format)) {
+            return null;
+        }
+
         $timeUntil = $this->formatTimeUntil($slotStart, $event->start);
 
         return str_replace(
@@ -69,17 +72,20 @@ class AedExtractorService
                 $event->start?->format('M j, Y') ?? '',
                 $event->start?->format('g:i A') ?? '',
             ],
-            $format
+            $profile->pre_event_format
         );
     }
 
     /**
      * Build the title for a post-event padding slot.
      * Supports {title}, {channel}, {date}, {time}.
+     * Returns null when post_event_format is not configured (no post-event slots emitted).
      */
-    public function postEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event): string
+    public function postEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event): ?string
     {
-        $format = $profile->post_event_format ?: 'Signing Off';
+        if (empty($profile->post_event_format)) {
+            return null;
+        }
 
         return str_replace(
             ['{title}', '{channel}', '{date}', '{time}'],
@@ -89,7 +95,7 @@ class AedExtractorService
                 $event->start?->format('M j, Y') ?? '',
                 $event->start?->format('g:i A') ?? '',
             ],
-            $format
+            $profile->post_event_format
         );
     }
 
