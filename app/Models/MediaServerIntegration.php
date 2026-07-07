@@ -73,6 +73,8 @@ class MediaServerIntegration extends Model
         'plex_management_enabled' => 'boolean',
         'plex_dvr_tuners' => 'array',
         'aiostreams_catalogs' => 'array',
+        'aiostreams_enable_all_catalogs' => 'boolean',
+        'aiostreams_selected_catalog_ids' => 'array',
     ];
 
     /**

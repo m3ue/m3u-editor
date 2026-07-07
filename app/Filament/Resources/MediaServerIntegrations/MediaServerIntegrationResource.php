@@ -64,7 +64,6 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 
@@ -394,21 +393,15 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                         Grid::make(2)->schema([
                             Toggle::make('import_movies')
-                                ->label(fn (callable $get) => $get('type') === 'aiostreams' ? __('Include Movie Catalogs') : __('Import Movies'))
-                                ->helperText(fn (callable $get) => $get('type') === 'aiostreams'
-                                    ? __('Expose movie catalogs from AIOStreams to users.')
-                                    : __('Sync movies as VOD channels')
-                                )
+                                ->label(__('Import Movies'))
+                                ->helperText(__('Sync movies as VOD channels'))
                                 ->default(true),
 
                             Toggle::make('import_series')
-                                ->label(fn (callable $get) => $get('type') === 'aiostreams' ? __('Include Series Catalogs') : __('Import Series'))
-                                ->helperText(fn (callable $get) => $get('type') === 'aiostreams'
-                                    ? __('Expose TV series catalogs from AIOStreams to users.')
-                                    : __('Sync TV series with episodes')
-                                )
+                                ->label(__('Import Series'))
+                                ->helperText(__('Sync TV series with episodes'))
                                 ->default(true),
-                        ])->visible(fn (callable $get) => $get('enabled')),
+                        ])->visible(fn (callable $get) => $get('enabled') && $get('type') !== 'aiostreams'),
 
                         Select::make('genre_handling')
                             ->label(__('Genre Handling'))
@@ -617,37 +610,62 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->schema([
                         Hidden::make('aiostreams_catalogs'),
 
-                        Placeholder::make('aiostreams_catalog_list')
+                        Placeholder::make('aiostreams_catalog_instructions')
                             ->label('')
-                            ->content(function ($record, callable $get) {
-                                $catalogs = $get('aiostreams_catalogs')
-                                    ?? $record?->aiostreams_catalogs
-                                    ?? [];
+                            ->content(function (callable $get) {
+                                $catalogs = $get('aiostreams_catalogs') ?? [];
                                 if (empty($catalogs)) {
                                     return new HtmlString(
-                                        '<p class="text-sm text-gray-500 dark:text-gray-400">No catalogs loaded yet — click "Sync Now" to connect.</p>'
+                                        '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                        '<p class="font-medium text-warning-600 dark:text-warning-400">No catalogs discovered yet.</p>'.
+                                        '<p class="mt-1">Click "Fetch Catalogs" above to discover available catalogs.</p>'.
+                                        '</div>'
                                     );
                                 }
+                                $total = count($catalogs);
+                                $enableAll = $get('aiostreams_enable_all_catalogs');
+                                $selected = $enableAll ? $total : count($get('aiostreams_selected_catalog_ids') ?? []);
 
-                                $grouped = collect($catalogs)->groupBy('type');
-                                $html = '<div class="space-y-3">';
-                                foreach ($grouped as $type => $items) {
-                                    $typeLabel = $type === 'series' ? 'Series' : 'Movie';
-                                    $color = $type === 'series' ? 'info' : 'success';
-                                    $html .= '<div>';
-                                    $html .= '<p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">'.$typeLabel.'</p>';
-                                    $html .= '<div class="flex flex-wrap gap-2">';
-                                    foreach ($items as $cat) {
-                                        $html .= Blade::render(
-                                            '<x-filament::badge color="'.$color.'">'.e($cat['name']).'</x-filament::badge>'
-                                        );
-                                    }
-                                    $html .= '</div></div>';
-                                }
-                                $html .= '</div>';
-
-                                return new HtmlString($html);
+                                return new HtmlString(
+                                    '<div class="text-sm text-gray-500 dark:text-gray-400">'.
+                                    "<p>Found <strong>{$total}</strong> catalogs. <strong>{$selected}</strong> enabled for users.</p>".
+                                    '<p class="mt-1">Select the catalogs you want to expose to users.</p>'.
+                                    '</div>'
+                                );
                             }),
+
+                        Toggle::make('aiostreams_enable_all_catalogs')
+                            ->label(__('Enable All Catalogs'))
+                            ->helperText(__('When on, all current and future catalogs are automatically available. Turn off to select specific catalogs manually.'))
+                            ->default(true)
+                            ->live()
+                            ->afterStateUpdated(function (bool $state, callable $get, callable $set, $record) {
+                                if (! $state) {
+                                    $catalogs = $get('aiostreams_catalogs') ?? $record?->aiostreams_catalogs ?? [];
+                                    $set('aiostreams_selected_catalog_ids', collect($catalogs)->pluck('id')->all());
+                                } else {
+                                    $set('aiostreams_selected_catalog_ids', null);
+                                }
+                            })
+                            ->visible(fn (callable $get) => ! empty($get('aiostreams_catalogs'))),
+
+                        CheckboxList::make('aiostreams_selected_catalog_ids')
+                            ->label(__('Catalogs to Expose'))
+                            ->options(function (callable $get) {
+                                $catalogs = $get('aiostreams_catalogs') ?? [];
+                                $options = [];
+                                foreach ($catalogs as $catalog) {
+                                    $typeLabel = $catalog['type'] === 'series' ? 'Series' : 'Movie';
+                                    $options[$catalog['id']] = "{$catalog['name']} [{$typeLabel}]";
+                                }
+
+                                return $options;
+                            })
+                            ->columns(2)
+                            ->bulkToggleable()
+                            ->live()
+                            ->dehydrated(true)
+                            ->visible(fn (callable $get) => ! empty($get('aiostreams_catalogs')) && ! $get('aiostreams_enable_all_catalogs')),
                     ])
                     ->visible(fn (callable $get) => $get('type') === 'aiostreams')
                     ->collapsed(false),
@@ -1288,7 +1306,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'plex' => 'warning',
                         'local' => 'gray',
                         'webdav' => 'primary',
-                        'aiostreams' => 'danger',
+                        'aiostreams' => 'gray',
                         default => 'gray',
                     }),
 
@@ -1317,7 +1335,15 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->label(__('Libraries'))
                     ->getStateUsing(function ($record): string {
                         if ($record->isAioStreams()) {
-                            return 'Movies · TV Shows';
+                            $catalogs = $record->aiostreams_catalogs ?? [];
+                            if (empty($catalogs)) {
+                                return 'Not configured';
+                            }
+                            $total = count($catalogs);
+                            $enableAll = $record->aiostreams_enable_all_catalogs;
+                            $selected = $enableAll ? $total : count($record->aiostreams_selected_catalog_ids ?? []);
+
+                            return "{$selected} of {$total} catalogs";
                         }
 
                         $available = $record->available_libraries ?? [];
@@ -2038,12 +2064,19 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         $result = $service->testConnection();
                         $catalogs = $tempIntegration->aiostreams_catalogs;
 
-                        // Push into form state so the placeholder re-renders immediately
+                        // Push catalogs into form state so the checklist re-renders immediately
                         $set('aiostreams_catalogs', $catalogs);
+
+                        // Auto-select any catalog IDs not already in the selection
+                        $newIds = collect($catalogs)->pluck('id')->all();
+                        $existingSelected = $get('aiostreams_selected_catalog_ids') ?? [];
+                        $merged = array_values(array_unique(array_merge($existingSelected, $newIds)));
+                        $set('aiostreams_selected_catalog_ids', $merged);
 
                         // Also persist when editing an existing record
                         if ($livewire->record) {
                             $livewire->record->aiostreams_catalogs = $catalogs;
+                            $livewire->record->aiostreams_selected_catalog_ids = $merged;
                             $livewire->record->save();
                         }
 

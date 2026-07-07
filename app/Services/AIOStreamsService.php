@@ -75,6 +75,16 @@ class AIOStreamsService implements MediaServer
         $this->integration->aiostreams_catalogs = $catalogs;
         $this->integration->aiostreams_logo = $manifest['logo'] ?? null;
 
+        // Prune any selected catalog IDs that no longer exist in the manifest.
+        if (! $this->integration->aiostreams_enable_all_catalogs) {
+            $validIds = collect($catalogs)->pluck('id')->flip()->all();
+            $pruned = collect($this->integration->aiostreams_selected_catalog_ids ?? [])
+                ->filter(fn (string $id) => isset($validIds[$id]))
+                ->values()
+                ->all();
+            $this->integration->aiostreams_selected_catalog_ids = $pruned;
+        }
+
         return [
             'success' => true,
             'message' => "Connected to {$manifest['name']} v{$manifest['version']}. Found ".count($catalogs).' catalogs.',
