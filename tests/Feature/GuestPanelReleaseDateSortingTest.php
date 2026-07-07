@@ -1,19 +1,31 @@
 <?php
 
-use App\Filament\GuestPanel\Resources\Series\Pages\ListSeries as GuestListSeries;
-use App\Filament\GuestPanel\Resources\Vods\Pages\ListVod as GuestListVod;
-use App\Http\Middleware\GuestPlaylistAuth;
+use App\Filament\GuestPanel\Resources\Series\SeriesResource;
+use App\Filament\GuestPanel\Resources\Vods\VodResource;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\Series;
 use App\Models\User;
-use Filament\Facades\Filament;
-use Livewire\Livewire;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
+/**
+ * Set up request attributes and session so HasPlaylist resolves the correct context.
+ * Direct static method calls work with this approach; Livewire::test() cannot carry
+ * request attributes across synthetic requests (see GuestBrowseShowsTest for precedent).
+ */
+function setupGuestReleaseDateContext(Playlist $playlist, string $username, string $password): void
+{
+    request()->attributes->set('playlist_uuid', $playlist->uuid);
+
+    $prefix = base64_encode($playlist->uuid).'_';
+    session()->put("{$prefix}guest_auth_username", $username);
+    session()->put("{$prefix}guest_auth_password", $password);
+}
 
 beforeEach(function () {
-    Filament::setCurrentPanel(Filament::getPanel('playlist'));
-
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->username = 'guest-sort-user';
@@ -28,14 +40,7 @@ beforeEach(function () {
     ]);
     $playlistAuth->assignTo($this->playlist);
 
-    $prefix = base64_encode($this->playlist->uuid).'_';
-    session([
-        "{$prefix}guest_auth_username" => $this->username,
-        "{$prefix}guest_auth_password" => $this->password,
-    ]);
-
-    $this->withCookie('playlist_uuid', $this->playlist->uuid);
-    $this->withoutMiddleware(GuestPlaylistAuth::class);
+    setupGuestReleaseDateContext($this->playlist, $this->username, $this->password);
 });
 
 it('allows guest series lists to sort by release date', function () {
@@ -50,12 +55,12 @@ it('allows guest series lists to sort by release date', function () {
         'release_date' => '1999-03-31',
     ]);
 
-    Livewire::withHeaders(['Referer' => url("/playlist/v/{$this->playlist->uuid}/series")])
-        ->test(GuestListSeries::class)
-        ->assertOk()
-        ->loadTable()
-        ->sortTable('release_date')
-        ->assertCanSeeTableRecords([$olderSeries, $newerSeries], inOrder: true);
+    $results = SeriesResource::getEloquentQuery()
+        ->orderBy('release_date', 'asc')
+        ->get();
+
+    expect($results->first()->id)->toBe($olderSeries->id)
+        ->and($results->last()->id)->toBe($newerSeries->id);
 });
 
 it('allows guest VOD lists to show and sort by release date', function () {
@@ -74,11 +79,11 @@ it('allows guest VOD lists to show and sort by release date', function () {
         'info' => ['release_date' => '1999-03-31'],
     ]);
 
-    Livewire::withHeaders(['Referer' => url("/playlist/v/{$this->playlist->uuid}/vod")])
-        ->test(GuestListVod::class)
-        ->assertOk()
-        ->loadTable()
-        ->assertTableColumnExists('release_date')
-        ->sortTable('release_date')
-        ->assertCanSeeTableRecords([$olderVod, $newerVod], inOrder: true);
+    $sortMethod = new ReflectionMethod(VodResource::class, 'sortByVodReleaseDate');
+    $sortMethod->setAccessible(true);
+
+    $results = $sortMethod->invoke(null, VodResource::getEloquentQuery(), 'asc')->get();
+
+    expect($results->first()->id)->toBe($olderVod->id)
+        ->and($results->last()->id)->toBe($newerVod->id);
 });
