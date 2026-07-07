@@ -64,6 +64,7 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 
@@ -155,7 +156,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                 $tab->visible(fn (Get $get): bool => $get('type') === 'plex');
             }
 
-            if ($section === 'Status') {
+            if (in_array($section, ['Status', 'Networks'])) {
                 $tab->visible(fn (Get $get): bool => $get('type') !== 'aiostreams');
             }
 
@@ -393,13 +394,19 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                         Grid::make(2)->schema([
                             Toggle::make('import_movies')
-                                ->label(__('Import Movies'))
-                                ->helperText(__('Sync movies as VOD channels'))
+                                ->label(fn (callable $get) => $get('type') === 'aiostreams' ? __('Include Movie Catalogs') : __('Import Movies'))
+                                ->helperText(fn (callable $get) => $get('type') === 'aiostreams'
+                                    ? __('Expose movie catalogs from AIOStreams to users.')
+                                    : __('Sync movies as VOD channels')
+                                )
                                 ->default(true),
 
                             Toggle::make('import_series')
-                                ->label(__('Import Series'))
-                                ->helperText(__('Sync TV series with episodes'))
+                                ->label(fn (callable $get) => $get('type') === 'aiostreams' ? __('Include Series Catalogs') : __('Import Series'))
+                                ->helperText(fn (callable $get) => $get('type') === 'aiostreams'
+                                    ? __('Expose TV series catalogs from AIOStreams to users.')
+                                    : __('Sync TV series with episodes')
+                                )
                                 ->default(true),
                         ])->visible(fn (callable $get) => $get('enabled')),
 
@@ -412,7 +419,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->default('primary')
                             ->helperText(__('How to handle content with multiple genres'))
                             ->native(false)
-                            ->visible(fn (callable $get) => $get('enabled')),
+                            ->visible(fn (callable $get) => $get('enabled') && $get('type') !== 'aiostreams'),
                     ]),
 
                 // Local Media Configuration Section
@@ -618,18 +625,22 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     ?? [];
                                 if (empty($catalogs)) {
                                     return new HtmlString(
-                                        '<p class="text-sm text-gray-500 dark:text-gray-400">No catalogs loaded yet — click "Fetch Catalogs" to connect.</p>'
+                                        '<p class="text-sm text-gray-500 dark:text-gray-400">No catalogs loaded yet — click "Sync Now" to connect.</p>'
                                     );
                                 }
 
                                 $grouped = collect($catalogs)->groupBy('type');
                                 $html = '<div class="space-y-3">';
                                 foreach ($grouped as $type => $items) {
+                                    $typeLabel = $type === 'series' ? 'Series' : 'Movie';
+                                    $color = $type === 'series' ? 'info' : 'success';
                                     $html .= '<div>';
-                                    $html .= '<p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">'.ucfirst($type).'</p>';
+                                    $html .= '<p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">'.$typeLabel.'</p>';
                                     $html .= '<div class="flex flex-wrap gap-2">';
                                     foreach ($items as $cat) {
-                                        $html .= '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200">'.e($cat['name']).'</span>';
+                                        $html .= Blade::render(
+                                            '<x-filament::badge color="'.$color.'">'.e($cat['name']).'</x-filament::badge>'
+                                        );
                                     }
                                     $html .= '</div></div>';
                                 }

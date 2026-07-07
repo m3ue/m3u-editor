@@ -2559,7 +2559,7 @@ class XtreamApiController extends Controller
                     'id' => $integration->id,
                     'name' => $integration->name,
                     'logo' => $integration->aiostreams_logo,
-                    'catalogs' => $integration->aiostreams_catalogs ?? [],
+                    'catalogs' => $this->filterAIOStreamsCatalogs($integration),
                 ],
             ];
         }
@@ -2582,9 +2582,31 @@ class XtreamApiController extends Controller
                 'id' => $integration->id,
                 'name' => $integration->name,
                 'logo' => $integration->aiostreams_logo,
-                'catalogs' => $integration->aiostreams_catalogs ?? [],
+                'catalogs' => $this->filterAIOStreamsCatalogs($integration),
             ],
         ];
+    }
+
+    /**
+     * Filter AIOStreams catalogs by the integration's import_movies / import_series flags.
+     *
+     * @return array<int, array{id: string, type: string, name: string, searchable: bool}>
+     */
+    private function filterAIOStreamsCatalogs($integration): array
+    {
+        return collect($integration->aiostreams_catalogs ?? [])
+            ->filter(function (array $catalog) use ($integration): bool {
+                if ($catalog['type'] === 'movie' && ! $integration->import_movies) {
+                    return false;
+                }
+                if ($catalog['type'] === 'series' && ! $integration->import_series) {
+                    return false;
+                }
+
+                return true;
+            })
+            ->values()
+            ->all();
     }
 
     private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
