@@ -192,6 +192,8 @@ return [
         '61ec81c5d5a2',
         '4491af1db976',
         'a88d30c913e5',
+        '5726439e4efd',
+        '99a951cf951c',
 
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.

@@ -493,7 +493,8 @@ class EpgGenerateController extends Controller
                         $slotMinutes = $aedProfile->event_duration_minutes;
                         $windowStart = Carbon::now()->startOfDay();
                         $windowEnd = Carbon::now()->startOfDay()->addDays(5);
-                        $postTitle = $this->escapeXml($aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent));
+                        $postTitle = $aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent);
+                        $postTitleEscaped = $postTitle !== null ? $this->escapeXml($postTitle) : null;
 
                         $emitSlot = function (string $slotTitle, Carbon $slotStart, Carbon $slotEnd) use (&$buffer, $tvgId, $aedIcon, $aedCategory): void {
                             $s = str_replace(':', '', $slotStart->format('YmdHis P'));
@@ -510,15 +511,17 @@ class EpgGenerateController extends Controller
                             $buffer .= '  </programme>'.PHP_EOL;
                         };
 
-                        // Pre-event fill: window start → event start
+                        // Pre-event fill: window start → event start (skipped when pre_event_format is null)
                         $cursor = $windowStart->copy();
                         while ($cursor->lt($aedEvent->start)) {
                             $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
                             if ($slotEnd->gt($aedEvent->start)) {
                                 $slotEnd = $aedEvent->start->copy();
                             }
-                            $preTitle = $this->escapeXml($aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor));
-                            $emitSlot($preTitle, $cursor, $slotEnd);
+                            $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor);
+                            if ($preTitle !== null) {
+                                $emitSlot($this->escapeXml($preTitle), $cursor, $slotEnd);
+                            }
                             $cursor = $slotEnd;
                         }
 
@@ -536,15 +539,17 @@ class EpgGenerateController extends Controller
                         }
                         $buffer .= '  </programme>'.PHP_EOL;
 
-                        // Post-event fill: event end → window end
-                        $cursor = $aedEvent->end->copy();
-                        while ($cursor->lt($windowEnd)) {
-                            $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
-                            if ($slotEnd->gt($windowEnd)) {
-                                $slotEnd = $windowEnd->copy();
+                        // Post-event fill: event end → window end (skipped when post_event_format is null)
+                        if ($postTitleEscaped !== null) {
+                            $cursor = $aedEvent->end->copy();
+                            while ($cursor->lt($windowEnd)) {
+                                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                                if ($slotEnd->gt($windowEnd)) {
+                                    $slotEnd = $windowEnd->copy();
+                                }
+                                $emitSlot($postTitleEscaped, $cursor, $slotEnd);
+                                $cursor = $slotEnd;
                             }
-                            $emitSlot($postTitle, $cursor, $slotEnd);
-                            $cursor = $slotEnd;
                         }
                     } else {
                         // Extraction failed or no time — use AED title with standard repeating slots

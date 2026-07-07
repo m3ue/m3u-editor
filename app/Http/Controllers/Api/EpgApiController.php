@@ -678,7 +678,7 @@ class EpgApiController extends Controller
                                 return $p;
                             };
 
-                            // Pre-event fill: window start → event start
+                            // Pre-event fill: window start → event start (skipped when pre_event_format is null)
                             $cursor = $windowStart->copy();
                             while ($cursor->lt($event->start)) {
                                 $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
@@ -686,22 +686,26 @@ class EpgApiController extends Controller
                                     $slotEnd = $event->start->copy();
                                 }
                                 $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $event, $cursor);
-                                $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $preTitle, $preTitle);
+                                if ($preTitle !== null) {
+                                    $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $preTitle, $preTitle);
+                                }
                                 $cursor = $slotEnd;
                             }
 
                             // The event itself
                             $dummyProgrammes[] = $buildProgramme($event->start, $event->end, $event->title, $event->description);
 
-                            // Post-event fill: event end → window end
-                            $cursor = $event->end->copy();
-                            while ($cursor->lt($windowEnd)) {
-                                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
-                                if ($slotEnd->gt($windowEnd)) {
-                                    $slotEnd = $windowEnd->copy();
+                            // Post-event fill: event end → window end (skipped when post_event_format is null)
+                            if ($postTitle !== null) {
+                                $cursor = $event->end->copy();
+                                while ($cursor->lt($windowEnd)) {
+                                    $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                                    if ($slotEnd->gt($windowEnd)) {
+                                        $slotEnd = $windowEnd->copy();
+                                    }
+                                    $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $postTitle, $postTitle);
+                                    $cursor = $slotEnd;
                                 }
-                                $dummyProgrammes[] = $buildProgramme($cursor, $slotEnd, $postTitle, $postTitle);
-                                $cursor = $slotEnd;
                             }
                         } else {
                             // No time extracted — fill the date range with repeating slots

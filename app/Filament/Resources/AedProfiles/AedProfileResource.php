@@ -352,13 +352,13 @@ SYS;
                             ->label(__('Pre-Event Format'))
                             ->default('Live in {time_until}: {title}')
                             ->maxLength(500)
-                            ->helperText(__('Padding slots before the event. Available: {time_until}, {title}, {channel}, {date}, {time}')),
+                            ->helperText(__('Padding slots before the event. Leave blank to disable. Available: {time_until}, {title}, {channel}, {date}, {time}')),
 
                         TextInput::make('post_event_format')
                             ->label(__('Post-Event Format'))
                             ->default('Signing Off')
                             ->maxLength(500)
-                            ->helperText(__('Padding slots after the event ends. Available: {title}, {channel}, {date}, {time}')),
+                            ->helperText(__('Padding slots after the event ends. Leave blank to disable. Available: {title}, {channel}, {date}, {time}')),
                     ]),
 
                     Grid::make(2)->schema([
@@ -401,8 +401,8 @@ SYS;
                             Hidden::make('_title_format')->default($get('title_format') ?? '{title}'),
                             Hidden::make('_description_format')->default($get('description_format')),
                             Hidden::make('_no_event_format')->default($get('no_event_format') ?? '{channel}'),
-                            Hidden::make('_pre_event_format')->default($get('pre_event_format') ?? 'Live in {time_until}: {title}'),
-                            Hidden::make('_post_event_format')->default($get('post_event_format') ?? 'Signing Off'),
+                            Hidden::make('_pre_event_format')->default($get('pre_event_format')),
+                            Hidden::make('_post_event_format')->default($get('post_event_format')),
                             Hidden::make('tested')->default(false),
                             Hidden::make('match_count')->default(''),
 
@@ -445,8 +445,8 @@ SYS;
                                         $profile->title_format = $get('_title_format') ?? '{title}';
                                         $profile->description_format = $get('_description_format');
                                         $profile->no_event_format = $get('_no_event_format') ?? '{channel}';
-                                        $profile->pre_event_format = $get('_pre_event_format') ?? 'Live in {time_until}: {title}';
-                                        $profile->post_event_format = $get('_post_event_format') ?? 'Signing Off';
+                                        $profile->pre_event_format = $get('_pre_event_format') ?: null;
+                                        $profile->post_event_format = $get('_post_event_format') ?: null;
 
                                         $service = app(AedExtractorService::class);
                                         $rows = [];
