@@ -214,7 +214,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 Local Media: '.$integration->name.'
                             </div>');
                         }
-                        if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin])) {
+                        if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams])) {
                             $integration = MediaServerIntegration::where('playlist_id', $record->id)->first();
                             $integrationLink = MediaServerIntegrationResource::getUrl('edit', ['record' => $integration]);
 
@@ -415,7 +415,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->action(function (Collection $records): void {
                             foreach ($records as $record) {
                                 // For media server playlists, dispatch the media server sync job
-                                if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin])) {
+                                if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams])) {
                                     $integration = MediaServerIntegration::where('playlist_id', $record->id)->first();
                                     if ($integration) {
                                         app('Illuminate\Contracts\Bus\Dispatcher')
@@ -517,7 +517,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         // For media server playlists, dispatch the media server sync job
-                        if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin])) {
+                        if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams])) {
                             $integration = MediaServerIntegration::where('playlist_id', $record->id)->first();
                             if ($integration) {
                                 app('Illuminate\Contracts\Bus\Dispatcher')
@@ -536,7 +536,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ProcessM3uImport($record, force: true, syncRunId: $syncRun->id));
                     })->after(function ($record) {
-                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
+                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams]);
                         $message = $isMediaServer
                             ? 'Media server content is being synced in the background. Depending on the size of your library, this may take several minutes. You will be notified on completion.'
                             : 'Playlist is being processed in the background. Depending on the size of your playlist, this may take a while. You will be notified on completion.';
@@ -553,7 +553,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
                     ->modalDescription(function ($record) {
-                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
+                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams]);
 
                         return $isMediaServer
                             ? 'Sync content from the media server now? This will fetch all movies, series, and episodes from your media server library.'
@@ -3341,6 +3341,35 @@ class PlaylistResource extends Resource implements CopilotResource
             ])
             ->hiddenOn('create');
 
+        $aiostreamsOptions = fn () => MediaServerIntegration::where('user_id', auth()->id())
+            ->where('type', 'aiostreams')
+            ->where('enabled', true)
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->toArray();
+
+        $tabs[] = Tab::make(__('AIOStreams'))
+            ->icon('heroicon-m-film')
+            ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
+                ->where('type', 'aiostreams')
+                ->where('enabled', true)
+                ->doesntExist()
+            )
+            ->schema([
+                Section::make(__('AIOStreams Access'))
+                    ->icon('heroicon-m-film')
+                    ->description(__('Grant guests on this playlist access to an AIOStreams on-demand catalog. Guests authenticated via Playlist Auth also need AIOStreams enabled on their auth profile.'))
+                    ->schema([
+                        Select::make('aiostreams_integration_id')
+                            ->label(__('AIOStreams Integration'))
+                            ->options($aiostreamsOptions)
+                            ->placeholder(__('No AIOStreams access'))
+                            ->nullable()
+                            ->helperText(__('Select which AIOStreams integration to expose on this playlist. Leave blank to disable AIOStreams for this playlist.')),
+                    ]),
+            ])
+            ->hiddenOn('create');
+
         // Compose the form with tabs and sections
         return [
             Grid::make()
@@ -3463,7 +3492,12 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         // For media server playlists, dispatch the media server sync job
-                        if (in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::Plex])) {
+                        if (in_array($record->source_type, [
+                            PlaylistSourceType::Emby,
+                            PlaylistSourceType::Jellyfin,
+                            PlaylistSourceType::Plex,
+                            PlaylistSourceType::AIOStreams,
+                        ])) {
                             $integration = MediaServerIntegration::where('playlist_id', $record->id)->first();
                             if ($integration) {
                                 app('Illuminate\Contracts\Bus\Dispatcher')
@@ -3483,7 +3517,11 @@ class PlaylistResource extends Resource implements CopilotResource
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new ProcessM3uImport($record, force: true, syncRunId: $syncRun->id));
                     })->after(function ($record) {
-                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
+                        $isMediaServer = in_array($record->source_type, [
+                            PlaylistSourceType::Emby,
+                            PlaylistSourceType::Jellyfin,
+                            PlaylistSourceType::AIOStreams,
+                        ]);
                         $message = $isMediaServer
                             ? 'Media server content is being synced in the background. Depending on the size of your library, this may take several minutes. You will be notified on completion.'
                             : 'Playlist is being processed in the background. Depending on the size of your playlist, this may take a while. You will be notified on completion.';
@@ -3500,7 +3538,12 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
                     ->modalDescription(function ($record) {
-                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin]);
+                        $isMediaServer = in_array($record->source_type, [
+                            PlaylistSourceType::Emby,
+                            PlaylistSourceType::Jellyfin,
+                            PlaylistSourceType::Plex,
+                            PlaylistSourceType::AIOStreams,
+                        ]);
 
                         return $isMediaServer
                             ? 'Sync content from the media server now? This will fetch all movies, series, and episodes from your media server library.'
@@ -3591,20 +3634,23 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->label(__('Download M3U'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->url(fn ($record) => PlaylistFacade::getUrls($record)['m3u'])
-                    ->openUrlInNewTab(),
+                    ->openUrlInNewTab()
+                    ->hidden(fn ($record): bool => $record->source_type === PlaylistSourceType::AIOStreams),
                 EpgCacheService::getEpgTableAction()
-                    ->cancelParentActions(),
+                    ->cancelParentActions()
+                    ->hidden(fn ($record): bool => $record->source_type === PlaylistSourceType::AIOStreams),
                 Action::make('HDHomeRun URL')
                     ->label(__('HDHomeRun URL'))
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->url(fn ($record) => PlaylistFacade::getUrls($record)['hdhr'])
                     ->openUrlInNewTab()
-                    ->hidden(fn ($record): bool => $record->is_network_playlist),
+                    ->hidden(fn ($record): bool => $record->is_network_playlist || $record->source_type === PlaylistSourceType::AIOStreams),
                 Action::make('Public URL')
                     ->label(__('Public URL'))
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->url(fn ($record) => '/playlist/v/'.$record->uuid)
-                    ->openUrlInNewTab(),
+                    ->openUrlInNewTab()
+                    ->hidden(fn ($record): bool => $record->source_type === PlaylistSourceType::AIOStreams),
             ]),
 
             // -- MediaFlow Proxy --

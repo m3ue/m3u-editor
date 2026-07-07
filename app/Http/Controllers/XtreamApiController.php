@@ -535,14 +535,21 @@ class XtreamApiController extends Controller
             ];
 
             $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
+            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features, $authMethod, $playlistAuth);
+
+            $m3uEditorPayload = [
+                'version' => config('dev.version'),
+                'features' => $features,
+            ];
+
+            if (! empty($aiostreamsData)) {
+                $m3uEditorPayload['aiostreams'] = $aiostreamsData;
+            }
 
             return response()->json([
                 'user_info' => $userInfo,
                 'server_info' => $serverInfo,
-                'm3u_editor' => [
-                    'version' => config('dev.version'),
-                    'features' => $features,
-                ],
+                'm3u_editor' => $m3uEditorPayload,
             ]);
         } elseif ($action === 'get_live_streams') {
             // Handle network playlists - return networks as live streams
@@ -2497,7 +2504,109 @@ class XtreamApiController extends Controller
             $features[] = 'requests';
         }
 
+        if ($this->hasAIOStreams($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'aiostreams';
+        }
+
         return $features;
+    }
+
+    private function hasAIOStreams($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($authMethod === 'playlist_auth') {
+            if (! $playlistAuth?->aiostreams_enabled) {
+                return false;
+            }
+            // Auth specifies its own integration directly — no playlist lookup needed.
+            if ($playlistAuth->aiostreams_integration_id !== null) {
+                return (bool) optional($playlistAuth->aiostreamsIntegration)->enabled;
+            }
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return false;
+        }
+
+        return $effectivePlaylist->aiostreams_integration_id !== null
+            && optional($effectivePlaylist->aiostreamsIntegration)->enabled;
+    }
+
+    /**
+     * Build the AIOStreams payload for the auth response.
+     * Returns an array of integration configs with their catalog lists.
+     *
+     * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
+     */
+    private function resolveAIOStreamsData($playlist, array $features, string $authMethod = '', ?PlaylistAuth $playlistAuth = null): array
+    {
+        if (! in_array('aiostreams', $features)) {
+            return [];
+        }
+
+        // Playlist auth with a directly-assigned integration bypasses the playlist lookup.
+        if ($authMethod === 'playlist_auth' && $playlistAuth?->aiostreams_integration_id !== null) {
+            $integration = $playlistAuth->aiostreamsIntegration;
+            if (! $integration || ! $integration->enabled) {
+                return [];
+            }
+
+            return [
+                [
+                    'id' => $integration->id,
+                    'name' => $integration->name,
+                    'logo' => $integration->aiostreams_logo,
+                    'catalogs' => $this->filterAIOStreamsCatalogs($integration),
+                ],
+            ];
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return [];
+        }
+
+        $integration = $effectivePlaylist->aiostreamsIntegration;
+        if (! $integration || ! $integration->enabled) {
+            return [];
+        }
+
+        return [
+            [
+                'id' => $integration->id,
+                'name' => $integration->name,
+                'logo' => $integration->aiostreams_logo,
+                'catalogs' => $this->filterAIOStreamsCatalogs($integration),
+            ],
+        ];
+    }
+
+    /**
+     * Filter AIOStreams catalogs by the integration's selected catalog IDs.
+     * A null selection means all catalogs are enabled.
+     *
+     * @return array<int, array{id: string, type: string, name: string, searchable: bool}>
+     */
+    private function filterAIOStreamsCatalogs($integration): array
+    {
+        $all = $integration->aiostreams_catalogs ?? [];
+
+        if ($integration->aiostreams_enable_all_catalogs) {
+            return $all;
+        }
+
+        $selectedSet = array_flip($integration->aiostreams_selected_catalog_ids ?? []);
+
+        return collect($all)
+            ->filter(fn (array $catalog) => isset($selectedSet[$catalog['id'].'_'.$catalog['type']]))
+            ->values()
+            ->all();
     }
 
     private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool

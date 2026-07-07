@@ -48,7 +48,6 @@ class RefreshMediaServerIntegrations extends Command
 
         $this->info('Checking media server integrations for scheduled sync');
 
-        // Get all enabled integrations with auto_sync enabled
         $integrations = MediaServerIntegration::query()
             ->where('enabled', true)
             ->where('auto_sync', true)

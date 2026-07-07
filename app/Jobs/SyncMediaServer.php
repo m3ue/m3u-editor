@@ -135,6 +135,35 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 throw new Exception('Connection failed: '.$connectionTest['message']);
             }
 
+            // AIOStreams is on-demand only — no content to sync after connection is verified.
+            if ($integration->isAioStreams()) {
+                $integration->update([
+                    'status' => 'completed',
+                    'progress' => 100,
+                    'movie_progress' => 100,
+                    'series_progress' => 100,
+                    'last_synced_at' => now(),
+                    'aiostreams_catalogs' => $integration->aiostreams_catalogs,
+                    'aiostreams_logo' => $integration->aiostreams_logo,
+                    'aiostreams_selected_catalog_ids' => $integration->aiostreams_selected_catalog_ids,
+                ]);
+
+                $playlist->update([
+                    'status' => Status::Completed,
+                    'processing' => [],
+                    'synced' => now(),
+                ]);
+
+                Notification::make()
+                    ->success()
+                    ->title(__('AIOStreams Connected'))
+                    ->body($connectionTest['message'] ?? "Connected to {$integration->name}.")
+                    ->broadcast($integration->user)
+                    ->sendToDatabase($integration->user);
+
+                return;
+            }
+
             // Validate selected libraries still exist
             $this->validateSelectedLibraries($integration, $service);
 
@@ -246,6 +275,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'jellyfin' => PlaylistSourceType::Jellyfin,
             'plex' => PlaylistSourceType::Plex,
             'local', 'webdav' => PlaylistSourceType::LocalMedia,
+            'aiostreams' => PlaylistSourceType::AIOStreams,
             default => PlaylistSourceType::M3u,
         };
 
