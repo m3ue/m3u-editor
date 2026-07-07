@@ -153,6 +153,10 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                 $tab->visible(fn (Get $get): bool => $get('type') === 'plex');
             }
 
+            if (in_array($section, ['Schedule', 'Status'])) {
+                $tab->visible(fn (Get $get): bool => $get('type') !== 'aiostreams');
+            }
+
             $tabs[] = $tab;
         }
 
@@ -213,6 +217,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->description(fn (callable $get) => match ($get('type')) {
                         'local' => 'Configure your local media library paths',
                         'webdav' => 'Configure your WebDAV server connection and media library paths',
+                        'aiostreams' => 'Configure your AIOStreams addon — paste your manifest URL to connect',
                         default => 'Configure your media server connection',
                     })
                     ->collapsible(! $creating)
@@ -224,6 +229,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->placeholder(fn (callable $get) => match ($get('type')) {
                                     'local' => 'e.g., My Local Movies',
                                     'webdav' => 'e.g., TorBox or My NAS Media',
+                                    'aiostreams' => 'e.g., My AIOStreams Setup',
                                     default => 'e.g., Living Room Jellyfin',
                                 })
                                 ->required()
@@ -237,6 +243,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     'plex' => 'Plex',
                                     'local' => 'Local Media',
                                     'webdav' => 'WebDAV',
+                                    'aiostreams' => 'AIOStreams',
                                 ])
                                 ->required()
                                 ->default('emby')
@@ -297,7 +304,22 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                         $set('port', 80);
                                     }
                                 }),
-                        ])->visible(fn (callable $get) => $get('type') !== 'local'),
+                        ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'aiostreams'])),
+
+                        // AIOStreams manifest URL
+                        TextInput::make('manifest_url')
+                            ->label(__('Manifest URL'))
+                            ->url()
+                            ->placeholder('https://your-aiostreams-instance.com/stremio/uuid/token/manifest.json')
+                            ->helperText(__('Paste your AIOStreams manifest URL. The auth tokens are embedded in the URL — no API key needed.'))
+                            ->required(fn (callable $get) => $get('type') === 'aiostreams')
+                            ->visible(fn (callable $get) => $get('type') === 'aiostreams')
+                            ->maxLength(1024)
+                            ->columnSpanFull(),
+
+                        Actions::make(self::getAIOStreamsTestAction())
+                            ->visible(fn (callable $get) => $get('type') === 'aiostreams')
+                            ->fullWidth(),
 
                         // WebDAV authentication (username/password)
                         Grid::make(2)->schema([
@@ -338,7 +360,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->label(__('API Key/Token'))
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && ! in_array($get('type'), ['local', 'webdav']))
+                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && ! in_array($get('type'), ['local', 'webdav', 'aiostreams']))
                             ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->api_key)
                             ->helperText(function (string $operation, callable $get) {
                                 if ($operation === 'edit') {
@@ -350,10 +372,10 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     'local', 'webdav' => 'Not required for local media or WebDAV',
                                     default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
                                 };
-                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
+                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])),
 
                         Actions::make(self::getServerActions())
-                            ->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav']))
+                            ->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams']))
                             ->fullWidth(),
                     ]),
             ],
@@ -577,7 +599,41 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->validationMessages([
                                 'required' => 'Please select at least one library to import.',
                             ]),
-                    ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav'])),
+                    ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])),
+
+                // AIOStreams catalog overview (read-only after connection test)
+                Section::make(__('Available Catalogs'))
+                    ->description(__('Catalogs discovered from your AIOStreams manifest. Use "Refresh Catalogs" to update.'))
+                    ->schema([
+                        Placeholder::make('aiostreams_catalog_list')
+                            ->label('')
+                            ->content(function ($record) {
+                                $catalogs = $record?->aiostreams_catalogs ?? [];
+                                if (empty($catalogs)) {
+                                    return new HtmlString(
+                                        '<p class="text-sm text-warning-600 dark:text-warning-400 font-medium">No catalogs loaded yet.</p>'.
+                                        '<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Use "Test Connection" above to fetch catalogs from your manifest URL.</p>'
+                                    );
+                                }
+
+                                $grouped = collect($catalogs)->groupBy('type');
+                                $html = '<div class="space-y-3">';
+                                foreach ($grouped as $type => $items) {
+                                    $html .= '<div>';
+                                    $html .= '<p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">'.ucfirst($type).'</p>';
+                                    $html .= '<div class="flex flex-wrap gap-2">';
+                                    foreach ($items as $cat) {
+                                        $html .= '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200">'.e($cat['name']).'</span>';
+                                    }
+                                    $html .= '</div></div>';
+                                }
+                                $html .= '</div>';
+
+                                return new HtmlString($html);
+                            }),
+                    ])
+                    ->visible(fn (callable $get) => $get('type') === 'aiostreams')
+                    ->collapsed(false),
             ],
             'Schedule' => [
                 Section::make(__('Sync Schedule'))
@@ -1200,6 +1256,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'local' => 'Local Media',
                         'webdav' => 'WebDAV',
+                        'aiostreams' => 'AIOStreams',
                         default => ucfirst($state),
                     })
                     ->color(fn (string $state): string => match ($state) {
@@ -1208,6 +1265,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'plex' => 'warning',
                         'local' => 'gray',
                         'webdav' => 'primary',
+                        'aiostreams' => 'danger',
                         default => 'gray',
                     }),
 
@@ -1215,6 +1273,9 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->label(__('Server'))
                     ->formatStateUsing(fn ($record): string => match ($record->type) {
                         'local' => 'Local filesystem',
+                        'aiostreams' => $record->manifest_url
+                            ? parse_url($record->manifest_url, PHP_URL_HOST) ?? 'AIOStreams'
+                            : 'Not configured',
                         'webdav' => "{$record->host}:{$record->port}",
                         default => "{$record->host}:{$record->port}",
                     })
@@ -1223,6 +1284,12 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                 TextColumn::make('selected_library_ids')
                     ->label(__('Libraries'))
                     ->formatStateUsing(function ($record, $state): string {
+                        if ($record->isAioStreams()) {
+                            $catalogs = $record->aiostreams_catalogs ?? [];
+
+                            return empty($catalogs) ? 'Not configured' : count($catalogs).' catalogs';
+                        }
+
                         $available = $record->available_libraries ?? [];
 
                         if (empty($available)) {
@@ -1296,6 +1363,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         ->disabled(fn ($record) => $record->status === 'processing')
                         ->label(__('Sync Now'))
                         ->icon('heroicon-o-arrow-path')
+                        ->hidden(fn ($record) => $record->isAioStreams())
                         ->requiresConfirmation()
                         ->modalHeading(__('Sync Media Server'))
                         ->modalDescription(__('This will sync all content from the media server. For large libraries, this may take several minutes.'))
@@ -1316,6 +1384,29 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->title(__('Sync Started'))
                                 ->body("Syncing content from {$record->name}. You'll be notified when complete.")
                                 ->send();
+                        }),
+
+                    Action::make('refreshCatalogs')
+                        ->label(__('Refresh Catalogs'))
+                        ->icon('heroicon-o-arrow-path')
+                        ->hidden(fn ($record) => ! $record->isAioStreams())
+                        ->action(function (MediaServerIntegration $record) {
+                            try {
+                                $service = MediaServerService::make($record);
+                                $result = $service->testConnection();
+
+                                Notification::make()
+                                    ->success()
+                                    ->title(__('Catalogs Refreshed'))
+                                    ->body($result['message'])
+                                    ->send();
+                            } catch (\App\Exceptions\MediaServerException $e) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('Refresh Failed'))
+                                    ->body($e->getMessage())
+                                    ->send();
+                            }
                         }),
                     Action::make('test')
                         ->label(__('Test Connection'))
@@ -1903,6 +1994,61 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         ->title(__('Connection Successful'))
                         ->body("Connected to {$result['server_name']} (v{$result['version']}). Found {$libraries->count()} libraries.")
                         ->send();
+                }),
+        ];
+    }
+
+    private static function getAIOStreamsTestAction(): array
+    {
+        return [
+            Action::make('testAIOStreams')
+                ->label(__('Test Connection & Fetch Catalogs'))
+                ->icon('heroicon-o-signal')
+                ->action(function (callable $get, $livewire) {
+                    $manifestUrl = $get('manifest_url');
+
+                    if (empty($manifestUrl)) {
+                        Notification::make()
+                            ->danger()
+                            ->title(__('Validation Error'))
+                            ->body(__('Please enter a manifest URL before testing the connection.'))
+                            ->send();
+
+                        return;
+                    }
+
+                    $tempIntegration = (new MediaServerIntegration)->forceFill([
+                        'type' => 'aiostreams',
+                        'manifest_url' => $manifestUrl,
+                    ]);
+
+                    try {
+                        $service = new \App\Services\AIOStreamsService($tempIntegration);
+                        $result = $service->testConnection();
+
+                        // If we have a saved record, persist the catalogs
+                        if ($livewire->record) {
+                            $livewire->record->aiostreams_catalogs = $tempIntegration->aiostreams_catalogs;
+                            $livewire->record->save();
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Connection Successful'))
+                            ->body($result['message'])
+                            ->send();
+
+                        // Refresh the page to show updated catalog list
+                        if ($livewire->record) {
+                            $livewire->dispatch('$refresh');
+                        }
+                    } catch (\App\Exceptions\MediaServerException $e) {
+                        Notification::make()
+                            ->danger()
+                            ->title(__('Connection Failed'))
+                            ->body($e->getMessage())
+                            ->send();
+                    }
                 }),
         ];
     }

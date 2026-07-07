@@ -29,6 +29,7 @@ use App\Http\Controllers\ShortURLController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WatchProgressController;
 use App\Http\Controllers\WebhookTestController;
+use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
@@ -334,6 +335,17 @@ Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{forma
 Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStream'])
     ->name('dispatcharr.proxy.stream')
     ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+
+// AIOStreams proxy routes — must come before the fallback direct stream catch-all
+Route::get('/{username}/{password}/aiostreams/{integration}/catalog/{type}/{catalogId}.json', [AIOStreamsProxyController::class, 'catalog'])
+    ->name('aiostreams.proxy.catalog')
+    ->where('integration', '[0-9]+');
+Route::get('/{username}/{password}/aiostreams/{integration}/stream/{type}/{id}.json', [AIOStreamsProxyController::class, 'stream'])
+    ->name('aiostreams.proxy.stream')
+    ->where('integration', '[0-9]+');
+Route::get('/{username}/{password}/aiostreams/{integration}/meta/{type}/{id}.json', [AIOStreamsProxyController::class, 'meta'])
+    ->name('aiostreams.proxy.meta')
+    ->where('integration', '[0-9]+');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
 Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])

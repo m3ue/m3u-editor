@@ -19,6 +19,7 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\Group;
+use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
@@ -535,14 +536,21 @@ class XtreamApiController extends Controller
             ];
 
             $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
+            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features);
+
+            $m3uEditorPayload = [
+                'version' => config('dev.version'),
+                'features' => $features,
+            ];
+
+            if (! empty($aiostreamsData)) {
+                $m3uEditorPayload['aiostreams'] = $aiostreamsData;
+            }
 
             return response()->json([
                 'user_info' => $userInfo,
                 'server_info' => $serverInfo,
-                'm3u_editor' => [
-                    'version' => config('dev.version'),
-                    'features' => $features,
-                ],
+                'm3u_editor' => $m3uEditorPayload,
             ]);
         } elseif ($action === 'get_live_streams') {
             // Handle network playlists - return networks as live streams
@@ -2497,7 +2505,54 @@ class XtreamApiController extends Controller
             $features[] = 'requests';
         }
 
+        if ($this->hasAIOStreams($playlist)) {
+            $features[] = 'aiostreams';
+        }
+
         return $features;
+    }
+
+    private function hasAIOStreams($playlist): bool
+    {
+        $userId = $playlist->user_id ?? $playlist->user?->id;
+        if (! $userId) {
+            return false;
+        }
+
+        return MediaServerIntegration::where('user_id', $userId)
+            ->where('type', 'aiostreams')
+            ->where('enabled', true)
+            ->exists();
+    }
+
+    /**
+     * Build the AIOStreams payload for the auth response.
+     * Returns an array of integration configs with their catalog lists.
+     *
+     * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
+     */
+    private function resolveAIOStreamsData($playlist, array $features): array
+    {
+        if (! in_array('aiostreams', $features)) {
+            return [];
+        }
+
+        $userId = $playlist->user_id ?? $playlist->user?->id;
+        if (! $userId) {
+            return [];
+        }
+
+        return MediaServerIntegration::where('user_id', $userId)
+            ->where('type', 'aiostreams')
+            ->where('enabled', true)
+            ->get()
+            ->map(fn (MediaServerIntegration $integration) => [
+                'id' => $integration->id,
+                'name' => $integration->name,
+                'catalogs' => $integration->aiostreams_catalogs ?? [],
+            ])
+            ->values()
+            ->all();
     }
 
     private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool

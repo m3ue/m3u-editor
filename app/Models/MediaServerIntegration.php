@@ -72,6 +72,7 @@ class MediaServerIntegration extends Model
         'auto_fetch_metadata' => 'boolean',
         'plex_management_enabled' => 'boolean',
         'plex_dvr_tuners' => 'array',
+        'aiostreams_catalogs' => 'array',
     ];
 
     /**
@@ -183,6 +184,26 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Check if this is an AIOStreams integration.
+     */
+    public function isAioStreams(): bool
+    {
+        return $this->type === 'aiostreams';
+    }
+
+    /**
+     * Get the base URL derived from the manifest URL (strips /manifest.json).
+     */
+    public function getManifestBaseUrlAttribute(): ?string
+    {
+        if (! $this->manifest_url) {
+            return null;
+        }
+
+        return rtrim(preg_replace('#/manifest\.json$#i', '', $this->manifest_url), '/');
+    }
+
+    /**
      * Check if this integration requires network connectivity.
      * Local media does not require network connectivity.
      */
@@ -198,6 +219,14 @@ class MediaServerIntegration extends Model
     public function usesLocalPathConfig(): bool
     {
         return $this->isLocal() || $this->isWebDav();
+    }
+
+    /**
+     * Check if this integration is a Stremio-protocol addon (no library sync).
+     */
+    public function isAddonType(): bool
+    {
+        return $this->isAioStreams();
     }
 
     /**
