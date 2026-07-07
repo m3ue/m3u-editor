@@ -2558,6 +2558,7 @@ class XtreamApiController extends Controller
                 [
                     'id' => $integration->id,
                     'name' => $integration->name,
+                    'logo' => $integration->aiostreams_logo,
                     'catalogs' => $integration->aiostreams_catalogs ?? [],
                 ],
             ];
@@ -2580,6 +2581,7 @@ class XtreamApiController extends Controller
             [
                 'id' => $integration->id,
                 'name' => $integration->name,
+                'logo' => $integration->aiostreams_logo,
                 'catalogs' => $integration->aiostreams_catalogs ?? [],
             ],
         ];

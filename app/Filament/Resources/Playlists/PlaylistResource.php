@@ -3488,10 +3488,7 @@ class PlaylistResource extends Resource implements CopilotResource
             // -- Processing --
             ModalActionGroup::section('Processing', [
                 Action::make('process')
-                    ->label(fn ($record) => $record->source_type === PlaylistSourceType::AIOStreams
-                        ? __('Refresh Catalogs')
-                        : __('Sync and Process')
-                    )
+                    ->label(__('Sync and Process'))
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         // For media server playlists, dispatch the media server sync job
@@ -3541,11 +3538,12 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-path')
                     ->modalIcon('heroicon-o-arrow-path')
                     ->modalDescription(function ($record) {
-                        if ($record->source_type === PlaylistSourceType::AIOStreams) {
-                            return 'Refresh catalogs from the AIOStreams addon now? This will re-fetch the manifest and update the available catalogs.';
-                        }
-
-                        $isMediaServer = in_array($record->source_type, [PlaylistSourceType::Emby, PlaylistSourceType::Jellyfin, PlaylistSourceType::AIOStreams]);
+                        $isMediaServer = in_array($record->source_type, [
+                            PlaylistSourceType::Emby,
+                            PlaylistSourceType::Jellyfin,
+                            PlaylistSourceType::Plex,
+                            PlaylistSourceType::AIOStreams,
+                        ]);
 
                         return $isMediaServer
                             ? 'Sync content from the media server now? This will fetch all movies, series, and episodes from your media server library.'

@@ -73,6 +73,7 @@ class AIOStreamsService implements MediaServer
             ->all();
 
         $this->integration->aiostreams_catalogs = $catalogs;
+        $this->integration->aiostreams_logo = $manifest['logo'] ?? null;
 
         return [
             'success' => true,

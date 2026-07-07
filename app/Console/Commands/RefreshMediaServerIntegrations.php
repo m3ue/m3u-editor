@@ -48,11 +48,9 @@ class RefreshMediaServerIntegrations extends Command
 
         $this->info('Checking media server integrations for scheduled sync');
 
-        // Get all enabled integrations with auto_sync enabled (AIOStreams is on-demand, never synced)
         $integrations = MediaServerIntegration::query()
             ->where('enabled', true)
             ->where('auto_sync', true)
-            ->where('type', '!=', 'aiostreams')
             ->whereNotNull('playlist_id')
             ->get();
 

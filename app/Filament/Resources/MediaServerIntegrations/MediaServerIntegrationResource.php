@@ -155,7 +155,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                 $tab->visible(fn (Get $get): bool => $get('type') === 'plex');
             }
 
-            if (in_array($section, ['Schedule', 'Status'])) {
+            if ($section === 'Status') {
                 $tab->visible(fn (Get $get): bool => $get('type') !== 'aiostreams');
             }
 
@@ -643,14 +643,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             ],
             'Schedule' => [
                 Section::make(__('Sync Schedule'))
-                    ->description(__('Configure automatic sync schedule'))
+                    ->description(fn (Get $get) => $get('type') === 'aiostreams'
+                        ? __('Configure how often the AIOStreams manifest is automatically refreshed to pick up changes.')
+                        : __('Configure automatic sync schedule')
+                    )
                     ->schema([
                         Grid::make(2)->schema([
                             Toggle::make('auto_sync')
                                 ->inline(false)
                                 ->live()
-                                ->label(__('Auto Sync'))
-                                ->helperText(__('Automatically sync content on schedule'))
+                                ->label(fn (Get $get) => $get('type') === 'aiostreams' ? __('Auto Refresh') : __('Auto Sync'))
+                                ->helperText(fn (Get $get) => $get('type') === 'aiostreams'
+                                    ? __('Automatically refresh the manifest on schedule.')
+                                    : __('Automatically sync content on schedule')
+                                )
                                 ->default(true),
 
                             Select::make('sync_interval')
@@ -1369,12 +1375,13 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         ->disabled(fn ($record) => $record->status === 'processing')
                         ->label(__('Sync Now'))
                         ->icon('heroicon-o-arrow-path')
-                        ->hidden(fn ($record) => $record->isAioStreams())
                         ->requiresConfirmation()
                         ->modalHeading(__('Sync Media Server'))
-                        ->modalDescription(__('This will sync all content from the media server. For large libraries, this may take several minutes.'))
+                        ->modalDescription(fn ($record) => $record->isAioStreams()
+                            ? __('This will re-fetch the AIOStreams manifest and update the available catalogs.')
+                            : __('This will sync all content from the media server. For large libraries, this may take several minutes.')
+                        )
                         ->action(function (MediaServerIntegration $record) {
-                            // Update status to processing
                             $record->update([
                                 'status' => 'processing',
                                 'progress' => 0,
@@ -1390,29 +1397,6 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->title(__('Sync Started'))
                                 ->body("Syncing content from {$record->name}. You'll be notified when complete.")
                                 ->send();
-                        }),
-
-                    Action::make('refreshCatalogs')
-                        ->label(__('Refresh Catalogs'))
-                        ->icon('heroicon-o-arrow-path')
-                        ->hidden(fn ($record) => ! $record->isAioStreams())
-                        ->action(function (MediaServerIntegration $record) {
-                            try {
-                                $service = MediaServerService::make($record);
-                                $result = $service->testConnection();
-
-                                Notification::make()
-                                    ->success()
-                                    ->title(__('Catalogs Refreshed'))
-                                    ->body($result['message'])
-                                    ->send();
-                            } catch (MediaServerException $e) {
-                                Notification::make()
-                                    ->danger()
-                                    ->title(__('Refresh Failed'))
-                                    ->body($e->getMessage())
-                                    ->send();
-                            }
                         }),
                     Action::make('test')
                         ->label(__('Test Connection'))

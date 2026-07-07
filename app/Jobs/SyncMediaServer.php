@@ -140,7 +140,11 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 $integration->update([
                     'status' => 'completed',
                     'progress' => 100,
+                    'movie_progress' => 100,
+                    'series_progress' => 100,
                     'last_synced_at' => now(),
+                    'aiostreams_catalogs' => $integration->aiostreams_catalogs,
+                    'aiostreams_logo' => $integration->aiostreams_logo,
                 ]);
 
                 $playlist->update([
