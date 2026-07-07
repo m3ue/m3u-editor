@@ -173,7 +173,7 @@ class VodRelationManager extends RelationManager
         }
 
         // Inject the custom group column after the group column
-        array_splice($defaultColumns, 14, 0, [$groupColumn]);
+        array_splice($defaultColumns, 17, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
             ->persistSortInSession()
