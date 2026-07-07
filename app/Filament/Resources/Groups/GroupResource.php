@@ -268,15 +268,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ->default(false),
                         ])
                         ->action(function (Group $record, array $data): void {
-                            $start = (int) $data['start'];
-                            if ($data['active_only'] ?? false) {
-                                $channels = $record->enabled_channels()
-                                    ->orderBy('sort')
-                                    ->get();
-                                SortFacade::bulkRecountChannels($channels, $start);
-                            } else {
-                                SortFacade::bulkRecountGroupChannels($record, $start);
-                            }
+                            SortFacade::bulkRecountGroupChannels($record, (int) $data['start'], (bool) ($data['active_only'] ?? false));
                         })
                         ->after(function () {
                             Notification::make()
