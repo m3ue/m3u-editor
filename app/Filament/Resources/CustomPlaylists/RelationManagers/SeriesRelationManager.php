@@ -139,7 +139,7 @@ class SeriesRelationManager extends RelationManager
         }
 
         // Inject the custom category column after the group column
-        array_splice($defaultColumns, 7, 0, [$groupColumn]);
+        array_splice($defaultColumns, 10, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
             ->persistSortInSession()
