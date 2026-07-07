@@ -667,8 +667,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->dehydrated(true)
                             ->visible(fn (callable $get) => ! empty($get('aiostreams_catalogs')) && ! $get('aiostreams_enable_all_catalogs')),
                     ])
-                    ->visible(fn (callable $get) => $get('type') === 'aiostreams')
-                    ->collapsed(false),
+                    ->visible(fn (callable $get) => $get('type') === 'aiostreams'),
             ],
             'Schedule' => [
                 Section::make(__('Sync Schedule'))
