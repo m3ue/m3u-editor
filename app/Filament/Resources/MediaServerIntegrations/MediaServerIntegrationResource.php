@@ -605,16 +605,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                 // AIOStreams catalog overview (read-only after connection test)
                 Section::make(__('Available Catalogs'))
-                    ->description(__('Catalogs discovered from your AIOStreams manifest. Use "Refresh Catalogs" to update.'))
+                    ->description(__('Catalogs discovered from your AIOStreams manifest URL.'))
+                    ->headerActions(self::getAIOStreamsTestAction('Fetch Catalogs'))
                     ->schema([
+                        Hidden::make('aiostreams_catalogs'),
+
                         Placeholder::make('aiostreams_catalog_list')
                             ->label('')
-                            ->content(function ($record) {
-                                $catalogs = $record?->aiostreams_catalogs ?? [];
+                            ->content(function ($record, callable $get) {
+                                $catalogs = $get('aiostreams_catalogs')
+                                    ?? $record?->aiostreams_catalogs
+                                    ?? [];
                                 if (empty($catalogs)) {
                                     return new HtmlString(
-                                        '<p class="text-sm text-warning-600 dark:text-warning-400 font-medium">No catalogs loaded yet.</p>'.
-                                        '<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Use "Test Connection" above to fetch catalogs from your manifest URL.</p>'
+                                        '<p class="text-sm text-gray-500 dark:text-gray-400">No catalogs loaded yet — click "Fetch Catalogs" to connect.</p>'
                                     );
                                 }
 
@@ -2000,13 +2004,13 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
         ];
     }
 
-    private static function getAIOStreamsTestAction(): array
+    private static function getAIOStreamsTestAction(string $label = 'Test Connection & Fetch Catalogs'): array
     {
         return [
             Action::make('testAIOStreams')
-                ->label(__('Test Connection & Fetch Catalogs'))
+                ->label(__($label))
                 ->icon('heroicon-o-signal')
-                ->action(function (callable $get, $livewire) {
+                ->action(function (callable $get, callable $set, $livewire) {
                     $manifestUrl = $get('manifest_url');
 
                     if (empty($manifestUrl)) {
@@ -2027,10 +2031,14 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     try {
                         $service = new AIOStreamsService($tempIntegration);
                         $result = $service->testConnection();
+                        $catalogs = $tempIntegration->aiostreams_catalogs;
 
-                        // If we have a saved record, persist the catalogs
+                        // Push into form state so the placeholder re-renders immediately
+                        $set('aiostreams_catalogs', $catalogs);
+
+                        // Also persist when editing an existing record
                         if ($livewire->record) {
-                            $livewire->record->aiostreams_catalogs = $tempIntegration->aiostreams_catalogs;
+                            $livewire->record->aiostreams_catalogs = $catalogs;
                             $livewire->record->save();
                         }
 
@@ -2039,11 +2047,6 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->title(__('Connection Successful'))
                             ->body($result['message'])
                             ->send();
-
-                        // Refresh the page to show updated catalog list
-                        if ($livewire->record) {
-                            $livewire->dispatch('$refresh');
-                        }
                     } catch (MediaServerException $e) {
                         Notification::make()
                             ->danger()

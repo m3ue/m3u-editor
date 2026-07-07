@@ -108,6 +108,12 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        if ($integration->isAioStreams()) {
+            Log::info('SyncMediaServer: Skipping AIOStreams integration (on-demand only)', ['id' => $this->integrationId]);
+
+            return;
+        }
+
         Log::info('SyncMediaServer: Starting sync', [
             'integration_id' => $integration->id,
             'name' => $integration->name,

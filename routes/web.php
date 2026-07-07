@@ -339,13 +339,16 @@ Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStrea
 // AIOStreams proxy routes — must come before the fallback direct stream catch-all
 Route::get('/{username}/{password}/aiostreams/{integration}/catalog/{type}/{catalogId}.json', [AIOStreamsProxyController::class, 'catalog'])
     ->name('aiostreams.proxy.catalog')
-    ->where('integration', '[0-9]+');
+    ->where('integration', '[0-9]+')
+    ->where('catalogId', '[^/]+');  // Catalog IDs may contain dots (e.g. c54e3b0.tmdb.top)
 Route::get('/{username}/{password}/aiostreams/{integration}/stream/{type}/{id}.json', [AIOStreamsProxyController::class, 'stream'])
     ->name('aiostreams.proxy.stream')
-    ->where('integration', '[0-9]+');
+    ->where('integration', '[0-9]+')
+    ->where('id', '[^/]+');
 Route::get('/{username}/{password}/aiostreams/{integration}/meta/{type}/{id}.json', [AIOStreamsProxyController::class, 'meta'])
     ->name('aiostreams.proxy.meta')
-    ->where('integration', '[0-9]+');
+    ->where('integration', '[0-9]+')
+    ->where('id', '[^/]+');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
 Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])
