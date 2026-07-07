@@ -642,7 +642,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->afterStateUpdated(function (bool $state, callable $get, callable $set, $record) {
                                 if (! $state) {
                                     $catalogs = $get('aiostreams_catalogs') ?? $record?->aiostreams_catalogs ?? [];
-                                    $set('aiostreams_selected_catalog_ids', collect($catalogs)->pluck('id')->all());
+                                    $set('aiostreams_selected_catalog_ids', collect($catalogs)->pluck('id', 'type')->map(fn ($id, $type) => "{$id}_{$type}")->all());
                                 } else {
                                     $set('aiostreams_selected_catalog_ids', null);
                                 }
@@ -656,7 +656,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 $options = [];
                                 foreach ($catalogs as $catalog) {
                                     $typeLabel = $catalog['type'] === 'series' ? 'Series' : 'Movie';
-                                    $options[$catalog['id']] = "{$catalog['name']} [{$typeLabel}]";
+                                    $composite = $catalog['id'].'_'.$catalog['type'];
+                                    $options[$composite] = "{$catalog['name']} [{$typeLabel}]";
                                 }
 
                                 return $options;
@@ -2067,7 +2068,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         $set('aiostreams_catalogs', $catalogs);
 
                         // Auto-select any catalog IDs not already in the selection
-                        $newIds = collect($catalogs)->pluck('id')->all();
+                        $newIds = collect($catalogs)->pluck('id', 'type')->map(fn ($id, $type) => "{$id}_{$type}")->all();
                         $existingSelected = $get('aiostreams_selected_catalog_ids') ?? [];
                         $merged = array_values(array_unique(array_merge($existingSelected, $newIds)));
                         $set('aiostreams_selected_catalog_ids', $merged);
