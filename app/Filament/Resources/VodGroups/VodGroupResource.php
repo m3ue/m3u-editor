@@ -263,10 +263,21 @@ class VodGroupResource extends Resource implements CopilotResource
                                 ->numeric()
                                 ->default(1)
                                 ->required(),
+                            Toggle::make('active_only')
+                                ->label(__('Active channels only'))
+                                ->helperText(__('When enabled, only active channels are renumbered; disabled channels keep their current numbers.'))
+                                ->default(false),
                         ])
                         ->action(function (Group $record, array $data): void {
                             $start = (int) $data['start'];
-                            SortFacade::bulkRecountGroupChannels($record, $start);
+                            if ($data['active_only'] ?? false) {
+                                $channels = $record->enabled_channels()
+                                    ->orderBy('sort')
+                                    ->get();
+                                SortFacade::bulkRecountChannels($channels, $start);
+                            } else {
+                                SortFacade::bulkRecountGroupChannels($record, $start);
+                            }
                         })
                         ->after(function () {
                             Notification::make()
@@ -683,11 +694,16 @@ class VodGroupResource extends Resource implements CopilotResource
                                 ->numeric()
                                 ->default(1)
                                 ->required(),
+                            Toggle::make('active_only')
+                                ->label(__('Active channels only'))
+                                ->helperText(__('When enabled, only active channels are renumbered; disabled channels keep their current numbers.'))
+                                ->default(false),
                         ])
                         ->action(function (Collection $records, array $data): void {
                             SortFacade::bulkRecountGroupsByOrder(
                                 $records,
-                                (int) $data['start']
+                                (int) $data['start'],
+                                (bool) ($data['active_only'] ?? false)
                             );
                         })
                         ->after(function () {

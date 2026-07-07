@@ -112,8 +112,11 @@ class SortService
 
     /**
      * Bulk recount multiple groups in deterministic sort order.
+     *
+     * When $activeOnly is true, only enabled live channels are renumbered;
+     * disabled channels keep their existing channel numbers.
      */
-    public function bulkRecountGroupsByOrder(Collection $groups, int $start = 1): void
+    public function bulkRecountGroupsByOrder(Collection $groups, int $start = 1, bool $activeOnly = false): void
     {
         $currentStart = max(1, $start);
 
@@ -136,14 +139,27 @@ class SortService
             ->values();
 
         foreach ($orderedGroups as $record) {
-            $channelCount = $record->channels()->count();
+            if ($activeOnly) {
+                $channels = $record->enabled_channels()
+                    ->orderBy('sort')
+                    ->get();
 
-            if ($channelCount === 0) {
-                continue;
+                if ($channels->isEmpty()) {
+                    continue;
+                }
+
+                $this->bulkRecountChannels($channels, $currentStart);
+                $currentStart += $channels->count();
+            } else {
+                $channelCount = $record->channels()->count();
+
+                if ($channelCount === 0) {
+                    continue;
+                }
+
+                $this->bulkRecountGroupChannels($record, $currentStart);
+                $currentStart += $channelCount;
             }
-
-            $this->bulkRecountGroupChannels($record, $currentStart);
-            $currentStart += $channelCount;
         }
     }
 
