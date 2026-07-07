@@ -11,6 +11,7 @@ enum PlaylistSourceType: string
     case Jellyfin = 'jellyfin';
     case Plex = 'plex';
     case LocalMedia = 'local_media';
+    case AIOStreams = 'aiostreams';
 
     public function getLabel(): string
     {
@@ -22,6 +23,7 @@ enum PlaylistSourceType: string
             self::Jellyfin => __('Jellyfin'),
             self::Plex => __('Plex'),
             self::LocalMedia => __('Local Media'),
+            self::AIOStreams => __('AIOStreams'),
         };
     }
 }

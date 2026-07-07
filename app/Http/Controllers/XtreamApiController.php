@@ -19,7 +19,6 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\Group;
-use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
@@ -536,7 +535,7 @@ class XtreamApiController extends Controller
             ];
 
             $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
-            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features);
+            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features, $authMethod, $playlistAuth);
 
             $m3uEditorPayload = [
                 'version' => config('dev.version'),
@@ -2505,24 +2504,35 @@ class XtreamApiController extends Controller
             $features[] = 'requests';
         }
 
-        if ($this->hasAIOStreams($playlist)) {
+        if ($this->hasAIOStreams($playlist, $authMethod, $playlistAuth)) {
             $features[] = 'aiostreams';
         }
 
         return $features;
     }
 
-    private function hasAIOStreams($playlist): bool
+    private function hasAIOStreams($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
     {
-        $userId = $playlist->user_id ?? $playlist->user?->id;
-        if (! $userId) {
+        if ($authMethod === 'playlist_auth') {
+            if (! $playlistAuth?->aiostreams_enabled) {
+                return false;
+            }
+            // Auth specifies its own integration directly — no playlist lookup needed.
+            if ($playlistAuth->aiostreams_integration_id !== null) {
+                return (bool) optional($playlistAuth->aiostreamsIntegration)->enabled;
+            }
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
             return false;
         }
 
-        return MediaServerIntegration::where('user_id', $userId)
-            ->where('type', 'aiostreams')
-            ->where('enabled', true)
-            ->exists();
+        return $effectivePlaylist->aiostreams_integration_id !== null
+            && optional($effectivePlaylist->aiostreamsIntegration)->enabled;
     }
 
     /**
@@ -2531,28 +2541,48 @@ class XtreamApiController extends Controller
      *
      * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
      */
-    private function resolveAIOStreamsData($playlist, array $features): array
+    private function resolveAIOStreamsData($playlist, array $features, string $authMethod = '', ?PlaylistAuth $playlistAuth = null): array
     {
         if (! in_array('aiostreams', $features)) {
             return [];
         }
 
-        $userId = $playlist->user_id ?? $playlist->user?->id;
-        if (! $userId) {
+        // Playlist auth with a directly-assigned integration bypasses the playlist lookup.
+        if ($authMethod === 'playlist_auth' && $playlistAuth?->aiostreams_integration_id !== null) {
+            $integration = $playlistAuth->aiostreamsIntegration;
+            if (! $integration || ! $integration->enabled) {
+                return [];
+            }
+
+            return [
+                [
+                    'id' => $integration->id,
+                    'name' => $integration->name,
+                    'catalogs' => $integration->aiostreams_catalogs ?? [],
+                ],
+            ];
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
             return [];
         }
 
-        return MediaServerIntegration::where('user_id', $userId)
-            ->where('type', 'aiostreams')
-            ->where('enabled', true)
-            ->get()
-            ->map(fn (MediaServerIntegration $integration) => [
+        $integration = $effectivePlaylist->aiostreamsIntegration;
+        if (! $integration || ! $integration->enabled) {
+            return [];
+        }
+
+        return [
+            [
                 'id' => $integration->id,
                 'name' => $integration->name,
                 'catalogs' => $integration->aiostreams_catalogs ?? [],
-            ])
-            ->values()
-            ->all();
+            ],
+        ];
     }
 
     private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool

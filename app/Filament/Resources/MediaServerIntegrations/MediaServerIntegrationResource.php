@@ -164,7 +164,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
         $tabs[] = Tab::make(__('Requests'))
             ->icon('heroicon-m-magnifying-glass-circle')
-            ->hidden(fn () => ! Auth::user()->canUseIntegrations())
+            ->hidden(fn (Get $get) => ! Auth::user()->canUseIntegrations() || $get('type') === 'aiostreams')
             ->schema([
                 Section::make(__('Content Requests'))
                     ->icon('heroicon-m-magnifying-glass-circle')

@@ -108,12 +108,6 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        if ($integration->isAioStreams()) {
-            Log::info('SyncMediaServer: Skipping AIOStreams integration (on-demand only)', ['id' => $this->integrationId]);
-
-            return;
-        }
-
         Log::info('SyncMediaServer: Starting sync', [
             'integration_id' => $integration->id,
             'name' => $integration->name,
@@ -139,6 +133,30 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             $connectionTest = $service->testConnection();
             if (! $connectionTest['success']) {
                 throw new Exception('Connection failed: '.$connectionTest['message']);
+            }
+
+            // AIOStreams is on-demand only — no content to sync after connection is verified.
+            if ($integration->isAioStreams()) {
+                $integration->update([
+                    'status' => 'completed',
+                    'progress' => 100,
+                    'last_synced_at' => now(),
+                ]);
+
+                $playlist->update([
+                    'status' => Status::Completed,
+                    'processing' => [],
+                    'synced' => now(),
+                ]);
+
+                Notification::make()
+                    ->success()
+                    ->title(__('AIOStreams Connected'))
+                    ->body($connectionTest['message'] ?? "Connected to {$integration->name}.")
+                    ->broadcast($integration->user)
+                    ->sendToDatabase($integration->user);
+
+                return;
             }
 
             // Validate selected libraries still exist
@@ -252,6 +270,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'jellyfin' => PlaylistSourceType::Jellyfin,
             'plex' => PlaylistSourceType::Plex,
             'local', 'webdav' => PlaylistSourceType::LocalMedia,
+            'aiostreams' => PlaylistSourceType::AIOStreams,
             default => PlaylistSourceType::M3u,
         };
 

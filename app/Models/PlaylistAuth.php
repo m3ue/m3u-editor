@@ -33,11 +33,18 @@ class PlaylistAuth extends Model
         'stop_oldest_on_limit' => 'boolean',
         'request_enabled' => 'boolean',
         'auto_approve_requests' => 'boolean',
+        'aiostreams_enabled' => 'boolean',
+        'aiostreams_integration_id' => 'integer',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function aiostreamsIntegration(): BelongsTo
+    {
+        return $this->belongsTo(MediaServerIntegration::class, 'aiostreams_integration_id');
     }
 
     public function viewer(): HasOne
