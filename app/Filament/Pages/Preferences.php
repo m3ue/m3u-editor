@@ -1032,11 +1032,11 @@ class Preferences extends SettingsPage
                                                         ->label(__('Channel slug'))
                                                         ->required()
                                                         ->regex('/^[a-z0-9_]+$/')
-                                                        ->placeholder('dvr_recording_completed')
+                                                        ->placeholder(__('dvr_recording_completed'))
                                                         ->helperText(__('Lowercase letters, numbers, and underscores only.')),
                                                     TextInput::make('label')
                                                         ->label(__('Display label'))
-                                                        ->placeholder('DVR Recording Completed')
+                                                        ->placeholder(__('DVR Recording Completed'))
                                                         ->helperText(__('Optional — shown in the TV app instead of the raw slug.')),
                                                 ]),
                                             ])

@@ -11,6 +11,7 @@ use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Schemas\Components\Utilities\Get;
@@ -68,10 +69,13 @@ class EditGroup extends EditRecord
                             ->numeric()
                             ->default(1)
                             ->required(),
+                        Toggle::make('active_only')
+                            ->label(__('Active channels only'))
+                            ->helperText(__('When enabled, only active channels are renumbered; disabled channels keep their current numbers.'))
+                            ->default(false),
                     ])
                     ->action(function (Group $record, array $data): void {
-                        $start = (int) $data['start'];
-                        SortFacade::bulkRecountGroupChannels($record, $start);
+                        SortFacade::bulkRecountGroupChannels($record, (int) $data['start'], (bool) ($data['active_only'] ?? false));
                     })
                     ->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
