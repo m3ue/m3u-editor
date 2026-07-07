@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
@@ -29,7 +30,6 @@ use App\Http\Controllers\ShortURLController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WatchProgressController;
 use App\Http\Controllers\WebhookTestController;
-use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MediaServerIntegrations;
 
+use App\Exceptions\MediaServerException;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Filament\Concerns\HasCopilotSupport;
@@ -20,6 +21,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
+use App\Services\AIOStreamsService;
 use App\Services\MediaServerService;
 use App\Services\PlexManagementService;
 use App\Tables\Columns\ProgressColumn;
@@ -1400,7 +1402,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     ->title(__('Catalogs Refreshed'))
                                     ->body($result['message'])
                                     ->send();
-                            } catch (\App\Exceptions\MediaServerException $e) {
+                            } catch (MediaServerException $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title(__('Refresh Failed'))
@@ -2023,7 +2025,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ]);
 
                     try {
-                        $service = new \App\Services\AIOStreamsService($tempIntegration);
+                        $service = new AIOStreamsService($tempIntegration);
                         $result = $service->testConnection();
 
                         // If we have a saved record, persist the catalogs
@@ -2042,7 +2044,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         if ($livewire->record) {
                             $livewire->dispatch('$refresh');
                         }
-                    } catch (\App\Exceptions\MediaServerException $e) {
+                    } catch (MediaServerException $e) {
                         Notification::make()
                             ->danger()
                             ->title(__('Connection Failed'))
