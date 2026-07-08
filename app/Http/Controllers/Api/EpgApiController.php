@@ -814,7 +814,16 @@ class EpgApiController extends Controller
             $channels = [];
             $programmes = [];
 
+            // Pre-compute date range outside the loop — same for every network
+            $startDateTime = Carbon::parse($startDate)->startOfDay();
+            $endDateTime = Carbon::parse($endDate)->endOfDay();
+
             foreach ($networks as $network) {
+                // Use network->id as the array key — always unique.
+                // channel_number is NOT safe as a key because two networks can share
+                // the same value (or one may be null, falling back to an id that
+                // matches another network's channel_number), causing silent overwrites.
+                $key = $network->id;
                 $channelNo = $network->channel_number ?? $network->id;
 
                 // Get the stream URL - use HLS if broadcasting, otherwise legacy endpoint
@@ -840,15 +849,15 @@ class EpgApiController extends Controller
                 }
 
                 // Build channel entry
-                $channels[$channelNo] = [
-                    'id' => $channelNo,
-                    'database_id' => null, // $network->id,
+                $channels[$key] = [
+                    'id' => $key,
+                    'database_id' => null,
                     'url' => $url,
                     'format' => 'hls', // Network streams are HLS
                     'tvg_id' => 'network_'.$network->id,
                     'display_name' => $network->name,
                     'title' => $network->name,
-                    'channel_number' => $network->channel_number ?? $channelNo,
+                    'channel_number' => $channelNo,
                     'group' => $network->effective_group_name,
                     'icon' => $icon,
                     'has_epg' => true, // Networks always have EPG from programmes
@@ -859,10 +868,6 @@ class EpgApiController extends Controller
                     'is_broadcasting' => $network->isBroadcasting(),
                     'broadcast_offset' => $broadcastOffset, // For EPG playhead alignment
                 ];
-
-                // Get programmes for this network within the date range
-                $startDateTime = Carbon::parse($startDate)->startOfDay();
-                $endDateTime = Carbon::parse($endDate)->endOfDay();
 
                 $networkProgrammes = $network->programmes()
                     ->where('end_time', '>=', $startDateTime)
@@ -893,7 +898,7 @@ class EpgApiController extends Controller
                     ];
                 }
 
-                $programmes[$channelNo] = $channelProgrammes;
+                $programmes[$key] = $channelProgrammes;
             }
 
             // Create pagination info

@@ -10,6 +10,7 @@ use App\Services\NetworkScheduleService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\Component;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 
@@ -111,20 +112,27 @@ class EditNetwork extends EditRecord
                     ->label(__('Generate Schedule'))
                     ->icon('heroicon-o-calendar')
                     ->color('gray')
-                    ->requiresConfirmation()
                     ->modalHeading(__('Generate Schedule'))
-                    ->modalDescription(fn (): string => 'This will generate a '.($this->record->schedule_window_days ?? 7).'-day programme schedule for this network. Existing future programmes will be replaced.')
+                    ->modalSubmitActionLabel(__('Generate'))
                     ->disabled(fn (): bool => $this->record->network_playlist_id === null)
                     ->tooltip(fn (): ?string => $this->record->network_playlist_id === null ? 'Assign to a playlist first' : null)
                     ->visible(fn (): bool => $this->record->schedule_type !== 'manual')
-                    ->action(function () {
-                        $service = app(NetworkScheduleService::class);
-                        $service->generateSchedule($this->record);
+                    ->schema(fn (): array => $this->generateScheduleModalSchema($this->record->schedule_window_days ?? 7, $this->record->schedule_type))
+                    ->action(function (array $data) {
+                        $forceReset = ($data['mode'] ?? 'continue') === 'reset';
+
+                        app(NetworkScheduleService::class)->generateSchedule($this->record, forceReset: $forceReset);
+
+                        if ($forceReset && $this->record->isBroadcasting()) {
+                            app(NetworkBroadcastService::class)->restart($this->record);
+                        }
 
                         Notification::make()
                             ->success()
                             ->title(__('Schedule Generated'))
-                            ->body("Generated programme schedule for {$this->record->name}")
+                            ->body($forceReset
+                                ? "Fresh schedule generated for {$this->record->name}."
+                                : "Schedule continued for {$this->record->name}.")
                             ->send();
 
                         $this->refreshFormData(['schedule_generated_at']);
@@ -138,5 +146,13 @@ class EditNetwork extends EditRecord
 
             ])->button(),
         ];
+    }
+
+    /**
+     * @return array<int, Component>
+     */
+    protected function generateScheduleModalSchema(int $windowDays, string $scheduleType): array
+    {
+        return NetworkResource::generateScheduleModalSchema($windowDays, $scheduleType);
     }
 }

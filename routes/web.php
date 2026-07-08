@@ -208,6 +208,12 @@ Route::get('/network/{network}/live.m3u8', [NetworkHlsController::class, 'playli
 Route::get('/network/{network}/{segment}.ts', [NetworkHlsController::class, 'segment'])
     ->name('network.hls.segment')
     ->where('segment', 'live[0-9]+');
+// Video/subtitle variant sub-playlists and their .ts/.vtt segments, used only
+// when a network has subtitles enabled (proxy emits a master playlist instead
+// of a flat live.m3u8).
+Route::get('/network/{network}/hls-variant/{filename}', [NetworkHlsController::class, 'variant'])
+    ->name('network.hls.variant')
+    ->where('filename', 'live[^/]*\.(?:ts|vtt|m3u8)');
 
 /*
  * API routes

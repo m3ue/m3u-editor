@@ -55,6 +55,8 @@ class Network extends Model
         // Manual schedule
         'manual_schedule_recurrence' => 'string',
         'schedule_gap_seconds' => 'integer',
+        'preferred_audio_language' => 'string',
+        'subtitles_enabled' => 'boolean',
     ];
 
     /**
