@@ -560,5 +560,4 @@ class ListVod extends ListRecords
     {
         $this->resetPage();
     }
-
 }

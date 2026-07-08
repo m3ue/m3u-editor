@@ -489,6 +489,4 @@ class ListSeries extends ListRecords
     {
         $this->resetPage();
     }
-
-
 }
