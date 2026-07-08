@@ -2142,7 +2142,7 @@ class XtreamApiController extends Controller
     private function resolveViewer(string $viewerUlid, $playlist): ?PlaylistViewer
     {
         return PlaylistViewer::where('ulid', $viewerUlid)
-            ->where('viewerable_type', get_class($playlist))
+            ->where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->first();
     }
@@ -2166,7 +2166,7 @@ class XtreamApiController extends Controller
 
             if ($playlistAuth) {
                 $viewer = PlaylistViewer::where('playlist_auth_id', $playlistAuth->id)
-                    ->where('viewerable_type', get_class($playlist))
+                    ->where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
                     ->first();
 
@@ -2176,7 +2176,7 @@ class XtreamApiController extends Controller
                         'name' => $playlistAuth->name,
                         'is_admin' => false,
                         'playlist_auth_id' => $playlistAuth->id,
-                        'viewerable_type' => get_class($playlist),
+                        'viewerable_type' => $playlist->getMorphClass(),
                         'viewerable_id' => $playlist->id,
                     ]);
                 }
@@ -2186,7 +2186,7 @@ class XtreamApiController extends Controller
         }
 
         // Fall back to admin viewer
-        return PlaylistViewer::where('viewerable_type', get_class($playlist))
+        return PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->where('is_admin', true)
             ->first();
@@ -2197,7 +2197,7 @@ class XtreamApiController extends Controller
      */
     private function getViewers($playlist): \Illuminate\Http\JsonResponse
     {
-        $viewers = PlaylistViewer::where('viewerable_type', get_class($playlist))
+        $viewers = PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->orderByDesc('is_admin')
             ->orderBy('name')
@@ -2220,7 +2220,7 @@ class XtreamApiController extends Controller
             'ulid' => (string) Str::ulid(),
             'name' => $name,
             'is_admin' => false,
-            'viewerable_type' => get_class($playlist),
+            'viewerable_type' => $playlist->getMorphClass(),
             'viewerable_id' => $playlist->id,
         ]);
 

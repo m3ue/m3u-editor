@@ -553,7 +553,7 @@ class AppServiceProvider extends ServiceProvider
                 $playlist->postProcesses()->detach();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', Playlist::class)
+                PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
                     ->delete();
 
@@ -621,7 +621,7 @@ class AppServiceProvider extends ServiceProvider
                 $mergedPlaylist->removeShortUrls();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', MergedPlaylist::class)
+                PlaylistViewer::where('viewerable_type', $mergedPlaylist->getMorphClass())
                     ->where('viewerable_id', $mergedPlaylist->id)
                     ->delete();
 
@@ -671,7 +671,7 @@ class AppServiceProvider extends ServiceProvider
                     ->delete();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', CustomPlaylist::class)
+                PlaylistViewer::where('viewerable_type', $customPlaylist->getMorphClass())
                     ->where('viewerable_id', $customPlaylist->id)
                     ->delete();
 
@@ -746,7 +746,7 @@ class AppServiceProvider extends ServiceProvider
                 $playlistAlias->removeShortUrls();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', PlaylistAlias::class)
+                PlaylistViewer::where('viewerable_type', $playlistAlias->getMorphClass())
                     ->where('viewerable_id', $playlistAlias->id)
                     ->delete();
 
@@ -832,7 +832,7 @@ class AppServiceProvider extends ServiceProvider
                     'ulid' => (string) Str::ulid(),
                     'name' => $adminUser->name,
                     'is_admin' => true,
-                    'viewerable_type' => get_class($record),
+                    'viewerable_type' => $record->getMorphClass(),
                     'viewerable_id' => $record->id,
                 ]);
             };
