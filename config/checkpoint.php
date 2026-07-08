@@ -63,6 +63,20 @@ return [
             'guzzlehttp/guzzle',
             // updated alongside guzzlehttp/guzzle 7.12.1
             'guzzlehttp/psr7',
+            // ── Core Laravel ecosystem — trusted first-party packages ────────
+            'laravel/framework',
+            // ── Well-known, widely-audited ecosystem packages ────────────────
+            'league/flysystem',
+            'vlucas/phpdotenv',
+            // ── Dev tooling — phpstan, rector, pest ──────────────────────────
+            'phpstan/phpdoc-parser',
+            'pestphp/pest',
+            'rector/rector',
+            // ── Application-specific packages ────────────────────────────────
+            'dedoc/scramble',
+            'stechstudio/filament-impersonate',
+            // dev-master dep — always "fresh", false-positive by design
+            'sparkison/m3u-parser',
         ],
     ],
 
