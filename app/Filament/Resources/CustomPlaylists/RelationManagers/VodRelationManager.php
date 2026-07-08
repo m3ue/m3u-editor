@@ -7,6 +7,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCus
 use App\Filament\Resources\Vods\VodResource;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
@@ -30,6 +31,7 @@ use Illuminate\Support\Facades\DB;
 
 class VodRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
     use ReordersCustomPlaylistPivotSort;
 
     protected static string $relationship = 'channels';
