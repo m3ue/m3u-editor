@@ -249,7 +249,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 }
                             }
 
-                            $takenPlaylists = $assignedIds[Playlist::class] ?? [];
+                            $takenPlaylists = $assignedIds[(new Playlist)->getMorphClass()] ?? [];
                             Playlist::where('user_id', $userId)
                                 ->when($takenPlaylists, fn ($q) => $q->whereNotIn('id', $takenPlaylists))
                                 ->get()
@@ -258,7 +258,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Playlist)';
                                 });
 
-                            $takenCustom = $assignedIds[CustomPlaylist::class] ?? [];
+                            $takenCustom = $assignedIds[(new CustomPlaylist)->getMorphClass()] ?? [];
                             CustomPlaylist::where('user_id', $userId)
                                 ->when($takenCustom, fn ($q) => $q->whereNotIn('id', $takenCustom))
                                 ->get()
@@ -267,7 +267,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Custom Playlist)';
                                 });
 
-                            $takenMerged = $assignedIds[MergedPlaylist::class] ?? [];
+                            $takenMerged = $assignedIds[(new MergedPlaylist)->getMorphClass()] ?? [];
                             MergedPlaylist::where('user_id', $userId)
                                 ->when($takenMerged, fn ($q) => $q->whereNotIn('id', $takenMerged))
                                 ->get()
@@ -276,7 +276,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Merged Playlist)';
                                 });
 
-                            $takenAliases = $assignedIds[PlaylistAlias::class] ?? [];
+                            $takenAliases = $assignedIds[(new PlaylistAlias)->getMorphClass()] ?? [];
                             PlaylistAlias::where('user_id', $userId)
                                 ->when($takenAliases, fn ($q) => $q->whereNotIn('id', $takenAliases))
                                 ->get()
