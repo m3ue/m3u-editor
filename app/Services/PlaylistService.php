@@ -880,52 +880,6 @@ class PlaylistService
     }
 
     /**
-     * Get selectable source groups for auto-sync rules.
-     *
-     * @return array<int, string>
-     */
-    public static function getEligibleAutoSyncGroupOptions(Playlist $playlist, ?int $customPlaylistId, string $type): array
-    {
-        if ($type === 'series_categories') {
-            return Category::query()
-                ->where('playlist_id', $playlist->id)
-                ->when($customPlaylistId, function (Builder $query) use ($customPlaylistId): void {
-                    $query->where(function (Builder $query) use ($customPlaylistId): void {
-                        $query->whereDoesntHave('series')
-                            ->orWhereHas('series', function (Builder $query) use ($customPlaylistId): void {
-                                $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
-                                    $query->whereKey($customPlaylistId);
-                                });
-                            });
-                    });
-                })
-                ->orderBy('name')
-                ->pluck('name', 'id')
-                ->toArray();
-        }
-
-        $isVod = $type === 'vod_groups';
-        $channelRelation = $isVod ? 'vod_channels' : 'live_channels';
-
-        return Group::query()
-            ->where('playlist_id', $playlist->id)
-            ->where('type', $isVod ? 'vod' : 'live')
-            ->when($customPlaylistId, function (Builder $query) use ($channelRelation, $customPlaylistId): void {
-                $query->where(function (Builder $query) use ($channelRelation, $customPlaylistId): void {
-                    $query->whereDoesntHave($channelRelation)
-                        ->orWhereHas($channelRelation, function (Builder $query) use ($customPlaylistId): void {
-                            $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
-                                $query->whereKey($customPlaylistId);
-                            });
-                        });
-                });
-            })
-            ->orderBy('name')
-            ->pluck('name', 'id')
-            ->toArray();
-    }
-
-    /**
      * Add items to a custom playlist and optionally tag them.
      *
      * @param  iterable|Relation|Builder  $items
