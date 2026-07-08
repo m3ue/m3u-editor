@@ -336,12 +336,6 @@ Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStrea
     ->name('dispatcharr.proxy.stream')
     ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
-// AIOStreams progress endpoints (user-scoped, not integration-scoped)
-Route::get('/{username}/{password}/aiostreams/progress', [AIOStreamsProxyController::class, 'getProgress'])
-    ->name('aiostreams.progress.get');
-Route::post('/{username}/{password}/aiostreams/progress', [AIOStreamsProxyController::class, 'saveProgress'])
-    ->name('aiostreams.progress.save');
-
 // AIOStreams proxy routes — must come before the fallback direct stream catch-all
 Route::get('/{username}/{password}/aiostreams/{integration}/catalog/{type}/{catalogId}.json', [AIOStreamsProxyController::class, 'catalog'])
     ->name('aiostreams.proxy.catalog')

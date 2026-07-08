@@ -23,6 +23,7 @@ class ViewerWatchProgress extends Model
         'series_id' => 'integer',
         'season_number' => 'integer',
         'episode_number' => 'integer',
+        'aio_integration_id' => 'integer',
     ];
 
     public function viewer(): BelongsTo
@@ -62,6 +63,10 @@ class ViewerWatchProgress extends Model
      */
     public function getContentTitleAttribute(): string
     {
+        if ($this->content_type === 'aiostreams') {
+            return $this->title ?? $this->aio_item_id ?? 'Unknown';
+        }
+
         if ($this->content_type === 'episode') {
             $episode = $this->episode;
             if ($episode) {
@@ -110,6 +115,11 @@ class ViewerWatchProgress extends Model
     public function scopeDvrRecording(Builder $query): Builder
     {
         return $query->where('content_type', 'dvr_recording');
+    }
+
+    public function scopeAiostreams(Builder $query): Builder
+    {
+        return $query->where('content_type', 'aiostreams');
     }
 
     public function scopeCompleted(Builder $query): Builder
