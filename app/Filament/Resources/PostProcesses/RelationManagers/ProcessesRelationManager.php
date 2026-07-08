@@ -36,10 +36,10 @@ class ProcessesRelationManager extends RelationManager
                     ->live()
                     ->helperText(__('The type of item to assign this post process to.'))
                     ->options([
-                        Playlist::class => 'Playlist',
+                        (new Playlist)->getMorphClass() => 'Playlist',
                         Epg::class => 'EPG',
                     ])
-                    ->default(Playlist::class) // Default to Playlists if no type is selected
+                    ->default((new Playlist)->getMorphClass())
                     ->searchable(),
 
                 Select::make('processable_id')
@@ -47,7 +47,7 @@ class ProcessesRelationManager extends RelationManager
                     ->label(__('Playlist'))
                     ->helperText(__('Select the Playlist you would like to assign this post process to.'))
                     ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                    ->hidden(fn ($get) => $get('processable_type') !== Playlist::class)
+                    ->hidden(fn ($get) => $get('processable_type') !== (new Playlist)->getMorphClass())
                     ->searchable(),
                 Select::make('processable_id')
                     ->required()

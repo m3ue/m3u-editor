@@ -93,18 +93,18 @@ class PlaylistViewerResource extends Resource implements CopilotResource
                 TextColumn::make('viewerable_type')
                     ->label(__('Playlist Type'))
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        Playlist::class => 'Playlist',
-                        CustomPlaylist::class => 'Custom Playlist',
-                        MergedPlaylist::class => 'Merged Playlist',
-                        PlaylistAlias::class => 'Playlist Alias',
+                        'playlist', Playlist::class => 'Playlist',
+                        'custom_playlist', CustomPlaylist::class => 'Custom Playlist',
+                        'merged_playlist', MergedPlaylist::class => 'Merged Playlist',
+                        'alias', PlaylistAlias::class => 'Playlist Alias',
                         default => class_basename($state),
                     })
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
-                        Playlist::class => 'primary',
-                        CustomPlaylist::class => 'info',
-                        MergedPlaylist::class => 'warning',
-                        PlaylistAlias::class => 'gray',
+                        'playlist', Playlist::class => 'primary',
+                        'custom_playlist', CustomPlaylist::class => 'info',
+                        'merged_playlist', MergedPlaylist::class => 'warning',
+                        'alias', PlaylistAlias::class => 'gray',
                         default => 'gray',
                     }),
 
@@ -128,10 +128,10 @@ class PlaylistViewerResource extends Resource implements CopilotResource
                 SelectFilter::make('viewerable_type')
                     ->label(__('Playlist Type'))
                     ->options([
-                        Playlist::class => 'Playlist',
-                        CustomPlaylist::class => 'Custom Playlist',
-                        MergedPlaylist::class => 'Merged Playlist',
-                        PlaylistAlias::class => 'Playlist Alias',
+                        'playlist' => 'Playlist',
+                        'custom_playlist' => 'Custom Playlist',
+                        'merged_playlist' => 'Merged Playlist',
+                        'alias' => 'Playlist Alias',
                     ]),
             ])
             ->recordActions([
