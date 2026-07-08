@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations\RelationManagers;
 
 use App\Filament\Resources\Series\SeriesResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
@@ -12,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class SeriesRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
+
     protected static string $relationship = 'series';
 
     protected static ?string $label = 'Series';
