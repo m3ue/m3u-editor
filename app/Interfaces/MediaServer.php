@@ -34,9 +34,42 @@ interface MediaServer
 
     public function getDirectStreamUrl(Request $request, string $itemId, string $container = 'ts', array $transcodeOptions = []): string;
 
+    /**
+     * Return the audio stream index for the given ISO 639 language code, or null if not found.
+     * The returned value is service-specific: Emby/Jellyfin use the MediaStreams array index;
+     * Plex uses the stream's ID field. Both map to AudioStreamIndex on the outgoing request.
+     */
+    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int;
+
+    /**
+     * Return the first available text-based subtitle stream for the item, or null if none
+     * exists. Covers both embedded and external (sidecar file) subtitle streams — the media
+     * server's own metadata is authoritative for external subtitles, which a raw ffprobe of
+     * the video file itself can never see. Bitmap subtitle formats (PGS/VobSub) are skipped,
+     * since ffmpeg's webvtt encoder only supports text-to-text conversion.
+     *
+     * When $seekSeconds > 0 the returned URL must be seeked server-side so the subtitle cues
+     * are rebased to zero at that content-time — matching the video's own server-side seek so
+     * both streams share one timeline origin. The returned 'server_seeked' flag tells the proxy
+     * whether the subtitle input still needs a local -ss (false) or already arrives aligned
+     * (true), so it never double-seeks.
+     *
+     * @return array{url: string, language: ?string, server_seeked: bool}|null
+     */
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array;
+
     public function getImageUrl(string $itemId, string $imageType = 'Primary'): string;
 
     public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string;
+
+    /**
+     * Return the total byte size of the item's primary static stream alongside its runtime,
+     * or null if unavailable. Used to compute an HTTP Range offset that lets ffmpeg seek
+     * a server-side-seeked static stream without help from the media server.
+     *
+     * @return array{bytes: int, runtime_ticks: int|null, runtime_seconds: float|null}|null
+     */
+    public function getStreamByteSize(string $itemId): ?array;
 
     public function extractGenres(array $item): array;
 

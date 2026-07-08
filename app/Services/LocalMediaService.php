@@ -902,4 +902,19 @@ class LocalMediaService implements MediaServer
 
         return $seasons->sortBy('IndexNumber')->values();
     }
+
+    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int
+    {
+        return null;
+    }
+
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array
+    {
+        return null;
+    }
+
+    public function getStreamByteSize(string $itemId): ?array
+    {
+        return null;
+    }
 }

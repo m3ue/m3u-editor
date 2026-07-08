@@ -957,4 +957,54 @@ class PlexService implements MediaServer
             ];
         }
     }
+
+    /**
+     * Return the Plex stream ID for the first audio stream matching the given
+     * ISO 639 language code. Returns null if not found or on error.
+     * Plex identifies audio streams by their ID, not a 0-based array index.
+     */
+    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int
+    {
+        try {
+            $response = $this->client()->get("/library/metadata/{$itemId}");
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $data = $response->json();
+            $streams = $data['MediaContainer']['Metadata'][0]['Media'][0]['Part'][0]['Stream'] ?? [];
+            $lang = strtolower($languageCode);
+
+            foreach ($streams as $stream) {
+                // streamType 2 = audio in the Plex API
+                if ((int) ($stream['streamType'] ?? 0) !== 2) {
+                    continue;
+                }
+
+                $streamLang = strtolower($stream['languageCode'] ?? $stream['language'] ?? '');
+                if ($streamLang === $lang) {
+                    return isset($stream['id']) ? (int) $stream['id'] : null;
+                }
+            }
+        } catch (Exception $e) {
+            Log::warning('PlexService: Failed to look up audio stream for language', [
+                'item_id' => $itemId,
+                'language' => $languageCode,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array
+    {
+        return null;
+    }
+
+    public function getStreamByteSize(string $itemId): ?array
+    {
+        return null;
+    }
 }
