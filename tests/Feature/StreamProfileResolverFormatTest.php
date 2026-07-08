@@ -215,7 +215,7 @@ function callCreateTranscodedStream(M3uProxyService $service, string $url, Strea
 
 describe('M3uProxyService::createTranscodedStream() resolver payload', function () {
     beforeEach(function () {
-        config(['proxy.m3u_proxy_host' => 'http://127.0.0.1:19999']);
+        config(['proxy.m3u_proxy_host' => 'http://127.0.0.1', 'proxy.m3u_proxy_port' => 19999]);
         // Catch all outbound HTTP so we never hit a real host, then assert on what was sent.
         Http::fake(['*' => Http::response(['stream_id' => 'abc123'], 200)]);
     });
