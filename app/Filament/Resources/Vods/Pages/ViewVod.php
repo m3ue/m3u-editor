@@ -3,12 +3,15 @@
 namespace App\Filament\Resources\Vods\Pages;
 
 use App\Filament\Resources\Vods\VodResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Contracts\Support\Htmlable;
 
 class ViewVod extends ViewRecord
 {
+    use AppliesTmdbSelection;
+
     protected static string $resource = VodResource::class;
 
     protected string $view = 'filament.resources.vods.pages.view-vod';
