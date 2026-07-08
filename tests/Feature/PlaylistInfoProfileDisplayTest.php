@@ -30,7 +30,7 @@ beforeEach(function () {
     ]);
 
     // Configure proxy host so M3uProxyService can construct URLs
-    config(['proxy.m3u_proxy_host' => 'http://localhost:8765']);
+    config(['proxy.m3u_proxy_host' => 'http://localhost', 'proxy.m3u_proxy_port' => 8765]);
     config(['proxy.m3u_proxy_token' => 'test-token']);
 
     // Force array cache driver to avoid Redis dependency

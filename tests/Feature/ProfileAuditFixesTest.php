@@ -24,7 +24,7 @@ beforeEach(function () {
     Queue::fake();
     $this->user = User::factory()->create();
 
-    config(['proxy.m3u_proxy_host' => 'http://localhost:8765']);
+    config(['proxy.m3u_proxy_host' => 'http://localhost', 'proxy.m3u_proxy_port' => 8765]);
     config(['proxy.m3u_proxy_token' => 'test-token']);
     config(['cache.default' => 'array']);
 });
