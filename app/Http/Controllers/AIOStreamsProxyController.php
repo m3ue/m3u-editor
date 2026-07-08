@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AIOStreamsWatchProgress;
 use App\Models\CustomPlaylist;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
@@ -110,6 +111,72 @@ class AIOStreamsProxyController extends Controller
         }
 
         return response()->json($data);
+    }
+
+    /**
+     * Return all in-progress (non-completed) AIOStreams watch progress for the authenticated user.
+     * Route: GET /{username}/{password}/aiostreams/progress
+     */
+    public function getProgress(Request $request, string $username, string $password): JsonResponse
+    {
+        $userId = $this->resolveUserId($username, $password);
+
+        if (! $userId) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $progress = AIOStreamsWatchProgress::where('user_id', $userId)
+            ->where('completed', false)
+            ->orderByDesc('last_watched_at')
+            ->get(['integration_id', 'item_id', 'item_type', 'position_seconds', 'duration_seconds', 'name', 'poster_url', 'last_watched_at']);
+
+        return response()->json($progress);
+    }
+
+    /**
+     * Save or update AIOStreams watch progress for the authenticated user.
+     * Route: POST /{username}/{password}/aiostreams/progress
+     */
+    public function saveProgress(Request $request, string $username, string $password): JsonResponse
+    {
+        $userId = $this->resolveUserId($username, $password);
+
+        if (! $userId) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $integrationId = (int) $request->input('integration_id');
+        $itemId = $request->input('item_id', '');
+        $itemType = $request->input('item_type', 'movie');
+
+        if (! $integrationId || ! $itemId) {
+            return response()->json(['error' => 'integration_id and item_id are required'], 400);
+        }
+
+        $positionSeconds = (int) $request->input('position_seconds', 0);
+        $durationSeconds = $request->input('duration_seconds') !== null
+            ? (int) $request->input('duration_seconds')
+            : null;
+
+        $completed = $request->boolean('completed');
+        if (! $completed && $durationSeconds && $durationSeconds > 0) {
+            $completed = $positionSeconds >= ($durationSeconds * 0.9);
+        }
+
+        $progress = AIOStreamsWatchProgress::updateOrCreate(
+            ['user_id' => $userId, 'integration_id' => $integrationId, 'item_id' => $itemId],
+            [
+                'item_type' => $itemType,
+                'position_seconds' => $positionSeconds,
+                'duration_seconds' => $durationSeconds,
+                'completed' => $completed,
+                'name' => $request->input('name', ''),
+                'poster_url' => $request->input('poster_url'),
+                'last_watched_at' => now(),
+            ]
+        );
+
+        return response()->json($progress->only(['position_seconds', 'duration_seconds', 'completed', 'last_watched_at']));
     }
 
     /**
