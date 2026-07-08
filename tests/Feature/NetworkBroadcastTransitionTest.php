@@ -369,3 +369,42 @@ it('next_stream_config key is always present in the broadcast start payload', fu
     // Key must always be present (null when no next programme).
     expect($captured)->toHaveKey('next_stream_config');
 });
+
+it('computeNextStreamConfig resolves audio_stream_index for the NEXT programme, not the current one', function () {
+    $network = Network::factory()->create([
+        'broadcast_enabled' => true,
+        'preferred_audio_language' => 'eng',
+    ]);
+
+    $currentProgramme = NetworkProgramme::factory()->create([
+        'network_id' => $network->id,
+        'start_time' => now()->subMinutes(5),
+        'end_time' => now()->addMinute(),
+        'duration_seconds' => 360,
+    ]);
+
+    $nextProgramme = NetworkProgramme::factory()->create([
+        'network_id' => $network->id,
+        'start_time' => now()->addMinute(),
+        'end_time' => now()->addMinutes(31),
+        'duration_seconds' => 1800,
+    ]);
+
+    $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
+    $service->shouldAllowMockingProtectedMethods();
+    $service->shouldReceive('getStreamUrl')
+        ->with($network, Mockery::on(fn ($p) => $p->is($nextProgramme)), 0)
+        ->andReturn('http://example.com/next.ts');
+    $service->shouldReceive('resolveSubtitleInfo')
+        ->with($network, Mockery::on(fn ($p) => $p->is($nextProgramme)), 0)
+        ->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
+    $service->shouldReceive('resolveAudioStreamIndex')
+        ->once()
+        ->with($network, Mockery::on(fn ($p) => $p->is($nextProgramme)))
+        ->andReturn(7);
+
+    $method = new ReflectionMethod(NetworkBroadcastService::class, 'computeNextStreamConfig');
+    $result = $method->invoke($service, $network, $currentProgramme);
+
+    expect($result['audio_stream_index'])->toBe(7);
+});
