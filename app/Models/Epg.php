@@ -154,9 +154,9 @@ class Epg extends Model
 
     /**
      * Get all Playlists types (including Standard, Custom, Merged and Aliases) associated with this EPG.
-     * Returns a merged, de-duplicated Collection of playlist-like models.
+     * Returns a merged, de-duplicated SupportCollection|Collection of playlist-like models.
      */
-    public function getAllPlaylists(): Collection
+    public function getAllPlaylists(): SupportCollection|Collection
     {
         $playlists = $this->getPlaylists();
         $customs = $this->getCustomPlaylists();
@@ -173,7 +173,7 @@ class Epg extends Model
     /**
      * Get Playlists linked to channels that map to this EPG.
      */
-    public function getPlaylists(): Collection
+    public function getPlaylists(): SupportCollection|Collection
     {
         $ids = Playlist::join('channels', 'channels.playlist_id', '=', 'playlists.id')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
