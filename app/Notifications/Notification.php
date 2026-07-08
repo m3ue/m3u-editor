@@ -2,6 +2,8 @@
 
 namespace App\Notifications;
 
+use App\Events\TvNotificationEvent;
+use App\Models\TvNotification;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification as BaseNotification;
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -26,5 +28,30 @@ class Notification extends BaseNotification
         }
 
         return parent::sendToDatabase($users, $isEventDispatched);
+    }
+
+    public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false): static
+    {
+        TvNotification::create([
+            'notifiable_type' => $playlist->getMorphClass(),
+            'notifiable_id' => $playlist->id,
+            'channel' => $channel,
+            'admin_only' => $adminOnly,
+            'title' => $this->getTitle() ?? '',
+            'body' => $this->getBody() ?? '',
+            'status' => $this->getStatus() ?? 'info',
+        ]);
+
+        broadcast(new TvNotificationEvent(
+            notifiableType: $playlist->getMorphClass(),
+            notifiableUuid: $playlist->uuid,
+            adminOnly: $adminOnly,
+            channel: $channel,
+            title: $this->getTitle() ?? '',
+            body: $this->getBody() ?? '',
+            status: $this->getStatus() ?? 'info',
+        ));
+
+        return $this;
     }
 }

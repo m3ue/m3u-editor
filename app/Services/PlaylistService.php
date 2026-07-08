@@ -7,6 +7,7 @@ use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
 use App\Jobs\UnmergeEpisodes;
+use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MergedPlaylist;

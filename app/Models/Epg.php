@@ -183,7 +183,7 @@ class Epg extends Model
             ->values()
             ->all();
 
-        return $ids ? Playlist::whereIn('id', $ids)->get() : collect();
+        return Playlist::whereIn('id', $ids)->get();
     }
 
     /**

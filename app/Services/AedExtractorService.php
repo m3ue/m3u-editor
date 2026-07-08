@@ -23,9 +23,9 @@ class AedExtractorService
         $startTime = $this->extractStartTime($profile, $channelTitle);
 
         return new AedEvent(
-            title: $this->formatTitle($profile->title_format, $eventTitle, $channelTitle, $startTime),
+            title: $this->formatTitle($profile->title_format, $eventTitle, $channelTitle, $startTime, $profile->team_delimiter),
             description: $profile->description_format
-                ? $this->formatTitle($profile->description_format, $eventTitle, $channelTitle, $startTime)
+                ? $this->formatTitle($profile->description_format, $eventTitle, $channelTitle, $startTime, $profile->team_delimiter)
                 : null,
             start: $startTime,
             end: $startTime?->copy()->addMinutes($profile->event_duration_minutes),
@@ -55,9 +55,12 @@ class AedExtractorService
      * Build the title for a pre-event padding slot.
      * Supports {time_until} (e.g. "2h 30m"), {title}, {channel}, {date}, {time}.
      */
-    public function preEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event, Carbon $slotStart): string
+    public function preEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event, Carbon $slotStart): ?string
     {
-        $format = $profile->pre_event_format ?: 'Live in {time_until}: {title}';
+        if (empty($profile->pre_event_format)) {
+            return null;
+        }
+
         $timeUntil = $this->formatTimeUntil($slotStart, $event->start);
 
         return str_replace(
@@ -69,17 +72,20 @@ class AedExtractorService
                 $event->start?->format('M j, Y') ?? '',
                 $event->start?->format('g:i A') ?? '',
             ],
-            $format
+            $profile->pre_event_format
         );
     }
 
     /**
      * Build the title for a post-event padding slot.
      * Supports {title}, {channel}, {date}, {time}.
+     * Returns null when post_event_format is not configured (no post-event slots emitted).
      */
-    public function postEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event): string
+    public function postEventTitle(AedProfile $profile, string $channelTitle, AedEvent $event): ?string
     {
-        $format = $profile->post_event_format ?: 'Signing Off';
+        if (empty($profile->post_event_format)) {
+            return null;
+        }
 
         return str_replace(
             ['{title}', '{channel}', '{date}', '{time}'],
@@ -89,7 +95,7 @@ class AedExtractorService
                 $event->start?->format('M j, Y') ?? '',
                 $event->start?->format('g:i A') ?? '',
             ],
-            $format
+            $profile->post_event_format
         );
     }
 
@@ -126,8 +132,12 @@ class AedExtractorService
 
         $raw = $matches[1] ?? $matches[0];
 
-        if ($profile->team_delimiter && str_contains($raw, $profile->team_delimiter)) {
-            return $raw;
+        // If a team delimiter is configured and a second capture group exists, join the
+        // two groups with the delimiter so {team1}/{team2} resolve correctly downstream.
+        // This supports titles like "Brazil 18:00 Argentina" where group 1 = "Brazil"
+        // and group 2 = "Argentina", with the delimiter set to e.g. " vs ".
+        if ($profile->team_delimiter && isset($matches[2]) && $matches[2] !== '') {
+            return trim($matches[1]).($profile->team_delimiter).trim($matches[2]);
         }
 
         return trim($raw);
@@ -201,17 +211,16 @@ class AedExtractorService
         string $template,
         string $eventTitle,
         string $channelTitle,
-        ?Carbon $startTime
+        ?Carbon $startTime,
+        ?string $teamDelimiter = null,
     ): string {
         $team1 = $eventTitle;
         $team2 = '';
 
-        // Split by team delimiter if present in the title
-        // (delimiter is stored on the profile but we only have extracted title here)
-        if (str_contains($eventTitle, ' vs ') || str_contains($eventTitle, ' vs. ')) {
-            $parts = preg_split('/\s+vs\.?\s+/i', $eventTitle, 2);
-            $team1 = $parts[0] ?? $eventTitle;
-            $team2 = $parts[1] ?? '';
+        if ($teamDelimiter && str_contains($eventTitle, $teamDelimiter)) {
+            $parts = explode($teamDelimiter, $eventTitle, 2);
+            $team1 = trim($parts[0]);
+            $team2 = trim($parts[1] ?? '');
         }
 
         return str_replace(

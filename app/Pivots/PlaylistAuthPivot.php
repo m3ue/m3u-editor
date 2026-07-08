@@ -23,30 +23,22 @@ class PlaylistAuthPivot extends Pivot
 
     public function type(): string
     {
-        switch ($this->authenticatable_type) {
-            case CustomPlaylist::class:
-                return 'Custom Playlist';
-            case MergedPlaylist::class:
-                return 'Merged Playlist';
-            case PlaylistAlias::class:
-                return 'Playlist Alias';
-            default:
-                return 'Playlist';
-        }
+        return match ($this->authenticatable_type) {
+            'custom_playlist', CustomPlaylist::class => 'Custom Playlist',
+            'merged_playlist', MergedPlaylist::class => 'Merged Playlist',
+            'alias', PlaylistAlias::class => 'Playlist Alias',
+            default => 'Playlist',
+        };
     }
 
     public function model(): BelongsTo
     {
-        switch ($this->authenticatable_type) {
-            case CustomPlaylist::class:
-                return $this->belongsTo(CustomPlaylist::class, 'authenticatable_id');
-            case MergedPlaylist::class:
-                return $this->belongsTo(MergedPlaylist::class, 'authenticatable_id');
-            case PlaylistAlias::class:
-                return $this->belongsTo(PlaylistAlias::class, 'authenticatable_id');
-            default:
-                return $this->belongsTo(Playlist::class, 'authenticatable_id');
-        }
+        return match ($this->authenticatable_type) {
+            'custom_playlist', CustomPlaylist::class => $this->belongsTo(CustomPlaylist::class, 'authenticatable_id'),
+            'merged_playlist', MergedPlaylist::class => $this->belongsTo(MergedPlaylist::class, 'authenticatable_id'),
+            'alias', PlaylistAlias::class => $this->belongsTo(PlaylistAlias::class, 'authenticatable_id'),
+            default => $this->belongsTo(Playlist::class, 'authenticatable_id'),
+        };
     }
 
     public function authenticatable(): MorphTo

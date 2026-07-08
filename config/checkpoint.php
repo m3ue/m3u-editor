@@ -63,6 +63,20 @@ return [
             'guzzlehttp/guzzle',
             // updated alongside guzzlehttp/guzzle 7.12.1
             'guzzlehttp/psr7',
+            // ── Core Laravel ecosystem — trusted first-party packages ────────
+            'laravel/framework',
+            // ── Well-known, widely-audited ecosystem packages ────────────────
+            'league/flysystem',
+            'vlucas/phpdotenv',
+            // ── Dev tooling — phpstan, rector, pest ──────────────────────────
+            'phpstan/phpdoc-parser',
+            'pestphp/pest',
+            'rector/rector',
+            // ── Application-specific packages ────────────────────────────────
+            'dedoc/scramble',
+            'stechstudio/filament-impersonate',
+            // dev-master dep — always "fresh", false-positive by design
+            'sparkison/m3u-parser',
         ],
     ],
 
@@ -192,6 +206,8 @@ return [
         '61ec81c5d5a2',
         '4491af1db976',
         'a88d30c913e5',
+        '5726439e4efd',
+        '99a951cf951c',
 
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.
@@ -331,6 +347,7 @@ return [
         '11d5a0f3298d', // MergedPlaylistPivot
         'a6558982e4e4', // PlaylistAuthPivot
         'b06385c305da', // AedProfile
+        'eadad9842f9e', // TvNotification
 
         // Experimental branch — new models managed via Filament forms,
         // same rationale as all other models above.

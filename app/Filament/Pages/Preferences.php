@@ -17,14 +17,20 @@ use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\CopilotTools\VodContentSearchTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
+use App\Notifications\Notification as AppNotification;
 use App\Rules\Cron;
 use App\Rules\ValidDateFormat;
 use App\Services\DateFormatService;
 use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
+use App\Support\CopilotProvider;
 use Cron\CronExpression;
 use Exception;
 use Filament\Actions\Action;
@@ -41,6 +47,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group;
@@ -764,7 +771,7 @@ class Preferences extends SettingsPage
                                                 'heroicon-m-question-mark-circle',
                                                 tooltip: 'When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.'
                                             )
-                                            ->helperText(__('Automatically trigger failover when a stream\\\'s audio goes silent. Disabled by default.')),
+                                            ->helperText(__('Automatically trigger failover when a stream\'s audio goes silent. Disabled by default.')),
 
                                         Fieldset::make(__('Silence Detection Settings'))
                                             ->hidden(fn (Get $get) => ! (bool) $get('enable_silence_detection'))
@@ -868,6 +875,177 @@ class Preferences extends SettingsPage
                                             ->minValue(0)
                                             ->step(1)
                                             ->helperText(__('Maximum number of players that can be open at once.')),
+                                    ]),
+                            ]),
+
+                        Tab::make(__('TV App'))
+                            ->schema([
+                                Section::make(__('TV Notification Tester'))
+                                    ->description(__('Send a test notification to a playlist target to verify the TV app notification system is connected and working.'))
+                                    ->icon('heroicon-m-device-phone-mobile')
+                                    ->headerActions([
+                                        Action::make('send_tv_notification')
+                                            ->label(__('Send Notification'))
+                                            ->color('gray')
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->modalWidth('2xl')
+                                            ->schema([
+                                                Grid::make()->columns(2)->schema([
+                                                    Select::make('notifiable_type')
+                                                        ->label(__('Playlist type'))
+                                                        ->options([
+                                                            'playlist' => __('Playlist'),
+                                                            'custom_playlist' => __('Custom Playlist'),
+                                                            'merged_playlist' => __('Merged Playlist'),
+                                                            'alias' => __('Alias'),
+                                                        ])
+                                                        ->default('playlist')
+                                                        ->required()
+                                                        ->live(),
+                                                    Select::make('notifiable_id')
+                                                        ->label(__('Target'))
+                                                        ->required()
+                                                        ->searchable()
+                                                        ->options(function (Get $get): array {
+                                                            return match ($get('notifiable_type')) {
+                                                                'custom_playlist' => CustomPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                                                'merged_playlist' => MergedPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                                                'alias' => PlaylistAlias::whereHas('playlist', fn ($q) => $q->where('user_id', auth()->id()))->pluck('name', 'id')->all(),
+                                                                default => Playlist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                                            };
+                                                        }),
+                                                ]),
+                                                ToggleButtons::make('status')
+                                                    ->label(__('Level'))
+                                                    ->options([
+                                                        'info' => __('Info'),
+                                                        'success' => __('Success'),
+                                                        'warning' => __('Warning'),
+                                                        'danger' => __('Danger'),
+                                                    ])
+                                                    ->icons([
+                                                        'info' => 'heroicon-s-information-circle',
+                                                        'success' => 'heroicon-s-check-circle',
+                                                        'warning' => 'heroicon-s-exclamation-triangle',
+                                                        'danger' => 'heroicon-s-x-circle',
+                                                    ])
+                                                    ->colors([
+                                                        'info' => 'info',
+                                                        'success' => 'success',
+                                                        'warning' => 'warning',
+                                                        'danger' => 'danger',
+                                                    ])
+                                                    ->default('info')
+                                                    ->required()
+                                                    ->grouped()
+                                                    ->columnSpanFull(),
+                                                TextInput::make('title')
+                                                    ->label(__('Title'))
+                                                    ->required()
+                                                    ->placeholder(__('Notification title'))
+                                                    ->columnSpanFull(),
+                                                Textarea::make('body')
+                                                    ->label(__('Message'))
+                                                    ->rows(3)
+                                                    ->placeholder(__('Optional message body'))
+                                                    ->columnSpanFull(),
+                                                Grid::make()->columns(2)->schema([
+                                                    Select::make('channel')
+                                                        ->label(__('Channel'))
+                                                        ->default('general')
+                                                        ->required()
+                                                        ->searchable()
+                                                        ->options(function (): array {
+                                                            $channels = app(GeneralSettings::class)->tv_notification_channels;
+
+                                                            return collect($channels)
+                                                                ->filter(fn (array $c) => ! empty($c['name']))
+                                                                ->mapWithKeys(fn (array $c) => [
+                                                                    $c['name'] => $c['label'] ?: $c['name'],
+                                                                ])
+                                                                ->all();
+                                                        })
+                                                        ->helperText(__('Category tag for the notification.')),
+                                                    Toggle::make('admin_only')
+                                                        ->inline(false)
+                                                        ->label(__('Admin only'))
+                                                        ->helperText(__('When enabled, only admin-scope TV sessions will receive this notification.')),
+                                                ]),
+                                            ])
+                                            ->action(function (array $data): void {
+                                                $model = match ($data['notifiable_type']) {
+                                                    'custom_playlist' => CustomPlaylist::find($data['notifiable_id']),
+                                                    'merged_playlist' => MergedPlaylist::find($data['notifiable_id']),
+                                                    'alias' => PlaylistAlias::find($data['notifiable_id']),
+                                                    default => Playlist::find($data['notifiable_id']),
+                                                };
+
+                                                if (! $model) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Target not found'))
+                                                        ->body(__('The selected playlist could not be found.'))
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                $notification = AppNotification::make()->title($data['title']);
+
+                                                if (! empty($data['body'])) {
+                                                    $notification->body($data['body']);
+                                                }
+
+                                                match ($data['status']) {
+                                                    'success' => $notification->success(),
+                                                    'warning' => $notification->warning(),
+                                                    'danger' => $notification->danger(),
+                                                    default => $notification->info(),
+                                                };
+
+                                                $notification->tvBroadcast($model, $data['channel'], $data['admin_only'] ?? false);
+
+                                                Notification::make()
+                                                    ->success()
+                                                    ->title(__('Notification sent'))
+                                                    ->body(__("Dispatched to \"{$model->name}\" on channel \"{$data['channel']}\"."))
+                                                    ->send();
+                                            }),
+                                        Action::make('get_tv_app')
+                                            ->label(__('Download the app'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->url('https://github.com/m3ue/m3u-tv/releases')
+                                            ->openUrlInNewTab(true),
+                                    ])
+                                    ->schema([
+                                        Callout::make()
+                                            ->info()
+                                            ->description(__('Use the "Send Notification" button above to dispatch a test TV notification to any playlist target.')),
+                                    ]),
+
+                                Section::make(__('Notification Channels'))
+                                    ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable — they appear automatically once a notification arrives on that channel.'))
+                                    ->icon('heroicon-m-tag')
+                                    ->schema([
+                                        Repeater::make('tv_notification_channels')
+                                            ->label(__('Default Notification Channels'))
+                                            ->schema([
+                                                Grid::make()->columns(2)->schema([
+                                                    TextInput::make('name')
+                                                        ->label(__('Channel slug'))
+                                                        ->required()
+                                                        ->regex('/^[a-z0-9_]+$/')
+                                                        ->placeholder(__('dvr_recording_completed'))
+                                                        ->helperText(__('Lowercase letters, numbers, and underscores only.')),
+                                                    TextInput::make('label')
+                                                        ->label(__('Display label'))
+                                                        ->placeholder(__('DVR Recording Completed'))
+                                                        ->helperText(__('Optional — shown in the TV app instead of the raw slug.')),
+                                                ]),
+                                            ])
+                                            ->addActionLabel(__('Add channel'))
+                                            ->reorderable()
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
 
@@ -1609,35 +1787,13 @@ class Preferences extends SettingsPage
                                                 Select::make('copilot_provider')
                                                     ->label(__('Provider'))
                                                     ->searchable()
-                                                    ->options([
-                                                        'openai' => 'OpenAI',
-                                                        'anthropic' => 'Anthropic',
-                                                        'gemini' => 'Google Gemini',
-                                                        'mistral' => 'Mistral',
-                                                        'groq' => 'Groq',
-                                                        'deepseek' => 'DeepSeek',
-                                                        'xai' => 'xAI (Grok)',
-                                                        'minimax' => 'MiniMax',
-                                                        'openrouter' => 'OpenRouter',
-                                                        'ollama' => 'Ollama (Local)',
-                                                    ])
+                                                    ->options(CopilotProvider::options())
                                                     ->live()
                                                     ->required(fn (Get $get): bool => (bool) $get('copilot_enabled'))
                                                     ->helperText(__('The AI provider to use for the Copilot assistant.')),
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
-                                                    ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4-6',
-                                                        'gemini' => 'gemini-2.5-flash',
-                                                        'mistral' => 'mistral-large-latest',
-                                                        'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-v4-flash',
-                                                        'xai' => 'grok-3',
-                                                        'minimax' => 'MiniMax-M2.7',
-                                                        'openrouter' => 'openai/gpt-5.4',
-                                                        'ollama' => 'llama3',
-                                                        default => 'gpt-5.4-mini',
-                                                    })
+                                                    ->placeholder(fn (Get $get): string => CopilotProvider::defaultModel($get('copilot_provider')))
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
                                         TextInput::make('copilot_api_key')
@@ -1651,12 +1807,8 @@ class Preferences extends SettingsPage
                                         TextInput::make('copilot_url')
                                             ->label(__('Base URL'))
                                             ->url()
-                                            ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                'ollama' => 'http://localhost:11434',
-                                                'minimax' => 'https://api.minimax.io/v1',
-                                                default => 'https://api.openai.com/v1',
-                                            })
-                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama', 'minimax']))
+                                            ->placeholder(fn (Get $get): string => CopilotProvider::defaultUrl($get('copilot_provider')))
+                                            ->visible(fn (Get $get): bool => CopilotProvider::supportsCustomUrl($get('copilot_provider')))
                                             ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))

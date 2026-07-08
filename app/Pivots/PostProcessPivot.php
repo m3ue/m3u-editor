@@ -21,6 +21,7 @@ class PostProcessPivot extends Pivot
     public function type(): string
     {
         switch ($this->processable_type) {
+            case 'playlist':
             case Playlist::class:
                 return 'Playlist';
             default:
@@ -31,6 +32,7 @@ class PostProcessPivot extends Pivot
     public function model(): BelongsTo
     {
         switch ($this->processable_type) {
+            case 'playlist':
             case Playlist::class:
                 return $this->belongsTo(Playlist::class, 'processable_id');
             default:

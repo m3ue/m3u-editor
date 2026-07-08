@@ -7,6 +7,7 @@ use App\Filament\Resources\PlaylistAuthResource\Pages;
 use App\Filament\Resources\PlaylistAuthResource\RelationManagers;
 use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
 use App\Models\CustomPlaylist;
+use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -153,12 +154,13 @@ class PlaylistAuthResource extends Resource implements CopilotResource
     public static function getForm(): array
     {
         $dvrSection = Section::make(__('DVR Access'))
-            ->description(__('Control whether this guest can schedule and manage DVR recordings.'))
+            ->description(__('Control whether this user can schedule and manage DVR recordings.'))
+            ->compact()
             ->hidden(fn () => ! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true)))
             ->schema([
                 Toggle::make('dvr_enabled')
                     ->label(__('Enable DVR'))
-                    ->helperText(__('Allow this guest to view and schedule recordings via the public playlist viewer.'))
+                    ->helperText(__('Allow this user to view and schedule recordings via the public playlist viewer.'))
                     ->default(false)
                     ->live()
                     ->columnSpan(2),
@@ -169,7 +171,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                     ->maxValue(99)
                     ->nullable()
                     ->placeholder(__('Inherit from DVR settings'))
-                    ->helperText(__('Override the maximum number of simultaneous recordings for this guest. Leave empty to use the playlist\'s DVR setting.'))
+                    ->helperText(__('Override the maximum number of simultaneous recordings for this user. Leave empty to use the playlist\'s DVR setting.'))
                     ->visible(fn ($get) => $get('dvr_enabled'))
                     ->columnSpan(1),
                 TextInput::make('dvr_storage_quota_gb')
@@ -178,13 +180,73 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                     ->minValue(1)
                     ->nullable()
                     ->placeholder(__('No quota'))
-                    ->helperText(__('Maximum total disk space this guest\'s recordings may use. Leave empty for unlimited.'))
+                    ->helperText(__('Maximum total disk space this user\'s recordings may use. Leave empty for unlimited.'))
                     ->visible(fn ($get) => $get('dvr_enabled'))
                     ->columnSpan(1),
             ])
             ->columns(2)
             ->collapsible()
             ->collapsed(fn ($record) => ! ($record?->dvr_enabled));
+
+        $requestsSection = Section::make(__('Content Requests'))
+            ->description(__('Control whether this user can browse and request content from Sonarr and Radarr.'))
+            ->compact()
+            ->schema([
+                Toggle::make('request_enabled')
+                    ->label(__('Enable Content Requests'))
+                    ->helperText(__('Allow this user to request content when the assigned playlist and ARR integration also allow user requests.'))
+                    ->default(false)
+                    ->live()
+                    ->columnSpan(2),
+                Toggle::make('auto_approve_requests')
+                    ->label(__('Auto-approve Content Requests'))
+                    ->helperText(__('Disable to require admin approval before media is added to Sonarr/Radarr.'))
+                    ->hintIcon(
+                        'heroicon-m-question-mark-circle',
+                        tooltip: __('When enabled, content requests from this user are sent directly to Sonarr/Radarr. When disabled, requests are held for admin approval in the Download Queue.')
+                    )
+                    ->visible(fn ($get) => $get('request_enabled'))
+                    ->default(false)
+                    ->columnSpan(2),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->request_enabled));
+
+        $aiostreamsOptions = fn () => MediaServerIntegration::where('user_id', auth()->id())
+            ->where('type', 'aiostreams')
+            ->where('enabled', true)
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->toArray();
+
+        $aiostreamsSection = Section::make(__('AIOStreams Access'))
+            ->description(__('Grant this user direct access to an AIOStreams on-demand catalog. Use this when the assigned playlist type (merged, custom, etc.) does not carry its own AIOStreams setting.'))
+            ->compact()
+            ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
+                ->where('type', 'aiostreams')
+                ->where('enabled', true)
+                ->doesntExist()
+            )
+            ->schema([
+                Toggle::make('aiostreams_enabled')
+                    ->label(__('Enable AIOStreams'))
+                    ->helperText(__('Allow this user to browse and stream AIOStreams catalogs.'))
+                    ->default(false)
+                    ->live()
+                    ->columnSpan(2),
+                Select::make('aiostreams_integration_id')
+                    ->label(__('AIOStreams Integration'))
+                    ->options($aiostreamsOptions)
+                    ->placeholder(__('Inherit from playlist'))
+                    ->nullable()
+                    ->helperText(__('Select which AIOStreams integration this user can access. Leave blank to inherit from the assigned playlist.'))
+                    ->visible(fn ($get) => $get('aiostreams_enabled'))
+                    ->columnSpan(2),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->aiostreams_enabled));
 
         return [
             Grid::make()
@@ -230,7 +292,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->columnSpan(1),
                         ]),
                     Grid::make()
-                        ->columns(5)
+                        ->columns(2)
                         ->schema([
                             TextInput::make('max_connections')
                                 ->label(__('Max Connections'))
@@ -241,8 +303,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->helperText(__('Maximum number of concurrent streams for this auth user.'))
                                 ->numeric()
                                 ->minValue(1)
-                                ->nullable()
-                                ->columnSpan(1),
+                                ->nullable(),
                             Toggle::make('stop_oldest_on_limit')
                                 ->label(__('Stop Oldest Stream on Limit'))
                                 ->inline(false)
@@ -251,18 +312,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
                                 )
                                 ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
-                                ->nullable()
-                                ->columnSpan(2),
-                            Toggle::make('auto_approve_requests')
-                                ->label(__('Auto-approve Content Requests'))
-                                ->inline(false)
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: __('When enabled, content requests from this guest are sent directly to Sonarr/Radarr. When disabled, requests are held for admin approval in the Download Queue.')
-                                )
-                                ->helperText(__('Disable to require admin approval before media is added to Sonarr/Radarr.'))
-                                ->default(false)
-                                ->columnSpan(2),
+                                ->nullable(),
                         ]),
                     Select::make('assigned_playlist')
                         ->label(__('Assigned to Playlist'))
@@ -298,7 +348,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 }
                             }
 
-                            $takenPlaylists = $assignedIds[Playlist::class] ?? [];
+                            $takenPlaylists = $assignedIds[(new Playlist)->getMorphClass()] ?? [];
                             Playlist::where('user_id', $userId)
                                 ->when($takenPlaylists, fn ($q) => $q->whereNotIn('id', $takenPlaylists))
                                 ->get()
@@ -307,7 +357,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Playlist)';
                                 });
 
-                            $takenCustom = $assignedIds[CustomPlaylist::class] ?? [];
+                            $takenCustom = $assignedIds[(new CustomPlaylist)->getMorphClass()] ?? [];
                             CustomPlaylist::where('user_id', $userId)
                                 ->when($takenCustom, fn ($q) => $q->whereNotIn('id', $takenCustom))
                                 ->get()
@@ -316,7 +366,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Custom Playlist)';
                                 });
 
-                            $takenMerged = $assignedIds[MergedPlaylist::class] ?? [];
+                            $takenMerged = $assignedIds[(new MergedPlaylist)->getMorphClass()] ?? [];
                             MergedPlaylist::where('user_id', $userId)
                                 ->when($takenMerged, fn ($q) => $q->whereNotIn('id', $takenMerged))
                                 ->get()
@@ -325,7 +375,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                     $options[$key] ??= $playlist->name.' (Merged Playlist)';
                                 });
 
-                            $takenAliases = $assignedIds[PlaylistAlias::class] ?? [];
+                            $takenAliases = $assignedIds[(new PlaylistAlias)->getMorphClass()] ?? [];
                             PlaylistAlias::where('user_id', $userId)
                                 ->when($takenAliases, fn ($q) => $q->whereNotIn('id', $takenAliases))
                                 ->get()
@@ -367,7 +417,9 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->columnSpan(2),
                 ])
                 ->columns(2),
+            $requestsSection,
             $dvrSection,
+            $aiostreamsSection,
         ];
     }
 }

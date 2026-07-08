@@ -1,5 +1,7 @@
 <?php
 
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistUpdated;
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Models\Category;
 use App\Models\Channel;
@@ -9,10 +11,37 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
+
+/**
+ * Mirrors the options() closure on the groups Select in PlaylistResource,
+ * so tests stay in sync with the form's filtering logic.
+ */
+function groupOptionsForType(Playlist $playlist, string $type): array
+{
+    if ($type === 'series_categories') {
+        return Category::where('playlist_id', $playlist->id)
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->toArray();
+    }
+
+    $groupType = $type === 'vod_groups' ? 'vod' : 'live';
+
+    return Group::where('playlist_id', $playlist->id)
+        ->where('type', $groupType)
+        ->orderBy('name')
+        ->pluck('name', 'id')
+        ->toArray();
+}
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
+    Notification::fake();
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
     $this->customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
@@ -252,4 +281,118 @@ it('skips missing group ids gracefully', function () {
     ))->handle();
 
     expect($this->customPlaylist->channels()->count())->toBe(0);
+});
+
+it('only shows live groups for live_groups type', function () {
+    $liveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Live News',
+        'type' => 'live',
+    ]);
+
+    $vodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'VOD Movies',
+        'type' => 'vod',
+    ]);
+
+    $options = groupOptionsForType($this->playlist, 'live_groups');
+
+    expect($options)
+        ->toHaveKey($liveGroup->id)
+        ->not->toHaveKey($vodGroup->id);
+});
+
+it('only shows VOD groups for vod_groups type', function () {
+    $liveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Live Sports',
+        'type' => 'live',
+    ]);
+
+    $vodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'VOD Action',
+        'type' => 'vod',
+    ]);
+
+    $options = groupOptionsForType($this->playlist, 'vod_groups');
+
+    expect($options)
+        ->toHaveKey($vodGroup->id)
+        ->not->toHaveKey($liveGroup->id);
+});
+
+it('shows series categories for series_categories type and not live or VOD groups', function () {
+    Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Live Sports',
+        'type' => 'live',
+    ]);
+
+    Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'VOD Action',
+        'type' => 'vod',
+    ]);
+
+    $category = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Drama',
+    ]);
+
+    $options = groupOptionsForType($this->playlist, 'series_categories');
+
+    // Only Category records should appear — no Group names
+    expect($options)
+        ->toHaveKey($category->id)
+        ->and(array_values($options))->toContain('Drama')
+        ->and(array_values($options))->not->toContain('Live Sports')
+        ->and(array_values($options))->not->toContain('VOD Action');
+});
+
+it('still shows a live group that is already attached to the custom playlist', function () {
+    $liveGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Attached Live',
+        'type' => 'live',
+    ]);
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $liveGroup->id,
+    ]);
+    $this->customPlaylist->channels()->attach($channel->id);
+
+    $options = groupOptionsForType($this->playlist, 'live_groups');
+
+    expect($options)->toHaveKey($liveGroup->id);
+});
+
+it('still shows a VOD group that is already attached to the custom playlist', function () {
+    $vodGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Attached VOD',
+        'type' => 'vod',
+    ]);
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $vodGroup->id,
+        'is_vod' => true,
+    ]);
+    $this->customPlaylist->channels()->attach($channel->id);
+
+    $options = groupOptionsForType($this->playlist, 'vod_groups');
+
+    expect($options)->toHaveKey($vodGroup->id);
 });

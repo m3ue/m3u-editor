@@ -168,22 +168,6 @@ class EpgGenerateController extends Controller
                     break;
             }
 
-            // If no TVG ID still, try fallback methods in the configured order before using last resort
-            if (empty($tvgId) && ! empty($dummyEpgFallbackOrder)) {
-                foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
-                    $tvgId = match ($fallbackMethod) {
-                        'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
-                        'name' => $channel->name_custom ?? $channel->name,
-                        'title' => $channel->title_custom ?? $channel->title,
-                        'number' => $channelNo,
-                        default => null,
-                    };
-                    if (! empty($tvgId)) {
-                        break;
-                    }
-                }
-            }
-
             // Ultimate last resort
             if (empty($tvgId)) {
                 $tvgId = $channel->source_id ?? $channel->id;
@@ -255,13 +239,32 @@ class EpgGenerateController extends Controller
                 }
                 $icon = $this->escapeXml($icon);
 
+                // Resolve dummy EPG display title using the configured fallback order.
+                // Each method is tried in order; the first non-empty value wins.
+                // When no order is configured, fall back to title_custom ?? title.
+                $dummyTitle = null;
+                foreach ($dummyEpgFallbackOrder as $fallbackMethod) {
+                    $dummyTitle = match ($fallbackMethod) {
+                        'title' => $channel->title_custom ?? $channel->title,
+                        'name' => $channel->name_custom ?? $channel->name,
+                        'stream_id' => $channel->stream_id_custom ?? $channel->source_id ?? $channel->stream_id,
+                        'number' => $channelNo ? (string) $channelNo : '',
+                        default => null,
+                    };
+                    if (! empty($dummyTitle)) {
+                        break;
+                    }
+                }
+                $dummyTitle ??= $channel->title_custom ?? $channel->title;
+                $dummyTitleEscaped = $this->escapeXml($dummyTitle);
+
                 // Keep track of which channels need a dummy EPG program
                 // Need this to output the <programme> tags later
                 $dummyEpgChannels[] = [
                     'tvg_id' => $tvgId,
                     'channel_id' => $channel->id,
                     'channel_no' => $channelNo,
-                    'title' => $title,
+                    'title' => $dummyTitleEscaped,
                     'raw_title' => $channel->title_custom ?? $channel->title,
                     'icon' => $icon,
                     'group' => $channel->group ?? $channel->group_internal,
@@ -271,7 +274,7 @@ class EpgGenerateController extends Controller
 
                 // Output the <channel> tag
                 echo '  <channel id="'.$tvgId.'">'.PHP_EOL;
-                echo '    <display-name>'.$title.'</display-name>';
+                echo '    <display-name>'.$dummyTitleEscaped.'</display-name>';
                 if ($channelNo !== null) {
                     echo PHP_EOL.'    <display-name>'.$channelNo.'</display-name>';
                 }
@@ -490,7 +493,8 @@ class EpgGenerateController extends Controller
                         $slotMinutes = $aedProfile->event_duration_minutes;
                         $windowStart = Carbon::now()->startOfDay();
                         $windowEnd = Carbon::now()->startOfDay()->addDays(5);
-                        $postTitle = $this->escapeXml($aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent));
+                        $postTitle = $aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent);
+                        $postTitleEscaped = $postTitle !== null ? $this->escapeXml($postTitle) : null;
 
                         $emitSlot = function (string $slotTitle, Carbon $slotStart, Carbon $slotEnd) use (&$buffer, $tvgId, $aedIcon, $aedCategory): void {
                             $s = str_replace(':', '', $slotStart->format('YmdHis P'));
@@ -507,15 +511,17 @@ class EpgGenerateController extends Controller
                             $buffer .= '  </programme>'.PHP_EOL;
                         };
 
-                        // Pre-event fill: window start → event start
+                        // Pre-event fill: window start → event start (skipped when pre_event_format is null)
                         $cursor = $windowStart->copy();
                         while ($cursor->lt($aedEvent->start)) {
                             $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
                             if ($slotEnd->gt($aedEvent->start)) {
                                 $slotEnd = $aedEvent->start->copy();
                             }
-                            $preTitle = $this->escapeXml($aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor));
-                            $emitSlot($preTitle, $cursor, $slotEnd);
+                            $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor);
+                            if ($preTitle !== null) {
+                                $emitSlot($this->escapeXml($preTitle), $cursor, $slotEnd);
+                            }
                             $cursor = $slotEnd;
                         }
 
@@ -533,15 +539,17 @@ class EpgGenerateController extends Controller
                         }
                         $buffer .= '  </programme>'.PHP_EOL;
 
-                        // Post-event fill: event end → window end
-                        $cursor = $aedEvent->end->copy();
-                        while ($cursor->lt($windowEnd)) {
-                            $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
-                            if ($slotEnd->gt($windowEnd)) {
-                                $slotEnd = $windowEnd->copy();
+                        // Post-event fill: event end → window end (skipped when post_event_format is null)
+                        if ($postTitleEscaped !== null) {
+                            $cursor = $aedEvent->end->copy();
+                            while ($cursor->lt($windowEnd)) {
+                                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                                if ($slotEnd->gt($windowEnd)) {
+                                    $slotEnd = $windowEnd->copy();
+                                }
+                                $emitSlot($postTitleEscaped, $cursor, $slotEnd);
+                                $cursor = $slotEnd;
                             }
-                            $emitSlot($postTitle, $cursor, $slotEnd);
-                            $cursor = $slotEnd;
                         }
                     } else {
                         // Extraction failed or no time — use AED title with standard repeating slots

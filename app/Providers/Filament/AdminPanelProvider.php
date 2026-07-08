@@ -60,6 +60,7 @@ use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
 use App\Http\Middleware\SeedLocaleFromUser;
 use App\Settings\GeneralSettings;
+use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
 use EslamRedaDiv\FilamentCopilot\FilamentCopilotPlugin;
 use EslamRedaDiv\FilamentCopilot\Tools\GetToolsTool;
@@ -410,24 +411,6 @@ class AdminPanelProvider extends PanelProvider
      * Build the Copilot plugin from database settings.
      * Returns null when the plugin is disabled or not fully configured.
      */
-    /** Default models used when the model field is left blank. */
-    private const COPILOT_DEFAULT_MODELS = [
-        'openai' => 'gpt-5.4-mini',
-        'anthropic' => 'claude-sonnet-4-6',
-        'gemini' => 'gemini-2.5-flash',
-        'mistral' => 'mistral-large-latest',
-        'ollama' => 'llama3',
-        'groq' => 'llama-3.3-70b-versatile',
-        'deepseek' => 'deepseek-v4-flash',
-        'xai' => 'grok-3',
-        'openrouter' => 'openai/gpt-5.4',
-        'minimax' => 'MiniMax-M2.7',
-    ];
-
-    /**
-     * Build the Copilot plugin from database settings.
-     * Returns null when the plugin is disabled or not fully configured.
-     */
     private function buildCopilotPlugin(array $s): ?FilamentCopilotPlugin
     {
         // Skip during tests — the settings table is not yet created when panel() runs
@@ -448,7 +431,7 @@ class AdminPanelProvider extends PanelProvider
             }
 
             $model = $s['copilot_model']
-                ?: (self::COPILOT_DEFAULT_MODELS[$s['copilot_provider']] ?? 'gpt-4o');
+                ?: CopilotProvider::defaultModel($s['copilot_provider']);
 
             $provider = $s['copilot_provider'];
 
@@ -459,8 +442,9 @@ class AdminPanelProvider extends PanelProvider
                 config(["ai.providers.{$provider}.key" => $s['copilot_api_key']]);
             }
 
-            // Custom base URL — supported for OpenAI-compatible, Ollama, and MiniMax endpoints.
-            if (! empty($s['copilot_url']) && in_array($provider, ['openai', 'ollama', 'minimax'], true)) {
+            // Custom base URL is only the API root. The selected gateway appends
+            // /responses or /chat/completions depending on the provider driver.
+            if (! empty($s['copilot_url']) && CopilotProvider::supportsCustomUrl($provider)) {
                 config(["ai.providers.{$provider}.url" => $s['copilot_url']]);
             }
 

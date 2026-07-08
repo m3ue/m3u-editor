@@ -259,7 +259,8 @@ class SeriesResource extends Resource implements CopilotResource
                 ->openUrlInNewTab()
                 ->icon('heroicon-s-play'),
             TextColumn::make('release_date')
-                ->searchable(),
+                ->searchable()
+                ->sortable(),
             TextColumn::make('rating')
                 ->badge()
                 ->color('success')
@@ -753,7 +754,7 @@ class SeriesResource extends Resource implements CopilotResource
                     ->schema([
                         Toggle::make('overwrite_existing')
                             ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\\\'t already have them.'))
+                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\'t already have them.'))
                             ->default(false),
                     ])
                     ->action(function ($records, $data) {

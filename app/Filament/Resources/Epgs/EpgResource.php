@@ -820,7 +820,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->label(__('Preferred Locale'))
                         ->prefixIcon('heroicon-m-language')
                         ->placeholder(__('en'))
-                        ->helperText(__('Entered your desired locale - if you\\\'re not sure what to put here, look at your EPG source. If you see entries like "CHANNEL.en", then "en" would be a good choice if you prefer english. This is used when mapping the EPG to a playlist. If the EPG has multiple locales, this will be used as the preferred locale when a direct match is not found.'))
+                        ->helperText(__('Enter your desired locale - if you\'re not sure what to put here, look at your EPG source. If you see entries like "CHANNEL.en", then "en" would be a good choice if you prefer English. This is used when mapping the EPG to a playlist. If the EPG has multiple locales, this will be used as the preferred locale when a direct match is not found.'))
                         ->maxLength(10),
                 ]),
         ];

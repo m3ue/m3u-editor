@@ -10,6 +10,7 @@ use App\Enums\DvrSeriesMode;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Models\ArrIntegration;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -24,6 +25,7 @@ use App\Models\NetworkProgramme;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Models\PlaylistRequestSetting;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
@@ -33,6 +35,7 @@ use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -453,12 +456,18 @@ class XtreamApiController extends Controller
             }
             // Override max_connections when the request is authenticated via a PlaylistAuth
             // that has a specific per-auth limit configured.
+            $playlistAuth = null;
             if ($authMethod === 'playlist_auth') {
-                $authMaxConnections = PlaylistAuth::where('username', $username)
+                $playlistAuth = PlaylistAuth::where('username', $username)
                     ->where('password', $password)
-                    ->value('max_connections');
-                if ($authMaxConnections) {
-                    $streams = $authMaxConnections;
+                    ->where('enabled', true)
+                    ->where(function ($query) {
+                        $query->whereNull('expires_at')
+                            ->orWhere('expires_at', '>', now());
+                    })
+                    ->first();
+                if ($playlistAuth?->max_connections) {
+                    $streams = $playlistAuth->max_connections;
                 }
             }
 
@@ -526,13 +535,22 @@ class XtreamApiController extends Controller
                 'process' => true, // Always true
             ];
 
+            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
+            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features, $authMethod, $playlistAuth);
+
+            $m3uEditorPayload = [
+                'version' => config('dev.version'),
+                'features' => $features,
+            ];
+
+            if (! empty($aiostreamsData)) {
+                $m3uEditorPayload['aiostreams'] = $aiostreamsData;
+            }
+
             return response()->json([
                 'user_info' => $userInfo,
                 'server_info' => $serverInfo,
-                'm3u_editor' => [
-                    'version' => config('dev.version'),
-                    'features' => ['viewers', 'progress'],
-                ],
+                'm3u_editor' => $m3uEditorPayload,
             ]);
         } elseif ($action === 'get_live_streams') {
             // Handle network playlists - return networks as live streams
@@ -2137,7 +2155,7 @@ class XtreamApiController extends Controller
     private function resolveViewer(string $viewerUlid, $playlist): ?PlaylistViewer
     {
         return PlaylistViewer::where('ulid', $viewerUlid)
-            ->where('viewerable_type', get_class($playlist))
+            ->where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->first();
     }
@@ -2161,7 +2179,7 @@ class XtreamApiController extends Controller
 
             if ($playlistAuth) {
                 $viewer = PlaylistViewer::where('playlist_auth_id', $playlistAuth->id)
-                    ->where('viewerable_type', get_class($playlist))
+                    ->where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
                     ->first();
 
@@ -2171,7 +2189,7 @@ class XtreamApiController extends Controller
                         'name' => $playlistAuth->name,
                         'is_admin' => false,
                         'playlist_auth_id' => $playlistAuth->id,
-                        'viewerable_type' => get_class($playlist),
+                        'viewerable_type' => $playlist->getMorphClass(),
                         'viewerable_id' => $playlist->id,
                     ]);
                 }
@@ -2181,7 +2199,7 @@ class XtreamApiController extends Controller
         }
 
         // Fall back to admin viewer
-        return PlaylistViewer::where('viewerable_type', get_class($playlist))
+        return PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->where('is_admin', true)
             ->first();
@@ -2192,7 +2210,7 @@ class XtreamApiController extends Controller
      */
     private function getViewers($playlist): \Illuminate\Http\JsonResponse
     {
-        $viewers = PlaylistViewer::where('viewerable_type', get_class($playlist))
+        $viewers = PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
             ->where('viewerable_id', $playlist->id)
             ->orderByDesc('is_admin')
             ->orderBy('name')
@@ -2215,7 +2233,7 @@ class XtreamApiController extends Controller
             'ulid' => (string) Str::ulid(),
             'name' => $name,
             'is_admin' => false,
-            'viewerable_type' => get_class($playlist),
+            'viewerable_type' => $playlist->getMorphClass(),
             'viewerable_id' => $playlist->id,
         ]);
 
@@ -2473,6 +2491,172 @@ class XtreamApiController extends Controller
             }
 
             return $value;
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve optional m3u-editor capabilities advertised to compatible clients.
+     *
+     * DVR is only advertised when the effective playlist has DVR enabled and,
+     * for PlaylistAuth credentials, the individual auth is allowed to use DVR.
+     * Owner/alias credentials keep access when the playlist itself has DVR enabled.
+     *
+     * @return array<int, string>
+     */
+    private function resolveM3uEditorFeatures($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): array
+    {
+        $features = ['viewers', 'progress'];
+
+        if ($this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'dvr';
+        }
+
+        if ($this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'requests';
+        }
+
+        if ($this->hasAIOStreams($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'aiostreams';
+        }
+
+        return $features;
+    }
+
+    private function hasAIOStreams($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($authMethod === 'playlist_auth') {
+            if (! $playlistAuth?->aiostreams_enabled) {
+                return false;
+            }
+            // Auth specifies its own integration directly — no playlist lookup needed.
+            if ($playlistAuth->aiostreams_integration_id !== null) {
+                return (bool) optional($playlistAuth->aiostreamsIntegration)->enabled;
+            }
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return false;
+        }
+
+        return $effectivePlaylist->aiostreams_integration_id !== null
+            && optional($effectivePlaylist->aiostreamsIntegration)->enabled;
+    }
+
+    /**
+     * Build the AIOStreams payload for the auth response.
+     * Returns an array of integration configs with their catalog lists.
+     *
+     * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
+     */
+    private function resolveAIOStreamsData($playlist, array $features, string $authMethod = '', ?PlaylistAuth $playlistAuth = null): array
+    {
+        if (! in_array('aiostreams', $features)) {
+            return [];
+        }
+
+        // Playlist auth with a directly-assigned integration bypasses the playlist lookup.
+        if ($authMethod === 'playlist_auth' && $playlistAuth?->aiostreams_integration_id !== null) {
+            $integration = $playlistAuth->aiostreamsIntegration;
+            if (! $integration || ! $integration->enabled) {
+                return [];
+            }
+
+            return [
+                [
+                    'id' => $integration->id,
+                    'name' => $integration->name,
+                    'logo' => $integration->aiostreams_logo,
+                    'catalogs' => $this->filterAIOStreamsCatalogs($integration),
+                ],
+            ];
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return [];
+        }
+
+        $integration = $effectivePlaylist->aiostreamsIntegration;
+        if (! $integration || ! $integration->enabled) {
+            return [];
+        }
+
+        return [
+            [
+                'id' => $integration->id,
+                'name' => $integration->name,
+                'logo' => $integration->aiostreams_logo,
+                'catalogs' => $this->filterAIOStreamsCatalogs($integration),
+            ],
+        ];
+    }
+
+    /**
+     * Filter AIOStreams catalogs by the integration's selected catalog IDs.
+     * A null selection means all catalogs are enabled.
+     *
+     * @return array<int, array{id: string, type: string, name: string, searchable: bool}>
+     */
+    private function filterAIOStreamsCatalogs($integration): array
+    {
+        $all = $integration->aiostreams_catalogs ?? [];
+
+        if ($integration->aiostreams_enable_all_catalogs) {
+            return $all;
+        }
+
+        $selectedSet = array_flip($integration->aiostreams_selected_catalog_ids ?? []);
+
+        return collect($all)
+            ->filter(fn (array $catalog) => isset($selectedSet[$catalog['id'].'_'.$catalog['type']]))
+            ->values()
+            ->all();
+    }
+
+    private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if (! (config('dvr.dvr_enabled', true) && config('proxy.proxy_integration_enabled', true))) {
+            return false;
+        }
+
+        $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
+        if (! $dvrPlaylist) {
+            return false;
+        }
+
+        $hasEnabledDvr = DvrSetting::where('playlist_id', $dvrPlaylist->id)
+            ->where('enabled', true)
+            ->exists();
+        if (! $hasEnabledDvr) {
+            return false;
+        }
+
+        if ($authMethod !== 'playlist_auth') {
+            return true;
+        }
+
+        return (bool) $playlistAuth?->dvr_enabled;
+    }
+
+    private function resolveDvrPlaylist($playlist): ?Playlist
+    {
+        if ($playlist instanceof Playlist) {
+            return $playlist;
+        }
+
+        if ($playlist instanceof PlaylistAlias) {
+            $effective = $playlist->getEffectivePlaylist();
+
+            return $effective instanceof Playlist ? $effective : null;
         }
 
         return null;
@@ -2822,6 +3006,35 @@ class XtreamApiController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Determine whether Xtream clients should be told request integrations are available.
+     */
+    private function requestsFeatureEnabled($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($authMethod === 'playlist_auth' && ! ($playlistAuth?->request_enabled)) {
+            return false;
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        if (! $effectivePlaylist instanceof Playlist) {
+            return false;
+        }
+
+        if (! PlaylistRequestSetting::where('playlist_id', $effectivePlaylist->id)
+            ->where('enabled', true)
+            ->exists()) {
+            return false;
+        }
+
+        return ArrIntegration::where('user_id', $effectivePlaylist->user_id)
+            ->enabled()
+            ->guestEnabled()
+            ->exists();
     }
 
     /**

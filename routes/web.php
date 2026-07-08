@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
@@ -340,6 +341,26 @@ Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{forma
 Route::get('/proxy/ts/stream/{uuid}', [DispatcharrController::class, 'proxyStream'])
     ->name('dispatcharr.proxy.stream')
     ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+
+// AIOStreams progress endpoints (user-scoped, not integration-scoped)
+Route::get('/{username}/{password}/aiostreams/progress', [AIOStreamsProxyController::class, 'getProgress'])
+    ->name('aiostreams.progress.get');
+Route::post('/{username}/{password}/aiostreams/progress', [AIOStreamsProxyController::class, 'saveProgress'])
+    ->name('aiostreams.progress.save');
+
+// AIOStreams proxy routes — must come before the fallback direct stream catch-all
+Route::get('/{username}/{password}/aiostreams/{integration}/catalog/{type}/{catalogId}.json', [AIOStreamsProxyController::class, 'catalog'])
+    ->name('aiostreams.proxy.catalog')
+    ->where('integration', '[0-9]+')
+    ->where('catalogId', '[^/]+');  // Catalog IDs may contain dots (e.g. c54e3b0.tmdb.top)
+Route::get('/{username}/{password}/aiostreams/{integration}/stream/{type}/{id}.json', [AIOStreamsProxyController::class, 'stream'])
+    ->name('aiostreams.proxy.stream')
+    ->where('integration', '[0-9]+')
+    ->where('id', '[^/]+');
+Route::get('/{username}/{password}/aiostreams/{integration}/meta/{type}/{id}.json', [AIOStreamsProxyController::class, 'meta'])
+    ->name('aiostreams.proxy.meta')
+    ->where('integration', '[0-9]+')
+    ->where('id', '[^/]+');
 
 // (Fallback) direct stream access (without /live/ or /movie/ prefix)
 Route::get('/{username}/{password}/{streamId}.{format?}', [XtreamStreamController::class, 'handleDirect'])

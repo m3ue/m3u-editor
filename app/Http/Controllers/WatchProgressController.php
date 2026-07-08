@@ -139,7 +139,7 @@ class WatchProgressController extends Controller
 
             return PlaylistViewer::firstOrCreate(
                 [
-                    'viewerable_type' => Playlist::class,
+                    'viewerable_type' => $playlist->getMorphClass(),
                     'viewerable_id' => $playlist->id,
                     'is_admin' => true,
                 ],
@@ -164,7 +164,7 @@ class WatchProgressController extends Controller
                 return PlaylistViewer::firstOrCreate(
                     [
                         'playlist_auth_id' => $playlistAuth->id,
-                        'viewerable_type' => Playlist::class,
+                        'viewerable_type' => $playlist->getMorphClass(),
                         'viewerable_id' => $playlist->id,
                     ],
                     [

@@ -35,7 +35,7 @@ beforeEach(function () {
         'ulid' => (string) Str::ulid(),
         'name' => 'admin',
         'is_admin' => true,
-        'viewerable_type' => Playlist::class,
+        'viewerable_type' => $this->playlist->getMorphClass(),
         'viewerable_id' => $this->playlist->id,
     ]);
 });
@@ -133,7 +133,7 @@ it('does not mark vod as completed via merged playlist when client sends string 
         'ulid' => (string) Str::ulid(),
         'name' => 'admin',
         'is_admin' => true,
-        'viewerable_type' => MergedPlaylist::class,
+        'viewerable_type' => $merged->getMorphClass(),
         'viewerable_id' => $merged->id,
     ]);
 

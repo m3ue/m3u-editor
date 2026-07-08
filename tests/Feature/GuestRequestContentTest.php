@@ -41,6 +41,20 @@ function setGuestAuthContext(string $uuid, ?string $username = 'guest', ?string 
     }
 }
 
+function createGuestAuthForPlaylist(Playlist $playlist, User $owner, bool $requestEnabled = true): PlaylistAuth
+{
+    $auth = PlaylistAuth::factory()->create([
+        'user_id' => $owner->id,
+        'enabled' => true,
+        'username' => 'guest',
+        'password' => 'secret',
+        'request_enabled' => $requestEnabled,
+    ]);
+    $auth->assignTo($playlist);
+
+    return $auth;
+}
+
 it('hides the page when no session auth', function () {
     PlaylistRequestSetting::factory()->create([
         'playlist_id' => $this->playlist->id,
@@ -76,6 +90,7 @@ it('hides the page when no integration is guest-enabled', function () {
         'guest_enabled' => false,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();
@@ -88,6 +103,7 @@ it('hides the page when no integration exists at all', function () {
         'enabled' => true,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();
@@ -105,6 +121,7 @@ it('hides the page when request setting is disabled', function () {
         'guest_enabled' => true,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();
@@ -117,6 +134,25 @@ it('hides the page when no request setting exists', function () {
         'guest_enabled' => true,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
+    setGuestAuthContext($this->playlist->uuid);
+
+    expect(GuestRequestContent::canAccess())->toBeFalse();
+});
+
+it('hides the page when PlaylistAuth request access is disabled', function () {
+    PlaylistRequestSetting::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+    ]);
+    ArrIntegration::factory()->create([
+        'user_id' => $this->owner->id,
+        'enabled' => true,
+        'guest_enabled' => true,
+    ]);
+
+    createGuestAuthForPlaylist($this->playlist, $this->owner, requestEnabled: false);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();
@@ -134,6 +170,7 @@ it('shows the page when request setting is enabled and an integration is guest-e
         'guest_enabled' => true,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeTrue();
@@ -151,6 +188,7 @@ it('hides the page when integration is disabled', function () {
         'guest_enabled' => true,
     ]);
 
+    createGuestAuthForPlaylist($this->playlist, $this->owner);
     setGuestAuthContext($this->playlist->uuid);
 
     expect(GuestRequestContent::canAccess())->toBeFalse();

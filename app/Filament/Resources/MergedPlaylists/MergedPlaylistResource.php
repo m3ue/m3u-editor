@@ -331,23 +331,23 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
                         ->required(),
                     Repeater::make('dummy_epg_fallback_order')
-                        ->label(__('EPG Match Fallback Order'))
-                        ->helperText(__('If the primary method above produces no EPG match, these alternatives are tried in order (top = first). Drag to reorder. The primary method is excluded automatically.'))
+                        ->label(__('Dummy EPG Title Source'))
+                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order — first non-empty value wins. Leave empty to use the channel title.'))
                         ->schema([
                             Select::make('method')
-                                ->label(__('Method'))
+                                ->label(__('Field'))
                                 ->options(fn (Get $get): array => collect([
                                     'stream_id' => __('TVG ID / Stream ID'),
                                     'name' => __('Channel Name'),
                                     'title' => __('Channel Title'),
                                     'number' => __('Channel Number'),
-                                ])->except($get('../../id_channel_by'))->all())
+                                ])->all())
                                 ->required()
                                 ->columnSpanFull(),
                         ])
                         ->reorderable()
                         ->reorderableWithButtons()
-                        ->addActionLabel(__('Add fallback method'))
+                        ->addActionLabel(__('Add title source'))
                         ->columnSpanFull()
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                 ]),
@@ -432,7 +432,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 ->helperText('')
                                 ->inline(false)
                                 ->default(false)
-                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\\\'t use load balancing.')),
+                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
                     Fieldset::make(__('Transcoding Settings (optional)'))

@@ -75,21 +75,31 @@ class SortService
 
     /**
      * Bulk recount channel numbers.
+     *
+     * When $activeOnly is true, only enabled channels are renumbered via SQL;
+     * disabled channels are not touched.
      */
-    public function bulkRecountGroupChannels(Group $record, int $start = 1): void
+    public function bulkRecountGroupChannels(Group $record, int $start = 1, bool $activeOnly = false): void
     {
         $offset = max(0, $start - 1);
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
         if ($driver === 'mysql') {
-            DB::statement('UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.channel = t.rn + ?', [$record->id, $offset]);
+            $where = $activeOnly ? 'group_id = ? AND enabled = 1' : 'group_id = ?';
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t ON c.id = t.id SET c.channel = t.rn + ?", [$record->id, $offset]);
         } elseif ($this->isPostgres($driver)) {
-            DB::statement('UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id', [$offset, $record->id]);
+            $where = $activeOnly ? 'group_id = ? AND enabled = true' : 'group_id = ?';
+            DB::statement("UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t WHERE channels.id = t.id", [$offset, $record->id]);
         } elseif ($driver === 'sqlite') {
-            DB::statement('WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE group_id = ?', [$record->id, $offset, $record->id]);
+            $where = $activeOnly ? 'group_id = ? AND enabled = 1' : 'group_id = ?';
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE id IN (SELECT id FROM ranked)", [$record->id, $offset]);
         } else {
             // Fallback: CASE update
-            $ids = $record->channels()->orderBy('sort')->pluck('id')->all();
+            $query = $record->channels()->orderBy('sort');
+            if ($activeOnly) {
+                $query->where('enabled', true);
+            }
+            $ids = array_map('intval', $query->pluck('id')->all());
             if (empty($ids)) {
                 return;
             }
@@ -112,8 +122,11 @@ class SortService
 
     /**
      * Bulk recount multiple groups in deterministic sort order.
+     *
+     * When $activeOnly is true, only enabled channels are renumbered;
+     * disabled channels keep their existing channel numbers.
      */
-    public function bulkRecountGroupsByOrder(Collection $groups, int $start = 1): void
+    public function bulkRecountGroupsByOrder(Collection $groups, int $start = 1, bool $activeOnly = false): void
     {
         $currentStart = max(1, $start);
 
@@ -136,13 +149,15 @@ class SortService
             ->values();
 
         foreach ($orderedGroups as $record) {
-            $channelCount = $record->channels()->count();
+            $channelCount = $activeOnly
+                ? $record->enabled_channels()->count()
+                : $record->channels()->count();
 
             if ($channelCount === 0) {
                 continue;
             }
 
-            $this->bulkRecountGroupChannels($record, $currentStart);
+            $this->bulkRecountGroupChannels($record, $currentStart, $activeOnly);
             $currentStart += $channelCount;
         }
     }

@@ -15,6 +15,7 @@ class MediaServerService
             'plex' => new PlexService($integration),
             'local' => new LocalMediaService($integration),
             'webdav' => new WebDavMediaService($integration),
+            'aiostreams' => new AIOStreamsService($integration),
             default => throw new InvalidArgumentException("Unsupported media server type: {$integration->type}"),
         };
     }

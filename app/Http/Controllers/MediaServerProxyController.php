@@ -325,6 +325,19 @@ class MediaServerProxyController extends Controller
                     $isAllowed = true;
                     break;
                 }
+
+                // Also allow entries that are symlinks located inside a configured path
+                // but resolving outside it (e.g. *arr libraries symlinked into a
+                // debrid/cloud mount). Only the final path component may be a symlink:
+                // the parent directory is resolved with realpath(), so `..` traversal
+                // and symlinked directories cannot escape the configured paths.
+                $linkDir = realpath(dirname($filePath));
+
+                if ($allowedPath && $linkDir && is_file($filePath)
+                    && (str_starts_with($linkDir.DIRECTORY_SEPARATOR, $allowedPath.DIRECTORY_SEPARATOR) || $linkDir === $allowedPath)) {
+                    $isAllowed = true;
+                    break;
+                }
             }
 
             if (! $isAllowed) {

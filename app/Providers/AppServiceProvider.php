@@ -44,6 +44,7 @@ use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Settings\GeneralSettings;
+use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\Events\LocaleChanged;
 use Dedoc\Scramble\Scramble;
 use Dedoc\Scramble\Support\Generator\OpenApi;
@@ -62,6 +63,7 @@ use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobFailed;
@@ -133,6 +135,14 @@ class AppServiceProvider extends ServiceProvider
     {
         // Disable mass assignment protection (security handled by Filament)
         Model::unguard();
+
+        // Short morph aliases for playlist types used in tv_notifications
+        Relation::morphMap([
+            'playlist' => Playlist::class,
+            'merged_playlist' => MergedPlaylist::class,
+            'custom_playlist' => CustomPlaylist::class,
+            'alias' => PlaylistAlias::class,
+        ]);
 
         // App URL generation based on context
         if (app()->runningInConsole()) {
@@ -543,7 +553,7 @@ class AppServiceProvider extends ServiceProvider
                 $playlist->postProcesses()->detach();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', Playlist::class)
+                PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
                     ->delete();
 
@@ -611,7 +621,7 @@ class AppServiceProvider extends ServiceProvider
                 $mergedPlaylist->removeShortUrls();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', MergedPlaylist::class)
+                PlaylistViewer::where('viewerable_type', $mergedPlaylist->getMorphClass())
                     ->where('viewerable_id', $mergedPlaylist->id)
                     ->delete();
 
@@ -661,7 +671,7 @@ class AppServiceProvider extends ServiceProvider
                     ->delete();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', CustomPlaylist::class)
+                PlaylistViewer::where('viewerable_type', $customPlaylist->getMorphClass())
                     ->where('viewerable_id', $customPlaylist->id)
                     ->delete();
 
@@ -736,7 +746,7 @@ class AppServiceProvider extends ServiceProvider
                 $playlistAlias->removeShortUrls();
 
                 // Delete associated viewers (watch progress cascades via FK)
-                PlaylistViewer::where('viewerable_type', PlaylistAlias::class)
+                PlaylistViewer::where('viewerable_type', $playlistAlias->getMorphClass())
                     ->where('viewerable_id', $playlistAlias->id)
                     ->delete();
 
@@ -830,7 +840,7 @@ class AppServiceProvider extends ServiceProvider
                     'ulid' => (string) Str::ulid(),
                     'name' => $adminUser->name,
                     'is_admin' => true,
-                    'viewerable_type' => get_class($record),
+                    'viewerable_type' => $record->getMorphClass(),
                     'viewerable_id' => $record->id,
                 ]);
             };
@@ -913,7 +923,7 @@ class AppServiceProvider extends ServiceProvider
                 config(["ai.providers.{$settings->copilot_provider}.key" => $settings->copilot_api_key]);
             }
 
-            if (! empty($settings->copilot_url) && in_array($settings->copilot_provider, ['openai', 'ollama'], true)) {
+            if (! empty($settings->copilot_url) && CopilotProvider::supportsCustomUrl($settings->copilot_provider)) {
                 config(["ai.providers.{$settings->copilot_provider}.url" => $settings->copilot_url]);
             }
         } catch (Throwable) {
