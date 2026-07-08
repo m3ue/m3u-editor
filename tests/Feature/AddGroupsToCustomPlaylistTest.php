@@ -444,6 +444,84 @@ it('includes empty live groups in auto-sync options so they can be targeted befo
     expect($options)->toHaveKey($emptyLiveGroup->id);
 });
 
+it('keeps selected live groups available after their channels are already attached to the custom playlist', function () {
+    $selectedGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Selected Parents',
+        'type' => 'live',
+    ]);
+    $selectedChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $selectedGroup->id,
+        'is_vod' => false,
+    ]);
+    $this->customPlaylist->channels()->attach($selectedChannel->id);
+
+    $attachedUnselectedGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Attached Unselected',
+        'type' => 'live',
+    ]);
+    $attachedUnselectedChannel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $attachedUnselectedGroup->id,
+        'is_vod' => false,
+    ]);
+    $this->customPlaylist->channels()->attach($attachedUnselectedChannel->id);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions(
+        $this->playlist,
+        $this->customPlaylist->id,
+        'live_groups',
+        [$selectedGroup->id]
+    );
+
+    expect($options)
+        ->toHaveKey($selectedGroup->id)
+        ->not->toHaveKey($attachedUnselectedGroup->id);
+});
+
+it('keeps selected series categories available after their series are already attached to the custom playlist', function () {
+    $selectedCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Selected Series',
+    ]);
+    $selectedSeries = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $selectedCategory->id,
+    ]);
+    $this->customPlaylist->series()->attach($selectedSeries->id);
+
+    $attachedUnselectedCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Attached Unselected Series',
+    ]);
+    $attachedUnselectedSeries = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $attachedUnselectedCategory->id,
+    ]);
+    $this->customPlaylist->series()->attach($attachedUnselectedSeries->id);
+
+    $options = PlaylistService::getEligibleAutoSyncGroupOptions(
+        $this->playlist,
+        $this->customPlaylist->id,
+        'series_categories',
+        [$selectedCategory->id]
+    );
+
+    expect($options)
+        ->toHaveKey($selectedCategory->id)
+        ->not->toHaveKey($attachedUnselectedCategory->id);
+});
+
 it('includes empty series categories in auto-sync options so they can be targeted before series are synced', function () {
     $emptyCategory = Category::factory()->create([
         'user_id' => $this->user->id,

@@ -2620,6 +2620,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         playlist: $record,
                                         customPlaylistId: $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
                                         type: $get('type') ?? 'live_groups',
+                                        selectedGroupIds: (array) ($get('groups') ?? []),
                                     );
                                 })
                                 ->multiple()

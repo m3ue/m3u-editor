@@ -882,21 +882,29 @@ class PlaylistService
     /**
      * Get selectable source groups for auto-sync rules.
      *
+     * @param  array<int|string>  $selectedGroupIds
      * @return array<int, string>
      */
-    public static function getEligibleAutoSyncGroupOptions(Playlist $playlist, ?int $customPlaylistId, string $type): array
+    public static function getEligibleAutoSyncGroupOptions(Playlist $playlist, ?int $customPlaylistId, string $type, array $selectedGroupIds = []): array
     {
+        $selectedGroupIds = collect($selectedGroupIds)
+            ->filter(fn ($id): bool => is_numeric($id))
+            ->map(fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+
         if ($type === 'series_categories') {
             return Category::query()
                 ->where('playlist_id', $playlist->id)
-                ->when($customPlaylistId, function (Builder $query) use ($customPlaylistId): void {
-                    $query->where(function (Builder $query) use ($customPlaylistId): void {
+                ->when($customPlaylistId, function (Builder $query) use ($customPlaylistId, $selectedGroupIds): void {
+                    $query->where(function (Builder $query) use ($customPlaylistId, $selectedGroupIds): void {
                         $query->whereDoesntHave('series')
                             ->orWhereHas('series', function (Builder $query) use ($customPlaylistId): void {
                                 $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
                                     $query->whereKey($customPlaylistId);
                                 });
-                            });
+                            })
+                            ->when($selectedGroupIds, fn (Builder $query): Builder => $query->orWhereIn('id', $selectedGroupIds));
                     });
                 })
                 ->orderBy('name')
@@ -910,14 +918,15 @@ class PlaylistService
         return Group::query()
             ->where('playlist_id', $playlist->id)
             ->where('type', $isVod ? 'vod' : 'live')
-            ->when($customPlaylistId, function (Builder $query) use ($channelRelation, $customPlaylistId): void {
-                $query->where(function (Builder $query) use ($channelRelation, $customPlaylistId): void {
+            ->when($customPlaylistId, function (Builder $query) use ($channelRelation, $customPlaylistId, $selectedGroupIds): void {
+                $query->where(function (Builder $query) use ($channelRelation, $customPlaylistId, $selectedGroupIds): void {
                     $query->whereDoesntHave($channelRelation)
                         ->orWhereHas($channelRelation, function (Builder $query) use ($customPlaylistId): void {
                             $query->whereDoesntHave('customPlaylists', function (Builder $query) use ($customPlaylistId): void {
                                 $query->whereKey($customPlaylistId);
                             });
-                        });
+                        })
+                        ->when($selectedGroupIds, fn (Builder $query): Builder => $query->orWhereIn('id', $selectedGroupIds));
                 });
             })
             ->orderBy('name')
