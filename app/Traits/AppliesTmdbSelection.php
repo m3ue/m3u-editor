@@ -44,7 +44,7 @@ trait AppliesTmdbSelection
             $tmdbService = app(TmdbService::class);
 
             if ($type === 'tv' && $recordType === 'series') {
-                $series = Series::find($recordId);
+                $series = Series::where('user_id', auth()->id())->find($recordId);
                 if (! $series) {
                     Notification::make()
                         ->danger()
@@ -57,7 +57,7 @@ trait AppliesTmdbSelection
 
                 $this->applySeriesMetadata($tmdbService, $series, $tmdbId);
             } elseif ($type === 'movie' && $recordType === 'vod') {
-                $vod = Channel::find($recordId);
+                $vod = Channel::where('user_id', auth()->id())->find($recordId);
                 if (! $vod) {
                     Notification::make()
                         ->danger()
