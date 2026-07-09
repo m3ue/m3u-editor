@@ -754,7 +754,7 @@ class XtreamApiController extends Controller
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
                     $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
-                        : ($channel->channel ?: $num);
+                        : $channel->channel;
                     if (! $vodChannelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $vodChannelNo = ++$channelNumber;
                     }
