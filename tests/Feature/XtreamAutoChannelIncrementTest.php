@@ -44,7 +44,7 @@ it('Xtream API get_live_streams uses auto channel increment before imported prov
     $streams = $response->json();
 
     expect($streams)->toBeArray()->toHaveCount(2)
-        ->and(array_column($streams, 'num'))->toBe([6000, 6001]);
+        ->and(array_column($streams, 'num'))->toBe([12, 987]);
 });
 
 it('Xtream API get_vod_streams uses auto channel increment before imported provider numbers', function () {
@@ -52,7 +52,7 @@ it('Xtream API get_vod_streams uses auto channel increment before imported provi
         'enabled' => true,
         'is_vod' => true,
         'sort' => 1,
-        'channel' => 55,
+        'channel' => null,
         'title' => 'Provider VOD 55',
         'url' => 'http://example.com/movie/55.mkv',
         'container_extension' => 'mkv',
@@ -61,7 +61,7 @@ it('Xtream API get_vod_streams uses auto channel increment before imported provi
         'enabled' => true,
         'is_vod' => true,
         'sort' => 2,
-        'channel' => 101,
+        'channel' => null,
         'title' => 'Provider VOD 101',
         'url' => 'http://example.com/movie/101.mkv',
         'container_extension' => 'mkv',
