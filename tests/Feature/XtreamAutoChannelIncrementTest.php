@@ -20,7 +20,7 @@ beforeEach(function () {
     $this->group = Group::factory()->for($this->playlist)->for($this->user)->create(['sort_order' => 1]);
 });
 
-it('Xtream API get_live_streams uses auto channel increment before imported provider numbers', function () {
+it('Xtream API get_live_streams does not use auto channel increment before imported provider numbers', function () {
     Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => false,
@@ -44,10 +44,10 @@ it('Xtream API get_live_streams uses auto channel increment before imported prov
     $streams = $response->json();
 
     expect($streams)->toBeArray()->toHaveCount(2)
-        ->and(array_column($streams, 'num'))->toBe([6000, 6001]);
+        ->and(array_column($streams, 'num'))->toBe([12, 987]);
 });
 
-it('Xtream API get_vod_streams uses auto channel increment before imported provider numbers', function () {
+it('Xtream API get_vod_streams does not use auto channel increment before imported provider numbers', function () {
     Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
         'enabled' => true,
         'is_vod' => true,
@@ -63,6 +63,62 @@ it('Xtream API get_vod_streams uses auto channel increment before imported provi
         'sort' => 2,
         'channel' => 101,
         'title' => 'Provider VOD 101',
+        'url' => 'http://example.com/movie/101.mkv',
+        'container_extension' => 'mkv',
+    ]);
+
+    $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password='.urlencode($this->playlist->uuid).'&action=get_vod_streams');
+
+    $response->assertStatus(200);
+    $streams = $response->json();
+
+    expect($streams)->toBeArray()->toHaveCount(2)
+        ->and(array_column($streams, 'num'))->toBe([55, 101]);
+});
+
+it('Xtream API get_live_streams uses auto channel increment before imported provider numbers', function () {
+    Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 1,
+        'channel' => null,
+        'title' => 'Provider Number Not Provided',
+        'url' => 'http://example.com/live/12.ts',
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'sort' => 2,
+        'channel' => null,
+        'title' => 'Provider Number Not Provided',
+        'url' => 'http://example.com/live/987.ts',
+    ]);
+
+    $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password='.urlencode($this->playlist->uuid).'&action=get_live_streams');
+
+    $response->assertStatus(200);
+    $streams = $response->json();
+
+    expect($streams)->toBeArray()->toHaveCount(2)
+        ->and(array_column($streams, 'num'))->toBe([6000, 6001]);
+});
+
+it('Xtream API get_vod_streams uses auto channel increment before imported provider numbers', function () {
+    Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 1,
+        'channel' => null,
+        'title' => 'Provider VOD Not Provided',
+        'url' => 'http://example.com/movie/55.mkv',
+        'container_extension' => 'mkv',
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'sort' => 2,
+        'channel' => null,
+        'title' => 'Provider VOD Not Provided',
         'url' => 'http://example.com/movie/101.mkv',
         'container_extension' => 'mkv',
     ]);
