@@ -219,7 +219,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->description(fn (callable $get) => match ($get('type')) {
                         'local' => 'Configure your local media library paths',
                         'webdav' => 'Configure your WebDAV server connection and media library paths',
-                        'aiostreams' => 'Configure your AIOStreams addon — paste your manifest URL to connect',
+                        'aiostreams' => __('Configure your AIOStreams addon — paste your manifest URL to connect'),
                         default => 'Configure your media server connection',
                     })
                     ->collapsible(! $creating)
