@@ -636,9 +636,7 @@ class XtreamApiController extends Controller
                     $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
                         : $channel->channel;
-                    if ($playlist->auto_channel_increment) {
-                        $channelNo = ++$channelNumber;
-                    } elseif (! $channelNo && $idChannelBy === PlaylistChannelId::Number) {
+                    if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
                     }
 
@@ -745,6 +743,7 @@ class XtreamApiController extends Controller
 
             return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist) {
                 $num = 0;
+                $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 echo '[';
                 $first = true;
@@ -782,7 +781,7 @@ class XtreamApiController extends Controller
                     $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
                         : ($channel->channel ?: $num);
-                    if ($playlist->auto_channel_increment) {
+                    if (! $vodChannelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $vodChannelNo = ++$channelNumber;
                     }
 
