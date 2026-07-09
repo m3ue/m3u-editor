@@ -380,7 +380,22 @@ class NetworkBroadcastService
 
                         if ($sizeMeta && ! empty($sizeMeta['runtime_seconds']) && $sizeMeta['runtime_seconds'] > 0) {
                             $offset = intval(($seekPosition / $sizeMeta['runtime_seconds']) * $sizeMeta['bytes']);
+                            Log::debug('📍 #range= byte offset computed for rewritten-static URL', [
+                                'network_id' => $network->id,
+                                'item_id' => $itemId,
+                                'seek_seconds' => $seekPosition,
+                                'runtime_seconds' => $sizeMeta['runtime_seconds'],
+                                'bytes' => $sizeMeta['bytes'],
+                                'offset' => $offset,
+                            ]);
                             $streamUrl .= '#range='.$offset.'-';
+                        } else {
+                            Log::warning('📍 #range= byte offset NOT computed — getStreamByteSize returned unusable data', [
+                                'network_id' => $network->id,
+                                'item_id' => $itemId,
+                                'seek_seconds' => $seekPosition,
+                                'size_meta' => $sizeMeta,
+                            ]);
                         }
                     }
                 }
