@@ -22,17 +22,21 @@ Feel free to [open an issue](https://github.com/sparkison/m3u-editor/issues/new?
 
 Join our [Discord](https://discord.gg/rS3abJ5dz7) server to ask questions and get help, help others, suggest new ideas, and offer suggestions for improvements! You can also try out and help test new features! 🎉
 
-## Prerequisites
+## 🚀 How to run
 
-- [Docker](https://www.docker.com/) installed on your system.
-- Xtream codes API login info or M3U URLs/files containing an M3U playlist of video streams.
-- (Optionally) EPG URLs/files containing valid XMLTV data.
+### Managed Hosting
 
-## 📖 Documentation
+Fully managed **M3U Editor** instances available via [ElfHosted](https://store.elfhosted.com/product/m3u-editor/) – no setup required 🪄
 
-Check out the docs: [m3u editor docs](https://sparkison.github.io/m3u-editor-docs/) (we could use some help with this one...)
+- https://store.elfhosted.com/product/m3u-editor/
 
-## 🐳 Docker quick start <sup><small><code>v0.8.x+</code></small></sup>
+### Self hosted
+
+#### Prerequisites
+
+- [Docker](https://www.docker.com/) installed and setup on your system
+
+#### 🐳 Docker quick start <sup><small><code>v0.8.x+</code></small></sup>
 > [!IMPORTANT]
 > - **Default Username:** admin
 > - **Default password:** admin
