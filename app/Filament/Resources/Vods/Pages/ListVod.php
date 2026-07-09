@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Vods\Pages;
 
+use App\Facades\SortFacade;
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Exports\ChannelExporter;
 use App\Filament\Imports\ChannelImporter;
@@ -222,6 +223,45 @@ class ListVod extends ListRecords
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription(__('Sync selected VOD .strm files now? This will generate .strm files for the selected VOD channels at the path set for the channels.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
+
+                Action::make('sort_release_date')
+                    ->label(__('Sort by Release Date'))
+                    ->icon('heroicon-o-calendar-days')
+                    ->schema([
+                        Select::make('playlist')
+                            ->label(__('Playlist'))
+                            ->required()
+                            ->helperText(__('Select the Playlist you would like to sort VOD channels by release date for.'))
+                            ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->searchable(),
+                        Select::make('sort')
+                            ->label(__('Sort Order'))
+                            ->options([
+                                'DESC' => 'Newest first (2026 to 1950)',
+                                'ASC' => 'Newest first (1950 to 2026)',
+                            ])
+                            ->default('DESC')
+                            ->required(),
+                    ])
+                    ->action(function (array $data): void {
+                        $playlist = Playlist::find($data['playlist'] ?? null);
+                        if (! $playlist) {
+                            return;
+                        }
+                        SortFacade::bulkSortPlaylistVodByReleaseDate($playlist, $data['sort'] ?? 'DESC');
+                    })
+                    ->after(function () {
+                        Notification::make()
+                            ->success()
+                            ->title(__('VOD Sorted by Release Date'))
+                            ->body(__('VOD channels have been sorted by release date across the playlist.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-calendar-days')
+                    ->modalIcon('heroicon-o-calendar-days')
+                    ->modalDescription(__('Sort all VOD channels in the selected playlist by release date? This will update the sort order within each group.'))
+                    ->modalSubmitActionLabel(__('Yes, sort now')),
 
                 Action::make('find-replace')
                     ->label(__('Find & Replace'))
