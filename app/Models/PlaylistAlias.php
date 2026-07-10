@@ -565,12 +565,13 @@ class PlaylistAlias extends Model
         }
 
         // Get the channel's effective playlist to find its source config.
+        // M3U-imported playlists have no stored xtream config, so fall back to
+        // parsing the credentials directly from the stream URL when it is Xtream-style.
         $effectivePlaylist = $channel->getEffectivePlaylist();
-        if (! $effectivePlaylist || ! $effectivePlaylist->xtream_config) {
+        $sourceConfig = $effectivePlaylist?->xtream_config ?: self::parseXtreamStreamUrl($originalUrl);
+        if (! $sourceConfig) {
             return $originalUrl;
         }
-
-        $sourceConfig = $effectivePlaylist->xtream_config;
 
         // If this alias has multiple configs, choose the best match by base URL.
         $aliasConfig = $this->findXtreamConfigByUrl((string) ($sourceConfig['url'] ?? '')) ?? $primaryAliasConfig;
@@ -592,12 +593,13 @@ class PlaylistAlias extends Model
         }
 
         // Get the episode's effective playlist to find its source config.
+        // M3U-imported playlists have no stored xtream config, so fall back to
+        // parsing the credentials directly from the stream URL when it is Xtream-style.
         $effectivePlaylist = $episode->getEffectivePlaylist();
-        if (! $effectivePlaylist || ! $effectivePlaylist->xtream_config) {
+        $sourceConfig = $effectivePlaylist?->xtream_config ?: self::parseXtreamStreamUrl($originalUrl);
+        if (! $sourceConfig) {
             return $originalUrl;
         }
-
-        $sourceConfig = $effectivePlaylist->xtream_config;
 
         // If this alias has multiple configs, choose the best match by base URL.
         $aliasConfig = $this->findXtreamConfigByUrl((string) ($sourceConfig['url'] ?? '')) ?? $primaryAliasConfig;
@@ -650,7 +652,51 @@ class PlaylistAlias extends Model
             return "{$aliasBaseUrl}/{$streamType}/{$aliasUsername}/{$aliasPassword}/{$streamIdAndExtension}";
         }
 
+        // Prefix-less live form (common in M3U exports):
+        // http://domain:port/username/password/<stream>
+        $pattern =
+            '#^'.preg_quote($sourceBaseUrl, '#').
+            '/'.preg_quote($sourceUsername, '#').
+            '/'.preg_quote($sourcePassword, '#').
+            '/(.+)$#';
+
+        if (preg_match($pattern, $originalUrl, $matches)) {
+            return "{$aliasBaseUrl}/{$aliasUsername}/{$aliasPassword}/{$matches[1]}";
+        }
+
         return $originalUrl;
+    }
+
+    /**
+     * Parse an Xtream-style stream URL into a config array.
+     *
+     * Used as a source-config fallback for M3U-imported playlists, which have
+     * no stored xtream config but commonly contain Xtream-style stream URLs.
+     *
+     * @return array{url: string, username: string, password: string}|null
+     */
+    private static function parseXtreamStreamUrl(string $url): ?array
+    {
+        // Prefixed form: http(s)://domain:port/(live|series|movie)/username/password/<stream>
+        if (preg_match('#^(https?://[^/]+)/(?:live|series|movie)/([^/]+)/([^/]+)/.+$#', $url, $matches)) {
+            return [
+                'url' => $matches[1],
+                'username' => $matches[2],
+                'password' => $matches[3],
+            ];
+        }
+
+        // Prefix-less live form: http(s)://domain:port/username/password/<numeric id>[.ext]
+        // Requiring a numeric stream ID avoids matching arbitrary three-segment URLs.
+        if (preg_match('#^(https?://[^/]+)/([^/]+)/([^/]+)/\d+(?:\.\w+)?$#', $url, $matches)) {
+            return [
+                'url' => $matches[1],
+                'username' => $matches[2],
+                'password' => $matches[3],
+            ];
+        }
+
+        return null;
     }
 
     /**
