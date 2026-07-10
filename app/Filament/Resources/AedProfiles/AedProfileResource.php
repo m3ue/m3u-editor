@@ -339,10 +339,6 @@ class AedProfileResource extends Resource implements CopilotResource
                             ->options(fn () => collect(timezone_identifiers_list())->mapWithKeys(fn ($tz) => [$tz => $tz]))
                             ->searchable()
                             ->default(fn () => config('dev.timezone') ?: 'UTC'),
-                    ]),
-
-                    Grid::make(2)->schema([
-
                         TextInput::make('event_duration_minutes')
                             ->label(__('Event Duration (minutes)'))
                             ->numeric()
