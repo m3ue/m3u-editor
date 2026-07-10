@@ -14,9 +14,11 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\AedExtractorService;
 use App\Services\EpgCacheService;
+use App\Services\EpisodeNumberNormalizer;
 use App\Services\NetworkEpgService;
 use Carbon\Carbon;
 use DOMDocument;
+use DOMElement;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Http\Response;
@@ -382,8 +384,11 @@ class EpgGenerateController extends Controller
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
-                                if ($programme['episode_num']) {
-                                    $progXml .= '    <episode-num system="xmltv_ns">'.$this->escapeXml($programme['episode_num']).'</episode-num>'.PHP_EOL;
+                                foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
+                                    $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
+                                        ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
+                                        : '';
+                                    $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
                                 if ($programme['icon']) {
                                     $icon = $logoProxyEnabled
@@ -463,7 +468,6 @@ class EpgGenerateController extends Controller
             foreach ($dummyEpgChannels as $dummyEpgChannel) {
                 $tvgId = $this->escapeXml($dummyEpgChannel['tvg_id']);
                 $title = $dummyEpgChannel['title'];
-                $icon = $dummyEpgChannel['icon'];
                 $group = $this->escapeXml($dummyEpgChannel['group']);
                 $includeCategory = $dummyEpgChannel['include_category'];
                 $aedProfileId = $dummyEpgChannel['aed_profile_id'] ?? null;
@@ -479,7 +483,7 @@ class EpgGenerateController extends Controller
 
                     $aedIcon = $aedProfile->logo_url
                         ? $this->escapeXml($aedProfile->logo_url)
-                        : $icon;
+                        : null;
                     $aedCategory = $aedProfile->category
                         ? $this->escapeXml($aedProfile->category)
                         : ($includeCategory ? $group : null);
@@ -552,7 +556,7 @@ class EpgGenerateController extends Controller
                             }
                         }
                     } else {
-                        // Extraction failed or no time — use AED title with standard repeating slots
+                        // Extraction failed or no time - use AED title with standard repeating slots
                         $aedTitle = $this->escapeXml($aedEvent->title);
                         $aedDesc = $aedEvent->description
                             ? $this->escapeXml($aedEvent->description)
@@ -583,9 +587,6 @@ class EpgGenerateController extends Controller
                     foreach ($timeSlots as $slot) {
                         $buffer .= '  <programme channel="'.$tvgId.'" start="'.$slot['start'].'" stop="'.$slot['end'].'">'.PHP_EOL;
                         $buffer .= '    <title>'.$title.'</title>'.PHP_EOL;
-                        if ($icon) {
-                            $buffer .= '    <icon src="'.$icon.'"/>'.PHP_EOL;
-                        }
                         $buffer .= '    <desc>'.$title.'</desc>'.PHP_EOL;
                         if ($includeCategory) {
                             $buffer .= '    <category lang="en">'.$group.'</category>'.PHP_EOL;
@@ -932,6 +933,7 @@ class EpgGenerateController extends Controller
 
                 // Get the item element
                 $item = $itemDom->documentElement;
+                $this->normalizeEpisodeNumbers($item);
 
                 // Save original time attributes before the loop so each iteration starts fresh
                 $originalStart = $item->getAttribute('start');
@@ -976,6 +978,34 @@ class EpgGenerateController extends Controller
         }
         // Close the XMLReader for this epg
         $programReader->close();
+    }
+
+    private function normalizeEpisodeNumbers(DOMElement $programme): void
+    {
+        $episodeNumberElements = [];
+
+        foreach ($programme->childNodes as $childNode) {
+            if ($childNode instanceof DOMElement && $childNode->tagName === 'episode-num') {
+                $episodeNumberElements[] = $childNode;
+            }
+        }
+
+        foreach ($episodeNumberElements as $episodeNumberElement) {
+            $normalizedEpisodeNumbers = EpisodeNumberNormalizer::normalize([[
+                'system' => $episodeNumberElement->hasAttribute('system')
+                    ? $episodeNumberElement->getAttribute('system')
+                    : null,
+                'value' => $episodeNumberElement->textContent,
+            ]]);
+
+            if ($normalizedEpisodeNumbers === []) {
+                $programme->removeChild($episodeNumberElement);
+
+                continue;
+            }
+
+            $episodeNumberElement->textContent = $normalizedEpisodeNumbers[0]['value'];
+        }
     }
 
     /**

@@ -14,7 +14,7 @@ class Notification extends BaseNotification
 {
     public function broadcast(Model|Authenticatable|Collection|array $users): static
     {
-        if ($this->getStatus() === 'success' && app(GeneralSettings::class)->suppress_success_notifications) {
+        if (($this->getStatus() === 'success' || $this->getStatus() === 'info') && app(GeneralSettings::class)->suppress_success_notifications) {
             return $this;
         }
 
@@ -23,7 +23,7 @@ class Notification extends BaseNotification
 
     public function sendToDatabase(Model|Authenticatable|Collection|array $users, bool $isEventDispatched = false): static
     {
-        if ($this->getStatus() === 'success' && app(GeneralSettings::class)->suppress_success_notifications) {
+        if (($this->getStatus() === 'success' || $this->getStatus() === 'info') && app(GeneralSettings::class)->suppress_success_notifications) {
             return $this;
         }
 
