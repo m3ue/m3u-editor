@@ -405,7 +405,7 @@ class XtreamStreamController extends Controller
         }
         $request->merge($mergeData);
 
-        if ($playlist->enable_proxy && $playlist->user->canUseProxy()) {
+        if (($playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
             return app()->call([app(M3uProxyApiController::class), 'channel'], [
                 'id' => $timeshiftChannel->id,
                 'uuid' => $playlist->uuid,

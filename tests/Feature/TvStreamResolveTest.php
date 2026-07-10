@@ -1118,6 +1118,7 @@ describe('catchup stream resolve', function () {
         $this->withoutMiddleware(ThrottleRequestsWithRedis::class);
         $this->user = tvCreateUser('catchupuser');
         $this->playlist = tvCreatePlaylist($this->user, 'Catchup Playlist');
+        $this->playlist->update(['server_timezone' => 'Etc/UTC']);
         tvCreateAuth($this->user, $this->playlist, 'catchup_user', 'catchup_pass');
         $this->channel = tvCreateChannel($this->user, $this->playlist, [
             'name' => 'Catchup Channel',
@@ -1195,6 +1196,53 @@ describe('catchup stream resolve', function () {
             ->not->toContain('example.com');
 
         $this->get($url)->assertOk()->assertSee('timeshift');
+    });
+
+    it('forces configured proxy mediation across the signed catchup response chain', function () {
+        $providerSecrets = [
+            'provider.example.test',
+            'provider_user',
+            'provider_pass',
+            'account_secret',
+            'provider_secret',
+        ];
+        $this->playlist->update(['enable_proxy' => false]);
+        expect($this->user->canUseProxy())->toBeTrue()
+            ->and($this->playlist->enable_proxy)->toBeFalse();
+        $this->channel->update([
+            'url' => 'https://provider_user:provider_pass@provider.example.test/live/account_secret/123.ts?token=provider_secret',
+        ]);
+        config([
+            'proxy.m3u_proxy_host' => 'https://proxy.example.test',
+            'proxy.m3u_proxy_port' => null,
+        ]);
+        Http::fake(['*' => Http::response('Proxy unavailable', 500)]);
+        Log::spy();
+
+        $url = $this->postJson($this->resolveUrl, [
+            'type' => 'catchup',
+            'stream_id' => $this->channel->id,
+            'catchup_start' => '2026-07-10T12:30:00+00:00',
+            'catchup_duration_minutes' => 30,
+        ])->assertOk()->json('url');
+
+        expect(URL::hasValidSignature(Request::create($url)))->toBeTrue();
+        foreach ($providerSecrets as $providerSecret) {
+            expect($url)->not->toContain($providerSecret);
+        }
+
+        $playbackResponse = $this->get($url);
+
+        $playbackResponse->assertServiceUnavailable();
+        expect($playbackResponse->headers->get('Location'))->toBeNull();
+        foreach ($providerSecrets as $providerSecret) {
+            expect($playbackResponse->getContent())->not->toContain($providerSecret);
+        }
+
+        $containsProviderSecret = fn (...$arguments): bool => Str::contains((string) json_encode($arguments), $providerSecrets);
+        foreach (['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'] as $level) {
+            Log::shouldNotHaveReceived($level, $containsProviderSecret);
+        }
     });
 
     it('rejects cross-playlist and VOD catchup streams', function () {
@@ -1281,16 +1329,17 @@ describe('catchup stream resolve', function () {
                 'metadata' => [],
             ]);
         }
-        $url = $this->postJson($this->resolveUrl, [
-            'type' => 'catchup',
-            'stream_id' => $this->channel->id,
-            'catchup_start' => '2026-07-10T12:30:00+00:00',
-            'catchup_duration_minutes' => 30,
-        ])->json('url');
+        $response = app(XtreamStreamController::class)->handleTimeshift(
+            Request::create('/timeshift', 'GET'),
+            'catchup_user',
+            'catchup_pass',
+            30,
+            '2026-07-10:12-30-00',
+            $this->channel->id,
+            'ts',
+        );
 
-        $this->get($url)
-            ->assertRedirect()
-            ->assertRedirectContains('eligible.ts');
+        expect($response->getTargetUrl())->toContain('eligible.ts');
     });
 
     it('keeps a shift-only primary instead of replacing it with a failover', function () {
