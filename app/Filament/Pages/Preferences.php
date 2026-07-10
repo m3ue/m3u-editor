@@ -278,9 +278,9 @@ class Preferences extends SettingsPage
                                                     ->label(__('Suppress success notifications'))
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                        tooltip: 'When enabled, success and informational notifications from background tasks (e.g. sync started or completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
                                                     )
-                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
+                                                    ->helperText(__('Hide success and informational notifications from background tasks (errors and warnings are always shown).')),
                                             ]),
                                         Grid::make()
                                             ->columnSpanFull()

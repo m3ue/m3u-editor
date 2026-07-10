@@ -58,10 +58,26 @@ it('does not suppress a warning notification when suppression is enabled', funct
     NotificationFacade::assertSentTo($this->user, DatabaseNotification::class);
 });
 
-it('does not suppress an info notification when suppression is enabled', function () {
+it('suppresses an info database notification when suppression is enabled', function () {
     mockNotificationSettings(suppress: true);
 
     Notification::make()->title('Info')->info()->sendToDatabase($this->user);
 
     NotificationFacade::assertNothingSent();
+});
+
+it('suppresses an info broadcast notification when suppression is enabled', function () {
+    mockNotificationSettings(suppress: true);
+
+    Notification::make()->title('Info')->info()->broadcast($this->user);
+
+    NotificationFacade::assertNothingSent();
+});
+
+it('sends an info database notification when suppression is disabled', function () {
+    mockNotificationSettings(suppress: false);
+
+    Notification::make()->title('Info')->info()->sendToDatabase($this->user);
+
+    NotificationFacade::assertSentTo($this->user, DatabaseNotification::class);
 });
