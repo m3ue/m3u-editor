@@ -130,6 +130,34 @@ class EditVodGroup extends EditRecord
                     ->modalIcon('heroicon-o-bars-arrow-down')
                     ->modalDescription(__('Sort all channels in this group alphabetically? This will update the sort order.')),
 
+                Action::make('sort_release_date')
+                    ->label(__('Sort by Release Date'))
+                    ->icon('heroicon-o-calendar-days')
+                    ->schema([
+                        Select::make('sort')
+                            ->label(__('Sort Order'))
+                            ->options([
+                                'DESC' => 'Newest first (2026 to 1950)',
+                                'ASC' => 'Newest first (1950 to 2026)',
+                            ])
+                            ->default('DESC')
+                            ->required(),
+                    ])
+                    ->action(function (Group $record, array $data): void {
+                        SortFacade::bulkSortGroupChannelsByReleaseDate($record, $data['sort'] ?? 'DESC');
+                    })
+                    ->after(function ($livewire) {
+                        $livewire->dispatch('refreshRelation');
+                        Notification::make()
+                            ->success()
+                            ->title(__('Channels Sorted by Release Date'))
+                            ->body(__('The channels in this group have been sorted by release date.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-calendar-days')
+                    ->modalDescription(__('Sort all channels in this group by release date? This will update the sort order.')),
+
                 Action::make('process_vod')
                     ->label(__('Fetch Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')

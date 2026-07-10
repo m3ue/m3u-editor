@@ -637,9 +637,7 @@ class XtreamApiController extends Controller
                     $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
                         : $channel->channel;
-                    if ($playlist->auto_channel_increment) {
-                        $channelNo = ++$channelNumber;
-                    } elseif (! $channelNo && $idChannelBy === PlaylistChannelId::Number) {
+                    if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
                     }
 
@@ -746,6 +744,7 @@ class XtreamApiController extends Controller
 
             return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist) {
                 $num = 0;
+                $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
                 echo '[';
                 $first = true;
@@ -782,8 +781,8 @@ class XtreamApiController extends Controller
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
                     $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
-                        : ($channel->channel ?: $num);
-                    if ($playlist->auto_channel_increment) {
+                        : $channel->channel;
+                    if (! $vodChannelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $vodChannelNo = ++$channelNumber;
                     }
 
@@ -2276,10 +2275,14 @@ class XtreamApiController extends Controller
     private function updateProgress(Request $request, $playlist, string $authMethod = 'none', string $username = '', string $password = ''): \Illuminate\Http\JsonResponse
     {
         $contentType = $request->input('content_type');
-        $streamId = (int) $request->input('stream_id');
+        $aioItemId = $request->input('aio_item_id');
 
-        if (! $contentType || ! $streamId) {
-            return response()->json(['error' => 'content_type and stream_id are required'], 400);
+        // AIOStreams content is keyed by aio_item_id rather than an integer stream_id.
+        $isAio = $contentType === 'aiostreams';
+        $streamId = $isAio ? null : (int) $request->input('stream_id');
+
+        if (! $contentType || (! $isAio && ! $streamId) || ($isAio && ! $aioItemId)) {
+            return response()->json(['error' => 'content_type and (stream_id or aio_item_id) are required'], 400);
         }
 
         $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
@@ -2306,7 +2309,32 @@ class XtreamApiController extends Controller
             'last_watched_at' => now(),
         ];
 
-        if ($contentType === 'live') {
+        if ($isAio) {
+            $aioIntegrationId = $request->input('aio_integration_id') ? (int) $request->input('aio_integration_id') : null;
+
+            $progress = ViewerWatchProgress::updateOrCreate(
+                [
+                    'playlist_viewer_id' => $viewer->id,
+                    'aio_item_id' => $aioItemId,
+                ],
+                array_merge($data, [
+                    'content_type' => 'aiostreams',
+                    'aio_integration_id' => $aioIntegrationId,
+                    'title' => $request->input('title'),
+                    'episode_title' => $request->input('episode_title'),
+                    'thumbnail_url' => $request->input('thumbnail_url'),
+                    'backdrop_url' => $request->input('backdrop_url'),
+                    'rating' => $request->input('rating'),
+                    'year' => $request->input('year'),
+                    'plot' => $request->input('plot'),
+                    'season_number' => $seasonNumber,
+                    'episode_number' => $episodeNumber,
+                    'position_seconds' => $positionSeconds,
+                    'duration_seconds' => $durationSeconds,
+                    'completed' => $completed,
+                ])
+            );
+        } elseif ($contentType === 'live') {
             // For live TV, just increment watch count
             $existing = ViewerWatchProgress::where('playlist_viewer_id', $viewer->id)
                 ->where('content_type', 'live')
@@ -2452,6 +2480,21 @@ class XtreamApiController extends Controller
                 $data['plot'] = $info['plot'] ?? $info['description'] ?? $info['desc'] ?? null;
                 $data['genre'] = $info['genre'] ?? $info['category_name'] ?? null;
                 $data['year'] = $channel?->year ?? $info['releasedate'] ?? $info['year'] ?? null;
+            } elseif ($progress->content_type === 'aiostreams') {
+                // AIOStreams — metadata is stored denormalised; no join needed.
+                $data['title'] = $progress->title;
+                $data['episode_title'] = $progress->episode_title;
+                $data['series_name'] = null;
+                $data['season_number'] = $progress->season_number;
+                $data['episode_number'] = $progress->episode_number;
+                $data['thumbnail_url'] = $progress->thumbnail_url;
+                $data['backdrop_url'] = $progress->backdrop_url;
+                $data['rating'] = $progress->rating;
+                $data['runtime'] = $this->formatRuntimeFromSeconds($progress->duration_seconds);
+                $data['plot'] = $progress->plot;
+                $data['year'] = $progress->year;
+                $data['aio_item_id'] = $progress->aio_item_id;
+                $data['aio_integration_id'] = $progress->aio_integration_id;
             } else {
                 // live
                 $channel = $progress->channel;
@@ -3051,5 +3094,21 @@ class XtreamApiController extends Controller
         $password = $request->input('password');
 
         return PlaylistFacade::authenticate($username, $password);
+    }
+
+    private function formatRuntimeFromSeconds(?int $seconds): ?string
+    {
+        if (! $seconds || $seconds <= 0) {
+            return null;
+        }
+        $minutes = (int) round($seconds / 60);
+        if ($minutes >= 60) {
+            $h = intdiv($minutes, 60);
+            $m = $minutes % 60;
+
+            return $m > 0 ? "{$h}h {$m}m" : "{$h}h";
+        }
+
+        return "{$minutes} min";
     }
 }

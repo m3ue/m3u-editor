@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Categories\Pages;
 
+use App\Facades\SortFacade;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -52,6 +53,33 @@ class EditCategory extends EditRecord
                     ->modalIcon('heroicon-o-arrows-right-left')
                     ->modalDescription(__('Move the series to another category.'))
                     ->modalSubmitActionLabel(__('Move now')),
+                Action::make('sort_release_date')
+                    ->label(__('Sort by Release Date'))
+                    ->icon('heroicon-o-calendar-days')
+                    ->schema([
+                        Select::make('sort')
+                            ->label(__('Sort Order'))
+                            ->options([
+                                'DESC' => 'Newest first (2026 to 1950)',
+                                'ASC' => 'Newest first (1950 to 2026)',
+                            ])
+                            ->default('DESC')
+                            ->required(),
+                    ])
+                    ->action(function (Category $record, array $data): void {
+                        SortFacade::bulkSortCategorySeriesByReleaseDate($record, $data['sort'] ?? 'DESC');
+                    })
+                    ->after(function ($livewire) {
+                        $livewire->dispatch('refreshRelation');
+                        Notification::make()
+                            ->success()
+                            ->title(__('Series Sorted by Release Date'))
+                            ->body(__('The series in this category have been sorted by release date.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-calendar-days')
+                    ->modalDescription(__('Sort all series in this category by release date? This will update the sort order.')),
                 Action::make('process')
                     ->label(__('Fetch Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')

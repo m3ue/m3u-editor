@@ -195,6 +195,7 @@ return [
         // ── SQL Injection — validated before interpolation ───────────────────
         // SortService: $direction is always 'ASC'|'DESC' (ternary-validated),
         // $lowerOrderByColumn comes from a match() with explicit safe cases,
+        // $expression is a hardcoded SQL literal (never user input),
         // $casesSql/$idsSql are built from existing DB primary keys.
         'bea9748233f2',
         '0e160ed2ed17',
@@ -208,6 +209,18 @@ return [
         'a88d30c913e5',
         '5726439e4efd',
         '99a951cf951c',
+        // SortService release-date methods: same guarantees as above —
+        // $expression is a compile-time SQL constant, $direction is ternary-validated.
+        'c932feeb0b60',
+        'b5574d564fe2',
+        '6f371c5d5ce4',
+        '088ee165b1ef',
+        '1cc4bbb3b1ef',
+        'ffb5113f383e',
+        '1f05e353e8f7',
+        '361a8a8465de',
+        '53e3187b2a5f',
+        'a215f7e698e0',
 
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.

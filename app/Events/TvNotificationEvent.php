@@ -13,6 +13,7 @@ class TvNotificationEvent implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
+        public readonly string $id,
         public readonly string $notifiableType,
         public readonly string $notifiableUuid,
         public readonly bool $adminOnly,

@@ -4,12 +4,15 @@ namespace App\Filament\Resources\Series\Pages;
 
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Filament\Resources\Series\SeriesResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Contracts\Support\Htmlable;
 
 class ViewSeries extends ViewRecord
 {
+    use AppliesTmdbSelection;
+
     protected static string $resource = SeriesResource::class;
 
     protected string $view = 'filament.resources.series.pages.view-series';

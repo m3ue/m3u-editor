@@ -5,6 +5,7 @@ namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCustomPlaylistPivotSort;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Models\Series;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
 use Filament\Actions\DetachAction;
@@ -28,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 
 class SeriesRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
     use ReordersCustomPlaylistPivotSort;
 
     protected static string $relationship = 'series';
