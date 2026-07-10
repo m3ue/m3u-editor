@@ -72,8 +72,19 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
 });
 
 /*
- * TV app API routes (authenticated via Xtream credentials in URL path — no Sanctum)
+ * TV app API routes
  */
+Route::post('tv/stream/resolve', [TvApiController::class, 'resolveStream'])
+    ->middleware('throttle:60,1')
+    ->name('tv.stream.resolve.basic');
+Route::get('tv/stream/{playlistType}/{playlistId}/{type}/{streamId}', [TvApiController::class, 'playStream'])
+    ->middleware(['signed', 'throttle:60,1'])
+    ->whereIn('type', ['live', 'vod', 'series', 'catchup'])
+    ->whereIn('playlistType', ['playlist', 'merged', 'custom', 'alias'])
+    ->whereNumber('streamId')
+    ->whereNumber('playlistId')
+    ->name('tv.stream.play');
+
 Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(function () {
     Route::get('notifications', [TvApiController::class, 'notifications'])
         ->name('tv.notifications');
@@ -81,4 +92,5 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.notifications.read');
     Route::post('broadcasting/auth', [TvApiController::class, 'broadcastingAuth'])
         ->name('tv.broadcasting.auth');
+
 });

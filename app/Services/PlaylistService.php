@@ -780,16 +780,9 @@ class PlaylistService
 
             $streamUrl = $rewrite($streamUrl, $stamp, $offset);
 
-            // Helpful debug for verification
-            Log::debug(sprintf(
-                '[TIMESHIFT-M3U] utc=%d lutc=%d tz=%s start=%s offset(min)=%d final_url=%s',
-                $utc,
-                $lutc,
-                $providerTz,
-                $stamp,
-                $offset,
-                $streamUrl
-            ));
+            Log::debug('Generated M3U timeshift URL', [
+                'duration_minutes' => $offset,
+            ]);
         } elseif ($xtreamTimeshiftPresent) {
             // Convert Xtream API date format to timeshift URL format
             // Input: YYYY-MM-DD:HH-MM-SS, Output: YYYY-MM-DD:HH-MM
@@ -808,14 +801,9 @@ class PlaylistService
 
             $streamUrl = $rewrite($streamUrl, $stamp, $duration);
 
-            // Helpful debug for verification
-            Log::debug(sprintf(
-                '[TIMESHIFT-XTREAM] duration=%d date=%s converted_stamp=%s final_url=%s',
-                $duration,
-                $date,
-                $stamp,
-                $streamUrl
-            ));
+            Log::debug('Generated Xtream timeshift URL', [
+                'duration_minutes' => $duration,
+            ]);
         }
 
         return $streamUrl;

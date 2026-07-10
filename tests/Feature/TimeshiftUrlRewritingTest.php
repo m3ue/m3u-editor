@@ -101,6 +101,7 @@ it('uses failover channel URL when primary channel has no catchup support', func
         'enabled' => true,
         'url' => 'https://provider.domain/live/user/pass/hd-stream.ts',
         'catchup' => null,
+        'shift' => 0,
     ]);
 
     $failoverChannel = Channel::factory()->create([

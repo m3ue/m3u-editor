@@ -379,12 +379,13 @@ class XtreamStreamController extends Controller
         // If the primary channel doesn't support catchup, defer to the first failover that does.
         // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
         $timeshiftChannel = $channel;
-        if (! $channel->catchup || $channel->catchup == 0) {
+        $channel->loadMissing('playlist');
+        if (! $this->supportsTimeshift($channel)) {
             $failoverWithCatchup = $channel->failoverChannels()
-                ->whereNotNull('catchup')
-                ->where('catchup', '!=', '0')
-                ->where('catchup', '!=', '')
-                ->first();
+                ->with('playlist')
+                ->where('enabled', true)
+                ->get()
+                ->first(fn (Channel $failover): bool => $this->supportsTimeshift($failover));
 
             if ($failoverWithCatchup) {
                 $timeshiftChannel = $failoverWithCatchup;
@@ -429,6 +430,12 @@ class XtreamStreamController extends Controller
         }
 
         return $streamUrl;
+    }
+
+    private function supportsTimeshift(Channel $channel): bool
+    {
+        return ! $channel->playlist?->disable_catchup
+            && ((! empty($channel->catchup) && $channel->catchup !== '0') || (int) $channel->shift > 0);
     }
 
     /**

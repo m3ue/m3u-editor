@@ -25,6 +25,7 @@ class StreamStatsService
 
         $video = null;
         $audio = null;
+        $format = null;
 
         foreach ($stats as $entry) {
             if (! is_array($entry)) {
@@ -42,6 +43,10 @@ class StreamStatsService
 
             if (($stream['codec_type'] ?? null) === 'audio' && $audio === null) {
                 $audio = $stream;
+            }
+
+            if (isset($entry['format']) && is_array($entry['format']) && $format === null) {
+                $format = $entry['format'];
             }
         }
 
@@ -62,6 +67,7 @@ class StreamStatsService
             'codec_tag_string' => $video['codec_tag_string'] ?? null,
             'side_data_list' => $video['side_data_list'] ?? null,
             'bit_depth' => self::extractBitDepth($video),
+            'bit_rate' => $video['bit_rate'] ?? $audio['bit_rate'] ?? $format['bit_rate'] ?? null,
             'audio_codec' => $audio['codec_name'] ?? null,
             'audio_profile' => $audio['profile'] ?? null,
             'audio_channels' => $audio['channels'] ?? $audio['channel_layout'] ?? null,

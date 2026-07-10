@@ -1272,7 +1272,6 @@ class M3uProxyService
                 'stream_profile_id' => $profile->id,
                 'provider_profile_id' => $selectedProfile?->id,
                 'is_failover' => $isFailover,
-                'primary_url' => $primaryUrl,
                 'failover_count' => is_array($failovers) ? count($failovers) : ($failovers ? 'using_resolver' : 0),
             ]);
 
@@ -1307,7 +1306,6 @@ class M3uProxyService
                 'is_vod' => $actualChannel->is_vod ?? false,
                 'provider_profile_id' => $selectedProfile?->id,
                 'provider_profile_name' => $selectedProfile?->name,
-                'primary_url' => preg_replace('#/[^/]+/[^/]+/(live|series|movie)/#', '/***/***/\1/', $primaryUrl),
                 'url_transformed' => $selectedProfile !== null,
             ]);
 
@@ -2208,7 +2206,6 @@ class M3uProxyService
                 if (isset($data['stream_id'])) {
                     Log::debug('m3u-proxy stream created/updated successfully', [
                         'stream_id' => $data['stream_id'],
-                        'url' => $url,
                     ]);
 
                     return $data['stream_id'];
@@ -2217,11 +2214,10 @@ class M3uProxyService
                 throw new Exception('Stream ID not found in API response');
             }
 
-            throw new Exception('Failed to create stream: '.$response->body());
+            throw new Exception('Failed to create stream');
         } catch (Exception $e) {
             Log::error('Error creating/updating stream on m3u-proxy', [
-                'error' => $e->getMessage(),
-                'url' => $url,
+                'error_type' => $e::class,
             ]);
             throw $e;
         }
@@ -2347,7 +2343,6 @@ class M3uProxyService
                     Log::debug('Created transcoded stream on m3u-proxy', [
                         'stream_id' => $data['stream_id'],
                         'format' => $profile->format,
-                        'payload' => $payload,
                     ]);
 
                     return $data['stream_id'];
@@ -2356,12 +2351,10 @@ class M3uProxyService
                 throw new Exception('Stream ID not found in transcoding API response');
             }
 
-            throw new Exception('Failed to create transcoded stream: '.$response->body());
+            throw new Exception('Failed to create transcoded stream');
         } catch (Exception $e) {
             Log::error('Error creating transcoded stream on m3u-proxy', [
-                'error' => $e->getMessage(),
-                'profile' => $profile->getProfileIdentifier(),
-                'url' => $url,
+                'error_type' => $e::class,
             ]);
             throw $e;
         }
@@ -2398,27 +2391,7 @@ class M3uProxyService
             $url = $baseUrl.'/stream/'.$streamId;
         }
 
-        // Append trace parameters if provided
-        return $this->appendProxyTraceParams($url, $username);
-    }
-
-    /**
-     * Append traceability parameters to a proxy URL.
-     * Adds username as query parameter for client tracking.
-     *
-     * @param  string  $url  The base proxy URL
-     * @param  string|null  $username  Optional Xtream username for client tracking
-     * @return string URL with appended trace parameters
-     */
-    protected function appendProxyTraceParams(string $url, ?string $username = null): string
-    {
-        if (! $username) {
-            return $url;
-        }
-
-        $separator = parse_url($url, PHP_URL_QUERY) ? '&' : '?';
-
-        return $url.$separator.http_build_query(['username' => $username]);
+        return $url;
     }
 
     private function getFormatFromUrl(?string $url): string
@@ -2475,13 +2448,22 @@ class M3uProxyService
         // 2) resolver URL if set - this is the most explicit and reliable method to ensure correct URL resolution
         $publicUrl = config('proxy.m3u_proxy_public_url');
         if (! empty($publicUrl)) {
-            return rtrim($publicUrl, '/').'/m3u-proxy';
+            return $this->credentialFreeProxyUrl($publicUrl);
         }
 
         // 3) Smart fallback: Use APP_URL + /m3u-proxy if available (works with reverse proxy)
         // This allows the proxy to work without requiring explicit resolver URL configuration.
         // Works automatically in Docker containers with NGINX reverse proxy.
-        return ProxyFacade::getBaseUrl().'/m3u-proxy';
+        return $this->credentialFreeProxyUrl(ProxyFacade::getBaseUrl());
+    }
+
+    private function credentialFreeProxyUrl(string $url): string
+    {
+        if (parse_url($url, PHP_URL_USER) !== null || parse_url($url, PHP_URL_PASS) !== null) {
+            throw new Exception('Proxy public URL must not contain credentials');
+        }
+
+        return rtrim($url, '/').'/m3u-proxy';
     }
 
     /**
