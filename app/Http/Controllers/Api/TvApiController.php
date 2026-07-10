@@ -36,8 +36,6 @@ class TvApiController extends Controller
             $query->whereIn('channel', (array) $request->input('channels'));
         }
 
-        $scheme = config('broadcasting.connections.reverb.options.scheme', 'http');
-
         $configuredChannels = collect(app(GeneralSettings::class)->tv_notification_channels)
             ->map(fn (array $c) => [
                 'name' => $c['name'] ?? '',
@@ -53,9 +51,9 @@ class TvApiController extends Controller
             'notifications' => $query->get(),
             'available_channels' => $configuredChannels,
             'reverb' => [
-                'host' => config('broadcasting.connections.reverb.options.host', 'localhost'),
-                'port' => (int) config('broadcasting.connections.reverb.options.port', 36800),
-                'scheme' => $scheme === 'https' ? 'wss' : 'ws',
+                'host' => $request->getHost(),
+                'port' => (int) $request->getPort(),
+                'scheme' => $request->isSecure() ? 'wss' : 'ws',
                 'app_key' => config('broadcasting.connections.reverb.key'),
                 'channel' => $auth['channel'],
             ],
