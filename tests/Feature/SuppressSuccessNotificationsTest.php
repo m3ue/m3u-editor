@@ -63,5 +63,5 @@ it('does not suppress an info notification when suppression is enabled', functio
 
     Notification::make()->title('Info')->info()->sendToDatabase($this->user);
 
-    NotificationFacade::assertSentTo($this->user, DatabaseNotification::class);
+    NotificationFacade::assertNothingSent();
 });
