@@ -1232,7 +1232,7 @@
     "Height (px)": "Height (px)",
     "Help support this project by donating! Any amount is appreciated.": "Help support this project by donating! Any amount is appreciated.",
     "Helper": "Helper",
-    "Hide success notifications from background tasks. Errors and warnings are always shown.": "Hide success notifications from background tasks. Errors and warnings are always shown.",
+    "Hide success and informational notifications from background tasks (errors and warnings are always shown).": "Hide success and informational notifications from background tasks (errors and warnings are always shown).",
     "High-Risk Permissions": "High-Risk Permissions",
     "Higher weight = more likely to appear when shuffling": "Higher weight = more likely to appear when shuffling",
     "Highest Rated": "Highest Rated",

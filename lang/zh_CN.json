@@ -1232,7 +1232,7 @@
     "Height (px)": "高度（像素）",
     "Help support this project by donating! Any amount is appreciated.": "点点关注不迷路，👉一键三连带我恰饭！每一份支持都是我们持续发电的动力",
     "Helper": "助手",
-    "Hide success notifications from background tasks. Errors and warnings are always shown.": "隐藏后台任务的成功通知，错误和警告始终显示。",
+    "Hide success and informational notifications from background tasks (errors and warnings are always shown).": "隐藏后台任务的成功和信息通知（错误和警告始终显示）。",
     "High-Risk Permissions": "高风险权限",
     "Higher weight = more likely to appear when shuffling": "权重越高随机播放时出现的概率越大",
     "Highest Rated": "最高评价",

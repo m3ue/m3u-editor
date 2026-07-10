@@ -1232,7 +1232,7 @@
     "Height (px)": "Hauteur (px)",
     "Help support this project by donating! Any amount is appreciated.": "Aidez à soutenir ce projet en faisant un don ! Tout montant est apprécié.",
     "Helper": "Assistant",
-    "Hide success notifications from background tasks. Errors and warnings are always shown.": "Masquer les notifications de succès des tâches en arrière-plan. Les erreurs et avertissements sont toujours affichés.",
+    "Hide success and informational notifications from background tasks (errors and warnings are always shown).": "Masquer les notifications de succès et d'information des tâches en arrière-plan (les erreurs et avertissements sont toujours affichés).",
     "High-Risk Permissions": "Autorisations à haut risque",
     "Higher weight = more likely to appear when shuffling": "Poids plus élevé = plus susceptible d'apparaître lors du mélange",
     "Highest Rated": "Les mieux notés",
