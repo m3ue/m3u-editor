@@ -864,8 +864,9 @@ class EpgApiController extends Controller
                     ];
                 }
 
-                // Build channel entry
-                $channels[$channelNo] = [
+                // Build channel entry — keyed by network ID (not channel_number) so two
+                // networks sharing the same channel number don't overwrite each other.
+                $channels[$network->id] = [
                     'id' => $channelNo,
                     'database_id' => null, // $network->id,
                     'url' => $url,
@@ -918,7 +919,7 @@ class EpgApiController extends Controller
                     ];
                 }
 
-                $programmes[$channelNo] = $channelProgrammes;
+                $programmes[$network->id] = $channelProgrammes;
             }
 
             // Create pagination info
