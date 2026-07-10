@@ -6,11 +6,13 @@ use App\Events\EpgUpdated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
+use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\EpgCacheService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
@@ -60,7 +62,7 @@ test('epg download does not crash when epg source file is missing', function () 
         'channel' => 1,
     ]);
 
-    // The EPG source file does not exist — should return valid XML without crashing
+    // The EPG source file does not exist - should return valid XML without crashing
     $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
 
     $response->assertStatus(200);
@@ -115,6 +117,80 @@ test('epg download does not crash when epg source file is corrupted', function (
     Storage::disk('local')->delete($epg->file_path);
 });
 
+test('xmlreader fallback preserves programme identities and artwork while omitting invalid identities', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/fallback-identity.xml',
+        'is_cached' => false,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.fallback.identity',
+        'display_name' => 'Fallback Identity Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'fallback-identity-channel',
+        'title' => 'Fallback Identity Channel',
+        'channel' => 1,
+    ]);
+
+    $start = now()->startOfDay()->addHour()->format('YmdHis O');
+    $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="source.fallback.identity"><display-name>Fallback Identity Channel</display-name></channel>
+  <programme start="{$start}" stop="{$stop}" channel="source.fallback.identity">
+    <title>Fallback Identity Programme</title>
+    <icon src="https://example.com/fallback-programme-artwork.jpg" />
+    <episode-num system="xmltv_ns">1 . 4/10 .</episode-num>
+    <episode-num system="provider-counter">0</episode-num>
+    <episode-num system="dd_progid">EP012345670089</episode-num>
+    <episode-num system="onscreen">S02E05</episode-num>
+    <episode-num system="provider.example/id">series-0</episode-num>
+    <episode-num>Unclassified 7</episode-num>
+    <episode-num system="xmltv_ns">1..2..3</episode-num>
+    <episode-num system="xmltv_ns">   </episode-num>
+    <episode-num system="provider-counter">   </episode-num>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+    $episodeNumbers = [];
+    foreach ($xpath->query('//programme[@channel="fallback-identity-channel"]/episode-num') as $episodeNumber) {
+        $episodeNumbers[] = [
+            'system' => $episodeNumber->hasAttribute('system') ? $episodeNumber->getAttribute('system') : null,
+            'value' => $episodeNumber->textContent,
+        ];
+    }
+
+    expect($episodeNumbers)->toBe([
+        ['system' => 'xmltv_ns', 'value' => '1 . 4/10 .'],
+        ['system' => 'provider-counter', 'value' => '0'],
+        ['system' => 'dd_progid', 'value' => 'EP012345670089'],
+        ['system' => 'onscreen', 'value' => 'S02E05'],
+        ['system' => 'provider.example/id', 'value' => 'series-0'],
+        ['system' => null, 'value' => 'Unclassified 7'],
+    ])->and($xpath->query('//programme[@channel="fallback-identity-channel"]/icon[@src="https://example.com/fallback-programme-artwork.jpg"]'))->toHaveCount(1);
+});
+
 test('epg xml generation preserves albanian characters with explicit utf8 escaping', function () {
     $previousCharset = ini_get('default_charset');
     ini_set('default_charset', 'ISO-8859-1');
@@ -149,4 +225,232 @@ test('epg xml generation preserves albanian characters with explicit utf8 escapi
     } finally {
         ini_set('default_charset', $previousCharset ?: 'UTF-8');
     }
+});
+
+test('cached epg generation preserves ordered episode number identities from source xml', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/identity.xml',
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.identity',
+        'display_name' => 'Identity Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'identity-channel',
+        'title' => 'Identity Channel',
+        'channel' => 1,
+    ]);
+
+    $date = now()->format('Y-m-d');
+    $start = now()->startOfDay()->addHour()->format('YmdHis O');
+    $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="source.identity"><display-name>Identity Channel</display-name></channel>
+  <programme start="{$start}" stop="{$stop}" channel="source.identity">
+    <title>Identity Programme</title>
+    <icon src="https://example.com/programme-artwork.jpg" />
+    <episode-num system="xmltv_ns">1 . 4/10 .</episode-num>
+    <episode-num system="dd_progid">EP012345670089</episode-num>
+    <episode-num system="onscreen">S02E05</episode-num>
+    <episode-num system="provider.example/id">series-0</episode-num>
+    <episode-num>Unclassified 7</episode-num>
+    <episode-num system=" xmltv_ns ">0</episode-num>
+    <episode-num system="xmltv_ns">0</episode-num>
+    <episode-num system="xmltv_ns">1..2..3</episode-num>
+    <episode-num system="onscreen">   </episode-num>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    $cacheLine = Storage::disk('local')->get("epg-cache/{$epg->uuid}/v2/programmes-{$date}.jsonl");
+    $cachedProgramme = json_decode(trim($cacheLine), true, flags: JSON_THROW_ON_ERROR)['programme'];
+    $expectedEpisodeNumbers = [
+        ['system' => 'xmltv_ns', 'value' => '1 . 4/10 .'],
+        ['system' => 'dd_progid', 'value' => 'EP012345670089'],
+        ['system' => 'onscreen', 'value' => 'S02E05'],
+        ['system' => 'provider.example/id', 'value' => 'series-0'],
+        ['system' => null, 'value' => 'Unclassified 7'],
+        ['system' => ' xmltv_ns ', 'value' => '0'],
+    ];
+
+    expect($cachedProgramme['episode_nums'])->toBe($expectedEpisodeNumbers)
+        ->and($cachedProgramme['icon'])->toBe('https://example.com/programme-artwork.jpg');
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $episodeNumbers = [];
+    foreach ($document->getElementsByTagName('episode-num') as $episodeNumber) {
+        $episodeNumbers[] = [
+            'system' => $episodeNumber->hasAttribute('system') ? $episodeNumber->getAttribute('system') : null,
+            'value' => $episodeNumber->textContent,
+        ];
+    }
+
+    $xpath = new DOMXPath($document);
+
+    expect($episodeNumbers)->toBe($expectedEpisodeNumbers)
+        ->and($xpath->query('//programme[@channel="identity-channel"]/icon[@src="https://example.com/programme-artwork.jpg"]'))->toHaveCount(1);
+});
+
+test('legacy scalar episode numbers emit only valid xmltv namespace identities', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/legacy.xml',
+        'is_cached' => true,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.legacy',
+        'display_name' => 'Legacy Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'legacy-channel',
+        'title' => 'Legacy Channel',
+        'channel' => 1,
+    ]);
+
+    $date = now()->format('Y-m-d');
+    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
+    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
+        'cache_created' => time(),
+        'cache_version' => 'v2',
+    ], JSON_THROW_ON_ERROR));
+
+    $records = collect([
+        ['title' => 'Valid Legacy', 'episode_num' => '0.4.'],
+        ['title' => 'Provider Legacy', 'episode_num' => 'EP012345670089'],
+        ['title' => 'Zero Legacy', 'episode_num' => '0'],
+        ['title' => 'Malformed Legacy', 'episode_num' => '1..2..3'],
+    ])->map(function (array $programme, int $index): string {
+        return json_encode([
+            'channel' => 'source.legacy',
+            'programme' => array_merge([
+                'start' => now()->startOfDay()->addHours($index + 1)->toISOString(),
+                'stop' => now()->startOfDay()->addHours($index + 2)->toISOString(),
+                'subtitle' => '',
+                'desc' => '',
+                'category' => '',
+                'rating' => '',
+                'icon' => '',
+                'images' => [],
+                'new' => false,
+            ], $programme),
+        ], JSON_THROW_ON_ERROR);
+    })->implode("\n")."\n";
+
+    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", $records);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $episodeNumbers = [];
+    foreach ($document->getElementsByTagName('episode-num') as $episodeNumber) {
+        $episodeNumbers[] = [
+            'system' => $episodeNumber->getAttribute('system'),
+            'value' => $episodeNumber->textContent,
+        ];
+    }
+
+    expect($episodeNumbers)->toBe([
+        ['system' => 'xmltv_ns', 'value' => '0.4.'],
+    ]);
+});
+
+test('standard dummy programmes do not copy channel branding into programme artwork', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 7200,
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'dummy-channel',
+        'title' => 'Dummy Channel',
+        'logo' => 'https://example.com/channel-logo.png',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//channel[@id="dummy-channel"]/icon'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="dummy-channel"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="dummy-channel"]/icon'))->toHaveCount(0);
+});
+
+test('aed dummy programmes do not fall back to channel branding for programme artwork', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+    ]);
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $user->id,
+        'name' => 'No Artwork',
+        'logo_url' => null,
+        'event_duration_minutes' => 7200,
+    ])->save();
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'aed-dummy-channel',
+        'title' => 'AED Dummy Channel',
+        'logo' => 'https://example.com/channel-logo.png',
+        'channel' => 1,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//channel[@id="aed-dummy-channel"]/icon'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="aed-dummy-channel"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="aed-dummy-channel"]/icon'))->toHaveCount(0);
 });

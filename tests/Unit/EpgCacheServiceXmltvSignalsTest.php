@@ -84,6 +84,67 @@ XML;
         ->and($programme['production_year'])->toBe(2024);
 });
 
+it('preserves episode number systems while omitting invalid xmltv namespace identities', function () {
+    $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20260421080000 +0000" stop="20260421084500 +0000" channel="demo.channel">
+    <title>Identity Test</title>
+    <episode-num system="xmltv_ns">1 . 4/10 .</episode-num>
+    <episode-num system="dd_progid">EP012345670089</episode-num>
+    <episode-num system="onscreen">S02E05</episode-num>
+    <episode-num system="provider.example/id">series-0</episode-num>
+    <episode-num>Unclassified 7</episode-num>
+    <episode-num system=" xmltv_ns ">0</episode-num>
+    <episode-num system="xmltv_ns">0</episode-num>
+    <episode-num system="xmltv_ns">1..2..3</episode-num>
+    <episode-num system="xmltv_ns">..</episode-num>
+    <episode-num system="onscreen">   </episode-num>
+  </programme>
+</tv>
+XML;
+
+    file_put_contents($this->testGzPath, gzencode($xml));
+
+    $service = makeTestEpgCacheService();
+    $programmes = iterator_to_array($service->exposeParseProgrammesStream($this->testGzPath), false);
+
+    expect($programmes)->toHaveCount(1)
+        ->and($programmes[0]['episode_num'])->toBe('1 . 4/10 .')
+        ->and($programmes[0]['episode_nums'])->toBe([
+            ['system' => 'xmltv_ns', 'value' => '1 . 4/10 .'],
+            ['system' => 'dd_progid', 'value' => 'EP012345670089'],
+            ['system' => 'onscreen', 'value' => 'S02E05'],
+            ['system' => 'provider.example/id', 'value' => 'series-0'],
+            ['system' => null, 'value' => 'Unclassified 7'],
+            ['system' => ' xmltv_ns ', 'value' => '0'],
+        ]);
+});
+
+it('preserves a zero episode number when its provider system gives it identity', function () {
+    $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20260421080000 +0000" stop="20260421084500 +0000" channel="demo.channel">
+    <title>Provider Zero</title>
+    <episode-num system="provider-counter">0</episode-num>
+    <episode-num system="xmltv_ns">0</episode-num>
+  </programme>
+</tv>
+XML;
+
+    file_put_contents($this->testGzPath, gzencode($xml));
+
+    $service = makeTestEpgCacheService();
+    $programmes = iterator_to_array($service->exposeParseProgrammesStream($this->testGzPath), false);
+
+    expect($programmes)->toHaveCount(1)
+        ->and($programmes[0]['episode_num'])->toBe('0')
+        ->and($programmes[0]['episode_nums'])->toBe([
+            ['system' => 'provider-counter', 'value' => '0'],
+        ]);
+});
+
 it('rejects malformed or unsafe url values from epg feeds', function () {
     $xml = <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>

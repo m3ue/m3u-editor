@@ -248,25 +248,25 @@ class EpgCacheService
                 break;
             case 'previously-shown':
                 // The <previously-shown> element may carry start/channel attributes;
-                // only the boolean presence is recorded — attributes are intentionally ignored.
+                // only the boolean presence is recorded - attributes are intentionally ignored.
                 $programme['previously_shown'] = true;
                 break;
             case 'premiere':
                 // The <premiere> element may carry text content (a description);
-                // only the boolean presence is recorded — content is intentionally ignored.
+                // only the boolean presence is recorded - content is intentionally ignored.
                 $programme['premiere'] = true;
                 break;
             case 'episode-num':
-                $episodeNumValue = trim($reader->readString() ?: '');
-                $episodeNumSystem = trim((string) ($reader->getAttribute('system') ?: ''));
-                if ($episodeNumValue !== '') {
+                $episodeNumbers = EpisodeNumberNormalizer::normalize([[
+                    'system' => $reader->getAttribute('system'),
+                    'value' => $reader->readString(),
+                ]]);
+                if ($episodeNumbers !== []) {
+                    $episodeNumber = $episodeNumbers[0];
                     if ($programme['episode_num'] === '') {
-                        $programme['episode_num'] = $episodeNumValue;
+                        $programme['episode_num'] = $episodeNumber['value'];
                     }
-                    $programme['episode_nums'][] = [
-                        'system' => $episodeNumSystem,
-                        'value' => $episodeNumValue,
-                    ];
+                    $programme['episode_nums'][] = $episodeNumber;
                 }
                 break;
             case 'url':
@@ -1218,7 +1218,7 @@ class EpgCacheService
      * Clear EPG file caches for all playlist types (source, custom, merged, aliases)
      * that contain any of the given channel IDs.
      *
-     * Executes 4 DB queries then one bulk Storage::delete — no model hydration, no N+1.
+     * Executes 4 DB queries then one bulk Storage::delete - no model hydration, no N+1.
      */
     public static function clearForChannelIds(array $channelIds): void
     {
