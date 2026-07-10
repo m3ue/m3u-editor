@@ -38,9 +38,11 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
     #[Test]
     public function it_swaps_credentials_for_m3u_playlist_channel_with_prefixed_xtream_url()
     {
+        // For M3U playlists the alias config URL must match the provider URL embedded in
+        // the stream. The user enters their provider URL + new credentials in the alias.
         $playlist = $this->makeM3uPlaylist();
         $alias = $this->makeAlias($playlist, [
-            'url' => 'http://alias.example.com:8080',
+            'url' => 'http://provider.example.com:8080',
             'username' => 'newuser',
             'password' => 'newpass',
         ]);
@@ -53,7 +55,7 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
         ]);
 
         $this->assertSame(
-            'http://alias.example.com:8080/live/newuser/newpass/1234.ts',
+            'http://provider.example.com:8080/live/newuser/newpass/1234.ts',
             $alias->transformChannelUrl($channel)
         );
     }
@@ -63,7 +65,7 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
     {
         $playlist = $this->makeM3uPlaylist();
         $alias = $this->makeAlias($playlist, [
-            'url' => 'http://alias.example.com:8080',
+            'url' => 'http://provider.example.com:8080',
             'username' => 'newuser',
             'password' => 'newpass',
         ]);
@@ -76,7 +78,7 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
         ]);
 
         $this->assertSame(
-            'http://alias.example.com:8080/newuser/newpass/1234',
+            'http://provider.example.com:8080/newuser/newpass/1234',
             $alias->transformChannelUrl($channel)
         );
     }
@@ -86,7 +88,7 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
     {
         $playlist = $this->makeM3uPlaylist();
         $alias = $this->makeAlias($playlist, [
-            'url' => 'http://alias.example.com:8080',
+            'url' => 'http://provider.example.com:8080',
             'username' => 'newuser',
             'password' => 'newpass',
         ]);
@@ -105,11 +107,41 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
     }
 
     #[Test]
+    public function it_leaves_urls_untouched_when_provider_is_not_registered_in_alias()
+    {
+        // Even if a URL looks Xtream-shaped (numeric stream ID in prefix-less form),
+        // it must NOT be rewritten unless its base URL is in the alias's provider list.
+        // This prevents CDN/HLS URLs from being accidentally rewritten.
+        $playlist = $this->makeM3uPlaylist();
+        $alias = $this->makeAlias($playlist, [
+            'url' => 'http://provider.example.com:8080',
+            'username' => 'newuser',
+            'password' => 'newpass',
+        ]);
+
+        foreach ([
+            'https://cdn.example.com/hls/stream/42.ts',
+            'https://cache.akamai.net/segments/live/99',
+            'https://cdn.example.com/movies/action/1234.mp4',
+            'http://unknown-provider.com:9000/user/pass/5678.ts',
+        ] as $url) {
+            $channel = Channel::factory()->create([
+                'playlist_id' => $playlist->id,
+                'user_id' => $playlist->user_id,
+                'group_id' => null,
+                'url' => $url,
+            ]);
+
+            $this->assertSame($url, $alias->transformChannelUrl($channel), "Expected URL to be untouched: {$url}");
+        }
+    }
+
+    #[Test]
     public function it_swaps_credentials_for_m3u_playlist_episode_url()
     {
         $playlist = $this->makeM3uPlaylist();
         $alias = $this->makeAlias($playlist, [
-            'url' => 'http://alias.example.com:8080',
+            'url' => 'http://provider.example.com:8080',
             'username' => 'newuser',
             'password' => 'newpass',
         ]);
@@ -121,7 +153,7 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
         ]);
 
         $this->assertSame(
-            'http://alias.example.com:8080/series/newuser/newpass/999.mkv',
+            'http://provider.example.com:8080/series/newuser/newpass/999.mkv',
             $alias->transformEpisodeUrl($episode)
         );
     }
@@ -129,6 +161,8 @@ class PlaylistAliasM3uCredentialSwapTest extends TestCase
     #[Test]
     public function it_still_swaps_credentials_using_the_playlist_xtream_config_when_present()
     {
+        // Xtream playlists have a stored xtream_config and support cross-server redirect
+        // (source URL differs from alias URL) via the primaryAliasConfig fallback.
         $user = User::factory()->create();
         $playlist = Playlist::factory()->for($user)->createQuietly([
             'xtream_config' => [

@@ -552,7 +552,12 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * Transform channel URL to use this alias's provider config
+     * Transform channel URL to use this alias's provider config.
+     *
+     * For M3U-imported playlists that have no stored xtream_config, credentials are
+     * parsed directly from the stream URL. The extracted provider URL must match one
+     * of the alias's configured providers — this is both the selection mechanism for
+     * multi-provider aliases and the guard against rewriting non-Xtream CDN URLs.
      */
     public function transformChannelUrl(Channel $channel): string
     {
@@ -564,23 +569,27 @@ class PlaylistAlias extends Model
             return $originalUrl;
         }
 
-        // Get the channel's effective playlist to find its source config.
-        // M3U-imported playlists have no stored xtream config, so fall back to
-        // parsing the credentials directly from the stream URL when it is Xtream-style.
         $effectivePlaylist = $channel->getEffectivePlaylist();
-        $sourceConfig = $effectivePlaylist?->xtream_config ?: self::parseXtreamStreamUrl($originalUrl);
+        [$sourceConfig, $aliasConfig] = $this->resolveSourceAndAliasConfig(
+            $originalUrl,
+            $effectivePlaylist?->xtream_config,
+            $primaryAliasConfig,
+        );
+
         if (! $sourceConfig) {
             return $originalUrl;
         }
-
-        // If this alias has multiple configs, choose the best match by base URL.
-        $aliasConfig = $this->findXtreamConfigByUrl((string) ($sourceConfig['url'] ?? '')) ?? $primaryAliasConfig;
 
         return $this->transformUrl($originalUrl, $sourceConfig, $aliasConfig);
     }
 
     /**
-     * Transform episode URL to use this alias's provider config
+     * Transform episode URL to use this alias's provider config.
+     *
+     * For M3U-imported playlists that have no stored xtream_config, credentials are
+     * parsed directly from the stream URL. The extracted provider URL must match one
+     * of the alias's configured providers — this is both the selection mechanism for
+     * multi-provider aliases and the guard against rewriting non-Xtream CDN URLs.
      */
     public function transformEpisodeUrl(Episode $episode): string
     {
@@ -592,19 +601,59 @@ class PlaylistAlias extends Model
             return $originalUrl;
         }
 
-        // Get the episode's effective playlist to find its source config.
-        // M3U-imported playlists have no stored xtream config, so fall back to
-        // parsing the credentials directly from the stream URL when it is Xtream-style.
         $effectivePlaylist = $episode->getEffectivePlaylist();
-        $sourceConfig = $effectivePlaylist?->xtream_config ?: self::parseXtreamStreamUrl($originalUrl);
+        [$sourceConfig, $aliasConfig] = $this->resolveSourceAndAliasConfig(
+            $originalUrl,
+            $effectivePlaylist?->xtream_config,
+            $primaryAliasConfig,
+        );
+
         if (! $sourceConfig) {
             return $originalUrl;
         }
 
-        // If this alias has multiple configs, choose the best match by base URL.
-        $aliasConfig = $this->findXtreamConfigByUrl((string) ($sourceConfig['url'] ?? '')) ?? $primaryAliasConfig;
-
         return $this->transformUrl($originalUrl, $sourceConfig, $aliasConfig);
+    }
+
+    /**
+     * Resolve the source config and best-matching alias config for a stream URL.
+     *
+     * For Xtream playlists the stored xtream_config is the source of truth.
+     * For M3U playlists (no stored config) credentials are parsed from the stream URL,
+     * but only if the extracted provider URL is already known to this alias — unknown
+     * URLs are left untouched rather than rewritten with the wrong credentials.
+     *
+     * @param  array<string,mixed>|null  $playlistXtreamConfig
+     * @param  array<string,mixed>  $primaryAliasConfig
+     * @return array{0: array<string,mixed>|null, 1: array<string,mixed>}
+     */
+    private function resolveSourceAndAliasConfig(
+        string $streamUrl,
+        ?array $playlistXtreamConfig,
+        array $primaryAliasConfig,
+    ): array {
+        if ($playlistXtreamConfig) {
+            // Xtream playlist: use the stored source config and pick the best alias match.
+            $aliasConfig = $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? '')) ?? $primaryAliasConfig;
+
+            return [$playlistXtreamConfig, $aliasConfig];
+        }
+
+        // M3U playlist: extract credentials from the stream URL itself.
+        $parsedConfig = self::parseXtreamStreamUrl($streamUrl);
+        if (! $parsedConfig) {
+            return [null, $primaryAliasConfig];
+        }
+
+        // The extracted provider URL must match a config the user has explicitly
+        // registered in this alias. This acts as the multi-provider selector and
+        // prevents accidental rewrites of non-Xtream CDN URLs.
+        $aliasConfig = $this->findXtreamConfigByUrl($parsedConfig['url']);
+        if (! $aliasConfig) {
+            return [null, $primaryAliasConfig];
+        }
+
+        return [$parsedConfig, $aliasConfig];
     }
 
     /**
