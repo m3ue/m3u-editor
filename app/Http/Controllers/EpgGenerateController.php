@@ -385,7 +385,7 @@ class EpgGenerateController extends Controller
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
                                 foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
-                                    $systemAttribute = $episodeNumber['system'] !== null
+                                    $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
                                         ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
                                         : '';
                                     $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;

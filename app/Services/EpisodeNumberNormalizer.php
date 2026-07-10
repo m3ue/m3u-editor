@@ -62,6 +62,6 @@ final class EpisodeNumberNormalizer
         $valueWithoutWhitespace = preg_replace('/\s+/', '', $value) ?? '';
 
         return $valueWithoutWhitespace !== '..'
-            && preg_match('/^(?:\d+(?:\/[1-9]\d*)?)?\.(?:\d+(?:\/[1-9]\d*)?)?\.(?:\d+(?:\/[1-9]\d*)?)?$/', $valueWithoutWhitespace) === 1;
+            && preg_match('/^(?:\d+(?:\/0*[1-9]\d*)?)?\.(?:\d+(?:\/0*[1-9]\d*)?)?\.(?:\d+(?:\/0*[1-9]\d*)?)?$/', $valueWithoutWhitespace) === 1;
     }
 }
