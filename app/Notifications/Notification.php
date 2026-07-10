@@ -32,7 +32,7 @@ class Notification extends BaseNotification
 
     public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false): static
     {
-        TvNotification::create([
+        $record = TvNotification::create([
             'notifiable_type' => $playlist->getMorphClass(),
             'notifiable_id' => $playlist->id,
             'channel' => $channel,
@@ -43,6 +43,7 @@ class Notification extends BaseNotification
         ]);
 
         broadcast(new TvNotificationEvent(
+            id: $record->id,
             notifiableType: $playlist->getMorphClass(),
             notifiableUuid: $playlist->uuid,
             adminOnly: $adminOnly,
