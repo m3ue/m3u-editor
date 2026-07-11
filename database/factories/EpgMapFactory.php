@@ -28,7 +28,7 @@ class EpgMapFactory extends Factory
             'status' => fake()->randomElement(['pending', 'processing', 'completed', 'failed']),
             'processing' => fake()->boolean(),
             'progress' => fake()->randomFloat(0, 0, 9999999999.),
-            'sync_time' => fake()->dateTime(),
+            'sync_time' => fake()->randomFloat(2, 0, 600),
             'user_id' => User::factory(),
             'epg_id' => Epg::factory(),
         ];

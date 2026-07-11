@@ -254,6 +254,10 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                         $fuzzyMaxDistance,
                         $exactMatchDistance,
                         $customQualityIndicators ?: null,
+                        // Pass the prefix/pattern-cleaned values so the similarity
+                        // search honors the map's exclude settings (issue #1265)
+                        cleanedTitle: $title,
+                        cleanedName: $name,
                     );
                 }
             }
