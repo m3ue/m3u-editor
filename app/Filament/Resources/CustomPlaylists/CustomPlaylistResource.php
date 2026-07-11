@@ -15,6 +15,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManage
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
 use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
+use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
@@ -31,6 +32,7 @@ use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -826,6 +828,109 @@ class CustomPlaylistResource extends Resource implements CopilotResource
 
                                                     return "{$actionLabel} — {$typeLabel}{$groupLabel}{$disabled}";
                                                 }),
+                                        ]),
+                                    Section::make(__('Auto-Merge Channels'))
+                                        ->description(__('Automatically merge overlapping channels within this custom playlist into failover relationships after each sync. Only channels added to this custom playlist are considered.'))
+                                        ->columnSpanFull()
+                                        ->collapsible()
+                                        ->collapsed(true)
+                                        ->columns(2)
+                                        ->schema([
+                                            Toggle::make('auto_merge_channels_enabled')
+                                                ->label(__('Enable auto-merge after sync'))
+                                                ->helperText(__('When enabled, channels in this custom playlist with the same stream ID will be automatically merged with failover relationships after each auto-sync.'))
+                                                ->columnSpanFull()
+                                                ->live()
+                                                ->inline(false)
+                                                ->default(false),
+
+                                            Fieldset::make(__('Merge scope'))
+                                                ->columnSpanFull()
+                                                ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                                                ->schema([
+                                                    Select::make('auto_merge_config.groups')
+                                                        ->label(__('Custom groups to merge'))
+                                                        ->options(fn (?CustomPlaylist $record): array => [
+                                                            'all' => __('All groups'),
+                                                            ...($record
+                                                                ? $record->groupTags()->pluck('name', 'name')->sort()->all()
+                                                                : []),
+                                                        ])
+                                                        ->default(['all'])
+                                                        ->multiple()
+                                                        ->searchable()
+                                                        ->columnSpanFull()
+                                                        ->helperText(__('Only channels in the selected custom playlist groups will be merged. Leave as "All groups" to merge across the whole custom playlist.')),
+                                                ]),
+
+                                            Fieldset::make(__('Merge source configuration'))
+                                                ->columnSpanFull()
+                                                ->columns(2)
+                                                ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                                                ->schema([
+                                                    Select::make('auto_merge_config.preferred_playlist_id')
+                                                        ->label(__('Preferred Playlist (optional)'))
+                                                        ->options(fn () => Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                                        ->searchable()
+                                                        ->columnSpanFull()
+                                                        ->placeholder(__('Use source priority order'))
+                                                        ->helperText(__('If set, channels from this playlist will be prioritized as master during merge.')),
+                                                    Repeater::make('auto_merge_config.failover_playlists')
+                                                        ->label(__('Source playlist priority (optional)'))
+                                                        ->columnSpanFull()
+                                                        ->reorderable()
+                                                        ->reorderableWithButtons()
+                                                        ->defaultItems(0)
+                                                        ->addActionLabel(__('Add playlist'))
+                                                        ->helperText(__('Ordered list deciding which playlist wins as master when duplicates are found (first = highest priority). Leave empty to consider all source playlists of this custom playlist.'))
+                                                        ->schema([
+                                                            Select::make('playlist_failover_id')
+                                                                ->label(__('Playlist'))
+                                                                ->options(fn () => Playlist::where('user_id', auth()->id())->pluck('name', 'id'))
+                                                                ->searchable()
+                                                                ->required(),
+                                                        ]),
+                                                ]),
+
+                                            Fieldset::make(__('Merge behavior'))
+                                                ->columnSpanFull()
+                                                ->columns(2)
+                                                ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                                                ->schema([
+                                                    TagsInput::make('auto_merge_config.regex_patterns')
+                                                        ->label(__('Regex patterns (optional)'))
+                                                        ->placeholder(__('e.g. ^(?:US[:\-\s])?(.*?)(?:\s+(?:HD|FHD|UHD|4K))?$'))
+                                                        ->columnSpanFull()
+                                                        ->helperText(__('Optional regex patterns used to group channels by name for merging (applied after stream ID merging).')),
+                                                    Select::make('auto_merge_config.merge_key')
+                                                        ->label(__('Merge key'))
+                                                        ->options([
+                                                            'stream_id' => __('Stream ID (Live)'),
+                                                            'tmdb_id' => __('TMDB ID (VOD)'),
+                                                        ])
+                                                        ->default('stream_id')
+                                                        ->helperText(__('Merge live channels by stream ID, or VOD channels by TMDB ID.')),
+                                                    Toggle::make('auto_merge_config.check_resolution')
+                                                        ->label(__('Prefer higher resolution'))
+                                                        ->inline(false)
+                                                        ->default(false)
+                                                        ->helperText(__('Prefer higher-resolution streams as master (requires probed stream stats).')),
+                                                    Toggle::make('auto_merge_config.prefer_catchup_as_primary')
+                                                        ->label(__('Prefer catchup as primary'))
+                                                        ->inline(false)
+                                                        ->default(false)
+                                                        ->helperText(__('Prefer channels with catchup support as master.')),
+                                                    Toggle::make('auto_merge_config.force_complete_remerge')
+                                                        ->label(__('Force complete re-merge'))
+                                                        ->inline(false)
+                                                        ->default(false)
+                                                        ->helperText(__('Re-evaluate all channels on every run instead of skipping existing failovers.')),
+                                                    Toggle::make('auto_merge_deactivate_failover')
+                                                        ->label(__('Deactivate failover channels'))
+                                                        ->inline(false)
+                                                        ->default(false)
+                                                        ->helperText(__('Disable channels that become failovers so only the master stays enabled.')),
+                                                ]),
                                         ]),
                                 ]),
                             Tab::make(__('Output'))
