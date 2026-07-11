@@ -790,6 +790,15 @@ class AppServiceProvider extends ServiceProvider
                     $network->schedule_type = 'sequential';
                 }
             });
+            Network::updating(function (Network $network) {
+                if ($network->isDirty('schedule_type') && ! in_array($network->schedule_type, ['sequential', 'shuffle', 'manual'], true)) {
+                    Log::warning('Network updated with invalid schedule_type, defaulting to sequential', [
+                        'schedule_type' => $network->schedule_type,
+                    ]);
+
+                    $network->schedule_type = 'sequential';
+                }
+            });
             Network::updated(function (Network $network) {
                 app(NetworkChannelSyncService::class)->refreshNetworkChannel($network);
             });

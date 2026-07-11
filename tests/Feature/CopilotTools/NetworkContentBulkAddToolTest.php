@@ -184,3 +184,23 @@ it('does not add channels from another user library', function () {
     expect($result)->toContain('Not found');
     expect(NetworkContent::count())->toBe(0);
 });
+
+it('skips duplicate channel IDs within the same input instead of re-inserting', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $network = Network::factory()->for($user)->create();
+    $channel = makeBulkChannel($user, $playlist, ['name' => 'Dumbo']);
+
+    $this->actingAs($user);
+
+    $result = (string) makeBulkAddTool()->handle(new Request([
+        'network_id' => $network->id,
+        'channel_ids' => [$channel->id, $channel->id],
+    ]));
+
+    expect($result)->toContain('Added: 1')
+        ->toContain('Skipped')
+        ->toContain('Dumbo');
+
+    expect(NetworkContent::where('network_id', $network->id)->count())->toBe(1);
+});

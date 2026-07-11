@@ -6,19 +6,20 @@ namespace App\Filament\CopilotTools;
 
 use App\Models\Channel;
 use App\Models\Network;
-use App\Models\NetworkContent;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Collection;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
 /**
  * Copilot tool that bulk-adds VOD channels to a media network playlist.
  *
- * Validates network ownership, skips duplicates using NetworkContent::findForNetwork(),
- * and appends items after the current highest sort_order. The NetworkContent model's
- * created hook dispatches a debounced, unique schedule regeneration job so bulk
- * inserts collapse into a single regen rather than one per row.
+ * Validates network ownership, skips duplicates using a single pre-fetched
+ * set of existing content IDs, and appends items after the current highest
+ * sort_order. The NetworkContent model's created hook dispatches a debounced,
+ * unique schedule regeneration job so bulk inserts collapse into a single
+ * regen rather than one per row.
  */
 class NetworkContentBulkAddTool extends BaseTool
 {
@@ -67,16 +68,34 @@ class NetworkContentBulkAddTool extends BaseTool
             return "Network #{$networkId} not found or does not belong to you.";
         }
 
+        // One query for all requested channels (scoped to the authenticated user).
+        $channels = Channel::whereIn('id', $channelIds)
+            ->where('user_id', auth()->id())
+            ->get()
+            ->keyBy('id');
+
+        // One query for existing content rows tied to these channels so the
+        // duplicate check doesn't fire a query per iteration.
+        $existingContentIds = $channels->isNotEmpty()
+            ? $network->networkContent()
+                ->whereIn('contentable_id', $channels->keys())
+                ->where('contentable_type', Channel::class)
+                ->pluck('contentable_id')
+                ->flip()
+            : new Collection;
+
         $maxSortOrder = $network->networkContent()->max('sort_order') ?? 0;
         $sortIndex = 0;
         $added = [];
         $skipped = [];
         $notFound = [];
 
+        // Track channel IDs we add during this loop so duplicate IDs within
+        // the same input are skipped instead of re-inserted.
+        $addedInLoop = new Collection;
+
         foreach ($channelIds as $channelId) {
-            $channel = Channel::where('id', $channelId)
-                ->where('user_id', auth()->id())
-                ->first();
+            $channel = $channels->get($channelId);
 
             if (! $channel) {
                 $notFound[] = $channelId;
@@ -84,7 +103,7 @@ class NetworkContentBulkAddTool extends BaseTool
                 continue;
             }
 
-            if (NetworkContent::findForNetwork($network, $channel) !== null) {
+            if ($existingContentIds->has($channel->id) || $addedInLoop->has($channel->id)) {
                 $skipped[] = $channel->name;
 
                 continue;
@@ -97,6 +116,7 @@ class NetworkContentBulkAddTool extends BaseTool
                 'weight' => $weight,
             ]);
 
+            $addedInLoop->put($channel->id, true);
             $added[] = $channel->name;
             $sortIndex++;
         }
