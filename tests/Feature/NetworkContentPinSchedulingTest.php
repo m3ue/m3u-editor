@@ -283,3 +283,65 @@ it('isPinned returns true only when both fields are set', function () {
     $nc->pin_time_of_day = '20:00';
     expect($nc->isPinned())->toBeTrue();
 });
+
+it('generates a schedule when the network contains only pinned content', function () {
+    // Regression: previously crashed with an undefined-array-key error on
+    // $contentItems[$contentIndex] because the rotation loop ran against an
+    // empty $contentItems when every NetworkContent row was pinned.
+    Carbon::setTestNow(Carbon::parse('2026-01-05 08:00:00'));
+
+    $network = Network::factory()->create([
+        'schedule_type' => 'sequential',
+        'loop_content' => true,
+        'schedule_window_days' => 7,
+        'auto_regenerate_schedule' => false,
+    ]);
+
+    // Only pinned content — no rotation items at all.
+    $movie = makePinChannel(7200); // 2 hours
+    addPinContent($network, $movie, [
+        'sort_order' => 1,
+        'pin_day_of_week' => 'friday',
+        'pin_time_of_day' => '20:00',
+    ]);
+
+    $generated = app(NetworkScheduleService::class)->generateSchedule($network);
+
+    $friday8pm = Carbon::parse('2026-01-09 20:00:00');
+
+    $pinnedProgramme = NetworkProgramme::where('network_id', $network->id)
+        ->where('contentable_id', $movie->id)
+        ->first();
+
+    expect($generated)->toBe(1)
+        ->and($pinnedProgramme)->not->toBeNull()
+        ->and($pinnedProgramme->start_time->toDateTimeString())->toBe($friday8pm->toDateTimeString())
+        ->and($pinnedProgramme->end_time->toDateTimeString())->toBe($friday8pm->copy()->addSeconds(7200)->toDateTimeString())
+        ->and($pinnedProgramme->pinned_start_time)->not->toBeNull()
+        ->and($network->refresh()->schedule_generated_at)->not->toBeNull();
+});
+
+it('generates a schedule when the network contains only pinned content in shuffle mode', function () {
+    // Same regression but in shuffle mode — getOrderedContent() still
+    // returns an empty Collection, the guard must short-circuit there too.
+    Carbon::setTestNow(Carbon::parse('2026-01-05 08:00:00'));
+
+    $network = Network::factory()->create([
+        'schedule_type' => 'shuffle',
+        'loop_content' => true,
+        'schedule_window_days' => 7,
+        'auto_regenerate_schedule' => false,
+    ]);
+
+    $movie = makePinChannel(3600); // 1 hour
+    addPinContent($network, $movie, [
+        'sort_order' => 1,
+        'pin_day_of_week' => 'saturday',
+        'pin_time_of_day' => '15:30',
+    ]);
+
+    $generated = app(NetworkScheduleService::class)->generateSchedule($network);
+
+    expect($generated)->toBe(1)
+        ->and(NetworkProgramme::where('network_id', $network->id)->count())->toBe(1);
+});

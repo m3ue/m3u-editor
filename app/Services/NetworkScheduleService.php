@@ -127,6 +127,15 @@ class NetworkScheduleService
 
             $contentCount = $contentItems->count();
 
+            // Network has pinned content only — no rotation items. Pinned
+            // occurrences have already been pre-placed above; skip the
+            // rotation loop to avoid an undefined-array-key on $contentItems[0].
+            if ($contentCount === 0) {
+                $network->update(['schedule_generated_at' => Carbon::now()]);
+
+                return;
+            }
+
             while ($currentTime->lt($endAt)) {
                 // If a programme already exists that starts exactly at this time, skip creating it
                 $existingProgramme = $network->programmes()->where('start_time', $currentTime)->first();
