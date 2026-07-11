@@ -100,8 +100,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 ->values()
                 ->toArray();
 
-            // Upsert the channels
-            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: [
+            $updateColumns = [
                 // Don't update the following fields...
                 // 'title_custom',
                 // 'name_custom',
@@ -114,7 +113,6 @@ class ProcessM3uImportChunk implements ShouldQueue
                 // 'enabled',
                 // 'epg_channel_id',
                 // 'new',
-                // 'sort',
                 // 'station_id', // Gracenote station ID
                 // 'source_id', // won't change - for Xtream API this will be the `stream_id`, for M3U it will be a hash of the title, name, group and playlist ID
                 // ...only update the following fields
@@ -138,7 +136,17 @@ class ProcessM3uImportChunk implements ShouldQueue
                 'year', // new field for year
                 'rating', // new field for rating
                 'rating_5based', // new field for 5-based rating
-            ]);
+            ];
+
+            // Rows carry a provider-order `sort` value only when the playlist has
+            // auto-sort enabled; propagate it so existing channels are re-sorted on
+            // sync (manual sort stays untouched when auto-sort is disabled).
+            if (! empty($bulk) && array_key_exists('sort', $bulk[0])) {
+                $updateColumns[] = 'sort';
+            }
+
+            // Upsert the channels
+            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: $updateColumns);
         }
     }
 }
