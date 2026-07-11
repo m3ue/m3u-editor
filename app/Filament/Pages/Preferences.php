@@ -11,8 +11,10 @@ use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\CopilotTools\ExecuteDatabaseQueryTool;
 use App\Filament\CopilotTools\GetDatabaseSchemaTool;
+use App\Filament\CopilotTools\NetworkContentBulkAddTool;
 use App\Filament\CopilotTools\NetworkContentPinTool;
 use App\Filament\CopilotTools\SearchDocsTool;
+use App\Filament\CopilotTools\VodContentSearchTool;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Jobs\RestartQueue;
 use App\Models\CustomPlaylist;
@@ -1835,6 +1837,8 @@ class Preferences extends SettingsPage
                                                 ExecuteDatabaseQueryTool::class => __('Database: Execute Query'),
                                                 DvrOverviewTool::class => __('DVR: Overview'),
                                                 DvrScheduleTool::class => __('DVR: Schedule'),
+                                                VodContentSearchTool::class => __('Content: VOD Search'),
+                                                NetworkContentBulkAddTool::class => __('Content: Network Bulk Add'),
                                                 NetworkContentPinTool::class => __('Content: Pin to Timeslot'),
                                             ])
                                             ->afterStateHydrated(function ($component, $state) {
