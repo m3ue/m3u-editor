@@ -152,6 +152,27 @@ it('updates sort on existing VOD channels when payload rows carry a sort value',
         ->and(Channel::count())->toBe(1);
 });
 
+it('updates shift on existing VOD channels on re-sync', function () {
+    $existing = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+        'source_id' => 'src-1',
+        'is_vod' => true,
+        'shift' => 5,
+    ]);
+
+    $job = createChunkSortJob($this->playlist, $this->group, [
+        chunkSortPayloadRow($this->playlist, [
+            'is_vod' => true,
+            'container_extension' => 'mp4',
+            'shift' => 0,
+        ]),
+    ]);
+
+    (new ProcessM3uVodImportChunk([$job->id], batchCount: 1))->handle();
+
+    expect((int) $existing->refresh()->shift)->toBe(0)
+        ->and(Channel::count())->toBe(1);
+});
+
 it('does not touch sort on existing VOD channels when auto-sort is disabled', function () {
     $existing = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
         'source_id' => 'src-1',
