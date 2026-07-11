@@ -255,6 +255,12 @@ return [
         '8a7c4d000066',
         '21366c44e0ab',
 
+        // VodContentSearchTool: $genreExpr comes from jsonExtract() which
+        // interpolates a hardcoded column name ('genre') only; $like comes
+        // from likeOperator() which returns 'LIKE'|'ILIKE'. The actual user
+        // input $genre is bound via the ? placeholder.
+        '3489035c968f',
+
         // ChannelController: $sortOrder was unsanitized — now validated to
         // 'ASC'|'DESC' before use. Hashes left here in case pattern still
         // matches post-fix.
