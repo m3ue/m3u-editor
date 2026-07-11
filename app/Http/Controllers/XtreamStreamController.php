@@ -13,6 +13,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -391,8 +392,13 @@ class XtreamStreamController extends Controller
             }
         }
 
+        // Convert Unix timestamp to Xtream format if the player sends a numeric date string
+        if (ctype_digit($date)) {
+            $date = Carbon::createFromTimestamp((int) $date)->format('Y-m-d:H-i-s');
+        }
+
         // Parse the date parameter and add timeshift parameters to the request
-        // Date format from Xtream API: YYYY-MM-DD:HH-MM-SS
+        // Expected downstream format: YYYY-MM-DD:HH-MM-SS
         // Also add username for proxy traceability
         $mergeData = [
             'timeshift_duration' => $duration,
