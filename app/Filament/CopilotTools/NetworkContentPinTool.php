@@ -85,6 +85,12 @@ class NetworkContentPinTool extends BaseTool
             return "Cleared pin for \"{$contentTitle}\" in network \"{$network->name}\". It will now play in normal rotation.";
         }
 
-        return "Pinned \"{$contentTitle}\" to ".ucfirst($day)."s at {$time} in network \"{$network->name}\". The schedule will be regenerated automatically.";
+        // The NetworkContent::updated listener only auto-regenerates when the
+        // network has auto_regenerate_schedule enabled, so don't overpromise.
+        $regenNote = $network->auto_regenerate_schedule
+            ? ' The schedule will be regenerated automatically.'
+            : ' The schedule will be regenerated on the next manual generation.';
+
+        return "Pinned \"{$contentTitle}\" to ".ucfirst($day)."s at {$time} in network \"{$network->name}\".{$regenNote}";
     }
 }

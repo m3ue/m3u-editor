@@ -176,6 +176,12 @@ it('applies the chain leads weight to the whole chain as one shuffle unit', func
 });
 
 it('unchained items do not always land adjacent to each other across different weeks', function () {
+    // Statistical / probabilistic assertion: with a Fisher-Yates seeded shuffle, two
+    // same-weight unchained items landing adjacent is expected ~33% of the time on a
+    // 6-item pool. Over 6 distinct week-seeds we assert they are NOT adjacent every
+    // single week — i.e. the shuffle is producing real variety, not silently clinging
+    // to sort order. The threshold (< count($weeks)) is intentionally conservative so
+    // the test stays stable without being a pass-through for a broken shuffle.
     $weeks = ['2026-02-02', '2026-02-09', '2026-02-16', '2026-02-23', '2026-03-02', '2026-03-09'];
     $adjacentCount = 0;
 
