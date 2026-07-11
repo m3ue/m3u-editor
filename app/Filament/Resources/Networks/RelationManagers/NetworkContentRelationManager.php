@@ -27,6 +27,7 @@ use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class NetworkContentRelationManager extends RelationManager
 {
@@ -350,32 +351,35 @@ class NetworkContentRelationManager extends RelationManager
                             return;
                         }
 
-                        $sorted = $records->sortBy('sort_order')->values();
-                        $chainId = $sorted->first()->id;
+                        // Wrap the writes so a mid-loop failure can't leave chains half-reassigned.
+                        DB::transaction(function () use ($records, $network): void {
+                            $sorted = $records->sortBy('sort_order')->values();
+                            $chainId = $sorted->first()->id;
 
-                        // Chains being vacated by items joining this new chain —
-                        // clean up any left with a single member afterward.
-                        $vacatedChainIds = $records->pluck('chain_id')->filter()->unique()
-                            ->reject(fn ($id) => $id === $chainId);
+                            // Chains being vacated by items joining this new chain —
+                            // clean up any left with a single member afterward.
+                            $vacatedChainIds = $records->pluck('chain_id')->filter()->unique()
+                                ->reject(fn ($id) => $id === $chainId);
 
-                        foreach ($sorted as $record) {
-                            $record->update(['chain_id' => $chainId]);
-                        }
-
-                        foreach ($vacatedChainIds as $oldChainId) {
-                            $remaining = NetworkContent::where('network_id', $network->id)
-                                ->where('chain_id', $oldChainId)
-                                ->get();
-
-                            if ($remaining->count() === 1) {
-                                $remaining->first()->update(['chain_id' => null]);
+                            foreach ($sorted as $record) {
+                                $record->update(['chain_id' => $chainId]);
                             }
-                        }
+
+                            foreach ($vacatedChainIds as $oldChainId) {
+                                $remaining = NetworkContent::where('network_id', $network->id)
+                                    ->where('chain_id', $oldChainId)
+                                    ->get();
+
+                                if ($remaining->count() === 1) {
+                                    $remaining->first()->update(['chain_id' => null]);
+                                }
+                            }
+                        });
 
                         Notification::make()
                             ->success()
                             ->title(__('Items chained'))
-                            ->body($sorted->count().' item(s) will now play consecutively.')
+                            ->body($records->count().' item(s) will now play consecutively.')
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
@@ -397,22 +401,25 @@ class NetworkContentRelationManager extends RelationManager
                             return;
                         }
 
-                        $affectedChainIds = $chained->pluck('chain_id')->unique();
+                        // Wrap the writes so a mid-loop failure can't leave a chain half-broken.
+                        DB::transaction(function () use ($chained, $network): void {
+                            $affectedChainIds = $chained->pluck('chain_id')->unique();
 
-                        foreach ($chained as $record) {
-                            $record->update(['chain_id' => null]);
-                        }
-
-                        // A chain of one left behind after unlinking is meaningless.
-                        foreach ($affectedChainIds as $chainId) {
-                            $remaining = NetworkContent::where('network_id', $network->id)
-                                ->where('chain_id', $chainId)
-                                ->get();
-
-                            if ($remaining->count() === 1) {
-                                $remaining->first()->update(['chain_id' => null]);
+                            foreach ($chained as $record) {
+                                $record->update(['chain_id' => null]);
                             }
-                        }
+
+                            // A chain of one left behind after unlinking is meaningless.
+                            foreach ($affectedChainIds as $chainId) {
+                                $remaining = NetworkContent::where('network_id', $network->id)
+                                    ->where('chain_id', $chainId)
+                                    ->get();
+
+                                if ($remaining->count() === 1) {
+                                    $remaining->first()->update(['chain_id' => null]);
+                                }
+                            }
+                        });
 
                         Notification::make()
                             ->success()
@@ -455,14 +462,16 @@ class NetworkContentRelationManager extends RelationManager
                 ])
                 ->nullable()
                 ->placeholder(__('No pin'))
-                ->helperText(__('Pin this content to a specific day each week')),
+                ->helperText(__('Pin this content to a specific day each week'))
+                ->rule('required_with:pin_time_of_day'),
 
             TextInput::make('pin_time_of_day')
                 ->label(__('Pin Time (HH:MM)'))
                 ->placeholder('20:00')
                 ->regex('/^\d{2}:\d{2}$/')
                 ->nullable()
-                ->helperText(__('Time in 24-hour format, e.g. 20:00 for 8pm')),
+                ->helperText(__('Time in 24-hour format, e.g. 20:00 for 8pm'))
+                ->rule('required_with:pin_day_of_week'),
         ]);
     }
 }

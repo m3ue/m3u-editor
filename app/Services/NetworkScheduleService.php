@@ -96,6 +96,15 @@ class NetworkScheduleService
             // Pre-place pinned content at their anchored day+time slots across the window
             $this->prePlacePinnedOccurrences($network, $pinnedNetworkContent, $startFrom, $endAt);
 
+            // Pre-load pinned programmes once — the rotation loop below reads them
+            // on every iteration to avoid overrunning a pin slot, so a per-iteration
+            // query would mean ~336 DB hits on a 7-day/30-min schedule.
+            $pinnedProgrammes = $network->programmes()
+                ->whereNotNull('pinned_start_time')
+                ->where('start_time', '>', $startFrom)
+                ->orderBy('start_time')
+                ->get();
+
             // If there's a currently airing programme, start from its end time
             // This prevents creating overlapping programmes
             if ($currentlyAiring) {
@@ -169,12 +178,9 @@ class NetworkScheduleService
                 $content = $contentItems[$contentIndex];
                 $duration = $this->getContentDuration($content);
 
-                // If placing this item would overrun a pinned programme, skip to the pin start instead
-                $nextPinned = $network->programmes()
-                    ->whereNotNull('pinned_start_time')
-                    ->where('start_time', '>', $currentTime)
-                    ->orderBy('start_time')
-                    ->first();
+                // If placing this item would overrun a pinned programme, skip to the pin start instead.
+                // $pinnedProgrammes is pre-loaded once above — search it in-memory here.
+                $nextPinned = $pinnedProgrammes->first(fn (NetworkProgramme $p) => $p->start_time->gt($currentTime));
 
                 if ($nextPinned && $currentTime->copy()->addSeconds($duration)->gt($nextPinned->start_time)) {
                     $currentTime = $nextPinned->start_time->copy();
