@@ -6,8 +6,8 @@
  * `sort` was unconditionally excluded from the chunk jobs' upsert update list,
  * so enabling "Auto channel sort" on an already-imported playlist never wrote a
  * sort number to existing channels — only newly inserted ones received it. The
- * chunk jobs now include `sort` in the update list when the payload rows carry
- * it (which is exactly when the import ran with auto-sort enabled).
+ * chunk jobs now include `sort` in the update list when `Job::variables['autoSort']`
+ * is true, which `ProcessM3uImport` sets to the playlist's `auto_sort` value.
  */
 
 use App\Jobs\ProcessM3uImportChunk;
@@ -84,7 +84,7 @@ function chunkSortPayloadRow(Playlist $playlist, array $overrides = []): array
     ];
 }
 
-function createChunkSortJob(Playlist $playlist, Group $group, array $rows): Job
+function createChunkSortJob(Playlist $playlist, Group $group, array $rows, bool $autoSort = false): Job
 {
     return Job::create([
         'title' => 'test chunk',
@@ -94,6 +94,7 @@ function createChunkSortJob(Playlist $playlist, Group $group, array $rows): Job
             'playlistId' => $playlist->id,
             'groupId' => $group->id,
             'groupName' => $group->name,
+            'autoSort' => $autoSort,
         ],
     ]);
 }
@@ -106,7 +107,7 @@ it('updates sort on existing channels when payload rows carry a sort value', fun
 
     $job = createChunkSortJob($this->playlist, $this->group, [
         chunkSortPayloadRow($this->playlist, ['sort' => 7]),
-    ]);
+    ], autoSort: true);
 
     (new ProcessM3uImportChunk([$job->id], batchCount: 1))->handle();
 
@@ -122,7 +123,7 @@ it('does not touch sort on existing channels when payload rows carry no sort val
 
     $job = createChunkSortJob($this->playlist, $this->group, [
         chunkSortPayloadRow($this->playlist),
-    ]);
+    ], autoSort: false);
 
     (new ProcessM3uImportChunk([$job->id], batchCount: 1))->handle();
 
@@ -143,10 +144,30 @@ it('updates sort on existing VOD channels when payload rows carry a sort value',
             'container_extension' => 'mp4',
             'sort' => 3,
         ]),
-    ]);
+    ], autoSort: true);
 
     (new ProcessM3uVodImportChunk([$job->id], batchCount: 1))->handle();
 
     expect((int) $existing->refresh()->sort)->toBe(3)
+        ->and(Channel::count())->toBe(1);
+});
+
+it('does not touch sort on existing VOD channels when auto-sort is disabled', function () {
+    $existing = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+        'source_id' => 'src-1',
+        'is_vod' => true,
+        'sort' => 99,
+    ]);
+
+    $job = createChunkSortJob($this->playlist, $this->group, [
+        chunkSortPayloadRow($this->playlist, [
+            'is_vod' => true,
+            'container_extension' => 'mp4',
+        ]),
+    ], autoSort: false);
+
+    (new ProcessM3uVodImportChunk([$job->id], batchCount: 1))->handle();
+
+    expect((int) $existing->refresh()->sort)->toBe(99)
         ->and(Channel::count())->toBe(1);
 });

@@ -137,10 +137,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 'rating_5based', // new field for 5-based rating
             ];
 
-            // Rows carry a provider-order `sort` value only when the playlist has
-            // auto-sort enabled; propagate it so existing channels are re-sorted on
-            // sync (manual sort stays untouched when auto-sort is disabled).
-            if (! empty($bulk) && array_key_exists('sort', $bulk[0])) {
+            if ($job->variables['autoSort'] ?? false) {
                 $updateColumns[] = 'sort';
             }
 
