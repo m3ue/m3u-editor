@@ -12,6 +12,7 @@
  * through to the similarity search.
  */
 
+use App\Jobs\MapPlaylistChannelsToEpgChunk;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
@@ -99,7 +100,7 @@ describe('MapPlaylistChannelsToEpgChunk exclude prefixes', function () {
         ]);
 
         $batchNo = 'epg-map-batch-'.uniqid();
-        (new \App\Jobs\MapPlaylistChannelsToEpgChunk(
+        (new MapPlaylistChannelsToEpgChunk(
             channelIds: [$channel->id],
             epgId: $epg->id,
             epgMapId: $map->id,
