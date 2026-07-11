@@ -391,8 +391,13 @@ class XtreamStreamController extends Controller
             }
         }
 
+        // Convert Unix timestamp to Xtream format if the player sends a numeric date string
+        if (is_numeric($date)) {
+            $date = \Carbon\Carbon::createFromTimestamp((int)$date)->format('Y-m-d:H-i-s');
+        }
+
         // Parse the date parameter and add timeshift parameters to the request
-        // Date format from Xtream API: YYYY-MM-DD:HH-MM-SS
+        // Expected downstream format: YYYY-MM-DD:HH-MM-SS
         // Also add username for proxy traceability
         $mergeData = [
             'timeshift_duration' => $duration,
