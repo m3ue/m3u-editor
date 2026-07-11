@@ -1183,6 +1183,7 @@ class ProcessM3uImport implements ShouldQueue
         if ($playlist->auto_sort_groups) {
             $groupOrder = 1;
         }
+        $autoSort = $playlist->auto_sort;
 
         // Determine if we should create the channels and groups in the database
         $preProcessingLive = $this->preprocess
@@ -1191,8 +1192,8 @@ class ProcessM3uImport implements ShouldQueue
 
         // Process live streams collection
         if ($liveStreamsEnabled && $liveCollection) {
-            $liveCollection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessingLive, &$groupOrder, $liveGroupsByName) {
-                $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessingLive, &$groupOrder, $liveGroupsByName) {
+            $liveCollection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessingLive, &$groupOrder, $liveGroupsByName, $autoSort) {
+                $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessingLive, &$groupOrder, $liveGroupsByName, $autoSort) {
                     // Add group and associated channels
                     if (! $preProcessingLive) {
                         // For Xtream, try matching by stable source_group_id first so groups
@@ -1255,7 +1256,7 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group->update($data);
                         }
-                        $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group) {
+                        $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group, $autoSort) {
                             Job::create([
                                 'title' => "Processing live channel import for group: {$group->name}",
                                 'batch_no' => $batchNo,
@@ -1265,6 +1266,7 @@ class ProcessM3uImport implements ShouldQueue
                                     'groupName' => $group->name,
                                     'playlistId' => $playlistId,
                                     'type' => 'live', // Mark as live job
+                                    'autoSort' => $autoSort,
                                 ],
                             ]);
                         });
@@ -1280,8 +1282,8 @@ class ProcessM3uImport implements ShouldQueue
 
         // Process VOD streams collection
         if ($vodStreamsEnabled && $vodCollection) {
-            $vodCollection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessingVod, &$groupOrder, $vodGroupsByName) {
-                $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessingVod, &$groupOrder, $vodGroupsByName) {
+            $vodCollection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessingVod, &$groupOrder, $vodGroupsByName, $autoSort) {
+                $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessingVod, &$groupOrder, $vodGroupsByName, $autoSort) {
                     // Add group and associated channels
                     if (! $preProcessingVod) {
                         // For Xtream, try matching by stable source_group_id first so groups
@@ -1344,7 +1346,7 @@ class ProcessM3uImport implements ShouldQueue
                             }
                             $group->update($data);
                         }
-                        $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group) {
+                        $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group, $autoSort) {
                             Job::create([
                                 'title' => "Processing VOD channel import for group: {$group->name}",
                                 'batch_no' => $batchNo,
@@ -1354,6 +1356,7 @@ class ProcessM3uImport implements ShouldQueue
                                     'groupName' => $group->name,
                                     'playlistId' => $playlistId,
                                     'type' => 'vod', // Mark as VOD job
+                                    'autoSort' => $autoSort,
                                 ],
                             ]);
                         });
@@ -1724,6 +1727,7 @@ class ProcessM3uImport implements ShouldQueue
         if ($playlist->auto_sort) {
             $groupOrder = 1;
         }
+        $autoSort = $playlist->auto_sort;
 
         // Determine if we should create the channels and groups in the database
         $preProcessing = $this->preprocess
@@ -1731,8 +1735,8 @@ class ProcessM3uImport implements ShouldQueue
             && count($this->includedGroupPrefixes) === 0;
 
         // Process the collection
-        $collection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessing, &$groupOrder) {
-            $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessing, &$groupOrder) {
+        $collection->groupBy('group')->chunk(10)->each(function (LazyCollection $grouped) use ($userId, $playlistId, $batchNo, $preProcessing, &$groupOrder, $autoSort) {
+            $grouped->each(function ($channels, $groupName) use ($userId, $playlistId, $batchNo, $preProcessing, &$groupOrder, $autoSort) {
                 // Add group and associated channels
                 if (! $preProcessing) {
                     $group = Group::withTrashed()->where([
@@ -1770,7 +1774,7 @@ class ProcessM3uImport implements ShouldQueue
                         }
                         $group->update($data);
                     }
-                    $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group) {
+                    $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group, $autoSort) {
                         Job::create([
                             'title' => "Processing channel import for group: {$group->name}",
                             'batch_no' => $batchNo,
@@ -1779,6 +1783,7 @@ class ProcessM3uImport implements ShouldQueue
                                 'groupId' => $group->id,
                                 'groupName' => $group->name,
                                 'playlistId' => $playlistId,
+                                'autoSort' => $autoSort,
                             ],
                         ]);
                     });
