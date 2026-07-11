@@ -9,18 +9,25 @@ use App\Models\Episode;
 use App\Models\Network;
 use App\Models\NetworkContent;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\ModalTableSelect;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\Column;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class NetworkContentRelationManager extends RelationManager
 {
@@ -126,9 +133,30 @@ class NetworkContentRelationManager extends RelationManager
                         : sprintf('%dm', $minutes);
                 }),
 
-            TextColumn::make('weight')
+            TextInputColumn::make('weight')
                 ->label(__('Weight'))
+                ->type('number')
+                ->rules(['required', 'integer', 'min:1'])
                 ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+
+            IconColumn::make('chain_id')
+                ->label(__('Chained'))
+                ->icon(fn (NetworkContent $record): string => $record->isChained() ? 'heroicon-o-link' : 'heroicon-o-minus')
+                ->color(fn (NetworkContent $record): string => $record->isChained() ? 'warning' : 'gray')
+                ->tooltip(fn (NetworkContent $record): ?string => $record->isChained()
+                    ? 'Chained with '.($record->chainMembers()->count() - 1).' other item(s)'
+                    : null)
+                ->toggleable(isToggledHiddenByDefault: true),
+
+            TextColumn::make('pin_day_of_week')
+                ->label(__('Pin Day'))
+                ->formatStateUsing(fn (?string $state): string => $state ? ucfirst($state) : '—')
+                ->toggleable(isToggledHiddenByDefault: true),
+
+            TextColumn::make('pin_time_of_day')
+                ->label(__('Pin Time'))
+                ->formatStateUsing(fn (?string $state): string => $state ?? '—')
                 ->toggleable(isToggledHiddenByDefault: true),
         ];
     }
@@ -272,6 +300,10 @@ class NetworkContentRelationManager extends RelationManager
     protected function getRecordActions(): array
     {
         return [
+            EditAction::make()
+                ->icon('heroicon-o-pencil-square')
+                ->button()
+                ->hiddenLabel(),
             DeleteAction::make()
                 ->icon('heroicon-o-x-circle')
                 ->button()
@@ -286,8 +318,116 @@ class NetworkContentRelationManager extends RelationManager
      */
     protected function getToolbarActions(): array
     {
+        /** @var Network $network */
+        $network = $this->getOwnerRecord();
+
         return [
             BulkActionGroup::make([
+                BulkAction::make('linkAsChain')
+                    ->label(__('Link as Chain'))
+                    ->icon('heroicon-o-link')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalDescription(__('Selected items will always play consecutively, in their current sort order, as one unit — most impactful in Shuffle mode.'))
+                    ->action(function (Collection $records) use ($network): void {
+                        if ($records->count() < 2) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('Select at least 2 items to chain'))
+                                ->send();
+
+                            return;
+                        }
+
+                        $pinned = $records->filter(fn (NetworkContent $record): bool => $record->isPinned());
+
+                        if ($pinned->isNotEmpty()) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Cannot chain pinned items'))
+                                ->body(__('Unpin the selected item(s) first: ').$pinned->map(fn (NetworkContent $r) => $r->title)->implode(', '))
+                                ->send();
+
+                            return;
+                        }
+
+                        // Wrap the writes so a mid-loop failure can't leave chains half-reassigned.
+                        DB::transaction(function () use ($records, $network): void {
+                            $sorted = $records->sortBy('sort_order')->values();
+                            $chainId = $sorted->first()->id;
+
+                            // Chains being vacated by items joining this new chain —
+                            // clean up any left with a single member afterward.
+                            $vacatedChainIds = $records->pluck('chain_id')->filter()->unique()
+                                ->reject(fn ($id) => $id === $chainId);
+
+                            foreach ($sorted as $record) {
+                                $record->update(['chain_id' => $chainId]);
+                            }
+
+                            foreach ($vacatedChainIds as $oldChainId) {
+                                $remaining = NetworkContent::where('network_id', $network->id)
+                                    ->where('chain_id', $oldChainId)
+                                    ->get();
+
+                                if ($remaining->count() === 1) {
+                                    $remaining->first()->update(['chain_id' => null]);
+                                }
+                            }
+                        });
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Items chained'))
+                            ->body($records->count().' item(s) will now play consecutively.')
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion(),
+
+                BulkAction::make('unlinkChain')
+                    ->label(__('Unlink Chain'))
+                    ->icon('heroicon-o-link-slash')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->action(function (Collection $records) use ($network): void {
+                        $chained = $records->filter(fn (NetworkContent $record): bool => $record->isChained());
+
+                        if ($chained->isEmpty()) {
+                            Notification::make()
+                                ->warning()
+                                ->title(__('No chained items selected'))
+                                ->send();
+
+                            return;
+                        }
+
+                        // Wrap the writes so a mid-loop failure can't leave a chain half-broken.
+                        DB::transaction(function () use ($chained, $network): void {
+                            $affectedChainIds = $chained->pluck('chain_id')->unique();
+
+                            foreach ($chained as $record) {
+                                $record->update(['chain_id' => null]);
+                            }
+
+                            // A chain of one left behind after unlinking is meaningless.
+                            foreach ($affectedChainIds as $chainId) {
+                                $remaining = NetworkContent::where('network_id', $network->id)
+                                    ->where('chain_id', $chainId)
+                                    ->get();
+
+                                if ($remaining->count() === 1) {
+                                    $remaining->first()->update(['chain_id' => null]);
+                                }
+                            }
+                        });
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('Chain(s) unlinked'))
+                            ->send();
+                    })
+                    ->deselectRecordsAfterCompletion(),
+
                 DeleteBulkAction::make(),
             ]),
         ];
@@ -308,6 +448,30 @@ class NetworkContentRelationManager extends RelationManager
                 ->default(1)
                 ->minValue(1)
                 ->helperText(__('Higher weight = more likely to appear when shuffling')),
+
+            Select::make('pin_day_of_week')
+                ->label(__('Pin Day of Week'))
+                ->options([
+                    'monday' => __('Monday'),
+                    'tuesday' => __('Tuesday'),
+                    'wednesday' => __('Wednesday'),
+                    'thursday' => __('Thursday'),
+                    'friday' => __('Friday'),
+                    'saturday' => __('Saturday'),
+                    'sunday' => __('Sunday'),
+                ])
+                ->nullable()
+                ->placeholder(__('No pin'))
+                ->helperText(__('Pin this content to a specific day each week'))
+                ->rule('required_with:pin_time_of_day'),
+
+            TextInput::make('pin_time_of_day')
+                ->label(__('Pin Time (HH:MM)'))
+                ->placeholder('20:00')
+                ->regex('/^\d{2}:\d{2}$/')
+                ->nullable()
+                ->helperText(__('Time in 24-hour format, e.g. 20:00 for 8pm'))
+                ->rule('required_with:pin_day_of_week'),
         ]);
     }
 }

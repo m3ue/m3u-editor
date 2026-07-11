@@ -26,7 +26,9 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Component;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -145,10 +147,13 @@ class NetworkResource extends Resource implements CopilotResource
                                     Select::make('media_server_integration_id')
                                         ->label(__('Media Server'))
                                         ->relationship('mediaServerIntegration', 'name')
-                                        ->helperText(__('Networks pull VOD content from the linked media server.'))
                                         ->required()
                                         ->native(false)
-                                        ->disabled(),
+                                        ->preload()
+                                        ->disabled(fn (Network $record): bool => $record->networkContent()->count() > 0)
+                                        ->helperText(fn (Network $record): string => $record->networkContent()->count() > 0
+                                            ? __('Cannot change once content has been added to this network.')
+                                            : __('Networks pull VOD content from the linked media server.')),
                                 ]),
                         ]),
 
@@ -1029,19 +1034,26 @@ class NetworkResource extends Resource implements CopilotResource
                     Action::make('generateSchedule')
                         ->label(__('Generate Schedule'))
                         ->icon('heroicon-o-calendar')
-                        ->requiresConfirmation()
                         ->modalHeading(__('Generate Schedule'))
-                        ->modalDescription(fn (Network $record): string => 'This will generate a '.($record->schedule_window_days ?? 7).'-day programme schedule for this network. Existing future programmes will be replaced.')
+                        ->modalSubmitActionLabel(__('Generate'))
                         ->disabled(fn (Network $record): bool => $record->network_playlist_id === null)
                         ->tooltip(fn (Network $record): ?string => $record->network_playlist_id === null ? 'Assign to a playlist first' : null)
-                        ->action(function (Network $record) {
-                            $service = app(NetworkScheduleService::class);
-                            $service->generateSchedule($record);
+                        ->schema(fn (Network $record): array => static::generateScheduleModalSchema($record->schedule_window_days ?? 7, $record->schedule_type))
+                        ->action(function (Network $record, array $data) {
+                            $forceReset = ($data['mode'] ?? 'continue') === 'reset';
+
+                            app(NetworkScheduleService::class)->generateSchedule($record, forceReset: $forceReset);
+
+                            if ($forceReset && $record->isBroadcasting()) {
+                                app(NetworkBroadcastService::class)->restart($record);
+                            }
 
                             Notification::make()
                                 ->success()
                                 ->title(__('Schedule Generated'))
-                                ->body("Generated programme schedule for {$record->name}")
+                                ->body($forceReset
+                                    ? "Fresh schedule generated for {$record->name}."
+                                    : "Schedule continued for {$record->name}.")
                                 ->send();
                         }),
 
@@ -1276,5 +1288,32 @@ class NetworkResource extends Resource implements CopilotResource
     {
         return parent::getEloquentQuery()
             ->where('user_id', Auth::id());
+    }
+
+    /**
+     * Build the Radio schema for the generate-schedule modal.
+     *
+     * @return array<int, Component>
+     */
+    public static function generateScheduleModalSchema(int $windowDays, string $scheduleType): array
+    {
+        $shuffleNote = $scheduleType === 'shuffle'
+            ? ' The shuffle order will be randomised afresh.'
+            : ' The content sequence restarts from the beginning.';
+
+        return [
+            Radio::make('mode')
+                ->label(__('How should the schedule be generated?'))
+                ->options([
+                    'continue' => __('Continue from current position'),
+                    'reset' => __('Fresh start'),
+                ])
+                ->descriptions([
+                    'continue' => __("Keeps the currently-airing programme. Regenerates the next {$windowDays} days from where the schedule left off. The content order stays the same — good for topping up an expiring schedule without disrupting viewers."),
+                    'reset' => __("Deletes all existing programmes and builds a completely new {$windowDays}-day schedule from scratch.{$shuffleNote} Use this after reordering content, setting pins, or when you want a fresh lineup."),
+                ])
+                ->default('continue')
+                ->required(),
+        ];
     }
 }

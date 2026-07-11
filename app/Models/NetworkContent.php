@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 class NetworkContent extends Model
@@ -32,6 +33,9 @@ class NetworkContent extends Model
         'network_id' => 'integer',
         'sort_order' => 'integer',
         'weight' => 'integer',
+        'pin_day_of_week' => 'string',
+        'pin_time_of_day' => 'string',
+        'chain_id' => 'integer',
     ];
 
     /**
@@ -52,6 +56,25 @@ class NetworkContent extends Model
             }
 
             if (! in_array($network->schedule_type, ['sequential', 'shuffle'])) {
+                return;
+            }
+
+            if ($network->auto_regenerate_schedule === false) {
+                return;
+            }
+
+            RegenerateNetworkSchedule::dispatch($network->id)->delay(3);
+        });
+
+        // When pin or chain fields change, queue a schedule regeneration.
+        static::updated(function (NetworkContent $networkContent) {
+            if (! $networkContent->wasChanged(['pin_day_of_week', 'pin_time_of_day', 'chain_id'])) {
+                return;
+            }
+
+            $network = $networkContent->network;
+
+            if (! $network || ! in_array($network->schedule_type, ['sequential', 'shuffle'])) {
                 return;
             }
 
@@ -103,6 +126,18 @@ class NetworkContent extends Model
                         'network_id' => $network->id,
                         'error' => $e->getMessage(),
                     ]);
+                }
+            }
+
+            // A chain of one is meaningless — if this deletion left exactly one
+            // member behind, clear its chain_id too.
+            if ($networkContent->chain_id !== null) {
+                $remaining = static::where('network_id', $network->id)
+                    ->where('chain_id', $networkContent->chain_id)
+                    ->get();
+
+                if ($remaining->count() === 1) {
+                    $remaining->first()->update(['chain_id' => null]);
                 }
             }
         });
@@ -217,6 +252,47 @@ class NetworkContent extends Model
         }
 
         return $content->name ?? $content->title ?? 'Unknown';
+    }
+
+    /**
+     * Whether this content item is pinned to a specific day and time.
+     */
+    public function isPinned(): bool
+    {
+        return $this->pin_day_of_week !== null && $this->pin_time_of_day !== null;
+    }
+
+    /**
+     * Whether this content item is chained with other items to always play consecutively.
+     */
+    public function isChained(): bool
+    {
+        return $this->chain_id !== null;
+    }
+
+    /**
+     * All members of this item's chain (including itself), ordered by sort_order.
+     * Returns just itself when not chained.
+     */
+    public function chainMembers(): Collection
+    {
+        if (! $this->isChained()) {
+            return collect([$this]);
+        }
+
+        return static::where('network_id', $this->network_id)
+            ->where('chain_id', $this->chain_id)
+            ->orderBy('sort_order')
+            ->get();
+    }
+
+    /**
+     * The lead (first-playing) member of this item's chain, resolved dynamically
+     * by lowest sort_order — not by matching chain_id to an id.
+     */
+    public function chainLead(): self
+    {
+        return $this->isChained() ? $this->chainMembers()->first() : $this;
     }
 
     /**

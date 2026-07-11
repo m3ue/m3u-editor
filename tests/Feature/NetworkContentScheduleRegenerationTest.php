@@ -162,6 +162,65 @@ it('dispatches regeneration job when episodes are added', function () {
     });
 });
 
+it('dispatches regeneration job when chain_id is updated', function () {
+    $network = Network::factory()->create([
+        'schedule_type' => 'shuffle',
+        'loop_content' => true,
+        'auto_regenerate_schedule' => true,
+    ]);
+
+    $channelA = Channel::factory()->create();
+    $channelB = Channel::factory()->create();
+
+    $ncA = NetworkContent::withoutEvents(fn () => NetworkContent::create([
+        'network_id' => $network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $channelA->id,
+        'sort_order' => 1,
+        'weight' => 1,
+    ]));
+
+    $ncB = NetworkContent::withoutEvents(fn () => NetworkContent::create([
+        'network_id' => $network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $channelB->id,
+        'sort_order' => 2,
+        'weight' => 1,
+    ]));
+
+    Bus::fake();
+
+    $ncB->update(['chain_id' => $ncA->id]);
+
+    Bus::assertDispatched(RegenerateNetworkSchedule::class, function ($job) use ($network) {
+        return $job->networkId === $network->id;
+    });
+});
+
+it('does not dispatch regeneration job when sort_order alone is updated', function () {
+    $network = Network::factory()->create([
+        'schedule_type' => 'sequential',
+        'loop_content' => true,
+        'auto_regenerate_schedule' => true,
+    ]);
+
+    $channel = Channel::factory()->create();
+
+    $nc = NetworkContent::withoutEvents(fn () => NetworkContent::create([
+        'network_id' => $network->id,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $channel->id,
+        'sort_order' => 1,
+        'weight' => 1,
+    ]));
+
+    Bus::fake();
+
+    $nc->update(['sort_order' => 5]);
+
+    Bus::assertNotDispatched(RegenerateNetworkSchedule::class);
+});
+
 it('dispatches regeneration job for mixed content types', function () {
     $network = Network::factory()->create([
         'schedule_type' => 'sequential',

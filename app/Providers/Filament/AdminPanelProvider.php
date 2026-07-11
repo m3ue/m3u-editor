@@ -516,6 +516,13 @@ Never limit a genre search to a single keyword. Expand by theme:
 - "well-rated" or "quality": min_rating 7
 - "top-rated" or "highly rated": min_rating 8
 
+## Network Content Scheduling (Time Pins)
+You can pin specific content in a network playlist to a recurring weekly timeslot — for example, "play The Wild Robot every Friday at 8pm":
+1. List the network's content items to find the network_content_id for the title the user wants to pin.
+2. Call NetworkContentPinTool with the network_content_id, pin_day_of_week (e.g. "friday"), and pin_time_of_day (e.g. "20:00").
+3. The schedule regenerates automatically — pinned content will always air at that day/time each week.
+4. To remove a pin, call NetworkContentPinTool with only the network_content_id (omit day and time).
+
 ## Tools Guidance
 If the user asks for something you cannot do, call Get Available Tools to see which tools are currently enabled, identify the missing capability, and tell the user the exact tool to enable in Preferences → AI Copilot → Global Tools (for example: "I do not have the TV schedule tool enabled. Enable DVR: Schedule in Preferences → AI Copilot → Global Tools and try again.").
 PROMPT;
