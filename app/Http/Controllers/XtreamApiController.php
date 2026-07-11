@@ -21,6 +21,7 @@ use App\Models\Epg;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
+use App\Models\NetworkProgramme;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
@@ -1968,14 +1969,13 @@ class XtreamApiController extends Controller
             $streamIcon = $network->logo ?: $baseUrl.'/placeholder.png';
             $categoryId = $categoryMap[$network->effective_group_name] ?? 'networks';
 
-            // Use network ID as stream_id, channel_number as epg_channel_id
             $liveStreams[] = [
                 'num' => $network->channel_number ?? $network->id,
                 'name' => $network->name,
                 'stream_type' => 'live',
                 'stream_id' => $network->id,
                 'stream_icon' => $streamIcon,
-                'epg_channel_id' => 'network-'.($network->channel_number ?? $network->id),
+                'epg_channel_id' => 'network-'.$network->id,
                 'added' => (string) $network->created_at->timestamp,
                 'category_id' => $categoryId,
                 'category_ids' => [$categoryId],
@@ -2056,26 +2056,14 @@ class XtreamApiController extends Controller
             ->where('end_time', '>', $now)
             ->orderBy('start_time')
             ->limit($limit)
+            ->with('contentable')
             ->get();
 
         $epgListings = [];
         foreach ($programmes as $index => $programme) {
             $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
 
-            $epgListings[] = [
-                'id' => (string) $programme->id,
-                'epg_id' => (string) $network->id,
-                'title' => base64_encode($programme->title),
-                'lang' => 'en',
-                'start' => $programme->start_time->format('Y-m-d H:i:s'),
-                'end' => $programme->end_time->format('Y-m-d H:i:s'),
-                'description' => base64_encode($programme->description ?? ''),
-                'channel_id' => 'network-'.($network->channel_number ?? $network->id),
-                'start_timestamp' => (string) $programme->start_time->timestamp,
-                'stop_timestamp' => (string) $programme->end_time->timestamp,
-                'now_playing' => $isCurrentProgramme ? 1 : 0,
-                'has_archive' => 0,
-            ];
+            $epgListings[] = $this->buildNetworkEpgListing($programme, $network, $isCurrentProgramme);
         }
 
         return response()->json(['epg_listings' => $epgListings]);
@@ -2115,23 +2103,48 @@ class XtreamApiController extends Controller
         foreach ($programmes as $programme) {
             $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
 
-            $epgListings[] = [
-                'id' => (string) $programme->id,
-                'epg_id' => (string) $network->id,
-                'title' => base64_encode($programme->title),
-                'lang' => 'en',
-                'start' => $programme->start_time->format('Y-m-d H:i:s'),
-                'end' => $programme->end_time->format('Y-m-d H:i:s'),
-                'description' => base64_encode($programme->description ?? ''),
-                'channel_id' => 'network-'.($network->channel_number ?? $network->id),
-                'start_timestamp' => (string) $programme->start_time->timestamp,
-                'stop_timestamp' => (string) $programme->end_time->timestamp,
-                'now_playing' => $isCurrentProgramme ? 1 : 0,
-                'has_archive' => 0,
-            ];
+            $epgListings[] = $this->buildNetworkEpgListing($programme, $network, $isCurrentProgramme);
         }
 
         return response()->json(['epg_listings' => $epgListings]);
+    }
+
+    /**
+     * Build a single Xtream-API-compatible EPG listing array for a network programme.
+     * Resolves description from stored value with fallback to the contentable's metadata.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildNetworkEpgListing(NetworkProgramme $programme, Network $network, bool $isCurrentProgramme): array
+    {
+        $description = $programme->description;
+
+        if (empty($description)) {
+            $content = $programme->contentable;
+            if ($content) {
+                $info = $content->info ?? [];
+                $description = $info['plot']
+                    ?? $info['description']
+                    ?? $content->movie_data['info']['plot']
+                    ?? $content->movie_data['info']['description']
+                    ?? null;
+            }
+        }
+
+        return [
+            'id' => (string) $programme->id,
+            'epg_id' => (string) $network->id,
+            'title' => base64_encode($programme->title),
+            'lang' => 'en',
+            'start' => $programme->start_time->format('Y-m-d H:i:s'),
+            'end' => $programme->end_time->format('Y-m-d H:i:s'),
+            'description' => base64_encode($description ?? ''),
+            'channel_id' => 'network-'.$network->id,
+            'start_timestamp' => (string) $programme->start_time->timestamp,
+            'stop_timestamp' => (string) $programme->end_time->timestamp,
+            'now_playing' => $isCurrentProgramme ? 1 : 0,
+            'has_archive' => 0,
+        ];
     }
 
     /**
@@ -2719,26 +2732,13 @@ class XtreamApiController extends Controller
             ->where('end_time', '>', $now)
             ->orderBy('start_time')
             ->limit($limit)
+            ->with('contentable')
             ->get();
 
         $epgListings = [];
         foreach ($programmes as $programme) {
             $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
-
-            $epgListings[] = [
-                'id' => (string) $programme->id,
-                'epg_id' => (string) $network->id,
-                'title' => base64_encode($programme->title),
-                'lang' => 'en',
-                'start' => $programme->start_time->format('Y-m-d H:i:s'),
-                'end' => $programme->end_time->format('Y-m-d H:i:s'),
-                'description' => base64_encode($programme->description ?? ''),
-                'channel_id' => 'network-'.$network->id,
-                'start_timestamp' => (string) $programme->start_time->timestamp,
-                'stop_timestamp' => (string) $programme->end_time->timestamp,
-                'now_playing' => $isCurrentProgramme ? 1 : 0,
-                'has_archive' => 0,
-            ];
+            $epgListings[] = $this->buildNetworkEpgListing($programme, $network, $isCurrentProgramme);
         }
 
         return response()->json(['epg_listings' => $epgListings]);
@@ -2773,27 +2773,14 @@ class XtreamApiController extends Controller
             ->where('start_time', '>=', $today)
             ->where('start_time', '<', $tomorrow)
             ->orderBy('start_time')
+            ->with('contentable')
             ->get();
 
         $now = Carbon::now();
         $epgListings = [];
         foreach ($programmes as $programme) {
             $isCurrentProgramme = $programme->start_time->lte($now) && $programme->end_time->gt($now);
-
-            $epgListings[] = [
-                'id' => (string) $programme->id,
-                'epg_id' => (string) $network->id,
-                'title' => base64_encode($programme->title),
-                'lang' => 'en',
-                'start' => $programme->start_time->format('Y-m-d H:i:s'),
-                'end' => $programme->end_time->format('Y-m-d H:i:s'),
-                'description' => base64_encode($programme->description ?? ''),
-                'channel_id' => 'network-'.$network->id,
-                'start_timestamp' => (string) $programme->start_time->timestamp,
-                'stop_timestamp' => (string) $programme->end_time->timestamp,
-                'now_playing' => $isCurrentProgramme ? 1 : 0,
-                'has_archive' => 0,
-            ];
+            $epgListings[] = $this->buildNetworkEpgListing($programme, $network, $isCurrentProgramme);
         }
 
         return response()->json(['epg_listings' => $epgListings]);

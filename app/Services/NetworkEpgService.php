@@ -91,6 +91,7 @@ class NetworkEpgService
         // Stream programmes in chunks to manage memory
         $network->programmes()
             ->orderBy('start_time')
+            ->with('contentable')
             ->chunk(100, function ($programmes) use ($network) {
                 foreach ($programmes as $programme) {
                     echo $this->formatProgrammeXml($network, $programme);
@@ -116,6 +117,7 @@ class NetworkEpgService
         foreach ($networks as $network) {
             $network->programmes()
                 ->orderBy('start_time')
+                ->with('contentable')
                 ->chunk(100, function ($programmes) use ($network) {
                     foreach ($programmes as $programme) {
                         echo $this->formatProgrammeXml($network, $programme);
@@ -180,6 +182,7 @@ class NetworkEpgService
         $programmes = $network->programmes()
             ->where('end_time', '>', Carbon::now()->subDay())
             ->orderBy('start_time')
+            ->with('contentable')
             ->get();
 
         foreach ($programmes as $programme) {
@@ -315,10 +318,8 @@ class NetworkEpgService
      */
     protected function getChannelId(Network $network): string
     {
-        // Use channel number if available, otherwise use network ID
-        return $network->channel_number
-            ? 'network-'.$network->channel_number
-            : 'network-'.$network->id;
+        // Always use the network's database ID so the M3U tvg-id and EPG channel id match.
+        return 'network-'.$network->id;
     }
 
     /**

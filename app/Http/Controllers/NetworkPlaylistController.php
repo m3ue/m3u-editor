@@ -5,10 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\User;
-use App\Services\M3uProxyService;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkEpgService;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -59,31 +57,26 @@ class NetworkPlaylistController extends Controller
      *
      * Route: /network/{network}/playlist.m3u
      */
-    public function single(Network $network): RedirectResponse|StreamedResponse
+    public function single(Network $network): StreamedResponse
     {
         if (! $network->enabled) {
             abort(404, 'Network is disabled');
         }
 
-        $proxy = new M3uProxyService;
-
-        // If broadcasting is enabled, redirect clients to the proxy HLS playlist
-        if ($network->broadcast_enabled) {
-            if ($network->enabled && $network->broadcast_requested && $network->broadcast_on_demand && ! $network->isBroadcasting()) {
-                $broadcastService = app(NetworkBroadcastService::class);
-                $broadcastService->markConnectionSeen($network);
-                $broadcastService->startNow($network);
-            }
-
-            // Route through Laravel HLS endpoints so segment requests can update
-            // on-demand connection heartbeat and stop idling correctly.
-            return redirect()->route('network.hls.playlist', ['network' => $network->uuid]);
+        // For on-demand broadcast: trigger startup so the stream is ready when the client connects.
+        if ($network->broadcast_enabled && $network->broadcast_requested && $network->broadcast_on_demand && ! $network->isBroadcasting()) {
+            $broadcastService = app(NetworkBroadcastService::class);
+            $broadcastService->markConnectionSeen($network);
+            $broadcastService->startNow($network);
         }
 
         $baseUrl = url('/');
 
+        // Always return a proper M3U with tvg-id/tvg-logo/x-tvg-url so IPTV clients
+        // (Emby, Jellyfin, etc.) can match the channel to EPG data. The stream URL
+        // inside the M3U already points to HLS when broadcasting, so playback is
+        // unaffected — only the redirect (which stripped all metadata) is removed.
         return response()->stream(function () use ($network, $baseUrl) {
-            // M3U header with EPG URL
             $epgUrl = $network->epg_url;
             echo "#EXTM3U x-tvg-url=\"{$epgUrl}\"\n";
 
@@ -103,7 +96,7 @@ class NetworkPlaylistController extends Controller
         $name = $network->name;
         $channelNumber = $network->channel_number ?? $network->id;
         $tvgId = "network-{$network->id}";
-        $logo = $network->logo ?? "{$baseUrl}/placeholder.png";
+        $logo = $network->logo ?: "{$baseUrl}/placeholder.png";
         $group = $network->effective_group_name;
         $streamUrl = $network->stream_url;
 
