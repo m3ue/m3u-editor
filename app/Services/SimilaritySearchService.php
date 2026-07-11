@@ -134,6 +134,8 @@ class SimilaritySearchService
         int $fuzzyMaxDistance = 25,
         int $exactMatchDistance = 8,
         ?array $customQualityIndicators = null,
+        ?string $cleanedTitle = null,
+        ?string $cleanedName = null,
     ): ?EpgChannel {
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
@@ -146,9 +148,12 @@ class SimilaritySearchService
         $debug = false; // config('app.debug');
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
 
-        // Sanitize UTF-8 encoding immediately to prevent PostgreSQL errors
-        $title = $this->sanitizeUtf8($channel->title_custom ?? $channel->title);
-        $name = $this->sanitizeUtf8($channel->name_custom ?? $channel->name);
+        // Sanitize UTF-8 encoding immediately to prevent PostgreSQL errors.
+        // Callers that already stripped configured prefixes/patterns from the
+        // channel attributes pass the cleaned values so the similarity search
+        // works on the same names as the exact-match steps.
+        $title = $this->sanitizeUtf8($cleanedTitle ?? $channel->title_custom ?? $channel->title);
+        $name = $this->sanitizeUtf8($cleanedName ?? $channel->name_custom ?? $channel->name);
         $fallbackName = trim($title ?: $name);
         $normalizedChan = $this->normalizeChannelName($fallbackName);
 
