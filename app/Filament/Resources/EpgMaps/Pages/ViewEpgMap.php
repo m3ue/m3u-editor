@@ -47,45 +47,23 @@ class ViewEpgMap extends ViewRecord
                             ->compact()
                             ->persistCollapsed()
                             ->schema([
-                                Grid::make(2)
+                                Grid::make(4)
                                     ->columnSpanFull()
                                     ->schema([
-                                        Grid::make()
-                                            ->columnSpan(1)
-                                            ->schema([
-                                                TextEntry::make('name')
-                                                    ->label(__('Map name')),
-                                                TextEntry::make('status')
-                                                    ->badge()
-                                                    ->color(fn (Status $state): string => $state->getColor()),
-                                                TextEntry::make('progress')
-                                                    ->label(__('Progress'))
-                                                    ->state(fn ($record): string => $record->status === Status::Processing || $record->status === Status::Pending
-                                                        ? __('In progress — :pct%', ['pct' => round((float) $record->progress)])
-                                                        : __('Complete')),
-                                                TextEntry::make('mapped_at')
-                                                    ->label(__('Last ran'))
-                                                    ->since()
-                                                    ->placeholder(__('Never')),
-                                            ]),
-                                        Grid::make()
-                                            ->columnSpan(1)
-                                            ->schema([
-                                                TextEntry::make('epg.name')
-                                                    ->label(__('EPG source'))
-                                                    ->placeholder(__('—')),
-                                                TextEntry::make('playlist.name')
-                                                    ->label(__('Playlist'))
-                                                    ->placeholder(__('Custom channel selection')),
-                                                TextEntry::make('sync_time')
-                                                    ->label(__('Sync time'))
-                                                    ->state(fn ($record): string => $record->sync_time ? gmdate('H:i:s', (int) $record->sync_time) : '—'),
-                                                TextEntry::make('errors')
-                                                    ->label(__('Errors'))
-                                                    ->placeholder(__('None'))
-                                                    ->color('danger')
-                                                    ->visible(fn ($record): bool => filled($record->errors)),
-                                            ]),
+                                        TextEntry::make('name')
+                                            ->label(__('Map name')),
+                                        TextEntry::make('status')
+                                            ->badge()
+                                            ->color(fn (Status $state): string => $state->getColor()),
+                                        TextEntry::make('progress')
+                                            ->label(__('Progress'))
+                                            ->state(fn ($record): string => $record->status === Status::Processing || $record->status === Status::Pending
+                                                ? __('In progress — :pct%', ['pct' => round((float) $record->progress)])
+                                                : __('Complete')),
+                                        TextEntry::make('mapped_at')
+                                            ->label(__('Last ran'))
+                                            ->since()
+                                            ->placeholder(__('Never')),
                                     ]),
                                 Grid::make(4)
                                     ->columnSpanFull()
@@ -117,6 +95,12 @@ class ViewEpgMap extends ViewRecord
                                             ->label(__('Recurring on EPG sync'))
                                             ->boolean(),
                                     ]),
+                                TextEntry::make('errors')
+                                    ->columnSpanFull()
+                                    ->label(__('Errors'))
+                                    ->placeholder(__('None'))
+                                    ->color('danger')
+                                    ->visible(fn ($record): bool => filled($record->errors)),
                             ]),
                     ]),
             ]);
