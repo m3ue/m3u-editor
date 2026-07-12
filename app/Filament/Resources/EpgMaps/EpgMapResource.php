@@ -336,7 +336,17 @@ class EpgMapResource extends Resource implements CopilotResource
         $settings = $record->settings ?? [];
         $matcher = app(SimilaritySearchService::class);
 
-        return $channels->map(function (Channel $channel) use ($epg, $settings, $matcher): Radio|Placeholder {
+        // Preload matching EPG channels once for this page of unresolved channels
+        // so we issue a single LIKE scan instead of one per row — a meaningful
+        // win on very large EPG sources.
+        $unionTerms = $channels->flatMap(fn (Channel $channel): array => $matcher->searchTermsFor(
+            channel: $channel,
+            cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
+            cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+        ))->unique()->values()->all();
+        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms);
+
+        return $channels->map(function (Channel $channel) use ($epg, $settings, $matcher, $prefetched): Radio|Placeholder {
             $cleanedTitle = $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings);
             $cleanedName = $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings);
             $result = $matcher->findEpgChannelCandidates(
@@ -349,6 +359,7 @@ class EpgMapResource extends Resource implements CopilotResource
                 customQualityIndicators: $settings['quality_indicators'] ?? null,
                 cleanedTitle: $cleanedTitle,
                 cleanedName: $cleanedName,
+                prefetchedCandidates: $prefetched,
             );
 
             if ($result['candidates'] === []) {

@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,6 +19,8 @@ class SimilaritySearchService
     private const MAX_REVIEW_CANDIDATES = 3;
 
     private const MIN_REVIEW_CONFIDENCE = 40;
+
+    private const PREFERRED_REGION_DISTANCE_BONUS = 15;
 
     /** @var array<int, string> */
     private const DEFAULT_QUALITY_INDICATORS = [
@@ -164,6 +167,7 @@ class SimilaritySearchService
         ?array $customQualityIndicators = null,
         ?string $cleanedTitle = null,
         ?string $cleanedName = null,
+        ?Collection $prefetchedCandidates = null,
     ): ?EpgChannel {
         return $this->findEpgChannelCandidates(
             channel: $channel,
@@ -175,11 +179,82 @@ class SimilaritySearchService
             customQualityIndicators: $customQualityIndicators,
             cleanedTitle: $cleanedTitle,
             cleanedName: $cleanedName,
+            prefetchedCandidates: $prefetchedCandidates,
         )['automatic_match'];
     }
 
     /**
+     * Compute the ordered search terms used to filter EPG candidates.
+     *
+     * Exposed so batch callers (Filament review UI, Copilot preview) can union
+     * the terms across many channels and preload matching EPG rows in a single
+     * LIKE scan instead of one per channel — a meaningful win on very large
+     * EPG sources.
+     *
+     * @return list<string>
+     */
+    public function searchTermsFor(Channel $channel, ?string $cleanedTitle = null, ?string $cleanedName = null): array
+    {
+        $title = $this->sanitizeUtf8($cleanedTitle ?? $channel->title_custom ?? $channel->title);
+        $name = $this->sanitizeUtf8($cleanedName ?? $channel->name_custom ?? $channel->name);
+        $normalized = $this->normalizeChannelName(trim($title ?: $name));
+
+        if (! $normalized || mb_strlen($normalized, 'UTF-8') < $this->minChannelLength) {
+            return [];
+        }
+
+        return collect(explode(' ', $normalized))
+            ->filter(fn (string $term): bool => mb_strlen($term, 'UTF-8') >= $this->minChannelLength)
+            ->sortByDesc(fn (string $term): int => mb_strlen($term, 'UTF-8'))
+            ->take(4)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Load all EPG candidate rows that match any of the supplied search terms.
+     *
+     * Intended for batch flows that iterate many channels against the same EPG
+     * source: pass the union of every channel's searchTermsFor() result, then
+     * feed the returned collection to findEpgChannelCandidates() via the
+     * $prefetchedCandidates argument to skip per-channel DB round-trips.
+     *
+     * @param  list<string>  $unionTerms
+     * @return Collection<int, EpgChannel>
+     */
+    public function loadEpgCandidates(Epg $epg, array $unionTerms): Collection
+    {
+        $unionTerms = collect($unionTerms)
+            ->filter(fn (string $term): bool => mb_strlen($term, 'UTF-8') >= $this->minChannelLength)
+            ->unique()
+            ->take(200)
+            ->values()
+            ->all();
+
+        if ($unionTerms === []) {
+            return $epg->channels()->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')->get();
+        }
+
+        return $epg->channels()
+            ->where(function (Builder $query) use ($unionTerms): void {
+                foreach ($unionTerms as $term) {
+                    $likeTerm = $this->likePattern($term);
+                    $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                    $this->addJsonSearchCondition($query, $term);
+                }
+            })
+            ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->get();
+    }
+
+    /**
      * Return the automatic match decision and explainable review candidates from the same scoring pass.
+     *
+     * `$prefetchedCandidates` lets callers reuse one shared candidate set
+     * across many channels (see loadEpgCandidates). When null, the service
+     * performs its own bounded LIKE scan against the EPG source.
      *
      * @param  array<int, string>|null  $customQualityIndicators
      * @return array{
@@ -207,6 +282,7 @@ class SimilaritySearchService
         ?array $customQualityIndicators = null,
         ?string $cleanedTitle = null,
         ?string $cleanedName = null,
+        ?Collection $prefetchedCandidates = null,
     ): array {
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
@@ -244,23 +320,27 @@ class SimilaritySearchService
             return $emptyResult;
         }
 
-        [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all());
+        if ($prefetchedCandidates !== null) {
+            $databaseCandidates = $prefetchedCandidates;
+        } else {
+            [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all());
 
-        $databaseCandidates = $epg->channels()
-            ->where(function (Builder $query) use ($searchTerms): void {
-                foreach ($searchTerms as $term) {
-                    $likeTerm = $this->likePattern($term);
-                    $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
-                        ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
-                        ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
-                    $this->addJsonSearchCondition($query, $term);
-                }
-            })
-            ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
-            ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
-            ->orderBy('id')
-            ->limit(self::MAX_DATABASE_CANDIDATES)
-            ->get();
+            $databaseCandidates = $epg->channels()
+                ->where(function (Builder $query) use ($searchTerms): void {
+                    foreach ($searchTerms as $term) {
+                        $likeTerm = $this->likePattern($term);
+                        $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                            ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                            ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                        $this->addJsonSearchCondition($query, $term);
+                    }
+                })
+                ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+                ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
+                ->orderBy('id')
+                ->limit(self::MAX_DATABASE_CANDIDATES)
+                ->get();
+        }
 
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
         $scoredCandidates = [];
@@ -276,6 +356,13 @@ class SimilaritySearchService
                 $values[] = ['field' => 'alternate display name', 'value' => $additionalDisplayName];
             }
 
+            // The previous implementation also compared raw lowercased names
+            // (channel fallback vs EPG name/channel_id) as a tiebreaker. It's
+            // intentionally omitted here: normalizeChannelName strips stop
+            // words and quality indicators symmetrically on both sides, so
+            // the raw comparison rarely beat the normalized one, and the new
+            // best-of-fields pass plus cosine/containment fallbacks cover the
+            // remaining soft-match space more consistently.
             $bestComparison = null;
             foreach ($values as $value) {
                 $comparison = $this->compareNormalizedValues($normalizedChan, $value['value'], $value['field']);
@@ -288,7 +375,20 @@ class SimilaritySearchService
                 continue;
             }
 
-            if ($regionCode && str_contains(mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8'), $regionCode)) {
+            $inPreferredRegion = $regionCode && str_contains(
+                mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8'),
+                $regionCode,
+            );
+
+            if ($inPreferredRegion) {
+                // Restore the previous auto-match behavior where preferred_local
+                // shifted borderline candidates into the automatic-match band:
+                // shave distance by the configured bonus so the meetsDistanceRule
+                // gate can fire, in addition to nudging the display confidence.
+                $bestComparison['distance'] = max(
+                    0,
+                    $bestComparison['distance'] - self::PREFERRED_REGION_DISTANCE_BONUS,
+                );
                 $bestComparison['confidence'] = min(100, $bestComparison['confidence'] + 5);
                 $bestComparison['reason'] .= __('; preferred region');
             }

@@ -107,11 +107,24 @@ class EpgChannelMatcherTool extends BaseTool
         $unresolved = [];
         $matcher = app(SimilaritySearchService::class);
 
+        // Preload matching EPG channels once for the whole batch instead of
+        // issuing a LIKE scan per channel — most EPG sources are large enough
+        // that N round-trips dominate the request time.
+        $unionTerms = $channels->flatMap(
+            fn (Channel $channel): array => $matcher->searchTermsFor(
+                channel: $channel,
+                cleanedTitle: $channel->title_custom ?? $channel->title,
+                cleanedName: $channel->name_custom ?? $channel->name,
+            ),
+        )->unique()->values()->all();
+        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms);
+
         foreach ($channels as $channel) {
             $result = $matcher->findEpgChannelCandidates(
                 channel: $channel,
                 epg: $epg,
                 removeQualityIndicators: true,
+                prefetchedCandidates: $prefetched,
             );
             $topCandidate = $result['candidates'][0] ?? null;
 
@@ -187,9 +200,9 @@ class EpgChannelMatcherTool extends BaseTool
         $currentPage = (int) floor($offset / $limit) + 1;
 
         $lines = [
-            "EPG Match Preview - {$group} (playlist: {$playlistName})",
+            "EPG Match Preview — {$group} (playlist: {$playlistName})",
             "EPG Source: {$epgName} (id: {$epgId})",
-            "Channels {$rangeStart}-{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
+            "Channels {$rangeStart}–{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
             '',
         ];
 
@@ -198,7 +211,7 @@ class EpgChannelMatcherTool extends BaseTool
 
             foreach ($exactMatches as $m) {
                 $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\"";
-                $lines[] = "    -> {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']})";
+                $lines[] = "    → {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']})";
             }
 
             $lines[] = '';
@@ -208,10 +221,10 @@ class EpgChannelMatcherTool extends BaseTool
             $lines[] = 'FUZZY MATCHES (ask user to choose the correct candidate or skip):';
 
             foreach ($fuzzyMatches as $m) {
-                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" -> normalized: \"{$m['cleaned_name']}\"";
+                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" → normalized: \"{$m['cleaned_name']}\"";
 
                 foreach ($m['candidates'] as $i => $c) {
-                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) - {$c['score']}% - {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
+                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) — {$c['score']}% — {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
                 }
             }
 
@@ -219,10 +232,10 @@ class EpgChannelMatcherTool extends BaseTool
         }
 
         if (! empty($unresolved)) {
-            $lines[] = 'UNRESOLVED (no match found - will remain unmapped):';
+            $lines[] = 'UNRESOLVED (no match found — will remain unmapped):';
 
             foreach ($unresolved as $u) {
-                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" -> normalized: \"{$u['cleaned_name']}\"";
+                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" → normalized: \"{$u['cleaned_name']}\"";
             }
 
             $lines[] = '';
@@ -237,7 +250,7 @@ class EpgChannelMatcherTool extends BaseTool
 
         if ($totalUnmapped > $offset + $limit) {
             $nextOffset = $offset + $limit;
-            $lines[] = "More channels available - call this tool again with offset={$nextOffset} to continue.";
+            $lines[] = "More channels available — call this tool again with offset={$nextOffset} to continue.";
         }
 
         $lines[] = '';

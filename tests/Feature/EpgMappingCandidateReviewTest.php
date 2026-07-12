@@ -219,6 +219,82 @@ it('returns normalized context when no candidate is credible', function () {
         ->and($result['explanation'])->toContain('No candidate');
 });
 
+it('applies the preferred_local region bonus to candidates and auto-match', function () {
+    $candidate = EpgChannel::factory()
+        ->for($this->epg)
+        ->for($this->user)
+        ->create([
+            'name' => 'ESPN Sportsburgh Broadcasting Cascadia Cascadia Cascadeoning',
+            'display_name' => 'ESPN Sportsburgh Broadcasting Cascadia Cascadia Cascadeoning',
+            'channel_id' => 'espn-sportsburg.us',
+        ]);
+
+    $channel = Channel::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->for($this->group)
+        ->create([
+            'name' => 'ESPN Pittsburgh Broadcast Regionals Cascadia Cascadeoning',
+            'title' => 'ESPN Pittsburgh Broadcast Regionals Cascadia Cascadeoning',
+            'stream_id' => 'espn-pittsburgh',
+            'epg_map_enabled' => true,
+            'is_vod' => false,
+        ]);
+
+    // Without preferred_local the borderline distance (≈14) and cosine < 0.8
+    // leave the candidate in the review bucket rather than auto-matched.
+    $withoutRegion = (new SimilaritySearchService)->findEpgChannelCandidates(channel: $channel, epg: $this->epg);
+    expect($withoutRegion['candidates'])->not->toBeEmpty()
+        ->and($withoutRegion['candidates'][0]['reason'])->not->toContain('preferred region')
+        ->and($withoutRegion['automatic_match'])->toBeNull();
+
+    // Switch the same EPG to declare a preferred_local that matches the
+    // candidate's channel_id substring, then re-run the same scoring pass.
+    // The distance bonus should kick the borderline candidate past the
+    // automatic-match threshold without altering the underlying rows.
+    $this->epg->forceFill(['preferred_local' => 'us'])->save();
+    $withRegion = (new SimilaritySearchService)->findEpgChannelCandidates(channel: $channel, epg: $this->epg);
+
+    expect($withRegion['candidates'])->not->toBeEmpty()
+        ->and($withRegion['candidates'][0]['reason'])->toContain('preferred region')
+        ->and($withRegion['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($withRegion['automatic_match']?->id)->toBe($candidate->id);
+});
+
+it('preload-batching produces the same top candidates as per-channel queries', function () {
+    $candidateA = candidateReviewEpgChannel([
+        'name' => 'ESPN News Plus',
+        'display_name' => 'ESPN News Plus',
+        'channel_id' => 'espnews-plus',
+    ]);
+    $candidateB = candidateReviewEpgChannel([
+        'name' => 'Fox Soccer Channel Premier',
+        'display_name' => 'Fox Soccer Channel Premier',
+        'channel_id' => 'fox-soccer-prem',
+    ]);
+    $channelA = candidateReviewChannel('ESPN News Plus HD');
+    $channelB = candidateReviewChannel('Fox Soccer Channel Premier HD');
+
+    $matcher = new SimilaritySearchService;
+    $directA = $matcher->findEpgChannelCandidates($channelA, $this->epg, removeQualityIndicators: true);
+    $directB = $matcher->findEpgChannelCandidates($channelB, $this->epg, removeQualityIndicators: true);
+
+    $unionTerms = collect([$channelA, $channelB])
+        ->flatMap(fn (Channel $c): array => $matcher->searchTermsFor(channel: $c, cleanedTitle: $c->title_custom ?? $c->title, cleanedName: $c->name_custom ?? $c->name))
+        ->unique()
+        ->values()
+        ->all();
+    $prefetched = $matcher->loadEpgCandidates($this->epg, $unionTerms);
+
+    $batchedA = $matcher->findEpgChannelCandidates(channel: $channelA, epg: $this->epg, removeQualityIndicators: true, prefetchedCandidates: $prefetched);
+    $batchedB = $matcher->findEpgChannelCandidates(channel: $channelB, epg: $this->epg, removeQualityIndicators: true, prefetchedCandidates: $prefetched);
+
+    expect($batchedA['candidates'][0]['epg_channel_id'])->toBe($directA['candidates'][0]['epg_channel_id'])
+        ->and($batchedB['candidates'][0]['epg_channel_id'])->toBe($directB['candidates'][0]['epg_channel_id'])
+        ->and($batchedA['automatic_match']?->id)->toBe($directA['automatic_match']?->id)
+        ->and($batchedB['automatic_match']?->id)->toBe($directB['automatic_match']?->id);
+});
+
 it('shows candidate details and applies only an explicit valid confirmation', function () {
     $this->actingAs($this->user);
     $candidate = candidateReviewEpgChannel([
