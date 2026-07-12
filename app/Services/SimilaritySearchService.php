@@ -6,15 +6,40 @@ use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Service to handle similarity search between channels and EPG channels.
  */
 class SimilaritySearchService
 {
-    private const ORIGINAL_SEARCH_PREFIX_LENGTH = 10;
+    private const MAX_DATABASE_CANDIDATES = 250;
+
+    private const MAX_REVIEW_CANDIDATES = 3;
+
+    private const MIN_REVIEW_CONFIDENCE = 40;
+
+    private const PREFERRED_REGION_DISTANCE_BONUS = 15;
+
+    /** @var array<int, string> */
+    private const DEFAULT_QUALITY_INDICATORS = [
+        'hd',
+        'fhd',
+        'uhd',
+        '4k',
+        '8k',
+        'sd',
+        '720p',
+        '1080p',
+        '1080i',
+        '2160p',
+        'hdraw',
+        'sdraw',
+        'hevc',
+        'h264',
+        'h265',
+    ];
 
     private int $bestFuzzyThreshold = 8;
 
@@ -32,7 +57,7 @@ class SimilaritySearchService
         'television',
         'east',
         'west',
-        // Country/region codes — all common IPTV playlist prefixes
+        // Country/region codes common in IPTV playlist prefixes
         'us',
         'usa',
         'ca',
@@ -83,25 +108,31 @@ class SimilaritySearchService
     ];
 
     /** @var array<int, string> */
-    private array $qualityIndicators = [
-        'hd',
-        'fhd',
-        'uhd',
-        '4k',
-        '8k',
-        'sd',
-        '720p',
-        '1080p',
-        '1080i',
-        '2160p',
-        'hdraw',
-        'sdraw',
-        'hevc',
-        'h264',
-        'h265',
-    ];
+    private array $qualityIndicators = self::DEFAULT_QUALITY_INDICATORS;
 
     private bool $removeQualityIndicators = false;
+
+    /**
+     * Apply the map's configured prefix or regex cleanup before any matching strategy runs.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    public function cleanNameForMatching(?string $value, array $settings): string
+    {
+        $value = trim($this->sanitizeUtf8($value) ?? '');
+
+        foreach ($settings['exclude_prefixes'] ?? [] as $pattern) {
+            if ($settings['use_regex'] ?? false) {
+                $delimiter = '/';
+                $finalPattern = $delimiter.str_replace($delimiter, '\\'.$delimiter, $pattern).$delimiter.'u';
+                $value = preg_replace($finalPattern, '', $value) ?? $value;
+            } elseif (str_starts_with($value, $pattern)) {
+                $value = substr($value, strlen($pattern));
+            }
+        }
+
+        return trim($value);
+    }
 
     /**
      * Sanitizes UTF-8 encoding in strings to prevent PostgreSQL errors.
@@ -136,231 +167,328 @@ class SimilaritySearchService
         ?array $customQualityIndicators = null,
         ?string $cleanedTitle = null,
         ?string $cleanedName = null,
+        ?Collection $prefetchedCandidates = null,
     ): ?EpgChannel {
+        return $this->findEpgChannelCandidates(
+            channel: $channel,
+            epg: $epg,
+            removeQualityIndicators: $removeQualityIndicators,
+            similarityThreshold: $similarityThreshold,
+            fuzzyMaxDistance: $fuzzyMaxDistance,
+            exactMatchDistance: $exactMatchDistance,
+            customQualityIndicators: $customQualityIndicators,
+            cleanedTitle: $cleanedTitle,
+            cleanedName: $cleanedName,
+            prefetchedCandidates: $prefetchedCandidates,
+        )['automatic_match'];
+    }
+
+    /**
+     * Compute the ordered search terms used to filter EPG candidates.
+     *
+     * Exposed so batch callers (Filament review UI, Copilot preview) can union
+     * the terms across many channels and preload matching EPG rows in a single
+     * LIKE scan instead of one per channel — a meaningful win on very large
+     * EPG sources.
+     *
+     * @return list<string>
+     */
+    public function searchTermsFor(Channel $channel, ?string $cleanedTitle = null, ?string $cleanedName = null): array
+    {
+        $title = $this->sanitizeUtf8($cleanedTitle ?? $channel->title_custom ?? $channel->title);
+        $name = $this->sanitizeUtf8($cleanedName ?? $channel->name_custom ?? $channel->name);
+        $normalized = $this->normalizeChannelName(trim($title ?: $name));
+
+        if (! $normalized || mb_strlen($normalized, 'UTF-8') < $this->minChannelLength) {
+            return [];
+        }
+
+        return collect(explode(' ', $normalized))
+            ->filter(fn (string $term): bool => mb_strlen($term, 'UTF-8') >= $this->minChannelLength)
+            ->sortByDesc(fn (string $term): int => mb_strlen($term, 'UTF-8'))
+            ->take(4)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Load all EPG candidate rows that match any of the supplied search terms.
+     *
+     * Intended for batch flows that iterate many channels against the same EPG
+     * source: pass the union of every channel's searchTermsFor() result, then
+     * feed the returned collection to findEpgChannelCandidates() via the
+     * $prefetchedCandidates argument to skip per-channel DB round-trips.
+     *
+     * @param  list<string>  $unionTerms
+     * @return Collection<int, EpgChannel>
+     */
+    public function loadEpgCandidates(Epg $epg, array $unionTerms): Collection
+    {
+        $unionTerms = collect($unionTerms)
+            ->filter(fn (string $term): bool => mb_strlen($term, 'UTF-8') >= $this->minChannelLength)
+            ->unique()
+            ->take(200)
+            ->values()
+            ->all();
+
+        if ($unionTerms === []) {
+            return $epg->channels()->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')->get();
+        }
+
+        return $epg->channels()
+            ->where(function (Builder $query) use ($unionTerms): void {
+                foreach ($unionTerms as $term) {
+                    $likeTerm = $this->likePattern($term);
+                    $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                    $this->addJsonSearchCondition($query, $term);
+                }
+            })
+            ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->get();
+    }
+
+    /**
+     * Return the automatic match decision and explainable review candidates from the same scoring pass.
+     *
+     * `$prefetchedCandidates` lets callers reuse one shared candidate set
+     * across many channels (see loadEpgCandidates). When null, the service
+     * performs its own bounded LIKE scan against the EPG source.
+     *
+     * @param  array<int, string>|null  $customQualityIndicators
+     * @return array{
+     *     original_name: string,
+     *     normalized_name: string,
+     *     automatic_match: EpgChannel|null,
+     *     candidates: list<array{
+     *         epg_channel_id: int,
+     *         display_name: string,
+     *         matched_value: string,
+     *         normalized_value: string,
+     *         confidence: int,
+     *         reason: string
+     *     }>,
+     *     explanation: string
+     * }
+     */
+    public function findEpgChannelCandidates(
+        Channel $channel,
+        ?Epg $epg = null,
+        bool $removeQualityIndicators = false,
+        int $similarityThreshold = 70,
+        int $fuzzyMaxDistance = 25,
+        int $exactMatchDistance = 8,
+        ?array $customQualityIndicators = null,
+        ?string $cleanedTitle = null,
+        ?string $cleanedName = null,
+        ?Collection $prefetchedCandidates = null,
+    ): array {
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
         $this->bestFuzzyThreshold = $exactMatchDistance;
 
-        if ($customQualityIndicators !== null) {
-            $this->qualityIndicators = array_map('mb_strtolower', $customQualityIndicators);
-        }
+        $this->qualityIndicators = array_map(
+            'mb_strtolower',
+            $customQualityIndicators ?? self::DEFAULT_QUALITY_INDICATORS,
+        );
 
-        $debug = false; // config('app.debug');
-        $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
-
-        // Sanitize UTF-8 encoding immediately to prevent PostgreSQL errors.
-        // Callers that already stripped configured prefixes/patterns from the
-        // channel attributes pass the cleaned values so the similarity search
-        // works on the same names as the exact-match steps.
         $title = $this->sanitizeUtf8($cleanedTitle ?? $channel->title_custom ?? $channel->title);
         $name = $this->sanitizeUtf8($cleanedName ?? $channel->name_custom ?? $channel->name);
         $fallbackName = trim($title ?: $name);
         $normalizedChan = $this->normalizeChannelName($fallbackName);
 
-        if (! $normalizedChan || strlen($normalizedChan) < $this->minChannelLength) {
-            if ($debug) {
-                Log::debug("Channel {$channel->id} '{$fallbackName}' => empty or too short after normalization, skipping");
-            }
+        $emptyResult = [
+            'original_name' => $fallbackName,
+            'normalized_name' => $normalizedChan,
+            'automatic_match' => null,
+            'candidates' => [],
+            'explanation' => __('No candidate had enough normalized name or identifier overlap.'),
+        ];
 
-            return null;
+        if (! $epg || ! $normalizedChan || mb_strlen($normalizedChan, 'UTF-8') < $this->minChannelLength) {
+            return $emptyResult;
         }
 
-        // Step 1: Try to find exact normalized matches first (highest priority)
-        // Normalize the search term once (remove spaces, dashes, underscores)
-        $normalizedSearch = mb_strtolower(str_replace([' ', '-', '_'], '', $normalizedChan), 'UTF-8');
+        $searchTerms = collect(explode(' ', $normalizedChan))
+            ->filter(fn (string $term): bool => mb_strlen($term, 'UTF-8') >= $this->minChannelLength)
+            ->sortByDesc(fn (string $term): int => mb_strlen($term, 'UTF-8'))
+            ->take(4)
+            ->values();
 
-        // Find candidates that could match when normalized
-        // Use LIKE with wildcards to find potential matches, then verify in PHP
-        $exactMatchCandidates = $epg->channels()
-            ->where(function ($query) use ($normalizedChan) {
-                // Search for the normalized term in channel_id, name, or display_name
-                // This allows database to use indexes
-                $query->whereRaw('LOWER(channel_id) LIKE ?', ["%{$normalizedChan}%"])
-                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$normalizedChan}%"])
-                    ->orWhereRaw('LOWER(display_name) LIKE ?', ["%{$normalizedChan}%"]);
-            })
-            ->select('id', 'channel_id', 'name', 'display_name')
-            ->get();
+        if ($searchTerms->isEmpty()) {
+            return $emptyResult;
+        }
 
-        // Verify exact match after normalization in PHP (faster than DB REPLACE operations)
-        // Both sides must go through the same normalizeChannelName() pipeline (including stop-word
-        // removal) before space-stripping, otherwise names like "USA FOX 8 WGHP GREENSBORO" will
-        // never equal "fox8wghpgreensboro" because the EPG side still carries the "usa" prefix.
-        foreach ($exactMatchCandidates as $candidate) {
-            $normalizedChannelId = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->channel_id ?? '')), 'UTF-8');
-            $normalizedName = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->name ?? '')), 'UTF-8');
-            $normalizedDisplayName = mb_strtolower(str_replace([' ', '-', '_'], '', $this->normalizeChannelName($candidate->display_name ?? '')), 'UTF-8');
+        if ($prefetchedCandidates !== null) {
+            $databaseCandidates = $prefetchedCandidates;
+        } else {
+            [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all());
 
-            if (
-                $normalizedSearch === $normalizedChannelId ||
-                $normalizedSearch === $normalizedName ||
-                $normalizedSearch === $normalizedDisplayName
-            ) {
-                if ($debug) {
-                    Log::debug("Channel {$channel->id} '{$fallbackName}' => EXACT normalized match with EPG channel_id={$candidate->channel_id}");
+            $databaseCandidates = $epg->channels()
+                ->where(function (Builder $query) use ($searchTerms): void {
+                    foreach ($searchTerms as $term) {
+                        $likeTerm = $this->likePattern($term);
+                        $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                            ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                            ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                        $this->addJsonSearchCondition($query, $term);
+                    }
+                })
+                ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+                ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
+                ->orderBy('id')
+                ->limit(self::MAX_DATABASE_CANDIDATES)
+                ->get();
+        }
+
+        $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
+        $scoredCandidates = [];
+
+        foreach ($databaseCandidates as $epgChannel) {
+            $values = [
+                ['field' => 'channel ID', 'value' => $epgChannel->channel_id],
+                ['field' => 'name', 'value' => $epgChannel->name],
+                ['field' => 'display name', 'value' => $epgChannel->display_name],
+            ];
+
+            foreach ($epgChannel->additional_display_names ?? [] as $additionalDisplayName) {
+                $values[] = ['field' => 'alternate display name', 'value' => $additionalDisplayName];
+            }
+
+            // The previous implementation also compared raw lowercased names
+            // (channel fallback vs EPG name/channel_id) as a tiebreaker. It's
+            // intentionally omitted here: normalizeChannelName strips stop
+            // words and quality indicators symmetrically on both sides, so
+            // the raw comparison rarely beat the normalized one, and the new
+            // best-of-fields pass plus cosine/containment fallbacks cover the
+            // remaining soft-match space more consistently.
+            $bestComparison = null;
+            foreach ($values as $value) {
+                $comparison = $this->compareNormalizedValues($normalizedChan, $value['value'], $value['field']);
+                if ($comparison && ($bestComparison === null || $comparison['confidence'] > $bestComparison['confidence'])) {
+                    $bestComparison = $comparison;
                 }
-
-                return $candidate;
             }
-        }
 
-        // Step 2: Fetch EPG channels using fuzzy matching (more restrictive)
-        // Only fetch candidates that have significant overlap with the search term
-        $epgChannels = $epg->channels()
-            ->where(function ($query) use ($normalizedChan, $fallbackName) {
-                // Use LIKE with at least 3 characters for better filtering
-                // Also try the original fallback name for cases where normalization is too aggressive
-                $searchTerm = mb_strlen($normalizedChan, 'UTF-8') >= 5 ? mb_substr($normalizedChan, 0, 5, 'UTF-8') : $normalizedChan;
-                $originalSearch = mb_strtolower(mb_substr($fallbackName, 0, min(self::ORIGINAL_SEARCH_PREFIX_LENGTH, mb_strlen($fallbackName, 'UTF-8')), 'UTF-8'), 'UTF-8');
-
-                // Optimized query: search each column once with both search terms combined
-                $query->where(function ($subQuery) use ($searchTerm, $originalSearch) {
-                    $subQuery->whereRaw('LOWER(channel_id) LIKE ? OR LOWER(channel_id) LIKE ?', ["%$searchTerm%", "%$originalSearch%"])
-                        ->orWhereRaw('LOWER(name) LIKE ? OR LOWER(name) LIKE ?', ["%$searchTerm%", "%$originalSearch%"])
-                        ->orWhereRaw('LOWER(display_name) LIKE ? OR LOWER(display_name) LIKE ?', ["%$searchTerm%", "%$originalSearch%"]);
-                });
-
-                // Add search for additional_display_names JSONB column
-                $this->addJsonSearchCondition($query, $searchTerm);
-            });
-
-        $bestScore = PHP_INT_MAX;
-        $bestMatch = null;
-        $bestEpgForEmbedding = null;
-        $candidates = [];
-        $hasEpgChannels = false;
-
-        /**
-         * Multi-Strategy Matching for Better Accuracy
-         */
-        foreach ($epgChannels->cursor() as $epgChannel) {
-            $hasEpgChannels = true;
-            // Try matching with both normalized and less-normalized versions
-            $normalizedEpg = empty($epgChannel->name)
-                ? $this->normalizeChannelName($epgChannel->channel_id)
-                : $this->normalizeChannelName($epgChannel->name);
-            if (! $normalizedEpg) {
+            if (! $bestComparison || $bestComparison['confidence'] < self::MIN_REVIEW_CONFIDENCE) {
                 continue;
             }
 
-            // Also try with less aggressive normalization (keep more info)
-            $epgNameOriginal = mb_strtolower(trim($epgChannel->name ?? $epgChannel->channel_id), 'UTF-8');
-            $channelNameOriginal = mb_strtolower(trim($fallbackName), 'UTF-8');
+            $inPreferredRegion = $regionCode && str_contains(
+                mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8'),
+                $regionCode,
+            );
 
-            // Calculate fuzzy similarity with normalized names
-            $score = levenshtein($normalizedChan, $normalizedEpg);
-
-            // Also calculate with original names (can be more accurate for similar channels)
-            $scoreOriginal = levenshtein($channelNameOriginal, $epgNameOriginal);
-
-            // Use the better of the two scores
-            $finalScore = min($score, $scoreOriginal);
-
-            // Calculate similarity percentage for better filtering
-            $maxLength = max(mb_strlen($normalizedChan, 'UTF-8'), mb_strlen($normalizedEpg, 'UTF-8'));
-            $similarityPercentage = $maxLength > 0 ? (1 - ($finalScore / $maxLength)) * 100 : 0;
-
-            // Apply region-based bonus (convert to penalty for Levenshtein)
-            $regionBonus = 0;
-            if ($regionCode) {
-                $haystack = mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8');
-                if (mb_stripos($haystack, $regionCode, 0, 'UTF-8') !== false) {
-                    $finalScore = max(0, $finalScore - 15); // Subtract to improve the match
-                    $regionBonus = 15;
-                }
+            if ($inPreferredRegion) {
+                // Restore the previous auto-match behavior where preferred_local
+                // shifted borderline candidates into the automatic-match band:
+                // shave distance by the configured bonus so the meetsDistanceRule
+                // gate can fire, in addition to nudging the display confidence.
+                $bestComparison['distance'] = max(
+                    0,
+                    $bestComparison['distance'] - self::PREFERRED_REGION_DISTANCE_BONUS,
+                );
+                $bestComparison['confidence'] = min(100, $bestComparison['confidence'] + 5);
+                $bestComparison['reason'] .= __('; preferred region');
             }
 
-            // Store candidate with metadata for better decision making
-            $candidates[] = [
-                'channel' => $epgChannel,
-                'score' => $finalScore,
-                'similarity' => $similarityPercentage,
-                'region_bonus' => $regionBonus,
-                'normalized_name' => $normalizedEpg,
+            $scoredCandidates[] = [
+                'model' => $epgChannel,
+                'epg_channel_id' => $epgChannel->id,
+                'display_name' => $epgChannel->display_name ?: $epgChannel->name ?: $epgChannel->channel_id,
+                ...$bestComparison,
             ];
+        }
 
-            if ($finalScore < $bestScore) {
-                $bestScore = $finalScore;
-                $bestMatch = $epgChannel;
-            }
+        usort($scoredCandidates, fn (array $first, array $second): int => [
+            $second['confidence'],
+            -$second['epg_channel_id'],
+        ] <=> [
+            $first['confidence'],
+            -$first['epg_channel_id'],
+        ]);
 
-            // Store candidate for embedding similarity if in borderline range
-            if ($finalScore >= $this->bestFuzzyThreshold && $finalScore < $this->upperFuzzyThreshold) {
-                $bestEpgForEmbedding = $epgChannel;
+        $automaticMatch = null;
+        if ($topCandidate = $scoredCandidates[0] ?? null) {
+            $meetsDistanceRule = $topCandidate['distance'] < $this->bestFuzzyThreshold
+                && $topCandidate['levenshtein_confidence'] >= max(60, $similarityThreshold);
+            $meetsWordRule = $topCandidate['distance'] >= $this->bestFuzzyThreshold
+                && $topCandidate['distance'] < $this->upperFuzzyThreshold
+                && $topCandidate['word_similarity'] >= $this->embedSimThreshold;
+
+            if ($topCandidate['is_exact'] || $meetsDistanceRule || $meetsWordRule) {
+                $automaticMatch = $topCandidate['model'];
             }
         }
 
-        // If the query returned no EPG channels at all, short-circuit here
-        if (! $hasEpgChannels) {
-            if ($debug) {
-                Log::debug("Channel {$channel->id} '{$fallbackName}' => no EPG channels found, skipping");
-            }
+        $reviewCandidates = array_map(
+            fn (array $candidate): array => collect($candidate)
+                ->except(['model', 'distance', 'levenshtein_confidence', 'word_similarity', 'is_exact'])
+                ->all(),
+            array_slice($scoredCandidates, 0, self::MAX_REVIEW_CANDIDATES),
+        );
 
+        return [
+            'original_name' => $fallbackName,
+            'normalized_name' => $normalizedChan,
+            'automatic_match' => $automaticMatch,
+            'candidates' => $reviewCandidates,
+            'explanation' => $reviewCandidates === []
+                ? __('No candidate had enough normalized name or identifier overlap.')
+                : __('Candidates are ranked from the selected EPG source; confirm borderline matches explicitly.'),
+        ];
+    }
+
+    /**
+     * @return array{matched_value: string, normalized_value: string, confidence: int, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, is_exact: bool}|null
+     */
+    private function compareNormalizedValues(string $normalizedChannel, mixed $candidateValue, string $field): ?array
+    {
+        if (! is_string($candidateValue) || trim($candidateValue) === '') {
             return null;
         }
 
-        // Filter out poor matches - use configurable similarity threshold
-        // This prevents false positives like "Spiegel TV HD" matching "Spiegel Geschichte SD"
-        $candidates = array_filter($candidates, function ($candidate) use ($similarityThreshold) {
-            return $candidate['similarity'] >= $similarityThreshold;
-        });
-
-        // Sort candidates by score (lower is better), then by similarity (higher is better)
-        usort($candidates, function ($a, $b) {
-            // First compare by score with epsilon for float comparison
-            $scoreDiff = $a['score'] - $b['score'];
-            if (abs($scoreDiff) > 0.001) {
-                return $scoreDiff > 0 ? 1 : -1;
-            }
-
-            // If scores are equal (within epsilon), prefer higher similarity
-            return (int) $b['similarity'] <=> (int) $a['similarity'];
-        });
-
-        // If we have a best match with Levenshtein < bestFuzzyThreshold and good similarity, return it
-        if ($bestMatch && $bestScore < $this->bestFuzzyThreshold) {
-            // Double check that this is actually a good match
-            if (! empty($candidates) && $candidates[0]['similarity'] >= 60) {
-                if ($debug) {
-                    Log::debug("Channel {$channel->id} '{$fallbackName}' matched with EPG channel_id={$bestMatch->channel_id} (score={$bestScore}, similarity={$candidates[0]['similarity']}%)");
-                }
-
-                return $bestMatch;
-            }
+        $normalizedCandidate = $this->normalizeChannelName($candidateValue);
+        if ($normalizedCandidate === '') {
+            return null;
         }
 
-        // ** Cosine Similarity for Borderline Cases **
-        // Run this even when the candidate was filtered out by the Levenshtein similarity threshold,
-        // because word-order transpositions (e.g. "15 CBS WANE" vs "CBS 15 WANE") score poorly on
-        // edit distance but identically on a word-frequency cosine — which is the whole point of this
-        // fallback.
-        if ($bestEpgForEmbedding) {
-            $chanVector = $this->textToVector($normalizedChan);
-            $epgVector = $this->textToVector($this->normalizeChannelName($bestEpgForEmbedding->name));
-            if (! empty($chanVector) && ! empty($epgVector)) {
-                $similarity = $this->cosineSimilarity($chanVector, $epgVector);
+        $compactChannel = str_replace(' ', '', $normalizedChannel);
+        $compactCandidate = str_replace(' ', '', $normalizedCandidate);
+        $distance = levenshtein($normalizedChannel, $normalizedCandidate);
+        $maxLength = max(mb_strlen($normalizedChannel, 'UTF-8'), mb_strlen($normalizedCandidate, 'UTF-8'));
+        $levenshteinConfidence = $maxLength > 0 ? max(0, (int) round((1 - ($distance / $maxLength)) * 100)) : 0;
+        $wordSimilarity = $this->cosineSimilarity(
+            $this->textToVector($normalizedChannel),
+            $this->textToVector($normalizedCandidate),
+        );
+        $confidence = $levenshteinConfidence;
+        $reason = __('Similar normalized :field', ['field' => $field]);
+        $isExact = $compactChannel === $compactCandidate;
 
-                if ($similarity >= $this->embedSimThreshold) {
-                    if ($debug) {
-                        Log::debug("Channel {$channel->id} '{$fallbackName}' matched via cosine similarity with channel_id={$bestEpgForEmbedding->channel_id} (cos-sim={$similarity})");
-                    }
-
-                    return $bestEpgForEmbedding;
-                } else {
-                    if ($debug) {
-                        Log::debug("Channel {$channel->id} '{$fallbackName}' cosine-similarity with '{$bestEpgForEmbedding->name}' = {$similarity} (rejected, below threshold)");
-                    }
-                }
-            }
+        if ($isExact) {
+            $confidence = 100;
+            $reason = __('Exact normalized :field', ['field' => $field]);
+        } elseif ($wordSimilarity >= $this->embedSimThreshold) {
+            $confidence = max($confidence, (int) round($wordSimilarity * 100));
+            $reason = __('Same normalized words via :field', ['field' => $field]);
+        } elseif (min(strlen($compactChannel), strlen($compactCandidate)) >= 4
+            && (str_contains($compactChannel, $compactCandidate) || str_contains($compactCandidate, $compactChannel))) {
+            $confidence = max($confidence, 80);
+            $reason = __('Strong normalized containment via :field', ['field' => $field]);
         }
 
-        // If we have candidates, log why we didn't match
-        if ($debug && ! empty($candidates)) {
-            $topCandidate = $candidates[0];
-            Log::debug("Channel {$channel->id} '{$fallbackName}' => No match found. Best candidate: '{$topCandidate['channel']->channel_id}' (score={$topCandidate['score']}, similarity={$topCandidate['similarity']}%)");
-        }
-
-        return null;
+        return [
+            'matched_value' => $candidateValue,
+            'normalized_value' => $normalizedCandidate,
+            'confidence' => $confidence,
+            'reason' => $reason,
+            'distance' => $distance,
+            'levenshtein_confidence' => $levenshteinConfidence,
+            'word_similarity' => $wordSimilarity,
+            'is_exact' => $isExact,
+        ];
     }
 
     /**
@@ -441,42 +569,58 @@ class SimilaritySearchService
      */
     private function addJsonSearchCondition(Builder $query, string $normalizedChan): void
     {
-        $driver = DB::connection()->getConfig('driver');
+        [$condition, $bindings] = $this->jsonSearchCondition($normalizedChan);
 
-        switch ($driver) {
-            case 'pgsql':
-                // PostgreSQL: Use jsonb_array_elements_text to search through array elements
-                $query->orWhereRaw(
-                    'EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE LOWER(elem) LIKE ?)',
-                    ["%$normalizedChan%"]
-                );
-                break;
+        $query->orWhereRaw($condition, $bindings);
+    }
 
-            case 'mysql':
-            case 'mariadb':
-                // MySQL/MariaDB: Use JSON_UNQUOTE and JSON_SEARCH for array search
-                $query->orWhereRaw(
-                    'JSON_SEARCH(LOWER(JSON_UNQUOTE(additional_display_names)), "one", ?) IS NOT NULL',
-                    ["%$normalizedChan%"]
-                );
-                break;
+    /**
+     * @param  list<string>  $searchTerms
+     * @return array{string, list<string>}
+     */
+    private function candidateRelevanceOrder(array $searchTerms): array
+    {
+        $expressions = [];
+        $bindings = [];
 
-            case 'sqlite':
-                // SQLite: Use json_each to iterate through array elements
-                $query->orWhereRaw(
-                    'EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE LOWER(json_each.value) LIKE ?)',
-                    ["%$normalizedChan%"]
-                );
-                break;
-
-            default:
-                // Fallback: Use Laravel's JSON where clause (less efficient but universal)
-                // This converts the array to string and searches within it
-                $query->orWhere(function ($subQuery) use ($normalizedChan) {
-                    $subQuery->whereNotNull('additional_display_names')
-                        ->whereRaw('LOWER(CAST(additional_display_names AS TEXT)) LIKE ?', ["%$normalizedChan%"]);
-                });
-                break;
+        foreach ($searchTerms as $term) {
+            $likeTerm = $this->likePattern($term);
+            [$jsonCondition, $jsonBindings] = $this->jsonSearchCondition($term);
+            $expressions[] = "CASE WHEN (LOWER(COALESCE(channel_id, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(display_name, '')) LIKE ? ESCAPE '!' OR {$jsonCondition}) THEN 1 ELSE 0 END";
+            array_push($bindings, $likeTerm, $likeTerm, $likeTerm, ...$jsonBindings);
         }
+
+        return [implode(' + ', $expressions), $bindings];
+    }
+
+    private function likePattern(string $term): string
+    {
+        return '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
+    }
+
+    /** @return array{string, list<string>} */
+    private function jsonSearchCondition(string $term): array
+    {
+        $driver = DB::connection()->getConfig('driver');
+        $likeTerm = $this->likePattern($term);
+
+        return match ($driver) {
+            'pgsql' => [
+                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE LOWER(elem) LIKE ? ESCAPE '!')",
+                [$likeTerm],
+            ],
+            'mysql', 'mariadb' => [
+                "JSON_SEARCH(LOWER(JSON_UNQUOTE(additional_display_names)), 'one', ?, '!') IS NOT NULL",
+                [$likeTerm],
+            ],
+            'sqlite' => [
+                "EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE LOWER(json_each.value) LIKE ? ESCAPE '!')",
+                [$likeTerm],
+            ],
+            default => [
+                "LOWER(CAST(additional_display_names AS TEXT)) LIKE ? ESCAPE '!'",
+                [$likeTerm],
+            ],
+        };
     }
 }

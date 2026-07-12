@@ -185,6 +185,10 @@ return [
         '1cf9f415fe0d',
 
         // ── SQL Injection — validated before interpolation ───────────────────
+        // SimilaritySearchService: $relevanceSql is assembled only from fixed
+        // database-driver templates; search terms use escaped ? bindings.
+        'b5bc019c1883',
+
         // SortService: $direction is always 'ASC'|'DESC' (ternary-validated),
         // $lowerOrderByColumn comes from a match() with explicit safe cases,
         // $expression is a hardcoded SQL literal (never user input),
@@ -345,6 +349,7 @@ return [
         'a6558982e4e4', // PlaylistAuthPivot
         'b06385c305da', // AedProfile
         'eadad9842f9e', // TvNotification
+        '0113919ad8de', // EpgMapCandidate
     ],
 
     /*

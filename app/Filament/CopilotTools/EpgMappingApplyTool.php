@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\CopilotTools;
 
 use App\Models\Channel;
+use App\Models\Epg;
 use App\Models\EpgChannel;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -23,13 +24,16 @@ class EpgMappingApplyTool extends BaseTool
 {
     public function description(): Stringable|string
     {
-        return 'Apply confirmed EPG channel mappings to the database. Pass a JSON array of {"channel_id": int, "epg_channel_id": int} pairs. Only call this after presenting the mapping plan to the user and receiving explicit approval. Each mapping sets Channel.epg_channel_id to the matched EpgChannel.id.';
+        return 'Apply confirmed EPG channel mappings from one selected EPG source. Pass epg_id and a JSON array of {"channel_id": int, "epg_channel_id": int} pairs. Only call this after presenting the mapping plan and receiving explicit approval. Existing mappings are never replaced.';
     }
 
     /** @return array<string, mixed> */
     public function schema(JsonSchema $schema): array
     {
         return [
+            'epg_id' => $schema->integer()
+                ->description('The selected EPG source ID used to generate these candidates.')
+                ->required(),
             'mappings' => $schema->string()
                 ->description('JSON array of confirmed mappings. Format: [{"channel_id": 123, "epg_channel_id": 456}, {"channel_id": 124, "epg_channel_id": 789}]')
                 ->required(),
@@ -39,6 +43,11 @@ class EpgMappingApplyTool extends BaseTool
     public function handle(Request $request): Stringable|string
     {
         $raw = trim((string) ($request['mappings'] ?? ''));
+        $epgId = (int) ($request['epg_id'] ?? 0);
+
+        if (! Epg::whereKey($epgId)->where('user_id', auth()->id())->exists()) {
+            return "EPG source #{$epgId} not found.";
+        }
 
         if ($raw === '') {
             return 'No mappings provided.';
@@ -66,12 +75,15 @@ class EpgMappingApplyTool extends BaseTool
         // Fetch valid IDs in two queries rather than validating one-by-one.
         // Channel IDs are scoped to the current user to prevent cross-user manipulation.
         $validChannelIds = Channel::where('user_id', auth()->id())
+            ->whereNull('epg_channel_id')
             ->whereIn('id', $channelIds)
             ->pluck('id')
             ->flip()
             ->all();
 
-        $validEpgChannelIds = EpgChannel::whereIn('id', $epgChannelIds)
+        $validEpgChannelIds = EpgChannel::where('user_id', auth()->id())
+            ->where('epg_id', $epgId)
+            ->whereIn('id', $epgChannelIds)
             ->pluck('id')
             ->flip()
             ->all();
@@ -84,13 +96,13 @@ class EpgMappingApplyTool extends BaseTool
             $epgChannelId = (int) $mapping['epg_channel_id'];
 
             if (! isset($validChannelIds[$channelId])) {
-                $skipped[] = "Channel #{$channelId} not found — skipped.";
+                $skipped[] = "Channel #{$channelId} not found or already mapped - skipped.";
 
                 continue;
             }
 
             if (! isset($validEpgChannelIds[$epgChannelId])) {
-                $skipped[] = "EpgChannel #{$epgChannelId} not found — skipped (channel #{$channelId} left unmapped).";
+                $skipped[] = "EpgChannel #{$epgChannelId} is not in the selected EPG source - skipped (channel #{$channelId} left unmapped).";
 
                 continue;
             }
@@ -117,11 +129,10 @@ class EpgMappingApplyTool extends BaseTool
 
         DB::transaction(function () use ($groupedToApply, &$applied): void {
             foreach ($groupedToApply as $epgChannelId => $channelIds) {
-                Channel::whereIn('id', $channelIds)
+                $applied += Channel::whereIn('id', $channelIds)
                     ->where('user_id', auth()->id())
+                    ->whereNull('epg_channel_id')
                     ->update(['epg_channel_id' => $epgChannelId]);
-
-                $applied += count($channelIds);
             }
         });
 
