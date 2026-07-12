@@ -6,16 +6,12 @@ use App\Enums\Status;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EpgMap extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that should be cast to native types.
-     *
-     * @var array
-     */
     protected $casts = [
         'id' => 'integer',
         'processing' => 'boolean',
@@ -38,5 +34,15 @@ class EpgMap extends Model
     public function epg(): BelongsTo
     {
         return $this->belongsTo(Epg::class);
+    }
+
+    public function playlist(): BelongsTo
+    {
+        return $this->belongsTo(Playlist::class);
+    }
+
+    public function candidates(): HasMany
+    {
+        return $this->hasMany(EpgMapCandidate::class);
     }
 }

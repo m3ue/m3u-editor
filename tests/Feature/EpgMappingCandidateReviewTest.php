@@ -1,7 +1,11 @@
 <?php
 
+use App\Enums\EpgMapCandidateStatus;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
+use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
+use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
+use App\Jobs\BuildEpgMapCandidatesJob;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
@@ -311,17 +315,21 @@ it('shows candidate details and applies only an explicit valid confirmation', fu
         'settings' => ['remove_quality_indicators' => true],
     ]);
 
-    Livewire::test(ListEpgMaps::class)
-        ->mountAction(TestAction::make('reviewCandidates')->table($map))
-        ->assertMountedActionModalSee('Community XMLTV')
-        ->assertMountedActionModalSee('US | Sports | ESPN News FHD')
-        ->assertMountedActionModalSee('sports espn news')
-        ->assertMountedActionModalSee('ESPNews')
-        ->fillForm(['mappings' => [$channel->id => $candidate->id]])
-        ->callMountedAction()
-        ->assertHasNoFormErrors();
+    // Build candidate rows first; the View page hosts the relation manager.
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+    $row = $map->candidates()->first();
 
-    expect($channel->refresh()->epg_channel_id)->toBe($candidate->id);
+    Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$row])
+        ->callAction(TestAction::make('apply')->table($row))
+        ->assertNotified();
+
+    expect($channel->refresh()->epg_channel_id)->toBe($candidate->id)
+        ->and($row->refresh()->status)->toBe(EpgMapCandidateStatus::Applied);
 });
 
 it('rejects cross-source candidates and never replaces an existing explicit mapping', function () {
@@ -344,16 +352,19 @@ it('rejects cross-source candidates and never replaces an existing explicit mapp
         'settings' => [],
     ]);
 
-    Livewire::test(ListEpgMaps::class)
-        ->callAction(TestAction::make('reviewCandidates')->table($map), data: [
-            'mappings' => [
-                $unmapped->id => $crossSource->id,
-                $mappedChannel->id => $crossSource->id,
-            ],
-        ]);
+    // Build candidate rows — the cross-source channel must NEVER appear as a
+    // candidate, since the build queries against the selected EPG only.
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+    $rows = $map->candidates()->get();
+    foreach ($rows as $row) {
+        expect($row->epg_channel_id)->not->toBe($crossSource->id);
+    }
 
-    expect($unmapped->refresh()->epg_channel_id)->toBeNull()
-        ->and($mappedChannel->refresh()->epg_channel_id)->toBe($existing->id);
+    // Also confirm the existing mapping remains untouched; the build only
+    // selected unresolved channels, so the mapped channel has no row.
+    expect($rows->firstWhere('channel_id', $mappedChannel->id))->toBeNull();
+    expect($mappedChannel->refresh()->epg_channel_id)->toBe($existing->id);
+    expect($unmapped->refresh()->epg_channel_id)->toBeNull();
 });
 
 it('does not expose candidate review for an epg source owned by another user', function () {
@@ -368,6 +379,9 @@ it('does not expose candidate review for an epg source owned by another user', f
         'settings' => [],
     ]);
 
+    // REVIEW on the list table is hidden because the EPG is owned by another
+    // user — relation manager still mounts but its actions are gated by
+    // ownerMatchesAuth/ canReview.
     Livewire::test(ListEpgMaps::class)
         ->assertActionHidden(TestAction::make('reviewCandidates')->table($map));
 });
