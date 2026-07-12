@@ -7,7 +7,6 @@ use App\Models\Channel;
 use App\Models\EpgMap;
 use App\Services\SimilaritySearchService;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -36,9 +35,32 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
         if (! $map || ! $map->epg || ! $map->playlist_id) {
             Log::info("BuildEpgMapCandidatesJob skipped: map {$this->epgMapId} is no longer reviewable.");
 
+            // Synchronous callers may have already set this flag before
+            // dispatching — clear it so the UI doesn't spin forever.
+            $map?->update(['candidates_building' => false]);
+
             return;
         }
 
+        $map->update(['candidates_building' => true]);
+
+        try {
+            $this->build($map);
+            $map->update([
+                'candidates_building' => false,
+                'candidates_built_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            // Never leave the flag set if the job fails — otherwise the UI
+            // would spin forever.
+            $map->update(['candidates_building' => false]);
+
+            throw $e;
+        }
+    }
+
+    private function build(EpgMap $map): void
+    {
         $epg = $map->epg;
         $settings = $map->settings ?? [];
 
@@ -52,8 +74,7 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
             ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
 
         if ($channels->isEmpty()) {
-            // Nothing to review — clear any stale rows from a prior run.
-            $map->candidates()->delete();
+            // Nothing to review
 
             return;
         }
@@ -124,20 +145,5 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
                 $map->candidates()->insert($chunk);
             }
         });
-    }
-
-    /**
-     * @param  Collection<int, Channel>  $channels
-     * @return array<int, string>
-     */
-    private function collectSearchTerms(Collection $channels, SimilaritySearchService $matcher, array $settings): array
-    {
-        return $channels->flatMap(
-            fn (Channel $channel): array => $matcher->searchTermsFor(
-                channel: $channel,
-                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
-                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
-            ),
-        )->unique()->values()->all();
     }
 }

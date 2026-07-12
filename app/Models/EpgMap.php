@@ -15,6 +15,7 @@ class EpgMap extends Model
     protected $casts = [
         'id' => 'integer',
         'processing' => 'boolean',
+        'candidates_building' => 'boolean',
         // 'override' => 'boolean',
         'progress' => 'float',
         'user_id' => 'integer',
@@ -24,6 +25,7 @@ class EpgMap extends Model
         'settings' => 'array',
         'channels' => 'array',
         'status' => Status::class,
+        'candidates_built_at' => 'datetime',
     ];
 
     public function user(): BelongsTo

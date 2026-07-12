@@ -80,7 +80,99 @@ it('builds candidate rows for unresolved channels via the job', function () {
         ->and($rows->firstWhere('channel_id', $channel->id)->status)->toBe(EpgMapCandidateStatus::Pending)
         ->and($rows->firstWhere('channel_id', $channel->id)->automatic_match)->toBeTrue()
         ->and($rows->firstWhere('channel_id', $unrelated->id)->epg_channel_id)->toBeNull()
-        ->and($rows->firstWhere('channel_id', $unrelated->id)->automatic_match)->toBeFalse();
+        ->and($rows->firstWhere('channel_id', $unrelated->id)->automatic_match)->toBeFalse()
+        // The flag must be cleared and the timestamp stamped after a clean run.
+        ->and($map->refresh()->candidates_building)->toBeFalse()
+        ->and($map->refresh()->candidates_built_at)->not->toBeNull();
+});
+
+it('clears candidates_building on the early-return path when the map is no longer reviewable', function () {
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+    $map->update(['candidates_building' => true]);
+
+    // Force handle() to hit the early return by deleting the playlist
+    // association, which makes $map->playlist_id null. The flag is reset
+    // before the guard clause returns.
+    $map->update(['playlist_id' => null]);
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    expect($map->refresh()->candidates_building)->toBeFalse();
+});
+
+it('exposes status tabs ordered starting with pending plus all at the end', function () {
+    $this->actingAs($this->user);
+    candidatesEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $channel = candidatesChannel('ESPN News HD');
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    $component = Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+    ]);
+
+    $tabs = $component->instance()->getTabs();
+    $keys = array_keys($tabs);
+
+    expect($keys)->toHaveCount(5)
+        ->and($keys[0])->toBe('pending')
+        ->and($keys)->toContain('applied', 'skipped', 'stale', 'all')
+        ->and(array_slice($keys, -1)[0])->toBe('all');
+});
+
+it('filters table rows by the active status tab', function () {
+    $this->actingAs($this->user);
+    $match = candidatesEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $otherMatch = candidatesEpgChannel([
+        'name' => 'Fox Soccer Channel Premier',
+        'display_name' => 'Fox Soccer Channel Premier',
+        'channel_id' => 'fox-soccer-prem',
+    ]);
+    $channelA = candidatesChannel('ESPN News HD');
+    $channelB = candidatesChannel('Fox Soccer Channel Premier HD');
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    $rows = $map->candidates()->orderBy('id')->get();
+    $rows->first()->update(['status' => EpgMapCandidateStatus::Applied, 'applied_at' => now()]);
+
+    // Pending tab is the default opening tab — only the still-pending row
+    // should be visible.
+    Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$rows->last()])
+        ->assertCanNotSeeTableRecords([$rows->first()]);
+
+    // Switching to the applied tab should expose the row we just resolved.
+    Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+        'activeTab' => 'applied',
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$rows->first()])
+        ->assertCanNotSeeTableRecords([$rows->last()]);
+
+    // And the "all" tab shows both.
+    Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+        'activeTab' => 'all',
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords($rows->all());
 });
 
 it('replaces stale rows when the build job runs again', function () {

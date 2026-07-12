@@ -7,16 +7,17 @@ use App\Models\Channel;
 use App\Models\EpgChannel;
 use App\Models\EpgMapCandidate;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Forms\Components\Radio;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -31,6 +32,31 @@ class CandidatesRelationManager extends RelationManager
     public function isReadOnly(): bool
     {
         return false;
+    }
+
+    public function getTabs(): array
+    {
+        $tabs = [];
+
+        // Pending first — it's the default landing tab for reviewers and the
+        // most actionable state. The remainder follow the enum's declared
+        // order (Applied → Skipped → Stale), with an "All" tab last.
+        foreach (EpgMapCandidateStatus::cases() as $status) {
+            $tabs[$status->value] = Tab::make($status->getLabel())
+                ->badge(fn () => $this->ownerRecord->candidates()->where('status', $status)->count())
+                ->query(fn (Builder $query) => $query->where('status', $status));
+        }
+
+        $tabs['pending']?->icon('heroicon-s-clock');
+        $tabs['stale']?->icon('heroicon-s-exclamation-triangle');
+        $tabs['applied']?->icon('heroicon-s-check-circle');
+        $tabs['skipped']?->icon('heroicon-s-minus-circle');
+
+        $tabs['all'] = Tab::make(__('All'))
+            ->badge(fn () => $this->ownerRecord->candidates()->count())
+            ->icon('heroicon-s-squares-2x2');
+
+        return $tabs;
     }
 
     public function table(Table $table): Table
@@ -138,14 +164,14 @@ class CandidatesRelationManager extends RelationManager
             ], position: RecordActionsPosition::BeforeColumns)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    Action::make('applyTop')
+                    BulkAction::make('applyTop')
                         ->label(__('Apply top candidate'))
                         ->icon('heroicon-s-check')
                         ->requiresConfirmation()
                         ->modalDescription(__('Apply the top-ranked EPG channel to every selected channel. Existing mappings are never overwritten.'))
                         ->visible(fn (): bool => static::ownerMatchesAuth($this->ownerRecord))
                         ->action(fn (Collection $records) => static::applyMany($records)),
-                    Action::make('skip')
+                    BulkAction::make('skip')
                         ->label(__('Mark as skipped'))
                         ->icon('heroicon-s-x-mark')
                         ->color('gray')
@@ -157,9 +183,6 @@ class CandidatesRelationManager extends RelationManager
                 ]),
             ])
             ->filters([
-                SelectFilter::make('status')
-                    ->label(__('Status'))
-                    ->options(collect(EpgMapCandidateStatus::cases())->mapWithKeys(fn ($case): array => [$case->value => $case->getLabel()])->all()),
                 TernaryFilter::make('automatic_match')
                     ->label(__('Automatic match')),
                 TernaryFilter::make('is_exact')
