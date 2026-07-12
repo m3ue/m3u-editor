@@ -242,7 +242,7 @@ it('discovers and validates a generated local plugin fixture', function () {
     }
 });
 
-it('resolves dynamic select options from a trusted disabled plugin', function () {
+it('accepts integer values from numeric dynamic select option keys', function () {
     $pluginId = 'select-options-'.Str::lower(Str::random(6));
     $paths = pluginReviewFixturePaths($pluginId);
     $classSegment = Str::studly(str_replace('-', ' ', $pluginId));
@@ -260,7 +260,7 @@ it('resolves dynamic select options from a trusted disabled plugin', function ()
         'class' => "AppLocalPlugins\\{$classSegment}\\Plugin",
         'capabilities' => [],
         'hooks' => [],
-        'permissions' => [],
+        'permissions' => ['queue_jobs'],
         'settings' => [[
             'id' => 'provider_source',
             'label' => 'Provider Source',
@@ -268,7 +268,35 @@ it('resolves dynamic select options from a trusted disabled plugin', function ()
             'options_provider' => 'fixture_sources',
             'depends_on' => ['country'],
         ]],
-        'actions' => [],
+        'actions' => [[
+            'id' => 'enrich',
+            'label' => 'Enrich',
+            'fields' => [
+                [
+                    'id' => 'playlist_id',
+                    'label' => 'Playlist',
+                    'type' => 'select',
+                    'options_provider' => 'fixture_sources',
+                    'required' => true,
+                ],
+                [
+                    'id' => 'playlist_ids',
+                    'label' => 'Playlists',
+                    'type' => 'select',
+                    'options_provider' => 'fixture_sources',
+                    'multiple' => true,
+                    'required' => true,
+                ],
+                [
+                    'id' => 'mode',
+                    'label' => 'Mode',
+                    'type' => 'select',
+                    'options' => [
+                        'safe' => 'Safe',
+                    ],
+                ],
+            ],
+        ]],
         'schema' => [
             'tables' => [],
         ],
@@ -297,7 +325,7 @@ class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
 {
     public function runAction(string \$action, array \$payload, PluginExecutionContext \$context): PluginActionResult
     {
-        return PluginActionResult::success('Fixture plugin action completed.');
+        return PluginActionResult::success('Fixture plugin action completed.', \$payload);
     }
 
     public function selectOptions(string \$provider, PluginSelectOptionsContext \$context): array
@@ -307,7 +335,8 @@ class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
         }
 
         return [
-            'alpha' => 'Alpha '.\$context->value('country', 'unknown'),
+            5 => 'Playlist 5 '.\$context->value('country', 'unknown'),
+            8 => 'Playlist 8',
         ];
     }
 }
@@ -332,7 +361,39 @@ PHP;
             ['country' => 'uk'],
         );
 
-        expect($options)->toBe(['alpha' => 'Alpha uk']);
+        expect($options)->toBe([
+            5 => 'Playlist 5 uk',
+            8 => 'Playlist 8',
+        ]);
+
+        $plugin->update(['enabled' => true]);
+
+        $numericRun = app(PluginManager::class)->executeAction($plugin->fresh(), 'enrich', [
+            'playlist_id' => 5,
+            'playlist_ids' => [5, 8],
+            'mode' => 'safe',
+        ]);
+
+        expect($numericRun->status)->toBe('completed')
+            ->and(data_get($numericRun->result, 'data.playlist_id'))->toBe(5)
+            ->and(data_get($numericRun->result, 'data.playlist_ids'))->toBe([5, 8]);
+
+        $stringRun = app(PluginManager::class)->executeAction($plugin->fresh(), 'enrich', [
+            'playlist_id' => '5',
+            'playlist_ids' => ['5', '8'],
+            'mode' => 'safe',
+        ]);
+
+        expect($stringRun->status)->toBe('completed');
+
+        $invalidStaticRun = app(PluginManager::class)->executeAction($plugin->fresh(), 'enrich', [
+            'playlist_id' => 5,
+            'playlist_ids' => [5, 8],
+            'mode' => 'unsafe',
+        ]);
+
+        expect($invalidStaticRun->status)->toBe('failed')
+            ->and($invalidStaticRun->summary)->toContain('selected mode is invalid');
     } finally {
         cleanupReviewFixturePlugin($pluginId);
     }

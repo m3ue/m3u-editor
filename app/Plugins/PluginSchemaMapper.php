@@ -3,6 +3,7 @@
 namespace App\Plugins;
 
 use App\Models\Plugin;
+use Closure;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
@@ -352,17 +353,19 @@ class PluginSchemaMapper
     }
 
     /**
-     * @return array<int, string|ValidationRule|In>
+     * @return array<int, string|Closure|ValidationRule|In>
      */
     private function selectValueRules(array $field): array
     {
-        $rules = ['string'];
-
-        if (blank($field['options_provider'] ?? null)) {
-            $rules[] = Rule::in(array_keys($this->staticSelectOptions($field)));
+        if (filled($field['options_provider'] ?? null)) {
+            return [function (string $attribute, mixed $value, Closure $fail): void {
+                if (! is_string($value) && ! is_int($value)) {
+                    $fail('The :attribute must be a string or integer.');
+                }
+            }];
         }
 
-        return $rules;
+        return ['string', Rule::in(array_keys($this->staticSelectOptions($field)))];
     }
 
     /**
