@@ -1,0 +1,413 @@
+<?php
+
+use App\Enums\EpgMapCandidateStatus;
+use App\Filament\CopilotTools\EpgMappingApplyTool;
+use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
+use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
+use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
+use App\Jobs\BuildEpgMapCandidatesJob;
+use App\Models\Channel;
+use App\Models\Epg;
+use App\Models\EpgChannel;
+use App\Models\EpgMap;
+use App\Models\Group;
+use App\Models\Playlist;
+use App\Models\User;
+use App\Services\SimilaritySearchService;
+use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Event;
+use Laravel\Ai\Tools\Request;
+use Livewire\Livewire;
+
+beforeEach(function () {
+    $this->user = User::factory()->create();
+    $this->epg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create(['name' => 'Community XMLTV']));
+    $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
+    $this->group = Group::factory()->for($this->playlist)->for($this->user)->create();
+});
+
+function candidateReviewChannel(string $name): Channel
+{
+    return Channel::factory()
+        ->for(test()->playlist)
+        ->for(test()->user)
+        ->for(test()->group)
+        ->create([
+            'name' => $name,
+            'title' => $name,
+            'stream_id' => str($name)->slug(),
+            'epg_map_enabled' => true,
+            'is_vod' => false,
+        ]);
+}
+
+function candidateReviewEpgChannel(array $attributes): EpgChannel
+{
+    return EpgChannel::factory()
+        ->for(test()->epg)
+        ->for(test()->user)
+        ->create($attributes);
+}
+
+it('returns explainable candidates from only the selected source', function () {
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'ESPNews',
+        'display_name' => 'ESPNews',
+        'channel_id' => 'espnews.us',
+    ]);
+    $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create());
+    EpgChannel::factory()->for($otherEpg)->for($this->user)->create([
+        'name' => 'US Sports ESPN News FHD',
+        'display_name' => 'US Sports ESPN News FHD',
+    ]);
+    $channel = candidateReviewChannel('US | Sports | ESPN News FHD');
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        removeQualityIndicators: true,
+    );
+
+    expect($result['original_name'])->toBe('US | Sports | ESPN News FHD')
+        ->and($result['normalized_name'])->toBe('sports espn news')
+        ->and($result['automatic_match'])->toBeNull()
+        ->and($result['candidates'])->not->toBeEmpty()
+        ->and($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($result['candidates'][0]['matched_value'])->toBe('ESPNews')
+        ->and($result['candidates'][0]['normalized_value'])->toBe('espnews')
+        ->and($result['candidates'][0]['confidence'])->toBeInt()->toBeGreaterThanOrEqual(40)
+        ->and($result['candidates'][0]['reason'])->toContain('normalized');
+});
+
+it('keeps exact normalized matches automatic', function () {
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $channel = candidateReviewChannel('ESPN News HD');
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        removeQualityIndicators: true,
+    );
+
+    expect($result['automatic_match']?->id)->toBe($candidate->id)
+        ->and($result['candidates'][0]['confidence'])->toBe(100)
+        ->and($result['candidates'][0]['reason'])->toContain('Exact normalized');
+});
+
+it('ranks database candidates before applying the query bound', function () {
+    EpgChannel::factory()
+        ->count(250)
+        ->for($this->epg)
+        ->for($this->user)
+        ->sequence(fn ($sequence): array => [
+            'name' => "Sports Regional Feed {$sequence->index}",
+            'display_name' => "Sports Regional Feed {$sequence->index}",
+            'channel_id' => "sports-regional-{$sequence->index}",
+        ])
+        ->create();
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $channel = candidateReviewChannel('Sports ESPN News');
+    $retrievedCandidates = 0;
+
+    Event::listen('eloquent.retrieved: '.EpgChannel::class, function () use (&$retrievedCandidates): void {
+        $retrievedCandidates++;
+    });
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($retrievedCandidates)->toBe(250)
+        ->and($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id);
+});
+
+it('does not leak custom quality indicators across calls on a reused service', function () {
+    candidateReviewEpgChannel([
+        'name' => 'Premium Sports',
+        'display_name' => 'Premium Sports',
+        'channel_id' => 'premium-sports',
+    ]);
+    $channel = candidateReviewChannel('Premium Sports');
+    $matcher = new SimilaritySearchService;
+
+    $customResult = $matcher->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        removeQualityIndicators: true,
+        customQualityIndicators: ['premium'],
+    );
+    $defaultResult = $matcher->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        removeQualityIndicators: true,
+    );
+
+    expect($customResult['normalized_name'])->toBe('sports')
+        ->and($defaultResult['normalized_name'])->toBe('premium sports');
+});
+
+it('ranks an alternate name match ahead of weak bounded candidates', function () {
+    EpgChannel::factory()
+        ->count(250)
+        ->for($this->epg)
+        ->for($this->user)
+        ->sequence(fn ($sequence): array => [
+            'name' => "Fox Regional Feed {$sequence->index}",
+            'display_name' => "Fox Regional Feed {$sequence->index}",
+            'channel_id' => "fox-regional-{$sequence->index}",
+        ])
+        ->create();
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'WGHP',
+        'display_name' => 'WGHP-DT',
+        'channel_id' => 'wghp.us',
+        'additional_display_names' => ['Fox Eight Greensboro'],
+    ]);
+    $channel = candidateReviewChannel('Fox Eight Greensboro');
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($result['candidates'][0]['reason'])->toContain('alternate display name');
+});
+
+it('explains reordered words alternate names and station identifiers', function (string $playlistName, array $epgAttributes, string $reason) {
+    $candidate = candidateReviewEpgChannel($epgAttributes);
+    $channel = candidateReviewChannel($playlistName);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($result['candidates'][0]['reason'])->toContain($reason);
+})->with([
+    'reordered words' => [
+        'WANE CBS 15',
+        ['name' => 'CBS 15 WANE', 'display_name' => 'CBS 15 WANE', 'channel_id' => 'wane.us'],
+        'words',
+    ],
+    'alternate display name' => [
+        'Fox Eight Greensboro',
+        [
+            'name' => 'WGHP',
+            'display_name' => 'WGHP-DT',
+            'channel_id' => 'wghp.us',
+            'additional_display_names' => ['Fox Eight Greensboro'],
+        ],
+        'alternate display name',
+    ],
+    'station identifier' => [
+        'KOVR',
+        ['name' => 'CBS 13 Sacramento', 'display_name' => 'CBS 13', 'channel_id' => 'KOVR-DT'],
+        'channel ID',
+    ],
+]);
+
+it('returns normalized context when no candidate is credible', function () {
+    candidateReviewEpgChannel([
+        'name' => 'Completely Different Guide Station',
+        'display_name' => 'Different Station',
+        'channel_id' => 'different.example',
+    ]);
+    $channel = candidateReviewChannel('ZZQ Unrelated Provider Feed');
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['normalized_name'])->toBe('zzq unrelated provider feed')
+        ->and($result['candidates'])->toBeEmpty()
+        ->and($result['explanation'])->toContain('No candidate');
+});
+
+it('applies the preferred_local region bonus to candidates and auto-match', function () {
+    $candidate = EpgChannel::factory()
+        ->for($this->epg)
+        ->for($this->user)
+        ->create([
+            'name' => 'ESPN Sportsburgh Broadcasting Cascadia Cascadia Cascadeoning',
+            'display_name' => 'ESPN Sportsburgh Broadcasting Cascadia Cascadia Cascadeoning',
+            'channel_id' => 'espn-sportsburg.us',
+        ]);
+
+    $channel = Channel::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->for($this->group)
+        ->create([
+            'name' => 'ESPN Pittsburgh Broadcast Regionals Cascadia Cascadeoning',
+            'title' => 'ESPN Pittsburgh Broadcast Regionals Cascadia Cascadeoning',
+            'stream_id' => 'espn-pittsburgh',
+            'epg_map_enabled' => true,
+            'is_vod' => false,
+        ]);
+
+    // Without preferred_local the borderline distance (≈14) and cosine < 0.8
+    // leave the candidate in the review bucket rather than auto-matched.
+    $withoutRegion = (new SimilaritySearchService)->findEpgChannelCandidates(channel: $channel, epg: $this->epg);
+    expect($withoutRegion['candidates'])->not->toBeEmpty()
+        ->and($withoutRegion['candidates'][0]['reason'])->not->toContain('preferred region')
+        ->and($withoutRegion['automatic_match'])->toBeNull();
+
+    // Switch the same EPG to declare a preferred_local that matches the
+    // candidate's channel_id substring, then re-run the same scoring pass.
+    // The distance bonus should kick the borderline candidate past the
+    // automatic-match threshold without altering the underlying rows.
+    $this->epg->forceFill(['preferred_local' => 'us'])->save();
+    $withRegion = (new SimilaritySearchService)->findEpgChannelCandidates(channel: $channel, epg: $this->epg);
+
+    expect($withRegion['candidates'])->not->toBeEmpty()
+        ->and($withRegion['candidates'][0]['reason'])->toContain('preferred region')
+        ->and($withRegion['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($withRegion['automatic_match']?->id)->toBe($candidate->id);
+});
+
+it('preload-batching produces the same top candidates as per-channel queries', function () {
+    $candidateA = candidateReviewEpgChannel([
+        'name' => 'ESPN News Plus',
+        'display_name' => 'ESPN News Plus',
+        'channel_id' => 'espnews-plus',
+    ]);
+    $candidateB = candidateReviewEpgChannel([
+        'name' => 'Fox Soccer Channel Premier',
+        'display_name' => 'Fox Soccer Channel Premier',
+        'channel_id' => 'fox-soccer-prem',
+    ]);
+    $channelA = candidateReviewChannel('ESPN News Plus HD');
+    $channelB = candidateReviewChannel('Fox Soccer Channel Premier HD');
+
+    $matcher = new SimilaritySearchService;
+    $directA = $matcher->findEpgChannelCandidates($channelA, $this->epg, removeQualityIndicators: true);
+    $directB = $matcher->findEpgChannelCandidates($channelB, $this->epg, removeQualityIndicators: true);
+
+    $unionTerms = collect([$channelA, $channelB])
+        ->flatMap(fn (Channel $c): array => $matcher->searchTermsFor(channel: $c, cleanedTitle: $c->title_custom ?? $c->title, cleanedName: $c->name_custom ?? $c->name))
+        ->unique()
+        ->values()
+        ->all();
+    $prefetched = $matcher->loadEpgCandidates($this->epg, $unionTerms);
+
+    $batchedA = $matcher->findEpgChannelCandidates(channel: $channelA, epg: $this->epg, removeQualityIndicators: true, prefetchedCandidates: $prefetched);
+    $batchedB = $matcher->findEpgChannelCandidates(channel: $channelB, epg: $this->epg, removeQualityIndicators: true, prefetchedCandidates: $prefetched);
+
+    expect($batchedA['candidates'][0]['epg_channel_id'])->toBe($directA['candidates'][0]['epg_channel_id'])
+        ->and($batchedB['candidates'][0]['epg_channel_id'])->toBe($directB['candidates'][0]['epg_channel_id'])
+        ->and($batchedA['automatic_match']?->id)->toBe($directA['automatic_match']?->id)
+        ->and($batchedB['automatic_match']?->id)->toBe($directB['automatic_match']?->id);
+});
+
+it('shows candidate details and applies only an explicit valid confirmation', function () {
+    $this->actingAs($this->user);
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'ESPNews',
+        'display_name' => 'ESPNews',
+        'channel_id' => 'espnews.us',
+    ]);
+    $channel = candidateReviewChannel('US | Sports | ESPN News FHD');
+    $map = EpgMap::factory()->create([
+        'user_id' => $this->user->id,
+        'epg_id' => $this->epg->id,
+        'playlist_id' => $this->playlist->id,
+        'status' => 'completed',
+        'settings' => ['remove_quality_indicators' => true],
+    ]);
+
+    // Build candidate rows first; the View page hosts the relation manager.
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+    $row = $map->candidates()->first();
+
+    Livewire::test(CandidatesRelationManager::class, [
+        'ownerRecord' => $map,
+        'pageClass' => ViewEpgMap::class,
+    ])
+        ->loadTable()
+        ->assertCanSeeTableRecords([$row])
+        ->callAction(TestAction::make('apply')->table($row))
+        ->assertNotified();
+
+    expect($channel->refresh()->epg_channel_id)->toBe($candidate->id)
+        ->and($row->refresh()->status)->toBe(EpgMapCandidateStatus::Applied);
+});
+
+it('rejects cross-source candidates and never replaces an existing explicit mapping', function () {
+    $this->actingAs($this->user);
+    $existing = candidateReviewEpgChannel([
+        'name' => 'Existing',
+        'display_name' => 'Existing',
+        'channel_id' => 'existing',
+    ]);
+    $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create());
+    $crossSource = EpgChannel::factory()->for($otherEpg)->for($this->user)->create();
+    $unmapped = candidateReviewChannel('ESPN News');
+    candidateReviewChannel('Existing')->update(['epg_channel_id' => $existing->id]);
+    $mappedChannel = Channel::where('name', 'Existing')->firstOrFail();
+    $map = EpgMap::factory()->create([
+        'user_id' => $this->user->id,
+        'epg_id' => $this->epg->id,
+        'playlist_id' => $this->playlist->id,
+        'status' => 'completed',
+        'settings' => [],
+    ]);
+
+    // Build candidate rows — the cross-source channel must NEVER appear as a
+    // candidate, since the build queries against the selected EPG only.
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+    $rows = $map->candidates()->get();
+    foreach ($rows as $row) {
+        expect($row->epg_channel_id)->not->toBe($crossSource->id);
+    }
+
+    // Also confirm the existing mapping remains untouched; the build only
+    // selected unresolved channels, so the mapped channel has no row.
+    expect($rows->firstWhere('channel_id', $mappedChannel->id))->toBeNull();
+    expect($mappedChannel->refresh()->epg_channel_id)->toBe($existing->id);
+    expect($unmapped->refresh()->epg_channel_id)->toBeNull();
+});
+
+it('does not expose candidate review for an epg source owned by another user', function () {
+    $this->actingAs($this->user);
+    $otherUser = User::factory()->create();
+    $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($otherUser)->create());
+    $map = EpgMap::factory()->create([
+        'user_id' => $this->user->id,
+        'epg_id' => $otherEpg->id,
+        'playlist_id' => $this->playlist->id,
+        'status' => 'completed',
+        'settings' => [],
+    ]);
+
+    // REVIEW on the list table is hidden because the EPG is owned by another
+    // user — relation manager still mounts but its actions are gated by
+    // ownerMatchesAuth/ canReview.
+    Livewire::test(ListEpgMaps::class)
+        ->assertActionHidden(TestAction::make('reviewCandidates')->table($map));
+});
+
+it('keeps copilot confirmation source scoped and does not overwrite mappings', function () {
+    $this->actingAs($this->user);
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'ESPNews',
+        'display_name' => 'ESPNews',
+        'channel_id' => 'espnews.us',
+    ]);
+    $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create());
+    $crossSource = EpgChannel::factory()->for($otherEpg)->for($this->user)->create();
+    $unmapped = candidateReviewChannel('ESPN News');
+    $mapped = candidateReviewChannel('Existing');
+    $mapped->update(['epg_channel_id' => $candidate->id]);
+
+    $response = (new EpgMappingApplyTool)->handle(new Request([
+        'epg_id' => $this->epg->id,
+        'mappings' => json_encode([
+            ['channel_id' => $unmapped->id, 'epg_channel_id' => $crossSource->id],
+            ['channel_id' => $mapped->id, 'epg_channel_id' => $crossSource->id],
+        ], JSON_THROW_ON_ERROR),
+    ]));
+
+    expect((string) $response)->toContain('No valid mappings')
+        ->and($unmapped->refresh()->epg_channel_id)->toBeNull()
+        ->and($mapped->refresh()->epg_channel_id)->toBe($candidate->id);
+});

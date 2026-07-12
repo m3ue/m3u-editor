@@ -5,8 +5,9 @@ namespace App\Filament\Resources\EpgMaps;
 use App\Enums\Status;
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
-use App\Filament\Resources\EpgMapResource\Pages;
 use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
+use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
+use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
@@ -20,6 +21,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -172,6 +174,15 @@ class EpgMapResource extends Resource implements CopilotResource
                     })
                     ->hidden(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending)
                     ->tooltip(__('Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.')),
+                ViewAction::make('reviewCandidates')
+                    ->label(__('Review Candidates'))
+                    ->icon('heroicon-s-magnifying-glass')
+                    ->button()
+                    ->hiddenLabel()
+                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null
+                        || $record->user_id !== Auth::id()
+                        || $record->epg?->user_id !== Auth::id())
+                    ->tooltip(__('Review explainable candidates for unresolved channels from this map.')),
                 Action::make('restart')
                     ->label(__('Restart Now'))
                     ->icon('heroicon-s-arrow-path')
@@ -245,7 +256,7 @@ class EpgMapResource extends Resource implements CopilotResource
     public static function getRelations(): array
     {
         return [
-            //
+            CandidatesRelationManager::class,
         ];
     }
 
@@ -253,8 +264,7 @@ class EpgMapResource extends Resource implements CopilotResource
     {
         return [
             'index' => ListEpgMaps::route('/'),
-            // 'create' => Pages\CreateEpgMap::route('/create'),
-            // 'edit' => Pages\EditEpgMap::route('/{record}/edit'),
+            'view' => ViewEpgMap::route('/{record}'),
         ];
     }
 

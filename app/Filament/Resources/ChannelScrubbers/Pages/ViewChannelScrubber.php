@@ -32,14 +32,11 @@ class ViewChannelScrubber extends ViewRecord
     {
         return $schema->components([
             Section::make(__('Scrubber Details'))
-                ->columns(3)
+                ->columns(4)
                 ->compact()
                 ->collapsed(true)
                 ->schema([
                     Infolists\Components\TextEntry::make('name'),
-                    Infolists\Components\TextEntry::make('playlist.name')
-                        ->label(__('Playlist'))
-                        ->badge(),
                     Infolists\Components\TextEntry::make('status')
                         ->badge()
                         ->color(fn ($state) => $state->getColor()),
@@ -48,12 +45,12 @@ class ViewChannelScrubber extends ViewRecord
                         ->formatStateUsing(fn (string $state): string => strtoupper($state))
                         ->badge()
                         ->color(fn (string $state): string => $state === 'ffprobe' ? 'warning' : 'info'),
-                    Infolists\Components\TextEntry::make('channel_count')
-                        ->label(__('Last Channels Checked')),
                     Infolists\Components\TextEntry::make('dead_count')
                         ->label(__('Last Dead Links'))
                         ->badge()
                         ->color(fn ($state) => $state > 0 ? 'danger' : 'success'),
+                    Infolists\Components\TextEntry::make('channel_count')
+                        ->label(__('Last Channels Checked')),
                     Infolists\Components\IconEntry::make('include_vod')
                         ->label(__('Includes VOD'))
                         ->boolean(),
