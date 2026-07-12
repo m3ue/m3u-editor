@@ -6,8 +6,8 @@ namespace App\Filament\CopilotTools;
 
 use App\Models\Channel;
 use App\Models\Epg;
-use App\Models\EpgChannel;
 use App\Models\Playlist;
+use App\Services\SimilaritySearchService;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Tools\Request;
@@ -28,10 +28,6 @@ use Stringable;
  */
 class EpgChannelMatcherTool extends BaseTool
 {
-    private const FUZZY_MIN_SCORE = 40;
-
-    private const TOP_CANDIDATES = 3;
-
     private const DEFAULT_LIMIT = 50;
 
     private const MAX_LIMIT = 100;
@@ -100,58 +96,56 @@ class EpgChannelMatcherTool extends BaseTool
             ->orderBy('name')
             ->offset($offset)
             ->limit($limit)
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
 
-        // Load EPG channels for this source into memory for comparison.
-        // Only id, display_name, and additional_display_names are needed.
-        $epgChannels = EpgChannel::without('epg')
-            ->where('epg_id', $epgId)
-            ->get(['id', 'display_name', 'additional_display_names'])
-            ->toArray();
-
-        if (empty($epgChannels)) {
+        if (! $epg->channels()->exists()) {
             return "EPG source \"{$epg->name}\" (id: {$epgId}) has no channels loaded. Please sync the EPG source first.";
         }
-
-        // Build a lowercase → record lookup for O(1) exact matching.
-        // Both display_name and every additional_display_name are indexed.
-        $exactLookup = $this->buildExactLookup($epgChannels);
 
         $exactMatches = [];
         $fuzzyMatches = [];
         $unresolved = [];
+        $matcher = app(SimilaritySearchService::class);
 
         foreach ($channels as $channel) {
-            $cleaned = $this->cleanName($channel->name);
-            $lowerCleaned = strtolower($cleaned);
+            $result = $matcher->findEpgChannelCandidates(
+                channel: $channel,
+                epg: $epg,
+                removeQualityIndicators: true,
+            );
+            $topCandidate = $result['candidates'][0] ?? null;
 
-            if (isset($exactLookup[$lowerCleaned])) {
-                $match = $exactLookup[$lowerCleaned];
+            if ($result['automatic_match'] && ($topCandidate['confidence'] ?? 0) === 100) {
                 $exactMatches[] = [
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
-                    'cleaned_name' => $cleaned,
-                    'epg_channel_id' => $match['id'],
-                    'epg_display_name' => $match['display_name'],
+                    'cleaned_name' => $result['normalized_name'],
+                    'epg_channel_id' => $result['automatic_match']->id,
+                    'epg_display_name' => $topCandidate['display_name'],
                 ];
 
                 continue;
             }
 
-            $candidates = $this->findFuzzyCandidates($cleaned, $epgChannels);
-
-            if (empty($candidates)) {
+            if ($result['candidates'] === []) {
                 $unresolved[] = [
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
-                    'cleaned_name' => $cleaned,
+                    'cleaned_name' => $result['normalized_name'],
                 ];
             } else {
                 $fuzzyMatches[] = [
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
-                    'cleaned_name' => $cleaned,
-                    'candidates' => $candidates,
+                    'cleaned_name' => $result['normalized_name'],
+                    'candidates' => array_map(fn (array $candidate): array => [
+                        'epg_channel_id' => $candidate['epg_channel_id'],
+                        'display_name' => $candidate['display_name'],
+                        'score' => $candidate['confidence'],
+                        'reason' => $candidate['reason'],
+                        'matched_value' => $candidate['matched_value'],
+                        'normalized_value' => $candidate['normalized_value'],
+                    ], $result['candidates']),
                 ];
             }
         }
@@ -168,127 +162,6 @@ class EpgChannelMatcherTool extends BaseTool
             $limit,
             $totalUnmapped
         );
-    }
-
-    /**
-     * Strip common IPTV prefixes and quality/region suffixes from a channel name.
-     *
-     * Prefixes removed: two or three uppercase letters followed by a colon and
-     * optional whitespace (US:, PM:, UK:, CA:, AU:, MEX:, INT:, etc.).
-     *
-     * Suffixes removed: everything from a pipe character onward when the
-     * token after the pipe is a known quality or region tag.
-     */
-    private function cleanName(string $name): string
-    {
-        // Strip prefix: "US: ", "PM:   ", "MEX: ", etc.
-        $name = preg_replace('/^[A-Z]{2,4}:\s+/', '', $name) ?? $name;
-
-        // Strip suffix: "| HD", "| FHD", "| UHD", "| 4K", "| CA", "| EAST", "| WEST", "| BACKUP"
-        $name = preg_replace('/\s*\|\s*(UHD|FHD|HD|SD|4K|CA|EAST|WEST|BACKUP|\d+K)\s*$/i', '', $name) ?? $name;
-
-        return trim($name);
-    }
-
-    /**
-     * Build a lowercase-keyed lookup of all EPG display names and aliases.
-     *
-     * @param  array<int, array<string, mixed>>  $epgChannels
-     * @return array<string, array<string, mixed>>
-     */
-    private function buildExactLookup(array $epgChannels): array
-    {
-        $lookup = [];
-
-        foreach ($epgChannels as $ec) {
-            $displayName = (string) ($ec['display_name'] ?? '');
-
-            if ($displayName !== '') {
-                $lookup[strtolower(trim($displayName))] = $ec;
-            }
-
-            $additionalNames = $ec['additional_display_names'] ?? [];
-
-            if (is_array($additionalNames)) {
-                foreach ($additionalNames as $altName) {
-                    if (is_string($altName) && $altName !== '') {
-                        $lookup[strtolower(trim($altName))] ??= $ec;
-                    }
-                }
-            }
-        }
-
-        return $lookup;
-    }
-
-    /**
-     * Score all EPG channels against a cleaned name and return the top candidates.
-     *
-     * @param  array<int, array<string, mixed>>  $epgChannels
-     * @return list<array{epg_channel_id: int, display_name: string, score: int}>
-     */
-    private function findFuzzyCandidates(string $cleanedName, array $epgChannels): array
-    {
-        $lowerCleaned = strtolower($cleanedName);
-        $scored = [];
-
-        foreach ($epgChannels as $ec) {
-            $displayName = (string) ($ec['display_name'] ?? '');
-            $score = $this->similarity($lowerCleaned, strtolower($displayName));
-
-            // Also score against additional display names; keep the best.
-            $additionalNames = $ec['additional_display_names'] ?? [];
-
-            if (is_array($additionalNames)) {
-                foreach ($additionalNames as $altName) {
-                    if (is_string($altName) && $altName !== '') {
-                        $altScore = $this->similarity($lowerCleaned, strtolower($altName));
-
-                        if ($altScore > $score) {
-                            $score = $altScore;
-                        }
-                    }
-                }
-            }
-
-            if ($score >= self::FUZZY_MIN_SCORE) {
-                $scored[] = [
-                    'epg_channel_id' => $ec['id'],
-                    'display_name' => $displayName,
-                    'score' => $score,
-                ];
-            }
-        }
-
-        usort($scored, fn ($a, $b) => $b['score'] <=> $a['score']);
-
-        return array_slice($scored, 0, self::TOP_CANDIDATES);
-    }
-
-    /**
-     * Returns a 0–100 similarity score between two lowercase strings.
-     *
-     * Uses similar_text as the base, with a bonus when one string fully
-     * contains the other (e.g. "cinemax" inside "cinemax action max").
-     */
-    private function similarity(string $a, string $b): int
-    {
-        if ($a === '' || $b === '') {
-            return 0;
-        }
-
-        $lenA = strlen($a);
-        $lenB = strlen($b);
-        $maxLen = max($lenA, $lenB);
-
-        $dist = levenshtein($a, $b);
-        $score = (int) round((1 - $dist / $maxLen) * 100);
-
-        if (str_contains($b, $a) || str_contains($a, $b)) {
-            $score = max($score, 80);
-        }
-
-        return $score;
     }
 
     /**
@@ -314,9 +187,9 @@ class EpgChannelMatcherTool extends BaseTool
         $currentPage = (int) floor($offset / $limit) + 1;
 
         $lines = [
-            "EPG Match Preview — {$group} (playlist: {$playlistName})",
+            "EPG Match Preview - {$group} (playlist: {$playlistName})",
             "EPG Source: {$epgName} (id: {$epgId})",
-            "Channels {$rangeStart}–{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
+            "Channels {$rangeStart}-{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
             '',
         ];
 
@@ -325,7 +198,7 @@ class EpgChannelMatcherTool extends BaseTool
 
             foreach ($exactMatches as $m) {
                 $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\"";
-                $lines[] = "    → {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']})";
+                $lines[] = "    -> {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']})";
             }
 
             $lines[] = '';
@@ -335,10 +208,10 @@ class EpgChannelMatcherTool extends BaseTool
             $lines[] = 'FUZZY MATCHES (ask user to choose the correct candidate or skip):';
 
             foreach ($fuzzyMatches as $m) {
-                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" → cleaned: \"{$m['cleaned_name']}\"";
+                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" -> normalized: \"{$m['cleaned_name']}\"";
 
                 foreach ($m['candidates'] as $i => $c) {
-                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) — {$c['score']}%";
+                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) - {$c['score']}% - {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
                 }
             }
 
@@ -346,10 +219,10 @@ class EpgChannelMatcherTool extends BaseTool
         }
 
         if (! empty($unresolved)) {
-            $lines[] = 'UNRESOLVED (no match found — will remain unmapped):';
+            $lines[] = 'UNRESOLVED (no match found - will remain unmapped):';
 
             foreach ($unresolved as $u) {
-                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" → cleaned: \"{$u['cleaned_name']}\"";
+                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" -> normalized: \"{$u['cleaned_name']}\"";
             }
 
             $lines[] = '';
@@ -364,7 +237,7 @@ class EpgChannelMatcherTool extends BaseTool
 
         if ($totalUnmapped > $offset + $limit) {
             $nextOffset = $offset + $limit;
-            $lines[] = "More channels available — call this tool again with offset={$nextOffset} to continue.";
+            $lines[] = "More channels available - call this tool again with offset={$nextOffset} to continue.";
         }
 
         $lines[] = '';

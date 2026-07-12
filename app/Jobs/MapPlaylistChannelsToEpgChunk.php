@@ -65,57 +65,30 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         $channels = Channel::whereIn('id', $this->channelIds);
 
         // Process each channel
-        $patterns = $this->settings['exclude_prefixes'] ?? [];
-        $useRegex = $this->settings['use_regex'] ?? false;
         $skipMissing = $this->settings['skip_missing'] ?? false;
         $setEpgIcon = $this->settings['set_epg_icon'] ?? false;
         $mappedChannels = [];
 
         foreach ($channels->cursor() as $channel) {
             // Get the title and stream id - sanitize UTF-8 immediately
-            $streamId = $this->sanitizeUtf8(trim($channel->stream_id_custom ?? $channel->stream_id));
+            $streamId = $this->similaritySearch->cleanNameForMatching(
+                $channel->stream_id_custom ?? $channel->stream_id,
+                $this->settings,
+            );
 
             if ($skipMissing && empty($streamId)) {
                 // Skip channels without stream ID if the setting is enabled
                 continue;
             }
 
-            $name = $this->sanitizeUtf8(trim($channel->name_custom ?? $channel->name));
-            $title = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
-
-            // Get cleaned title and stream id
-            if (! empty($patterns)) {
-                foreach ($patterns as $pattern) {
-                    if ($useRegex) {
-                        // Escape existing delimiters in user input
-                        $delimiter = '/';
-                        $escapedPattern = str_replace($delimiter, '\\'.$delimiter, $pattern);
-                        $finalPattern = $delimiter.$escapedPattern.$delimiter.'u';
-
-                        // Use regex to remove the prefix
-                        if (preg_match($finalPattern, $streamId, $matches)) {
-                            $streamId = preg_replace($finalPattern, '', $streamId);
-                        }
-                        if (preg_match($finalPattern, $name, $matches)) {
-                            $name = preg_replace($finalPattern, '', $name);
-                        }
-                        if (preg_match($finalPattern, $title, $matches)) {
-                            $title = preg_replace($finalPattern, '', $title);
-                        }
-                    } else {
-                        // Use simple string prefix matching
-                        if (str_starts_with($streamId, $pattern)) {
-                            $streamId = substr($streamId, strlen($pattern));
-                        }
-                        if (str_starts_with($name, $pattern)) {
-                            $name = substr($name, strlen($pattern));
-                        }
-                        if (str_starts_with($title, $pattern)) {
-                            $title = substr($title, strlen($pattern));
-                        }
-                    }
-                }
-            }
+            $name = $this->similaritySearch->cleanNameForMatching(
+                $channel->name_custom ?? $channel->name,
+                $this->settings,
+            );
+            $title = $this->similaritySearch->cleanNameForMatching(
+                $channel->title_custom ?? $channel->title,
+                $this->settings,
+            );
 
             // Get the EPG channel (check for direct match first with improved logic)
             $epgChannel = null;

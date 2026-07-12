@@ -8,9 +8,12 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\EpgMapResource\Pages;
 use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
 use App\Jobs\MapPlaylistChannelsToEpg;
+use App\Models\Channel;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\EpgMap;
 use App\Models\Playlist;
+use App\Services\SimilaritySearchService;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -21,21 +24,26 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class EpgMapResource extends Resource implements CopilotResource
 {
@@ -172,6 +180,21 @@ class EpgMapResource extends Resource implements CopilotResource
                     })
                     ->hidden(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending)
                     ->tooltip(__('Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.')),
+                Action::make('reviewCandidates')
+                    ->label(__('Review Candidates'))
+                    ->icon('heroicon-s-magnifying-glass')
+                    ->button()
+                    ->hiddenLabel()
+                    ->modalHeading(__('Review EPG mapping candidates'))
+                    ->modalDescription(fn (EpgMap $record): string => __('Candidates are limited to :source and are never applied without confirmation.', [
+                        'source' => $record->epg?->name ?? __('the selected EPG source'),
+                    ]))
+                    ->modalSubmitActionLabel(__('Apply confirmed mappings'))
+                    ->modalWidth(Width::FiveExtraLarge)
+                    ->schema(fn (EpgMap $record): array => static::getCandidateReviewForm($record))
+                    ->action(fn (array $data, EpgMap $record) => static::applyCandidateReview($record, $data['mappings'] ?? []))
+                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null)
+                    ->tooltip(__('Review explainable candidates for unresolved channels from this map.')),
                 Action::make('restart')
                     ->label(__('Restart Now'))
                     ->icon('heroicon-s-arrow-path')
@@ -247,6 +270,152 @@ class EpgMapResource extends Resource implements CopilotResource
         return [
             //
         ];
+    }
+
+    /** @return array<int, Component> */
+    private static function getCandidateReviewForm(EpgMap $record): array
+    {
+        if ($record->user_id !== Auth::id()) {
+            return [Placeholder::make('unavailable')->content(__('This mapping is not available.'))];
+        }
+
+        $unresolvedCount = Channel::query()
+            ->where('user_id', Auth::id())
+            ->where('playlist_id', $record->playlist_id)
+            ->where('is_vod', false)
+            ->where('epg_map_enabled', true)
+            ->whereNull('epg_channel_id')
+            ->count();
+
+        if ($unresolvedCount === 0) {
+            return [Placeholder::make('resolved')->content(__('No unresolved channels are available for review.'))];
+        }
+
+        $pages = collect(range(0, (int) ceil($unresolvedCount / 20) - 1))
+            ->mapWithKeys(fn (int $page): array => [$page * 20 => __('Page :page', ['page' => $page + 1])])
+            ->all();
+
+        return [
+            Select::make('review_offset')
+                ->label(__('Unresolved channels'))
+                ->options($pages)
+                ->default(0)
+                ->live()
+                ->selectablePlaceholder(false),
+            Section::make(__('Candidate rows'))
+                ->schema(fn (Get $get): array => static::getCandidateReviewSchema($record, (int) ($get('review_offset') ?? 0)))
+                ->columnSpanFull(),
+        ];
+    }
+
+    /** @return array<int, Component> */
+    private static function getCandidateReviewSchema(EpgMap $record, int $offset): array
+    {
+        if ($record->user_id !== Auth::id()) {
+            return [Placeholder::make('unavailable')->content(__('This mapping is not available.'))];
+        }
+
+        $channels = Channel::query()
+            ->where('user_id', Auth::id())
+            ->where('playlist_id', $record->playlist_id)
+            ->where('is_vod', false)
+            ->where('epg_map_enabled', true)
+            ->whereNull('epg_channel_id')
+            ->orderBy('name')
+            ->offset($offset)
+            ->limit(20)
+            ->get();
+
+        if ($channels->isEmpty()) {
+            return [Placeholder::make('resolved')->content(__('No unresolved channels are available for review.'))];
+        }
+
+        $epg = $record->epg;
+        $settings = $record->settings ?? [];
+        $matcher = app(SimilaritySearchService::class);
+
+        return $channels->map(function (Channel $channel) use ($epg, $settings, $matcher): Radio|Placeholder {
+            $cleanedTitle = $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings);
+            $cleanedName = $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings);
+            $result = $matcher->findEpgChannelCandidates(
+                channel: $channel,
+                epg: $epg,
+                removeQualityIndicators: $settings['remove_quality_indicators'] ?? false,
+                similarityThreshold: $settings['similarity_threshold'] ?? 70,
+                fuzzyMaxDistance: $settings['fuzzy_max_distance'] ?? 25,
+                exactMatchDistance: $settings['exact_match_distance'] ?? 8,
+                customQualityIndicators: $settings['quality_indicators'] ?? null,
+                cleanedTitle: $cleanedTitle,
+                cleanedName: $cleanedName,
+            );
+
+            if ($result['candidates'] === []) {
+                return Placeholder::make("unresolved_{$channel->id}")
+                    ->label($result['original_name'])
+                    ->content(__('Normalized: :normalized. :explanation', [
+                        'normalized' => $result['normalized_name'] ?: __('empty'),
+                        'explanation' => $result['explanation'],
+                    ]));
+            }
+
+            $options = collect($result['candidates'])->mapWithKeys(fn (array $candidate): array => [
+                $candidate['epg_channel_id'] => __(':name - :confidence% - :reason - compared ":source" as ":normalized"', [
+                    'name' => $candidate['display_name'],
+                    'confidence' => $candidate['confidence'],
+                    'reason' => $candidate['reason'],
+                    'source' => $candidate['matched_value'],
+                    'normalized' => $candidate['normalized_value'],
+                ]),
+            ])->all();
+
+            return Radio::make("mappings.{$channel->id}")
+                ->label($result['original_name'])
+                ->helperText(__('Source: :source. Normalized playlist value: :normalized', [
+                    'source' => $epg->name,
+                    'normalized' => $result['normalized_name'],
+                ]))
+                ->options($options);
+        })->all();
+    }
+
+    /** @param  array<int|string, int|string|null>  $mappings */
+    private static function applyCandidateReview(EpgMap $record, array $mappings): void
+    {
+        if ($record->user_id !== Auth::id()) {
+            return;
+        }
+
+        $candidateIds = collect($mappings)->filter()->map(fn ($id): int => (int) $id)->unique();
+        $validCandidateIds = EpgChannel::query()
+            ->where('user_id', Auth::id())
+            ->where('epg_id', $record->epg_id)
+            ->whereIn('id', $candidateIds)
+            ->pluck('id')
+            ->flip();
+        $applied = 0;
+
+        DB::transaction(function () use ($record, $mappings, $validCandidateIds, &$applied): void {
+            foreach ($mappings as $channelId => $epgChannelId) {
+                if (! $epgChannelId || ! $validCandidateIds->has((int) $epgChannelId)) {
+                    continue;
+                }
+
+                $applied += Channel::query()
+                    ->whereKey((int) $channelId)
+                    ->where('user_id', Auth::id())
+                    ->where('playlist_id', $record->playlist_id)
+                    ->where('is_vod', false)
+                    ->where('epg_map_enabled', true)
+                    ->whereNull('epg_channel_id')
+                    ->update(['epg_channel_id' => (int) $epgChannelId]);
+            }
+        });
+
+        Notification::make()
+            ->success()
+            ->title(__('EPG candidates reviewed'))
+            ->body(trans_choice(':count mapping applied.|:count mappings applied.', $applied, ['count' => $applied]))
+            ->send();
     }
 
     public static function getPages(): array
