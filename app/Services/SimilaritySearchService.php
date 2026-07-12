@@ -19,6 +19,25 @@ class SimilaritySearchService
 
     private const MIN_REVIEW_CONFIDENCE = 40;
 
+    /** @var array<int, string> */
+    private const DEFAULT_QUALITY_INDICATORS = [
+        'hd',
+        'fhd',
+        'uhd',
+        '4k',
+        '8k',
+        'sd',
+        '720p',
+        '1080p',
+        '1080i',
+        '2160p',
+        'hdraw',
+        'sdraw',
+        'hevc',
+        'h264',
+        'h265',
+    ];
+
     private int $bestFuzzyThreshold = 8;
 
     private int $upperFuzzyThreshold = 25;
@@ -86,23 +105,7 @@ class SimilaritySearchService
     ];
 
     /** @var array<int, string> */
-    private array $qualityIndicators = [
-        'hd',
-        'fhd',
-        'uhd',
-        '4k',
-        '8k',
-        'sd',
-        '720p',
-        '1080p',
-        '1080i',
-        '2160p',
-        'hdraw',
-        'sdraw',
-        'hevc',
-        'h264',
-        'h265',
-    ];
+    private array $qualityIndicators = self::DEFAULT_QUALITY_INDICATORS;
 
     private bool $removeQualityIndicators = false;
 
@@ -209,9 +212,10 @@ class SimilaritySearchService
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
         $this->bestFuzzyThreshold = $exactMatchDistance;
 
-        if ($customQualityIndicators !== null) {
-            $this->qualityIndicators = array_map('mb_strtolower', $customQualityIndicators);
-        }
+        $this->qualityIndicators = array_map(
+            'mb_strtolower',
+            $customQualityIndicators ?? self::DEFAULT_QUALITY_INDICATORS,
+        );
 
         $title = $this->sanitizeUtf8($cleanedTitle ?? $channel->title_custom ?? $channel->title);
         $name = $this->sanitizeUtf8($cleanedName ?? $channel->name_custom ?? $channel->name);
@@ -240,17 +244,21 @@ class SimilaritySearchService
             return $emptyResult;
         }
 
+        [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all());
+
         $databaseCandidates = $epg->channels()
             ->where(function (Builder $query) use ($searchTerms): void {
                 foreach ($searchTerms as $term) {
-                    $likeTerm = "%{$term}%";
-                    $query->orWhereRaw('LOWER(channel_id) LIKE ?', [$likeTerm])
-                        ->orWhereRaw('LOWER(name) LIKE ?', [$likeTerm])
-                        ->orWhereRaw('LOWER(display_name) LIKE ?', [$likeTerm]);
+                    $likeTerm = $this->likePattern($term);
+                    $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
                     $this->addJsonSearchCondition($query, $term);
                 }
             })
             ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
+            ->orderBy('id')
             ->limit(self::MAX_DATABASE_CANDIDATES)
             ->get();
 
@@ -461,42 +469,58 @@ class SimilaritySearchService
      */
     private function addJsonSearchCondition(Builder $query, string $normalizedChan): void
     {
-        $driver = DB::connection()->getConfig('driver');
+        [$condition, $bindings] = $this->jsonSearchCondition($normalizedChan);
 
-        switch ($driver) {
-            case 'pgsql':
-                // PostgreSQL: Use jsonb_array_elements_text to search through array elements
-                $query->orWhereRaw(
-                    'EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE LOWER(elem) LIKE ?)',
-                    ["%$normalizedChan%"]
-                );
-                break;
+        $query->orWhereRaw($condition, $bindings);
+    }
 
-            case 'mysql':
-            case 'mariadb':
-                // MySQL/MariaDB: Use JSON_UNQUOTE and JSON_SEARCH for array search
-                $query->orWhereRaw(
-                    'JSON_SEARCH(LOWER(JSON_UNQUOTE(additional_display_names)), "one", ?) IS NOT NULL',
-                    ["%$normalizedChan%"]
-                );
-                break;
+    /**
+     * @param  list<string>  $searchTerms
+     * @return array{string, list<string>}
+     */
+    private function candidateRelevanceOrder(array $searchTerms): array
+    {
+        $expressions = [];
+        $bindings = [];
 
-            case 'sqlite':
-                // SQLite: Use json_each to iterate through array elements
-                $query->orWhereRaw(
-                    'EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE LOWER(json_each.value) LIKE ?)',
-                    ["%$normalizedChan%"]
-                );
-                break;
-
-            default:
-                // Fallback: Use Laravel's JSON where clause (less efficient but universal)
-                // This converts the array to string and searches within it
-                $query->orWhere(function ($subQuery) use ($normalizedChan) {
-                    $subQuery->whereNotNull('additional_display_names')
-                        ->whereRaw('LOWER(CAST(additional_display_names AS TEXT)) LIKE ?', ["%$normalizedChan%"]);
-                });
-                break;
+        foreach ($searchTerms as $term) {
+            $likeTerm = $this->likePattern($term);
+            [$jsonCondition, $jsonBindings] = $this->jsonSearchCondition($term);
+            $expressions[] = "CASE WHEN (LOWER(COALESCE(channel_id, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(display_name, '')) LIKE ? ESCAPE '!' OR {$jsonCondition}) THEN 1 ELSE 0 END";
+            array_push($bindings, $likeTerm, $likeTerm, $likeTerm, ...$jsonBindings);
         }
+
+        return [implode(' + ', $expressions), $bindings];
+    }
+
+    private function likePattern(string $term): string
+    {
+        return '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
+    }
+
+    /** @return array{string, list<string>} */
+    private function jsonSearchCondition(string $term): array
+    {
+        $driver = DB::connection()->getConfig('driver');
+        $likeTerm = $this->likePattern($term);
+
+        return match ($driver) {
+            'pgsql' => [
+                "EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE LOWER(elem) LIKE ? ESCAPE '!')",
+                [$likeTerm],
+            ],
+            'mysql', 'mariadb' => [
+                "JSON_SEARCH(LOWER(JSON_UNQUOTE(additional_display_names)), 'one', ?, '!') IS NOT NULL",
+                [$likeTerm],
+            ],
+            'sqlite' => [
+                "EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE LOWER(json_each.value) LIKE ? ESCAPE '!')",
+                [$likeTerm],
+            ],
+            default => [
+                "LOWER(CAST(additional_display_names AS TEXT)) LIKE ? ESCAPE '!'",
+                [$likeTerm],
+            ],
+        };
     }
 }

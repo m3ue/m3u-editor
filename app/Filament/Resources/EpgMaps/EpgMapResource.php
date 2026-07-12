@@ -193,7 +193,9 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->modalWidth(Width::FiveExtraLarge)
                     ->schema(fn (EpgMap $record): array => static::getCandidateReviewForm($record))
                     ->action(fn (array $data, EpgMap $record) => static::applyCandidateReview($record, $data['mappings'] ?? []))
-                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null)
+                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null
+                        || $record->user_id !== Auth::id()
+                        || $record->epg?->user_id !== Auth::id())
                     ->tooltip(__('Review explainable candidates for unresolved channels from this map.')),
                 Action::make('restart')
                     ->label(__('Restart Now'))
@@ -275,7 +277,7 @@ class EpgMapResource extends Resource implements CopilotResource
     /** @return array<int, Component> */
     private static function getCandidateReviewForm(EpgMap $record): array
     {
-        if ($record->user_id !== Auth::id()) {
+        if ($record->user_id !== Auth::id() || $record->epg?->user_id !== Auth::id()) {
             return [Placeholder::make('unavailable')->content(__('This mapping is not available.'))];
         }
 
@@ -311,7 +313,7 @@ class EpgMapResource extends Resource implements CopilotResource
     /** @return array<int, Component> */
     private static function getCandidateReviewSchema(EpgMap $record, int $offset): array
     {
-        if ($record->user_id !== Auth::id()) {
+        if ($record->user_id !== Auth::id() || $record->epg?->user_id !== Auth::id()) {
             return [Placeholder::make('unavailable')->content(__('This mapping is not available.'))];
         }
 
@@ -381,7 +383,7 @@ class EpgMapResource extends Resource implements CopilotResource
     /** @param  array<int|string, int|string|null>  $mappings */
     private static function applyCandidateReview(EpgMap $record, array $mappings): void
     {
-        if ($record->user_id !== Auth::id()) {
+        if ($record->user_id !== Auth::id() || $record->epg?->user_id !== Auth::id()) {
             return;
         }
 
