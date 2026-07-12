@@ -349,6 +349,7 @@ return [
         'a6558982e4e4', // PlaylistAuthPivot
         'b06385c305da', // AedProfile
         'eadad9842f9e', // TvNotification
+        '0113919ad8de', // EpgMapCandidate
     ],
 
     /*

@@ -26,6 +26,7 @@ class EpgMap extends Model
         'channels' => 'array',
         'status' => Status::class,
         'candidates_built_at' => 'datetime',
+        'candidates_progress' => 'float',
     ];
 
     public function user(): BelongsTo

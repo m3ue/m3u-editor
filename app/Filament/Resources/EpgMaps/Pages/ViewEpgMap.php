@@ -13,92 +13,110 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 
 class ViewEpgMap extends ViewRecord
 {
     protected static string $resource = EpgMapResource::class;
 
+    public function getTitle(): string
+    {
+        return $this->getRecord()->name ?? __('View EPG Map');
+    }
+
     public function infolist(Schema $schema): Schema
     {
-        $record = $this->getRecord();
-
         return $schema
             ->schema([
-                Section::make(__('Last Mapping Run'))
-                    ->collapsible()
-                    ->compact()
-                    ->persistCollapsed()
+                // Wrap everything in a polling Grid so the infolist re-renders
+                // every 3 s while a candidate build is running, mirroring the
+                // pattern used by SyncRunResource. When idle the poll stops.
+                Grid::make()
+                    ->columnSpanFull()
+                    ->poll(fn ($record): ?string => $record->candidates_building ? '3s' : null)
                     ->schema([
-                        Grid::make(2)
-                            ->columnSpanFull()
+                        Section::make(__('Building Candidates'))
+                            ->compact()
                             ->schema([
-                                Grid::make()
-                                    ->columnSpan(1)
+                                View::make('infolists.components.progress'),
+                            ])
+                            ->visible(fn ($record): bool => (bool) $record->candidates_building),
+                        Section::make(__('Last Mapping Run'))
+                            ->collapsible()
+                            ->compact()
+                            ->persistCollapsed()
+                            ->schema([
+                                Grid::make(2)
+                                    ->columnSpanFull()
                                     ->schema([
-                                        TextEntry::make('name')
-                                            ->label(__('Map name')),
-                                        TextEntry::make('status')
+                                        Grid::make()
+                                            ->columnSpan(1)
+                                            ->schema([
+                                                TextEntry::make('name')
+                                                    ->label(__('Map name')),
+                                                TextEntry::make('status')
+                                                    ->badge()
+                                                    ->color(fn (Status $state): string => $state->getColor()),
+                                                TextEntry::make('progress')
+                                                    ->label(__('Progress'))
+                                                    ->state(fn ($record): string => $record->status === Status::Processing || $record->status === Status::Pending
+                                                        ? __('In progress — :pct%', ['pct' => round((float) $record->progress)])
+                                                        : __('Complete')),
+                                                TextEntry::make('mapped_at')
+                                                    ->label(__('Last ran'))
+                                                    ->since()
+                                                    ->placeholder(__('Never')),
+                                            ]),
+                                        Grid::make()
+                                            ->columnSpan(1)
+                                            ->schema([
+                                                TextEntry::make('epg.name')
+                                                    ->label(__('EPG source'))
+                                                    ->placeholder(__('—')),
+                                                TextEntry::make('playlist.name')
+                                                    ->label(__('Playlist'))
+                                                    ->placeholder(__('Custom channel selection')),
+                                                TextEntry::make('sync_time')
+                                                    ->label(__('Sync time'))
+                                                    ->state(fn ($record): string => $record->sync_time ? gmdate('H:i:s', (int) $record->sync_time) : '—'),
+                                                TextEntry::make('errors')
+                                                    ->label(__('Errors'))
+                                                    ->placeholder(__('None'))
+                                                    ->color('danger')
+                                                    ->visible(fn ($record): bool => filled($record->errors)),
+                                            ]),
+                                    ]),
+                                Grid::make(4)
+                                    ->columnSpanFull()
+                                    ->schema([
+                                        TextEntry::make('total_channel_count')
+                                            ->label(__('Total Channels'))
                                             ->badge()
-                                            ->color(fn (Status $state): string => $state->getColor()),
-                                        TextEntry::make('progress')
-                                            ->label(__('Progress'))
-                                            ->state(fn ($record): string => $record->status === Status::Processing || $record->status === Status::Pending
-                                                ? __('In progress — :pct%', ['pct' => round((float) $record->progress)])
-                                                : __('Complete')),
-                                        TextEntry::make('mapped_at')
-                                            ->label(__('Last ran'))
-                                            ->since()
-                                            ->placeholder(__('Never')),
+                                            ->tooltip(__('Total number of channels available for this mapping.')),
+                                        TextEntry::make('current_mapped_count')
+                                            ->label(__('Currently Mapped'))
+                                            ->badge()
+                                            ->tooltip(__('Number of channels that were already mapped to an EPG entry.')),
+                                        TextEntry::make('channel_count')
+                                            ->label(__('Search & Map'))
+                                            ->badge()
+                                            ->tooltip(__('Channels searched for a matching EPG entry in this run.')),
+                                        TextEntry::make('mapped_count')
+                                            ->label(__('Newly Mapped'))
+                                            ->badge()
+                                            ->tooltip(__('Channels matched in this run. Zero is expected when Override is off and all channels are already mapped.')),
                                     ]),
-                                Grid::make()
-                                    ->columnSpan(1)
+                                Grid::make(2)
+                                    ->columnSpanFull()
                                     ->schema([
-                                        TextEntry::make('epg.name')
-                                            ->label(__('EPG source'))
-                                            ->placeholder(__('—')),
-                                        TextEntry::make('playlist.name')
-                                            ->label(__('Playlist'))
-                                            ->placeholder(__('Custom channel selection')),
-                                        TextEntry::make('sync_time')
-                                            ->label(__('Sync time'))
-                                            ->state(fn ($record): string => $record->sync_time ? gmdate('H:i:s', (int) $record->sync_time) : '—'),
-                                        TextEntry::make('errors')
-                                            ->label(__('Errors'))
-                                            ->placeholder(__('None'))
-                                            ->color('danger')
-                                            ->visible(fn ($record): bool => filled($record->errors)),
+                                        IconEntry::make('override')
+                                            ->label(__('Override existing mappings'))
+                                            ->boolean(),
+                                        IconEntry::make('recurring')
+                                            ->label(__('Recurring on EPG sync'))
+                                            ->boolean(),
                                     ]),
-                            ]),
-                        Grid::make(4)
-                            ->columnSpanFull()
-                            ->schema([
-                                TextEntry::make('total_channel_count')
-                                    ->label(__('Total Channels'))
-                                    ->badge()
-                                    ->tooltip(__('Total number of channels available for this mapping.')),
-                                TextEntry::make('current_mapped_count')
-                                    ->label(__('Currently Mapped'))
-                                    ->badge()
-                                    ->tooltip(__('Number of channels that were already mapped to an EPG entry.')),
-                                TextEntry::make('channel_count')
-                                    ->label(__('Search & Map'))
-                                    ->badge()
-                                    ->tooltip(__('Channels searched for a matching EPG entry in this run.')),
-                                TextEntry::make('mapped_count')
-                                    ->label(__('Newly Mapped'))
-                                    ->badge()
-                                    ->tooltip(__('Channels matched in this run. Zero is expected when Override is off and all channels are already mapped.')),
-                            ]),
-                        Grid::make(2)
-                            ->columnSpanFull()
-                            ->schema([
-                                IconEntry::make('override')
-                                    ->label(__('Override existing mappings'))
-                                    ->boolean(),
-                                IconEntry::make('recurring')
-                                    ->label(__('Recurring on EPG sync'))
-                                    ->boolean(),
                             ]),
                     ]),
             ]);
@@ -116,9 +134,12 @@ class ViewEpgMap extends ViewRecord
                     if ($record->candidates()->exists()) {
                         $record->candidates()->delete();
                     }
-                    $record->update(['candidates_building' => true]);
-                    app('Illuminate\Contracts\Bus\Dispatcher')
-                        ->dispatch(new BuildEpgMapCandidatesJob($record->id));
+                    $record->update([
+                        'candidates_building' => true,
+                        'candidates_built_at' => now(),
+                        'candidates_progress' => 0,
+                    ]);
+                    dispatch(new BuildEpgMapCandidatesJob($record->id));
                     Notification::make()
                         ->success()
                         ->title(__('Candidate review is being prepared'))
@@ -148,6 +169,7 @@ class ViewEpgMap extends ViewRecord
                         ->title(__('Candidate review reset'))
                         ->body(__('The candidate list has been cleared. You can rebuild it at any time.'))
                         ->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record->getKey()]));
                 })
                 ->visible(fn (EpgMap $record): bool => $record->candidates_building)
                 ->requiresConfirmation()
@@ -173,10 +195,5 @@ class ViewEpgMap extends ViewRecord
         }
 
         return null;
-    }
-
-    protected function getPollInterval(): ?string
-    {
-        return $this->getRecord()?->candidates_building ? '3s' : null;
     }
 }
