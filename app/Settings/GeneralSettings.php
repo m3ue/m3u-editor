@@ -264,7 +264,7 @@ class GeneralSettings extends Settings
 
     public ?array $copilot_quick_actions = null;
 
-    // Alerts - Slack / Discord integration
+    // Alerts - Slack / Discord / Telegram integration
     public ?bool $discord_alerts_enabled = false;
 
     public ?string $discord_webhook_url = null;
@@ -272,6 +272,12 @@ class GeneralSettings extends Settings
     public ?bool $slack_alerts_enabled = false;
 
     public ?string $slack_webhook_url = null;
+
+    public ?bool $telegram_alerts_enabled = false;
+
+    public ?string $telegram_bot_token = null;
+
+    public ?string $telegram_chat_id = null;
 
     /** Forward queued job failures to enabled alert channels */
     public ?bool $alerts_on_job_failed = false;
