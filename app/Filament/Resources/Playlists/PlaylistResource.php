@@ -795,7 +795,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 Rule::unique('playlist_aliases', 'uuid'), // Ensure UUID is unique in playlist_aliases table as well
                             ];
                         })
-                        ->helperText(__('3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
+                        ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                         ->hintIcon(
                             'heroicon-m-exclamation-triangle',
                             tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
@@ -2500,41 +2500,70 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->options([
                                     'live_groups' => 'Live Groups',
                                     'vod_groups' => 'VOD Groups',
+                                    'series_categories' => 'Series Categories',
                                 ])
                                 ->live()
                                 ->default('live_groups')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set) => $set('group', ['all']))
+                                ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                    $set('group', ['all']);
+                                    $set('column', $state === 'series_categories' ? 'release_date' : 'title');
+                                    $set('sort', $state === 'series_categories' ? 'DESC' : 'ASC');
+                                })
                                 ->columnSpan(1),
                             Select::make('group')
-                                ->label(__('Groups'))
-                                ->options(fn (Get $get, ?Playlist $record): array => [
-                                    'all' => 'All groups',
-                                    ...($record
-                                        ? SourceGroup::where('playlist_id', $record->id)
-                                            ->where('type', match ($get('target')) {
-                                                'vod_groups' => 'vod',
-                                                default => 'live',
-                                            })
-                                            ->orderBy('name')
-                                            ->pluck('name', 'name')
-                                            ->toArray()
-                                        : []),
-                                ])
+                                ->label(fn (Get $get): string => $get('target') === 'series_categories' ? __('Categories') : __('Groups'))
+                                ->options(function (Get $get, ?Playlist $record): array {
+                                    if ($get('target') === 'series_categories') {
+                                        return [
+                                            'all' => 'All categories',
+                                            ...($record
+                                                ? SourceCategory::where('playlist_id', $record->id)
+                                                    ->orderBy('name')
+                                                    ->pluck('name', 'name')
+                                                    ->toArray()
+                                                : []),
+                                        ];
+                                    }
+
+                                    return [
+                                        'all' => 'All groups',
+                                        ...($record
+                                            ? SourceGroup::where('playlist_id', $record->id)
+                                                ->where('type', match ($get('target')) {
+                                                    'vod_groups' => 'vod',
+                                                    default => 'live',
+                                                })
+                                                ->orderBy('name')
+                                                ->pluck('name', 'name')
+                                                ->toArray()
+                                            : []),
+                                    ];
+                                })
                                 ->default(['all'])
                                 ->multiple()
                                 ->searchable()
                                 ->columnSpan(3),
                             Select::make('column')
                                 ->label(__('Sort By'))
-                                ->options([
-                                    'title' => 'Title (or override if set)',
-                                    'name' => 'Name (or override if set)',
-                                    'stream_id' => 'ID (or override if set)',
-                                    'channel' => 'Channel No.',
-                                ])
+                                ->options(function (Get $get): array {
+                                    $alphaOptions = [
+                                        'title' => 'Title (or override if set)',
+                                        'name' => 'Name (or override if set)',
+                                        'stream_id' => 'ID (or override if set)',
+                                        'channel' => 'Channel No.',
+                                    ];
+
+                                    return match ($get('target')) {
+                                        'series_categories' => ['release_date' => 'Release Date'],
+                                        'vod_groups' => [...$alphaOptions, 'release_date' => 'Release Date'],
+                                        default => $alphaOptions,
+                                    };
+                                })
+                                ->live()
                                 ->default('title')
                                 ->required()
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', $state === 'release_date' ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))
@@ -2556,12 +2585,16 @@ class PlaylistResource extends Resource implements CopilotResource
                             if (empty($state['target'])) {
                                 return null;
                             }
-                            $targetLabel = $state['target'] === 'vod_groups' ? 'VOD Groups' : 'Live Groups';
+                            $targetLabel = match ($state['target']) {
+                                'vod_groups' => 'VOD Groups',
+                                'series_categories' => 'Series Categories',
+                                default => 'Live Groups',
+                            };
                             $groups = (array) ($state['group'] ?? ['all']);
                             $groupLabel = \in_array('all', $groups) ? 'All' : implode(', ', $groups);
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
-                            return "{$targetLabel} — {$groupLabel}{$disabled}";
+                            return "{$targetLabel} - {$groupLabel}{$disabled}";
                         }),
                 ]),
 
@@ -2739,7 +2772,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 : 'No playlist';
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
-                            return "{$typeLabel} — {$groupLabel} → {$customPlaylistName}{$disabled}";
+                            return "{$typeLabel} - {$groupLabel} → {$customPlaylistName}{$disabled}";
                         }),
                 ]),
         ];
@@ -2910,7 +2943,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             TextInput::make('available_streams')
                                 ->label(__('Available Streams'))
                                 ->hint(__('Set to 0 for unlimited streams.'))
-                                ->helperText(__('Maximum proxy streams allowed. Applies regardless of Provider Profiles — set to 0 for unlimited. When Provider Profiles are enabled, this is the authoritative proxy-level limit while provider limits control routing.'))
+                                ->helperText(__('Maximum proxy streams allowed. Applies regardless of Provider Profiles - set to 0 for unlimited. When Provider Profiles are enabled, this is the authoritative proxy-level limit while provider limits control routing.'))
                                 ->columnSpan(1)
                                 ->rules(['min:0'])
                                 ->type('number')
@@ -3042,7 +3075,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
-                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order — first non-empty value wins. Leave empty to use the channel title.'))
+                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))
                         ->schema([
                             Select::make('method')
                                 ->label(__('Field'))
