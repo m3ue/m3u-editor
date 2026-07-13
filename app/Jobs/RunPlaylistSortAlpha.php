@@ -80,15 +80,17 @@ class RunPlaylistSortAlpha implements ShouldQueue
                     }
                 });
                 $vodRulesRun++;
-            } elseif ($target === 'series_categories' && $column === 'release_date') {
-                if ($isAll) {
-                    SortFacade::bulkSortPlaylistSeriesByReleaseDate($this->playlist, $order);
-                } else {
-                    $this->playlist->categories()
-                        ->whereIn('name_internal', $selectedGroups)
-                        ->each(function ($category) use ($order): void {
-                            SortFacade::bulkSortCategorySeriesByReleaseDate($category, $order);
-                        });
+            } elseif ($target === 'series_categories') {
+                if ($column === 'release_date') {
+                    if ($isAll) {
+                        SortFacade::bulkSortPlaylistSeriesByReleaseDate($this->playlist, $order);
+                    } else {
+                        $this->playlist->categories()
+                            ->whereIn('name_internal', $selectedGroups)
+                            ->each(function ($category) use ($order): void {
+                                SortFacade::bulkSortCategorySeriesByReleaseDate($category, $order);
+                            });
+                    }
                 }
                 $seriesRulesRun++;
             }

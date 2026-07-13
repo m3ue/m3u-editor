@@ -2563,7 +2563,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->default('title')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', $state === 'release_date' ? 'DESC' : 'ASC'))
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', ($state ?? '') === 'release_date' ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))
