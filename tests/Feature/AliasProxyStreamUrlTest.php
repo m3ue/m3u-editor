@@ -61,12 +61,12 @@ test('proxied live stream through M3U-playlist alias sends swapped credentials t
     ]);
 
     Http::fake([
-        'localhost:8765/streams/by-metadata*' => Http::response([
+        '*/streams/by-metadata*' => Http::response([
             'matching_streams' => [],
             'total_matching' => 0,
             'total_clients' => 0,
         ]),
-        'localhost:8765/streams' => Http::response(['stream_id' => 'test-stream-id']),
+        '*/streams' => Http::response(['stream_id' => 'test-stream-id']),
     ]);
 
     $response = $this->get("/live/owner/{$alias->uuid}/{$channel->id}.ts");
