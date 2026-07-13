@@ -12,6 +12,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Models\StreamProfile;
 use App\Pivots\PlaylistAuthPivot;
 use App\Services\DateFormatService;
 use App\Traits\HasUserFiltering;
@@ -23,6 +24,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -153,6 +155,48 @@ class PlaylistAuthResource extends Resource implements CopilotResource
 
     public static function getForm(): array
     {
+        $proxySection = auth()->user()->canUseProxy()
+            ? Section::make(__('Proxy Access'))
+                ->description(__('Advertise the m3u proxy to compatible clients (e.g. the TV app) authenticating with this user, allowing them to enable proxied playback and select a transcoding profile.'))
+                ->compact()
+                ->hidden(fn () => ! (auth()->user()?->canUseProxy() ?? false))
+                ->schema([
+                    Toggle::make('proxy_enabled')
+                        ->label(__('Enable Proxy'))
+                        ->helperText(__('Allow this user\'s clients to see and use the proxy, including per-device transcoding profile selection.'))
+                        ->default(false)
+                        ->live()
+                        ->columnSpan(2),
+                    Radio::make('proxy_profile_access')
+                        ->label(__('Transcoding Profile Access'))
+                        ->options([
+                            'all' => __('All profiles'),
+                            'selected' => __('Selected profiles'),
+                            'none' => __('None (direct proxy only)'),
+                        ])
+                        ->default('all')
+                        ->live()
+                        ->required()
+                        ->helperText(__('Which transcoding profiles this user may apply when streaming through the proxy.'))
+                        ->visible(fn ($get) => $get('proxy_enabled'))
+                        ->columnSpan(2),
+                    Select::make('proxy_stream_profile_ids')
+                        ->label(__('Allowed Profiles'))
+                        ->multiple()
+                        ->required()
+                        ->options(fn () => StreamProfile::where('user_id', auth()->id())
+                            ->orderBy('name')
+                            ->pluck('name', 'id')
+                            ->toArray())
+                        ->helperText(__('Only these profiles will be offered to (and accepted from) this user.'))
+                        ->hidden(fn ($get) => ! $get('proxy_enabled') || $get('proxy_profile_access') !== 'selected')
+                        ->columnSpan(2),
+                ])
+                ->columns(2)
+                ->collapsible()
+                ->collapsed(fn ($record) => ! ($record?->proxy_enabled))
+            : null;
+
         $dvrSection = Section::make(__('DVR Access'))
             ->description(__('Control whether this user can schedule and manage DVR recordings.'))
             ->compact()
@@ -417,6 +461,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         ->columnSpan(2),
                 ])
                 ->columns(2),
+            $proxySection,
             $requestsSection,
             $dvrSection,
             $aiostreamsSection,

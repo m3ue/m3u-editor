@@ -63,8 +63,22 @@ class M3uProxyApiController extends Controller
         // If neither is set, the stream is proxied directly without transcoding.
         // An adaptive profile (backend === 'adaptive') is unwrapped to its
         // concrete target via the channel's cached probe data.
-        $profile = $channel->streamProfile
-            ?? ($channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile);
+        //
+        // A client-selected profile (validated upstream in XtreamStreamController and
+        // passed via request attributes) replaces the playlist-level default; the
+        // channel-level profile still wins since it is pinned to make that specific
+        // stream work (e.g. resolver profiles). 'none' means explicit direct proxy.
+        $playlistProfile = $channel->is_vod ? $playlist->vodStreamProfile : $playlist->streamProfile;
+        $clientProfile = $request->attributes->get('client_stream_profile');
+        if ($clientProfile === 'none') {
+            $playlistProfile = null;
+        } elseif ($clientProfile !== null) {
+            $profileId = (int) $clientProfile;
+            $playlistProfile = StreamProfile::where('id', $profileId)
+                ->where('user_id', $playlist->user_id)
+                ->first();
+        }
+        $profile = $channel->streamProfile ?? $playlistProfile;
         $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
 
         $url = app(M3uProxyService::class)
@@ -112,8 +126,20 @@ class M3uProxyApiController extends Controller
             $playlist->load('streamProfile', 'vodStreamProfile');
         }
 
-        // For Series, use the VOD stream profile if set
+        // For Series, use the VOD stream profile if set.
+        // A client-selected profile (validated upstream in XtreamStreamController and
+        // passed via request attributes) replaces the playlist-level default;
+        // 'none' means explicit direct proxy.
         $profile = $playlist->vodStreamProfile;
+        $clientProfile = $request->attributes->get('client_stream_profile');
+        if ($clientProfile === 'none') {
+            $profile = null;
+        } elseif ($clientProfile !== null) {
+            $profileId = (int) $clientProfile;
+            $profile = StreamProfile::where('id', $profileId)
+                ->where('user_id', $playlist->user_id)
+                ->first();
+        }
 
         $url = app(M3uProxyService::class)
             ->getEpisodeUrl(
