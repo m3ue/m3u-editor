@@ -307,7 +307,7 @@ it('summarizes executed live vod and series rules in the notification', function
     NotificationFacade::assertSentTo(
         $this->user,
         DatabaseNotification::class,
-        fn (DatabaseNotification $notification): bool => $notification->data['title'] === 'Playlist sorting completed'
+        fn (DatabaseNotification $notification): bool => $notification->data['title'] === 'Sort Alpha completed'
             && str_contains($notification->data['body'], '1 live rule')
             && str_contains($notification->data['body'], '1 VOD rule')
             && str_contains($notification->data['body'], '1 Series rule'),

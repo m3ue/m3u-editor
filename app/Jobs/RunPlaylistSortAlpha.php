@@ -115,7 +115,7 @@ class RunPlaylistSortAlpha implements ShouldQueue
 
         Notification::make()
             ->success()
-            ->title('Playlist sorting completed')
+            ->title('Sort Alpha completed')
             ->body("Ran {$summary} for \"{$this->playlist->name}\" in {$completedIn}s.")
             ->broadcast($user)
             ->sendToDatabase($user);

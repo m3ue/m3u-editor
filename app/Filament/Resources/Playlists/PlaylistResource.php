@@ -795,7 +795,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 Rule::unique('playlist_aliases', 'uuid'), // Ensure UUID is unique in playlist_aliases table as well
                             ];
                         })
-                        ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
+                        ->helperText(__('3–36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                         ->hintIcon(
                             'heroicon-m-exclamation-triangle',
                             tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
@@ -2594,7 +2594,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             $groupLabel = \in_array('all', $groups) ? 'All' : implode(', ', $groups);
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
-                            return "{$targetLabel} - {$groupLabel}{$disabled}";
+                            return "{$targetLabel} — {$groupLabel}{$disabled}";
                         }),
                 ]),
 
@@ -2772,7 +2772,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 : 'No playlist';
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
-                            return "{$typeLabel} - {$groupLabel} → {$customPlaylistName}{$disabled}";
+                            return "{$typeLabel} — {$groupLabel} → {$customPlaylistName}{$disabled}";
                         }),
                 ]),
         ];
@@ -2943,7 +2943,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             TextInput::make('available_streams')
                                 ->label(__('Available Streams'))
                                 ->hint(__('Set to 0 for unlimited streams.'))
-                                ->helperText(__('Maximum proxy streams allowed. Applies regardless of Provider Profiles - set to 0 for unlimited. When Provider Profiles are enabled, this is the authoritative proxy-level limit while provider limits control routing.'))
+                                ->helperText(__('Maximum proxy streams allowed. Applies regardless of Provider Profiles — set to 0 for unlimited. When Provider Profiles are enabled, this is the authoritative proxy-level limit while provider limits control routing.'))
                                 ->columnSpan(1)
                                 ->rules(['min:0'])
                                 ->type('number')
@@ -3075,7 +3075,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
-                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))
+                        ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order — first non-empty value wins. Leave empty to use the channel title.'))
                         ->schema([
                             Select::make('method')
                                 ->label(__('Field'))
