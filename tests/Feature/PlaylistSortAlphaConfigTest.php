@@ -114,5 +114,5 @@ it('persists a series release date sort rule', function () {
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect($this->playlist->fresh()->sort_alpha_config)->toBe([$rule]);
+    expect($this->playlist->fresh()->sort_alpha_config)->toEqual([$rule]);
 });
