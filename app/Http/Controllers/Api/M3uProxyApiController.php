@@ -72,8 +72,11 @@ class M3uProxyApiController extends Controller
         $clientProfile = $request->attributes->get('client_stream_profile');
         if ($clientProfile === 'none') {
             $playlistProfile = null;
-        } elseif ($clientProfile instanceof StreamProfile) {
-            $playlistProfile = $clientProfile;
+        } elseif ($clientProfile !== null) {
+            $profileId = (int) $clientProfile;
+            $playlistProfile = StreamProfile::where('id', $profileId)
+                ->where('user_id', $playlist->user_id)
+                ->first();
         }
         $profile = $channel->streamProfile ?? $playlistProfile;
         $profile = app(StreamProfileRuleEvaluator::class)->unwrap($profile, $channel->stream_stats);
@@ -131,8 +134,11 @@ class M3uProxyApiController extends Controller
         $clientProfile = $request->attributes->get('client_stream_profile');
         if ($clientProfile === 'none') {
             $profile = null;
-        } elseif ($clientProfile instanceof StreamProfile) {
-            $profile = $clientProfile;
+        } elseif ($clientProfile !== null) {
+            $profileId = (int) $clientProfile;
+            $profile = StreamProfile::where('id', $profileId)
+                ->where('user_id', $playlist->user_id)
+                ->first();
         }
 
         $url = app(M3uProxyService::class)

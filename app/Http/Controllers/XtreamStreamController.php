@@ -11,7 +11,6 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
-use App\Models\StreamProfile;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
@@ -57,13 +56,7 @@ class XtreamStreamController extends Controller
             return;
         }
 
-        $profile = StreamProfile::where('id', $profileId)
-            ->where('user_id', $playlist->user_id)
-            ->first();
-
-        if ($profile) {
-            $request->attributes->set('client_stream_profile', $profile);
-        }
+        $request->attributes->set('client_stream_profile', $profileId);
     }
 
     /**
