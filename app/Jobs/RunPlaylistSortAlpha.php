@@ -42,6 +42,7 @@ class RunPlaylistSortAlpha implements ShouldQueue
         $start = now();
         $liveRulesRun = 0;
         $vodRulesRun = 0;
+        $seriesRulesRun = 0;
 
         foreach ($rules as $rule) {
             $target = $rule['target'] ?? 'live_groups';
@@ -60,15 +61,43 @@ class RunPlaylistSortAlpha implements ShouldQueue
                 });
                 $liveRulesRun++;
             } elseif ($target === 'vod_groups') {
+                if ($column === 'release_date' && $isAll) {
+                    SortFacade::bulkSortPlaylistVodByReleaseDate($this->playlist, $order);
+                    $vodRulesRun++;
+
+                    continue;
+                }
+
                 $query = $this->playlist->vodGroups();
                 if (! $isAll) {
                     $query = $query->whereIn('name_internal', $selectedGroups);
                 }
                 $query->each(function ($group) use ($column, $order): void {
-                    SortFacade::bulkSortGroupChannels($group, $order, $column);
+                    if ($column === 'release_date') {
+                        SortFacade::bulkSortGroupChannelsByReleaseDate($group, $order);
+                    } else {
+                        SortFacade::bulkSortGroupChannels($group, $order, $column);
+                    }
                 });
                 $vodRulesRun++;
+            } elseif ($target === 'series_categories') {
+                if ($column === 'release_date') {
+                    if ($isAll) {
+                        SortFacade::bulkSortPlaylistSeriesByReleaseDate($this->playlist, $order);
+                    } else {
+                        $this->playlist->categories()
+                            ->whereIn('name_internal', $selectedGroups)
+                            ->each(function ($category) use ($order): void {
+                                SortFacade::bulkSortCategorySeriesByReleaseDate($category, $order);
+                            });
+                    }
+                }
+                $seriesRulesRun++;
             }
+        }
+
+        if (($liveRulesRun + $vodRulesRun + $seriesRulesRun) === 0) {
+            return;
         }
 
         $completedIn = round($start->diffInSeconds(now()), 2);
@@ -80,6 +109,9 @@ class RunPlaylistSortAlpha implements ShouldQueue
         }
         if ($vodRulesRun > 0) {
             $parts[] = "{$vodRulesRun} VOD ".($vodRulesRun === 1 ? 'rule' : 'rules');
+        }
+        if ($seriesRulesRun > 0) {
+            $parts[] = "{$seriesRulesRun} Series ".($seriesRulesRun === 1 ? 'rule' : 'rules');
         }
         $summary = implode(' and ', $parts);
 

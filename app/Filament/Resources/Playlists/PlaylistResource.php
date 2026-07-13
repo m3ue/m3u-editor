@@ -2512,41 +2512,70 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->options([
                                     'live_groups' => 'Live Groups',
                                     'vod_groups' => 'VOD Groups',
+                                    'series_categories' => 'Series Categories',
                                 ])
                                 ->live()
                                 ->default('live_groups')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set) => $set('group', ['all']))
+                                ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                    $set('group', ['all']);
+                                    $set('column', $state === 'series_categories' ? 'release_date' : 'title');
+                                    $set('sort', $state === 'series_categories' ? 'DESC' : 'ASC');
+                                })
                                 ->columnSpan(1),
                             Select::make('group')
-                                ->label(__('Groups'))
-                                ->options(fn (Get $get, ?Playlist $record): array => [
-                                    'all' => 'All groups',
-                                    ...($record
-                                        ? SourceGroup::where('playlist_id', $record->id)
-                                            ->where('type', match ($get('target')) {
-                                                'vod_groups' => 'vod',
-                                                default => 'live',
-                                            })
-                                            ->orderBy('name')
-                                            ->pluck('name', 'name')
-                                            ->toArray()
-                                        : []),
-                                ])
+                                ->label(fn (Get $get): string => $get('target') === 'series_categories' ? __('Categories') : __('Groups'))
+                                ->options(function (Get $get, ?Playlist $record): array {
+                                    if ($get('target') === 'series_categories') {
+                                        return [
+                                            'all' => 'All categories',
+                                            ...($record
+                                                ? SourceCategory::where('playlist_id', $record->id)
+                                                    ->orderBy('name')
+                                                    ->pluck('name', 'name')
+                                                    ->toArray()
+                                                : []),
+                                        ];
+                                    }
+
+                                    return [
+                                        'all' => 'All groups',
+                                        ...($record
+                                            ? SourceGroup::where('playlist_id', $record->id)
+                                                ->where('type', match ($get('target')) {
+                                                    'vod_groups' => 'vod',
+                                                    default => 'live',
+                                                })
+                                                ->orderBy('name')
+                                                ->pluck('name', 'name')
+                                                ->toArray()
+                                            : []),
+                                    ];
+                                })
                                 ->default(['all'])
                                 ->multiple()
                                 ->searchable()
                                 ->columnSpan(3),
                             Select::make('column')
                                 ->label(__('Sort By'))
-                                ->options([
-                                    'title' => 'Title (or override if set)',
-                                    'name' => 'Name (or override if set)',
-                                    'stream_id' => 'ID (or override if set)',
-                                    'channel' => 'Channel No.',
-                                ])
+                                ->options(function (Get $get): array {
+                                    $alphaOptions = [
+                                        'title' => 'Title (or override if set)',
+                                        'name' => 'Name (or override if set)',
+                                        'stream_id' => 'ID (or override if set)',
+                                        'channel' => 'Channel No.',
+                                    ];
+
+                                    return match ($get('target')) {
+                                        'series_categories' => ['release_date' => 'Release Date'],
+                                        'vod_groups' => [...$alphaOptions, 'release_date' => 'Release Date'],
+                                        default => $alphaOptions,
+                                    };
+                                })
+                                ->live()
                                 ->default('title')
                                 ->required()
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', ($state ?? '') === 'release_date' ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))
@@ -2568,7 +2597,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             if (empty($state['target'])) {
                                 return null;
                             }
-                            $targetLabel = $state['target'] === 'vod_groups' ? 'VOD Groups' : 'Live Groups';
+                            $targetLabel = match ($state['target']) {
+                                'vod_groups' => 'VOD Groups',
+                                'series_categories' => 'Series Categories',
+                                default => 'Live Groups',
+                            };
                             $groups = (array) ($state['group'] ?? ['all']);
                             $groupLabel = \in_array('all', $groups) ? 'All' : implode(', ', $groups);
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
