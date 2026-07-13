@@ -27,6 +27,8 @@ class PlaylistAuth extends Model
         'expires_at' => 'datetime',
         'max_connections' => 'integer',
         'stop_oldest_on_limit' => 'boolean',
+        'proxy_enabled' => 'boolean',
+        'proxy_stream_profile_ids' => 'array',
     ];
 
     public function user(): BelongsTo
@@ -37,6 +39,25 @@ class PlaylistAuth extends Model
     public function viewer(): HasOne
     {
         return $this->hasOne(PlaylistViewer::class);
+    }
+
+    /**
+     * Whether this auth may apply the given stream profile when proxying.
+     *
+     * Profile access modes: 'all' (any owner profile), 'selected' (only the
+     * IDs in proxy_stream_profile_ids), 'none' (direct proxy only).
+     */
+    public function allowsProxyStreamProfile(int $profileId): bool
+    {
+        if (! $this->proxy_enabled) {
+            return false;
+        }
+
+        return match ($this->proxy_profile_access) {
+            'none' => false,
+            'selected' => in_array($profileId, array_map('intval', $this->proxy_stream_profile_ids ?? []), true),
+            default => true, // 'all'
+        };
     }
 
     /**

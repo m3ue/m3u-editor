@@ -18,6 +18,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
+use App\Models\StreamProfile;
 use App\Models\ViewerWatchProgress;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
@@ -442,15 +443,16 @@ class XtreamApiController extends Controller
                 $streams = $playlist->streams ?? 1;
                 $activeConnections = 0;
             }
+            // Resolve the PlaylistAuth once — used for the per-auth connection limit
+            // override and for feature advertisement (proxy access).
+            $playlistAuth = $authMethod === 'playlist_auth'
+                ? PlaylistAuth::where('username', $username)->where('password', $password)->first()
+                : null;
+
             // Override max_connections when the request is authenticated via a PlaylistAuth
             // that has a specific per-auth limit configured.
-            if ($authMethod === 'playlist_auth') {
-                $authMaxConnections = PlaylistAuth::where('username', $username)
-                    ->where('password', $password)
-                    ->value('max_connections');
-                if ($authMaxConnections) {
-                    $streams = $authMaxConnections;
-                }
+            if ($playlistAuth?->max_connections) {
+                $streams = $playlistAuth->max_connections;
             }
 
             $outputFormats = ['m3u8', 'ts'];
@@ -517,13 +519,22 @@ class XtreamApiController extends Controller
                 'process' => true, // Always true
             ];
 
+            $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
+
+            $m3uEditorPayload = [
+                'version' => config('dev.version'),
+                'features' => $features,
+            ];
+
+            $proxyData = $this->resolveProxyData($playlist, $features, $authMethod, $playlistAuth);
+            if (! empty($proxyData)) {
+                $m3uEditorPayload['proxy'] = $proxyData;
+            }
+
             return response()->json([
                 'user_info' => $userInfo,
                 'server_info' => $serverInfo,
-                'm3u_editor' => [
-                    'version' => config('dev.version'),
-                    'features' => ['viewers', 'progress'],
-                ],
+                'm3u_editor' => $m3uEditorPayload,
             ]);
         } elseif ($action === 'get_live_streams') {
             // Handle network playlists - return networks as live streams
@@ -2561,5 +2572,88 @@ class XtreamApiController extends Controller
         $password = $request->input('password');
 
         return PlaylistFacade::authenticate($username, $password);
+    }
+
+    /**
+     * Resolve optional m3u-editor capabilities advertised to compatible clients.
+     *
+     * The proxy feature is advertised when the playlist owner may use the proxy
+     * and, for PlaylistAuth credentials, the individual auth has proxy access
+     * enabled. Owner/alias credentials act with the owner's own permission.
+     *
+     * @return array<int, string>
+     */
+    private function resolveM3uEditorFeatures($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): array
+    {
+        $features = ['viewers', 'progress'];
+
+        if ($this->canAdvertiseProxyFeature($playlist, $authMethod, $playlistAuth)) {
+            $features[] = 'proxy';
+        }
+
+        return $features;
+    }
+
+    private function canAdvertiseProxyFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if (! $playlist->user?->canUseProxy()) {
+            return false;
+        }
+
+        if ($authMethod === 'playlist_auth') {
+            return (bool) $playlistAuth?->proxy_enabled;
+        }
+
+        return true;
+    }
+
+    /**
+     * Build the proxy payload for the auth response: whether the proxy is forced
+     * at the playlist level, and the transcoding profiles the authenticated user
+     * may apply to proxied streams. Profile ffmpeg args are intentionally never
+     * exposed to clients.
+     *
+     * When 'forced' is true the playlist already routes every stream through the
+     * proxy, so clients should present the proxy as locked on — profile selection
+     * still applies.
+     *
+     * @return array{forced: bool, profiles: array<int, array{id: int, name: string, description: string|null, format: string|null}>}|array{}
+     */
+    private function resolveProxyData($playlist, array $features, string $authMethod, ?PlaylistAuth $playlistAuth): array
+    {
+        if (! in_array('proxy', $features)) {
+            return [];
+        }
+
+        $forced = (bool) ($playlist->enable_proxy ?? false);
+
+        $query = StreamProfile::where('user_id', $playlist->user_id)->orderBy('name');
+
+        if ($authMethod === 'playlist_auth') {
+            $access = $playlistAuth->proxy_profile_access ?? 'all';
+            if ($access === 'none') {
+                return ['forced' => $forced, 'profiles' => []];
+            }
+            if ($access === 'selected') {
+                $allowedIds = array_map('intval', $playlistAuth->proxy_stream_profile_ids ?? []);
+                if (empty($allowedIds)) {
+                    return ['forced' => $forced, 'profiles' => []];
+                }
+                $query->whereIn('id', $allowedIds);
+            }
+        }
+
+        return [
+            'forced' => $forced,
+            'profiles' => $query->get(['id', 'name', 'description', 'format'])
+                ->map(fn (StreamProfile $profile) => [
+                    'id' => $profile->id,
+                    'name' => $profile->name,
+                    'description' => $profile->description,
+                    'format' => $profile->format,
+                ])
+                ->values()
+                ->all(),
+        ];
     }
 }
