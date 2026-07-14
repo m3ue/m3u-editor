@@ -2493,6 +2493,76 @@ class PlaylistResource extends Resource implements CopilotResource
                             : null
                         ),
                 ]),
+            Section::make(__('Auto Enable/Disable Rules'))
+                ->description(__('Automatically enable or disable channels whose title or name matches a regex pattern, re-evaluated after each playlist sync. Rules run in order and the last matching rule wins; channels matching no rule keep their current state. Useful for event channels that providers rename between syncs (e.g. disable "NO EVENT" placeholders).'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->schema([
+                    Repeater::make('channel_enable_rules')
+                        ->label('')
+                        ->schema([
+                            Toggle::make('enabled')
+                                ->label(__('Enabled'))
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(1),
+                            TextInput::make('name')
+                                ->label(__('Rule Name'))
+                                ->required()
+                                ->placeholder(__('e.g. Disable idle event channels'))
+                                ->columnSpan(2),
+                            Select::make('target')
+                                ->label(__('Target'))
+                                ->options([
+                                    'channels' => 'Live Channels',
+                                    'vod_channels' => 'VOD Channels',
+                                ])
+                                ->default('channels')
+                                ->required()
+                                ->columnSpan(2),
+                            Select::make('column')
+                                ->label(__('Column to match'))
+                                ->options([
+                                    'title' => 'Channel Title',
+                                    'name' => 'Channel Name (tvg-name)',
+                                ])
+                                ->default('title')
+                                ->required()
+                                ->columnSpan(2),
+                            Select::make('action')
+                                ->label(__('Action'))
+                                ->options([
+                                    'enable' => 'Enable matching channels',
+                                    'disable' => 'Disable matching channels',
+                                ])
+                                ->default('disable')
+                                ->required()
+                                ->columnSpan(2),
+                            TextInput::make('pattern')
+                                ->label(__('Pattern to match'))
+                                ->required()
+                                ->placeholder(__('e.g. NO EVENT'))
+                                ->suffixAction(
+                                    RegexTesterAction::make(
+                                        name: 'test-enable-rules',
+                                        samplesContext: fn (Get $get): string => $get('target') ?? 'channels',
+                                        patternField: 'pattern',
+                                    )
+                                )
+                                ->columnSpan(5),
+                        ])
+                        ->columns(7)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel('Add enable/disable rule')
+                        ->itemLabel(fn (array $state): ?string => ($state['name'] ?? null)
+                            ? ($state['name'].($state['enabled'] ?? true ? '' : ' (disabled)'))
+                            : null
+                        ),
+                ]),
             Section::make(__('Sort Alpha Configs'))
                 ->description(__('Define sort configurations that automatically run after each playlist sync. Configurations execute in order.'))
                 ->columnSpanFull()
