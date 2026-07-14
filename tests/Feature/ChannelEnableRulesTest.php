@@ -9,7 +9,7 @@
  */
 
 use App\Enums\SyncRunPhase;
-use App\Jobs\RunPlaylistChannelEnableRules;
+use App\Jobs\RunPlaylistChannelEnableDisableRules;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
@@ -57,7 +57,7 @@ it('disables channels matching a disable rule and leaves others untouched', func
     $idle = makeEnableRulesChannel($playlist, 'LIVE EVENT 02 | NO EVENT TODAY', true);
     $active = makeEnableRulesChannel($playlist, 'LIVE EVENT 01 | EVENT TITLE', true);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($idle->refresh()->enabled)->toBeFalse()
         ->and($active->refresh()->enabled)->toBeTrue();
@@ -71,7 +71,7 @@ it('re-enables a disabled channel when its title matches an enable rule', functi
     // Previously disabled placeholder that the provider renamed to a real event
     $channel = makeEnableRulesChannel($playlist, 'EVENT 01 | Big Game Tonight', false);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($channel->refresh()->enabled)->toBeTrue();
 });
@@ -85,7 +85,7 @@ it('applies rules in order with the last matching rule winning', function () {
     $idle = makeEnableRulesChannel($playlist, 'LIVE EVENT 02 | NO EVENT TODAY', true);
     $active = makeEnableRulesChannel($playlist, 'LIVE EVENT 01 | EVENT TITLE', false);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($idle->refresh()->enabled)->toBeFalse()
         ->and($active->refresh()->enabled)->toBeTrue();
@@ -98,7 +98,7 @@ it('matches against the custom title override when set', function () {
 
     $channel = makeEnableRulesChannel($playlist, 'LIVE EVENT 01', true, ['title_custom' => 'NO EVENT TODAY']);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($channel->refresh()->enabled)->toBeFalse();
 });
@@ -110,7 +110,7 @@ it('matches against the channel name when the rule targets the name column', fun
 
     $channel = makeEnableRulesChannel($playlist, 'Some title', true, ['name' => 'EVENT 05 | NO EVENT']);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($channel->refresh()->enabled)->toBeFalse();
 });
@@ -125,7 +125,7 @@ it('skips disabled rules and rules with invalid regex without aborting the rest'
     $active = makeEnableRulesChannel($playlist, 'LIVE EVENT 01 | EVENT TITLE', true);
     $idle = makeEnableRulesChannel($playlist, 'LIVE EVENT 02 | NO EVENT TODAY', true);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($active->refresh()->enabled)->toBeTrue()
         ->and($idle->refresh()->enabled)->toBeFalse();
@@ -139,7 +139,7 @@ it('only applies rules to channels of the matching target type', function () {
     $live = makeEnableRulesChannel($playlist, 'NO EVENT TODAY', true);
     $vod = makeEnableRulesChannel($playlist, 'NO EVENT TODAY', true, ['is_vod' => true]);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($live->refresh()->enabled)->toBeTrue()
         ->and($vod->refresh()->enabled)->toBeFalse();
@@ -152,7 +152,7 @@ it('never touches custom channels', function () {
 
     $custom = makeEnableRulesChannel($playlist, 'NO EVENT TODAY', true, ['is_custom' => true]);
 
-    (new RunPlaylistChannelEnableRules($playlist))->handle();
+    (new RunPlaylistChannelEnableDisableRules($playlist))->handle();
 
     expect($custom->refresh()->enabled)->toBeTrue();
 });

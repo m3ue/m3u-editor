@@ -4,13 +4,12 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\Playlist;
-use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 
-class RunPlaylistChannelEnableRules implements ShouldQueue
+class RunPlaylistChannelEnableDisableRules implements ShouldQueue
 {
     use Queueable;
 
@@ -49,8 +48,6 @@ class RunPlaylistChannelEnableRules implements ShouldQueue
 
         $start = now();
 
-        // Pre-compile the patterns, skipping any that fail to compile so one
-        // bad rule doesn't abort the rest.
         $compiled = [];
         $invalidRules = [];
         foreach ($rules as $rule) {
@@ -96,7 +93,6 @@ class RunPlaylistChannelEnableRules implements ShouldQueue
                                 ? ($channel->name_custom ?? $channel->name)
                                 : ($channel->title_custom ?? $channel->title);
                             if ($value !== null && preg_match($rule['pattern'], $value)) {
-                                // Last matching rule wins
                                 $targetState = $rule['enable'];
                             }
                         }
@@ -128,7 +124,7 @@ class RunPlaylistChannelEnableRules implements ShouldQueue
         }
 
         $completedIn = round($start->diffInSeconds(now()), 2);
-        $user = User::find($this->playlist->user_id);
+        $user = $this->playlist->user;
 
         $body = "Enabled {$enabledCount} and disabled {$disabledCount} channels for \"{$this->playlist->name}\" in {$completedIn}s.";
         if (! empty($invalidRules)) {

@@ -14,7 +14,7 @@ use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\ProcessM3uImportSeries;
 use App\Jobs\ProcessVodChannels;
-use App\Jobs\RunPlaylistChannelEnableRules;
+use App\Jobs\RunPlaylistChannelEnableDisableRules;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -404,7 +404,7 @@ class SyncPipelineService
     private function dispatchChannelEnableRules(SyncRun $run, Playlist $playlist): void
     {
         $this->chainOrDispatch([
-            new RunPlaylistChannelEnableRules($playlist),
+            new RunPlaylistChannelEnableDisableRules($playlist),
             new CompleteSyncPhase($run->id, SyncRunPhase::ChannelEnableRules),
         ], $run);
     }
@@ -638,8 +638,8 @@ class SyncPipelineService
             $phases[] = SyncRunPhase::FindReplace;
         }
 
-        // Enable/disable rules run after FindReplace so they match against the
-        // cleaned titles, and before ChannelMerge/LiveProbe so those phases see
+        // Enable/disable rules run after FindReplace when present (so they match
+        // cleaned titles), and before ChannelMerge/LiveProbe so those phases see
         // the final enabled set.
         if ($this->hasEnabledRule($playlist->channel_enable_rules)) {
             $phases[] = SyncRunPhase::ChannelEnableRules;
