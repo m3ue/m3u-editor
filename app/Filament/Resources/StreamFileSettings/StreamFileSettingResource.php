@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\StreamFileSettings;
 
+use App\Filament\Actions\CopyToUserAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Models\MediaServerIntegration;
 use App\Models\StreamFileSetting;
@@ -648,6 +649,8 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
                     ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+                CopyToUserAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([

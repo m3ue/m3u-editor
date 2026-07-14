@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\AedProfiles;
 
 use App\Filament\Actions\AssetPickerAction;
+use App\Filament\Actions\CopyToUserAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\EditAedProfile;
@@ -561,6 +562,8 @@ class AedProfileResource extends Resource implements CopilotResource
                     ->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
                     ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+                CopyToUserAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
