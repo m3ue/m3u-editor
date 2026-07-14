@@ -6,6 +6,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\PlaylistService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -76,7 +77,7 @@ it('uses app timezone (not hardcoded UTC) as the source when converting xtream t
 
 it('converts unix timestamp date parameter and produces correct timeshift URL', function () {
     // 2024-12-01 15:30:00 UTC as a unix timestamp
-    $unixTimestamp = \Carbon\Carbon::create(2024, 12, 1, 15, 30, 0, 'UTC')->timestamp;
+    $unixTimestamp = Carbon::create(2024, 12, 1, 15, 30, 0, 'UTC')->timestamp;
 
     $channel = Channel::factory()->create([
         'playlist_id' => $this->playlist->id,
