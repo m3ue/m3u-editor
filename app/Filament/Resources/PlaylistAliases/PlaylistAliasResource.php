@@ -518,6 +518,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->revealable(),
                             Forms\Components\Repeater::make('fallback_urls')
                                 ->label(__('DNS failover URLs'))
+                                ->addActionLabel(__('Add DNS failover URL'))
                                 ->helperText(__('Tried in order when this entry\'s URL fails; the first working URL is promoted to primary (same credentials for all URLs).'))
                                 ->hidden(fn (Get $get): bool => $get('../../dns_failover_mode') !== DnsFailoverMode::Independent->value)
                                 ->simple(
