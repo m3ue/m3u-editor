@@ -144,7 +144,7 @@ it('uses the same live TV eligibility predicate for matcher totals and paginatio
         ->not->toContain("Channel #{$disabled->id} \"");
 });
 
-it('reports when a group has no eligible unmapped live TV channels', function () {
+it('reports when a group has no eligible live TV channels at all', function () {
     $group = copilotEpgGroup('Ineligible Group');
 
     copilotEpgChannel($group, 'Movie One', ['is_vod' => true]);
@@ -156,7 +156,21 @@ it('reports when a group has no eligible unmapped live TV channels', function ()
         'epg_id' => $this->epg->id,
     ]));
 
-    expect($output)->toContain('No eligible unmapped live TV channels');
+    expect($output)->toContain('No eligible live TV channels in group');
+});
+
+it('reports when all eligible live TV channels in a group are already mapped', function () {
+    $group = copilotEpgGroup('Fully Mapped Group');
+
+    copilotEpgChannel($group, 'Already Mapped', ['epg_channel_id' => $this->epgChannel->id]);
+
+    $output = (string) (new EpgChannelMatcherTool)->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+    ]));
+
+    expect($output)->toContain('already mapped');
 });
 
 it('applies mappings only to eligible live TV channels', function () {

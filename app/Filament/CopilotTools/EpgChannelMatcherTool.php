@@ -87,7 +87,17 @@ class EpgChannelMatcherTool extends BaseTool
             ->count();
 
         if ($totalUnmapped === 0) {
-            return "No eligible unmapped live TV channels in group \"{$group}\" for playlist #{$playlistId}.";
+            $totalEligible = Channel::where('playlist_id', $playlistId)
+                ->where('user_id', auth()->id())
+                ->where('group', $group)
+                ->eligibleForEpgMapping()
+                ->count();
+
+            if ($totalEligible === 0) {
+                return "No eligible live TV channels in group \"{$group}\" for playlist #{$playlistId}. The group may contain only VOD content or have EPG mapping disabled.";
+            }
+
+            return "All {$totalEligible} eligible live TV channel(s) in group \"{$group}\" for playlist #{$playlistId} are already mapped.";
         }
 
         $channels = Channel::where('playlist_id', $playlistId)
