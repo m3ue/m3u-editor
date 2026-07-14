@@ -46,6 +46,33 @@
                                         class="ml-3 text-sm text-gray-500 dark:text-gray-400">{{ __('Searching...') }}</span>
                                 </div>
                             @elseif(count($results) > 0)
+                                {{-- Availability filter tabs (mirrors release-logs.blade.php tab strip) --}}
+                                @php
+                                    $availTabs = [
+                                        null         => ['label' => __('All'),        'color' => 'gray'],
+                                        'available'  => ['label' => __('Available'),  'color' => 'success'],
+                                        'in_library' => ['label' => __('In Library'), 'color' => 'warning'],
+                                        'missing'    => ['label' => __('Missing'),    'color' => 'gray'],
+                                    ];
+                                    $availCounts = $this->availabilityCounts;
+                                @endphp
+                                <div class="flex flex-wrap gap-2 mb-3">
+                                    @foreach ($availTabs as $value => $tab)
+                                        @php $current = ($availability ?? '') === ($value ?? ''); @endphp
+                                        <x-filament::button
+                                            wire:click="setAvailability('{{ $value ?? '' }}')"
+                                            color="{{ $tab['color'] }}"
+                                            icon="{{ $current ? 'heroicon-s-check-circle' : '' }}"
+                                            size="sm"
+                                            class="flex items-center gap-1">
+                                            {{ $tab['label'] }}
+                                            <x-filament::badge size="sm" color="{{ $tab['color'] }}">
+                                                {{ $availCounts[$value ?? 'all'] ?? 0 }}
+                                            </x-filament::badge>
+                                        </x-filament::button>
+                                    @endforeach
+                                </div>
+
                                 {{-- Genre filter chips --}}
                                 @if (count($this->availableGenres) > 0)
                                     <div class="flex flex-wrap gap-1.5 mb-4">

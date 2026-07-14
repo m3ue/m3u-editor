@@ -66,6 +66,13 @@ class ArrSearch extends Component implements HasActions, HasSchemas
      */
     public array $selectedGenres = [];
 
+    /**
+     * Active availability filter. Null means "show all".
+     * One of 'available' (has files), 'in_library' (in library, no files), 'missing' (not in library).
+     * Mutually exclusive with the genre filter — combined with AND logic.
+     */
+    public ?string $availability = null;
+
     public bool $isSearching = false;
 
     public bool $guestMode = false;
@@ -247,21 +254,82 @@ class ArrSearch extends Component implements HasActions, HasSchemas
     }
 
     /**
-     * Results filtered by the active genres (OR logic).
+     * Results filtered by the active genres (OR logic) AND the active availability bucket.
      * Preserves original array keys so openDetail($index)/request($index) remain valid.
      *
      * @return array<int, array<string, mixed>>
      */
     public function getFilteredResultsProperty(): array
     {
-        if (empty($this->selectedGenres)) {
+        $hasGenreFilter = ! empty($this->selectedGenres);
+        $hasAvailabilityFilter = $this->availability !== null;
+
+        if (! $hasGenreFilter && ! $hasAvailabilityFilter) {
             return $this->results;
         }
 
         return array_filter(
             $this->results,
-            fn ($r) => ! empty(array_intersect($r['genres'] ?? [], $this->selectedGenres))
+            function ($r) use ($hasGenreFilter, $hasAvailabilityFilter) {
+                if ($hasGenreFilter && empty(array_intersect($r['genres'] ?? [], $this->selectedGenres))) {
+                    return false;
+                }
+
+                if ($hasAvailabilityFilter && $this->bucketResult($r) !== $this->availability) {
+                    return false;
+                }
+
+                return true;
+            }
         );
+    }
+
+    // ── Availability filter ────────────────────────────────────────────────────
+
+    /**
+     * Set the active availability filter. Empty string resets to "all".
+     */
+    public function setAvailability(?string $value): void
+    {
+        $this->availability = ($value === null || $value === '') ? null : $value;
+    }
+
+    /**
+     * Per-bucket counts across the current result set.
+     * Used to render count badges on the availability tab strip.
+     *
+     * @return array{all: int, available: int, in_library: int, missing: int}
+     */
+    public function getAvailabilityCountsProperty(): array
+    {
+        $counts = ['all' => count($this->results), 'available' => 0, 'in_library' => 0, 'missing' => 0];
+
+        foreach ($this->results as $result) {
+            $bucket = $this->bucketResult($result);
+            $counts[$bucket]++;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Classify a single result into an availability bucket.
+     * Mirrors the card-overlay logic in arr-search.blade.php.
+     *
+     * @param  array<string, mixed>  $result
+     */
+    private function bucketResult(array $result): string
+    {
+        if (empty($result['existsInLibrary'])) {
+            return 'missing';
+        }
+
+        $isSonarr = ($result['integrationType'] ?? '') === 'sonarr';
+        $hasFiles = $isSonarr
+            ? ($result['episodeFileCount'] ?? 0) > 0
+            : ($result['hasFile'] ?? false);
+
+        return $hasFiles ? 'available' : 'in_library';
     }
 
     // ── Guest request queuing ─────────────────────────────────────────────────
@@ -301,6 +369,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         $this->searchTerm = '';
         $this->results = [];
         $this->selectedGenres = [];
+        $this->availability = null;
         $this->isSearching = false;
     }
 
@@ -309,6 +378,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         if (strlen(trim($this->searchTerm)) < 2) {
             $this->results = [];
             $this->selectedGenres = [];
+            $this->availability = null;
 
             return;
         }
@@ -316,6 +386,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         $this->isSearching = true;
         $this->results = [];
         $this->selectedGenres = [];
+        $this->availability = null;
 
         $integrations = $this->integrationsForSearch;
 
