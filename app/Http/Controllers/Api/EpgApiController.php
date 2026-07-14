@@ -369,7 +369,7 @@ class EpgApiController extends Controller
                         $logo = $channel->logo ?? $channel->logo_internal ?? '';
                         $logo = filter_var($logo, FILTER_VALIDATE_URL) ? $logo : url('/placeholder.png');
                     }
-                    if ($logoProxyEnabled) {
+                    if ($logoProxyEnabled && filter_var($logo, FILTER_VALIDATE_URL) && ! str_starts_with($logo, url('/'))) {
                         $logo = LogoProxyController::generateProxyUrl($logo, internal: true);
                     }
 
@@ -389,7 +389,7 @@ class EpgApiController extends Controller
                         $icon = url('/placeholder.png');
                     }
                     $icon = htmlspecialchars($icon);
-                    if ($logoProxyEnabled) {
+                    if ($logoProxyEnabled && filter_var($icon, FILTER_VALIDATE_URL) && ! str_starts_with($icon, url('/'))) {
                         $icon = LogoProxyController::generateProxyUrl($icon, internal: true);
                     }
 
@@ -464,7 +464,7 @@ class EpgApiController extends Controller
                 if (empty($icon)) {
                     $icon = url('/placeholder.png');
                 }
-                if ($logoProxyEnabled) {
+                if ($logoProxyEnabled && filter_var($icon, FILTER_VALIDATE_URL) && ! str_starts_with($icon, url('/'))) {
                     $icon = LogoProxyController::generateProxyUrl($icon, internal: true);
                 }
                 $playlistChannelData[$channelKey] = [
