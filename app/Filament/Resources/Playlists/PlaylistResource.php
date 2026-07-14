@@ -2500,7 +2500,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->schema([
                     Repeater::make('channel_enable_rules')
-                        ->label('')
+                        ->label(__('Auto enable/disable rules'))
                         ->schema([
                             Toggle::make('enabled')
                                 ->label(__('Enabled'))
