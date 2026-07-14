@@ -75,6 +75,7 @@ class EpgMappingApplyTool extends BaseTool
         // Fetch valid IDs in two queries rather than validating one-by-one.
         // Channel IDs are scoped to the current user to prevent cross-user manipulation.
         $validChannelIds = Channel::where('user_id', auth()->id())
+            ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
             ->whereIn('id', $channelIds)
             ->pluck('id')
@@ -96,7 +97,7 @@ class EpgMappingApplyTool extends BaseTool
             $epgChannelId = (int) $mapping['epg_channel_id'];
 
             if (! isset($validChannelIds[$channelId])) {
-                $skipped[] = "Channel #{$channelId} not found or already mapped - skipped.";
+                $skipped[] = "Channel #{$channelId} not found, already mapped, or not an eligible live TV channel - skipped.";
 
                 continue;
             }
@@ -131,6 +132,7 @@ class EpgMappingApplyTool extends BaseTool
             foreach ($groupedToApply as $epgChannelId => $channelIds) {
                 $applied += Channel::whereIn('id', $channelIds)
                     ->where('user_id', auth()->id())
+                    ->eligibleForEpgMapping()
                     ->whereNull('epg_channel_id')
                     ->update(['epg_channel_id' => $epgChannelId]);
             }

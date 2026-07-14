@@ -792,6 +792,13 @@ class Channel extends Model
         return $this->getTmdbId() !== null || $this->getImdbId() !== null;
     }
 
+    public function scopeEligibleForEpgMapping(Builder $query): Builder
+    {
+        return $query
+            ->where('is_vod', false)
+            ->where('epg_map_enabled', true);
+    }
+
     public function scopeHasMovieId(Builder $query): Builder
     {
         $isPgsql = config('database.connections.'.config('database.default').'.driver') === 'pgsql';
