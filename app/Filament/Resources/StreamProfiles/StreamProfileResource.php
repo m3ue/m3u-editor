@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\StreamProfiles;
 
+use App\Filament\Actions\CopyToUserAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
@@ -452,6 +453,8 @@ class StreamProfileResource extends Resource implements CopilotResource
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
                     ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+                CopyToUserAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
