@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\DnsFailoverMode;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Services\XtreamHealthService;
 use App\Services\XtreamService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -72,11 +74,50 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
             }
 
             $xtream = XtreamService::make(xtream_config: $config);
+            $results = $xtream ? ($xtream->userInfo(timeout: 3) ?: []) : [];
+
+            if (empty($results)) {
+                $results = $this->attemptAliasDnsFailover($playlist);
+            }
+
+            return $results;
+        } catch (\Exception $e) {
+            $results = $this->attemptAliasDnsFailover($playlist);
+            if (! empty($results)) {
+                return $results;
+            }
+
+            Cache::delete($this->cacheKey); // Allow retry on next job run
+            Log::error("Failed Xtream fetch for {$type} {$playlist->id}", ['error' => $e->getMessage()]);
+
+            return [];
+        }
+    }
+
+    /**
+     * For independent-mode aliases whose primary URL is failing, probe the entry
+     * fallback URLs, promote the first working one, and retry the stats fetch.
+     *
+     * @return array<string, mixed> Fresh stats on success, empty array otherwise.
+     */
+    protected function attemptAliasDnsFailover(mixed $playlist): array
+    {
+        if (! $playlist instanceof PlaylistAlias || $playlist->dns_failover_mode !== DnsFailoverMode::Independent) {
+            return [];
+        }
+
+        if (! XtreamHealthService::resolveWorkingAliasUrls($playlist, timeout: 3)) {
+            return [];
+        }
+
+        try {
+            $playlist->refresh();
+            $config = $playlist->getPrimaryXtreamConfig();
+            $xtream = $config ? XtreamService::make(xtream_config: $config) : null;
 
             return $xtream ? ($xtream->userInfo(timeout: 3) ?: []) : [];
         } catch (\Exception $e) {
-            Cache::delete($this->cacheKey); // Allow retry on next job run
-            Log::error("Failed Xtream fetch for {$type} {$playlist->id}", ['error' => $e->getMessage()]);
+            Log::error("Failed Xtream fetch after alias DNS failover for playlist_alias {$playlist->id}", ['error' => $e->getMessage()]);
 
             return [];
         }

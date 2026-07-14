@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PlaylistAliases;
 
+use App\Enums\DnsFailoverMode;
 use App\Facades\PlaylistFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
@@ -372,6 +373,34 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             Schemas\Components\Fieldset::make(__('Provider Credentials'))
                 ->columnSpanFull()
                 ->schema([
+                    Forms\Components\Select::make('dns_failover_mode')
+                        ->label(__('DNS failover mode'))
+                        ->options(
+                            collect(DnsFailoverMode::cases())
+                                ->mapWithKeys(fn (DnsFailoverMode $mode): array => [$mode->value => $mode->getLabel()])
+                                ->all()
+                        )
+                        ->default(DnsFailoverMode::Static->value)
+                        ->required()
+                        ->live()
+                        ->disableOptionWhen(function (string $value, Get $get): bool {
+                            if ($value !== DnsFailoverMode::Inherit->value) {
+                                return false;
+                            }
+                            if ($get('custom_playlist_id')) {
+                                return false;
+                            }
+                            $playlist = $get('playlist_id') ? Playlist::find($get('playlist_id')) : null;
+
+                            // Inherit requires a source playlist with an Xtream URL to follow.
+                            return ! ($playlist?->xtream_config['url'] ?? null);
+                        })
+                        ->helperText(fn (?string $state): string => match ($state) {
+                            DnsFailoverMode::Inherit->value => __('URLs follow the source playlist, including its DNS failover. Only the username/password below are used.'),
+                            DnsFailoverMode::Independent->value => __('Each credential entry keeps its own fallback URL list; the first working URL is promoted automatically on failure.'),
+                            default => __('Credentials are used exactly as entered. No failover.'),
+                        })
+                        ->columnSpanFull(),
                     Forms\Components\Repeater::make('xtream_config')
                         ->label(__('Credentials'))
                         ->helperText(__('Provider credentials to use for this alias. At least one set of credentials is required.'))
@@ -386,16 +415,21 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->collapsible()
                         ->itemLabel(fn (array $state): ?string => 'Provider: '.parse_url($state['url'] ?? '', PHP_URL_HOST))
                         ->schema([
+                            Forms\Components\Hidden::make('playlist_id'),
                             Forms\Components\TextInput::make('url')
                                 ->label(__('Xtream API URL'))
                                 ->live()
-                                ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
+                                ->helperText(fn (Get $get): string => $get('../../dns_failover_mode') === DnsFailoverMode::Inherit->value
+                                    ? __('Inherited from the source playlist — follows its DNS failover automatically.')
+                                    : __('Enter the full URL using <url>:<port> format - without trailing slash (/).'))
                                 ->prefixIcon('heroicon-m-globe-alt')
                                 ->maxLength(4000)
                                 ->url()
                                 ->rules([new UrlIsAllowed])
                                 ->columnSpan(2)
-                                ->required()
+                                ->required(fn (Get $get): bool => $get('../../dns_failover_mode') !== DnsFailoverMode::Inherit->value)
+                                ->disabled(fn (Get $get): bool => $get('../../dns_failover_mode') === DnsFailoverMode::Inherit->value)
+                                ->saved()
                                 ->suffixAction(
                                     Action::make('test_xtream_connection')
                                         ->label(__('Test connection'))
@@ -482,6 +516,116 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->required()
                                 ->password()
                                 ->revealable(),
+                            Forms\Components\Repeater::make('fallback_urls')
+                                ->label(__('DNS failover URLs'))
+                                ->helperText(__('Tried in order when this entry\'s URL fails; the first working URL is promoted to primary (same credentials for all URLs).'))
+                                ->hidden(fn (Get $get): bool => $get('../../dns_failover_mode') !== DnsFailoverMode::Independent->value)
+                                ->simple(
+                                    Forms\Components\TextInput::make('url')
+                                        ->label(__('URL'))
+                                        ->prefixIcon('heroicon-m-globe-alt')
+                                        ->rules([new UrlIsAllowed])
+                                        ->maxLength(4000)
+                                        ->url()
+                                        ->required(),
+                                )
+                                ->defaultItems(0)
+                                ->maxItems(10)
+                                ->collapsible()
+                                ->reorderable()
+                                ->extraItemActions([
+                                    Action::make('test_alias_dns_url')
+                                        ->label(__('Test'))
+                                        ->icon('heroicon-o-signal')
+                                        ->color('info')
+                                        ->tooltip(__('Test connection to this fallback URL'))
+                                        ->action(function (array $arguments, Forms\Components\Repeater $component, Get $get): void {
+                                            $itemKey = $arguments['item'];
+                                            $allItems = $component->getState();
+                                            $url = $allItems[$itemKey]['url'] ?? null;
+
+                                            if (empty($url)) {
+                                                Notification::make()
+                                                    ->title(__('Missing URL'))
+                                                    ->body(__('Please enter a URL first.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $username = $get('username');
+                                            $password = $get('password');
+
+                                            if (empty($username) || empty($password)) {
+                                                Notification::make()
+                                                    ->title(__('Missing Credentials'))
+                                                    ->body(__('Please fill in the username and password for this provider before testing.'))
+                                                    ->warning()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            try {
+                                                $xtream = XtreamService::make(xtream_config: [
+                                                    'url' => $url,
+                                                    'username' => $username,
+                                                    'password' => $password,
+                                                ]);
+
+                                                $result = $xtream->userInfo(timeout: 10);
+
+                                                if (empty($result) || ! isset($result['user_info'])) {
+                                                    Notification::make()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body(__('No valid response from the Xtream API. Check the URL and credentials.'))
+                                                        ->danger()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                $userInfo = $result['user_info'];
+                                                $serverInfo = $result['server_info'] ?? [];
+
+                                                $status = $userInfo['status'] ?? 'Unknown';
+                                                $maxConnections = $userInfo['max_connections'] ?? '?';
+                                                $activeCons = $userInfo['active_cons'] ?? '0';
+                                                $expDate = ! empty($userInfo['exp_date'])
+                                                    ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                                    : 'Never';
+                                                $serverUrl = $serverInfo['url'] ?? $url;
+                                                $serverTime = ! empty($serverInfo['time_now'])
+                                                    ? $serverInfo['time_now']
+                                                    : 'Unknown';
+
+                                                $isActive = $status === 'Active';
+                                                $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                                $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                                $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                                $details .= "**Active Connections:** {$activeCons}\n\n";
+                                                $details .= "**Expires:** {$expDate}\n\n";
+                                                $details .= "**Server:** {$serverUrl}\n\n";
+                                                $details .= "**Server Time:** {$serverTime}";
+
+                                                Notification::make()
+                                                    ->title(__('Connection Successful'))
+                                                    ->body(Str::markdown($details))
+                                                    ->success()
+                                                    ->persistent()
+                                                    ->send();
+                                            } catch (Exception $e) {
+                                                Notification::make()
+                                                    ->title(__('Connection Failed'))
+                                                    ->body($e->getMessage())
+                                                    ->danger()
+                                                    ->send();
+                                            }
+                                        }),
+                                ])
+                                ->columnSpan(2),
                         ])->columnSpanFull(),
                 ]),
 
@@ -1080,6 +1224,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 'url' => $xtreamConfig['url'] ?? '',
                 'username' => '',
                 'password' => '',
+                'playlist_id' => $playlist->id,
+                'fallback_urls' => [],
             ],
         ]);
     }
@@ -1114,6 +1260,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 'url' => $source['url'] ?? '',
                 'username' => '',
                 'password' => '',
+                'playlist_id' => $source['id'] ?? null,
+                'fallback_urls' => [],
             ];
         }
 

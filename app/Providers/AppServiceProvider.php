@@ -704,25 +704,13 @@ class AppServiceProvider extends ServiceProvider
                 if (! $playlistAlias->user_id) {
                     $playlistAlias->user_id = auth()->id();
                 }
-                if (($playlistAlias->xtream_config['url'] ?? false) && Str::endsWith($playlistAlias->xtream_config['url'], '/')) {
-                    // Remove trailing slash from Xtream URL
-                    $playlistAlias->xtream_config = [
-                        ...$playlistAlias->xtream_config,
-                        'url' => rtrim($playlistAlias->xtream_config['url'], '/'),
-                    ];
-                }
+                self::normalizeAliasXtreamConfigUrls($playlistAlias);
                 $playlistAlias->uuid = Str::orderedUuid()->toString();
 
                 return $playlistAlias;
             });
             PlaylistAlias::updating(function (PlaylistAlias $playlistAlias) {
-                if (($playlistAlias->xtream_config['url'] ?? false) && Str::endsWith($playlistAlias->xtream_config['url'], '/')) {
-                    // Remove trailing slash from Xtream URL
-                    $playlistAlias->xtream_config = [
-                        ...$playlistAlias->xtream_config,
-                        'url' => rtrim($playlistAlias->xtream_config['url'], '/'),
-                    ];
-                }
+                self::normalizeAliasXtreamConfigUrls($playlistAlias);
                 if ($playlistAlias->isDirty('short_urls_enabled')) {
                     $playlistAlias->generateShortUrl();
                 }
@@ -1077,5 +1065,45 @@ class AppServiceProvider extends ServiceProvider
             ->reorderableColumns()
             ->deferColumnManager(false)
         );
+    }
+
+    /**
+     * Trim trailing slashes from every alias config entry URL and fallback URL,
+     * preserving the stored shape (legacy single object or entry list). Operates
+     * on the raw attribute to avoid accessor side effects leaking into storage.
+     */
+    private static function normalizeAliasXtreamConfigUrls(PlaylistAlias $playlistAlias): void
+    {
+        $raw = $playlistAlias->getAttributes()['xtream_config'] ?? null;
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (! is_array($decoded)) {
+            return;
+        }
+
+        $normalized = $decoded;
+        if (array_key_exists('url', $normalized)) {
+            // Legacy format: single config object.
+            if (is_string($normalized['url'])) {
+                $normalized['url'] = rtrim($normalized['url'], '/');
+            }
+        } else {
+            foreach ($normalized as $index => $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+                if (is_string($entry['url'] ?? null)) {
+                    $normalized[$index]['url'] = rtrim($entry['url'], '/');
+                }
+                foreach ($entry['fallback_urls'] ?? [] as $fallbackIndex => $fallbackUrl) {
+                    if (is_string($fallbackUrl)) {
+                        $normalized[$index]['fallback_urls'][$fallbackIndex] = rtrim($fallbackUrl, '/');
+                    }
+                }
+            }
+        }
+
+        if ($normalized !== $decoded) {
+            $playlistAlias->xtream_config = $normalized;
+        }
     }
 }

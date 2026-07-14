@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use App\Enums\DnsFailoverMode;
 use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
+use App\Jobs\CheckPlaylistAliasDnsHealth;
 use App\Jobs\UpdateXtreamStats;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -444,6 +446,13 @@ class Playlist extends Model
             'xtream_config' => $config,
             'xtream_fallback_urls' => $newFallbacks,
         ]);
+
+        // Aliases with their own failover URLs may be affected by the same DNS
+        // outage; re-check them now. Inherit-mode aliases follow at read time.
+        $this->aliases()
+            ->where('dns_failover_mode', DnsFailoverMode::Independent->value)
+            ->get()
+            ->each(fn (PlaylistAlias $alias) => CheckPlaylistAliasDnsHealth::dispatch($alias));
     }
 
     /**

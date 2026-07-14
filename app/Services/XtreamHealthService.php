@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -124,5 +125,71 @@ class XtreamHealthService
         }
 
         return null;
+    }
+
+    /**
+     * Find the first reachable URL for a single alias config entry, in priority order.
+     *
+     * @param  array<string, mixed>  $entry
+     */
+    public static function findWorkingEntryUrl(PlaylistAlias $alias, array $entry, int $timeout = 5): ?string
+    {
+        $username = (string) ($entry['username'] ?? '');
+        $password = (string) ($entry['password'] ?? '');
+
+        if (! $username || ! $password) {
+            return null;
+        }
+
+        $verify = ! ($alias->playlist?->disable_ssl_verification ?? false);
+
+        foreach ($alias->getOrderedEntryUrls($entry) as $url) {
+            $result = self::checkUrl($url, $username, $password, $timeout, $verify);
+            if ($result['reachable']) {
+                Log::info("Xtream health check: {$url} is reachable ({$result['response_time_ms']}ms)", [
+                    'playlist_alias_id' => $alias->id,
+                ]);
+
+                return $url;
+            }
+
+            Log::warning("Xtream health check: {$url} is unreachable", [
+                'playlist_alias_id' => $alias->id,
+                'error' => $result['error'],
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Check every entry of an independent-mode alias and promote the first working
+     * fallback for any entry whose current URL is unreachable.
+     *
+     * @return bool Whether any promotion occurred.
+     */
+    public static function resolveWorkingAliasUrls(PlaylistAlias $alias, int $timeout = 5): bool
+    {
+        $promoted = false;
+
+        foreach ($alias->xtream_config as $entry) {
+            if (count($alias->getOrderedEntryUrls($entry)) < 2) {
+                continue;
+            }
+
+            $workingUrl = self::findWorkingEntryUrl($alias, $entry, $timeout);
+            if ($workingUrl === null || $workingUrl === rtrim((string) ($entry['url'] ?? ''), '/')) {
+                continue;
+            }
+
+            $alias->promoteXtreamUrl($workingUrl);
+            $promoted = true;
+
+            Log::info("Xtream alias failover: promoted {$workingUrl}", [
+                'playlist_alias_id' => $alias->id,
+            ]);
+        }
+
+        return $promoted;
     }
 }

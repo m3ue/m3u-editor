@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DnsFailoverMode;
 use App\Enums\PlaylistChannelId;
 use App\Jobs\UpdateXtreamStats;
 use App\Traits\ShortUrlTrait;
@@ -23,8 +24,12 @@ class PlaylistAlias extends Model
     /** @var array<int>|null Memoised source_category_id list for the series() filter. */
     public ?array $resolvedCategoryIds = null;
 
+    /** @var array<int, Playlist>|null Memoised source playlists for inherit-mode URL resolution. */
+    private ?array $inheritSourcePlaylists = null;
+
     protected $casts = [
         'xtream_config' => 'array',
+        'dns_failover_mode' => DnsFailoverMode::class,
         'group_filter' => 'array',
         'proxy_options' => 'array',
         'enable_proxy' => 'boolean',
@@ -37,37 +42,123 @@ class PlaylistAlias extends Model
 
     /**
      * Get the xtream_config attribute as a normalized array of configs.
+     *
+     * In inherit DNS failover mode, each entry's URL is replaced at read time with the
+     * current URL of its source playlist, so the alias follows the playlist's DNS
+     * failover automatically. Entries whose source cannot be resolved keep their
+     * stored URL; entries without any resolvable URL are dropped.
      */
     protected function xtreamConfig(): Attribute
     {
         return Attribute::make(
-            get: function (?string $value) {
+            get: function (?string $value, array $attributes) {
                 if ($value === null || $value === '') {
                     return [];
                 }
 
                 $raw = json_decode($value, true);
-
-                // Legacy format: single config object stored as array with 'url' key.
-                if (is_array($raw) && array_key_exists('url', $raw)) {
-                    return [$raw];
+                if (! is_array($raw)) {
+                    return [];
                 }
 
-                // New format: list of configs.
-                if (is_array($raw)) {
-                    $configs = [];
-                    foreach ($raw as $index => $item) {
-                        if (is_array($item) && ! empty($item['url'])) {
-                            $configs[] = $item;
+                // Legacy format: single config object stored as array with 'url' key.
+                if (array_key_exists('url', $raw)) {
+                    $raw = [$raw];
+                }
+
+                $inherit = ($attributes['dns_failover_mode'] ?? null) === DnsFailoverMode::Inherit->value;
+
+                $configs = [];
+                foreach ($raw as $item) {
+                    if (! is_array($item)) {
+                        continue;
+                    }
+
+                    if ($inherit) {
+                        $inheritedUrl = $this->resolveInheritedUrl($item);
+                        if ($inheritedUrl !== null) {
+                            $item['url'] = $inheritedUrl;
                         }
                     }
 
-                    return $configs;
+                    if (! empty($item['url'])) {
+                        $configs[] = $item;
+                    }
                 }
 
-                return [];
+                return $configs;
             },
         );
+    }
+
+    /**
+     * Resolve the URL a config entry should inherit from its source playlist.
+     *
+     * Standard-playlist aliases always inherit the parent playlist's current Xtream URL.
+     * Custom-playlist aliases resolve the entry's source playlist by its stored
+     * playlist_id, falling back to matching the entry URL against each source
+     * playlist's ordered URL list (which still matches after a source failover,
+     * since the old primary remains in the playlist's fallback list).
+     *
+     * @param  array<string, mixed>  $entry
+     */
+    private function resolveInheritedUrl(array $entry): ?string
+    {
+        if ($this->playlist_id) {
+            $url = $this->playlist?->xtream_config['url'] ?? null;
+
+            return $url ? rtrim($url, '/') : null;
+        }
+
+        $sources = $this->getInheritSourcePlaylists();
+
+        $entryPlaylistId = (int) ($entry['playlist_id'] ?? 0);
+        if ($entryPlaylistId) {
+            foreach ($sources as $source) {
+                if ($source->id === $entryPlaylistId) {
+                    $url = $source->xtream_config['url'] ?? null;
+
+                    return $url ? rtrim($url, '/') : null;
+                }
+            }
+
+            return null;
+        }
+
+        // Legacy entry without playlist linkage: match its stored URL against each
+        // source playlist's ordered URLs.
+        $entryUrl = rtrim(strtolower((string) ($entry['url'] ?? '')), '/');
+        if ($entryUrl === '') {
+            return null;
+        }
+
+        foreach ($sources as $source) {
+            foreach ($source->getOrderedXtreamUrls() as $sourceUrl) {
+                if (strtolower($sourceUrl) === $entryUrl) {
+                    $url = $source->xtream_config['url'] ?? null;
+
+                    return $url ? rtrim($url, '/') : null;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get the source playlists used for inherit-mode URL resolution, memoised per instance.
+     *
+     * @return array<int, Playlist>
+     */
+    private function getInheritSourcePlaylists(): array
+    {
+        if ($this->inheritSourcePlaylists === null) {
+            $this->inheritSourcePlaylists = $this->custom_playlist_id
+                ? ($this->customPlaylist?->getSourcePlaylists()->all() ?? [])
+                : [];
+        }
+
+        return $this->inheritSourcePlaylists;
     }
 
     /**
@@ -135,6 +226,11 @@ class PlaylistAlias extends Model
         return $this->xtream_config[0] ?? null;
     }
 
+    /**
+     * Find the config entry matching a URL, checking each entry's primary URL and
+     * its fallback_urls. When the same URL appears in multiple entries, the first
+     * entry wins.
+     */
     public function findXtreamConfigByUrl(?string $url): ?array
     {
         if (! $url) {
@@ -145,17 +241,109 @@ class PlaylistAlias extends Model
         $needle = rtrim(strtolower((string) $url), '/');
 
         foreach ($this->xtream_config as $cfg) {
-            // Normalize config URL
-            $cfgUrl = rtrim((string) strtolower($cfg['url'] ?? ''), '/');
-
-            // If URLs match, return this config
-            if ($cfgUrl !== '' && $cfgUrl === $needle) {
-                return $cfg;
+            foreach ($this->getOrderedEntryUrls($cfg) as $cfgUrl) {
+                if (strtolower($cfgUrl) === $needle) {
+                    return $cfg;
+                }
             }
         }
 
         // No matching config found
         return null;
+    }
+
+    /**
+     * Find the config entry linked to a specific source playlist, when entries carry
+     * a playlist_id (seeded by the alias form for provider matching).
+     */
+    public function findXtreamConfigByPlaylistId(?int $playlistId): ?array
+    {
+        if (! $playlistId) {
+            return null;
+        }
+
+        foreach ($this->xtream_config as $cfg) {
+            if ((int) ($cfg['playlist_id'] ?? 0) === $playlistId) {
+                return $cfg;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get a config entry's URLs in priority order: the entry URL first, then its
+     * fallback URLs, trailing-slash-normalized and de-duplicated.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return string[]
+     */
+    public function getOrderedEntryUrls(array $entry): array
+    {
+        $urls = [];
+
+        $primary = rtrim((string) ($entry['url'] ?? ''), '/');
+        if ($primary !== '') {
+            $urls[] = $primary;
+        }
+
+        foreach ($entry['fallback_urls'] ?? [] as $url) {
+            $normalized = rtrim((string) $url, '/');
+            if ($normalized !== '' && ! in_array($normalized, $urls)) {
+                $urls[] = $normalized;
+            }
+        }
+
+        return $urls;
+    }
+
+    /**
+     * Promote a working URL to primary within the config entry that owns it,
+     * demoting the entry's current URL into its fallback_urls.
+     *
+     * Only applies in independent DNS failover mode. Unknown URLs are a no-op;
+     * when the same URL appears in multiple entries, the first entry wins.
+     */
+    public function promoteXtreamUrl(string $workingUrl): void
+    {
+        if ($this->dns_failover_mode !== DnsFailoverMode::Independent) {
+            return;
+        }
+
+        $raw = json_decode((string) ($this->getAttributes()['xtream_config'] ?? ''), true);
+        if (! is_array($raw)) {
+            return;
+        }
+
+        // Legacy format: single config object stored as array with 'url' key.
+        if (array_key_exists('url', $raw)) {
+            $raw = [$raw];
+        }
+
+        $normalizedWorking = rtrim($workingUrl, '/');
+
+        foreach (array_values($raw) as $index => $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $orderedUrls = $this->getOrderedEntryUrls($entry);
+            if (count($orderedUrls) < 2 || ! in_array($normalizedWorking, $orderedUrls)) {
+                continue;
+            }
+
+            $entry['url'] = $normalizedWorking;
+            $entry['fallback_urls'] = array_values(array_filter(
+                $orderedUrls,
+                fn (string $url) => $url !== $normalizedWorking
+            ));
+
+            $entries = array_values($raw);
+            $entries[$index] = $entry;
+            $this->update(['xtream_config' => $entries]);
+
+            return;
+        }
     }
 
     public function user(): BelongsTo
@@ -574,6 +762,7 @@ class PlaylistAlias extends Model
             $originalUrl,
             $effectivePlaylist?->xtream_config,
             $primaryAliasConfig,
+            $effectivePlaylist instanceof Playlist ? $effectivePlaylist->id : null,
         );
 
         if (! $sourceConfig) {
@@ -606,6 +795,7 @@ class PlaylistAlias extends Model
             $originalUrl,
             $effectivePlaylist?->xtream_config,
             $primaryAliasConfig,
+            $effectivePlaylist instanceof Playlist ? $effectivePlaylist->id : null,
         );
 
         if (! $sourceConfig) {
@@ -631,10 +821,14 @@ class PlaylistAlias extends Model
         string $streamUrl,
         ?array $playlistXtreamConfig,
         array $primaryAliasConfig,
+        ?int $sourcePlaylistId = null,
     ): array {
         if ($playlistXtreamConfig) {
-            // Xtream playlist: use the stored source config and pick the best alias match.
-            $aliasConfig = $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? '')) ?? $primaryAliasConfig;
+            // Xtream playlist: prefer the entry linked to the source playlist, then
+            // fall back to URL matching for entries without a playlist link.
+            $aliasConfig = $this->findXtreamConfigByPlaylistId($sourcePlaylistId)
+                ?? $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? ''))
+                ?? $primaryAliasConfig;
 
             return [$playlistXtreamConfig, $aliasConfig];
         }
