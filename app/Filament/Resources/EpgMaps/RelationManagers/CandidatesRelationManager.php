@@ -11,9 +11,12 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Forms\Components\Radio;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -140,13 +143,20 @@ class CandidatesRelationManager extends RelationManager
                     ->button()
                     ->color('gray')
                     ->modalWidth(Width::TwoExtraLarge)
+                    ->modalHeading(fn (EpgMapCandidate $record): string => $record->original_name)
                     ->modalSubmitActionLabel(__('Apply selected candidate'))
                     ->schema(fn (EpgMapCandidate $record): array => static::alternativeSchema($record))
                     ->visible(fn (EpgMapCandidate $record): bool => $record->epg_channel_id !== null
                         && count($record->alternatives ?? []) > 0
                         && $record->status === EpgMapCandidateStatus::Pending
                         && static::canReview($record))
-                    ->action(fn (array $data, EpgMapCandidate $record) => static::applyAlternative($record, (int) ($data['epg_channel_id'] ?? 0))),
+                    ->action(function (array $data, EpgMapCandidate $record): void {
+                        $isManual = filled($data['manual_epg_channel_id'] ?? null);
+                        $epgChannelId = $isManual
+                            ? (int) $data['manual_epg_channel_id']
+                            : (int) ($data['epg_channel_id'] ?? 0);
+                        static::applyAlternative($record, $epgChannelId, $isManual);
+                    }),
                 Action::make('skip')
                     ->label(__('Skip'))
                     ->icon('heroicon-s-x-mark')
@@ -240,12 +250,53 @@ class CandidatesRelationManager extends RelationManager
             ]),
         ])->all();
 
+        $epgId = $record->epgMap?->epg_id;
+
         return [
-            Radio::make('epg_channel_id')
-                ->label($record->original_name)
-                ->options($options)
-                ->default($record->epg_channel_id)
-                ->required(),
+            Section::make(__('Suggested Matches'))
+                ->compact()
+                ->schema([
+                    Radio::make('epg_channel_id')
+                        ->hiddenLabel()
+                        ->options($options)
+                        ->default($record->epg_channel_id)
+                        ->live()
+                        ->afterStateUpdated(fn (Set $set) => $set('manual_epg_channel_id', null)),
+                ]),
+            Section::make(__('Manual Override'))
+                ->compact()
+                ->description(__('Search the EPG source directly. Selecting a channel here clears the suggestion above.'))
+                ->schema([
+                    Select::make('manual_epg_channel_id')
+                        ->label(__('EPG Channel'))
+                        ->placeholder(__('Search by name, display name, or channel ID…'))
+                        ->searchable()
+                        ->live()
+                        ->afterStateUpdated(fn (Set $set) => $set('epg_channel_id', null))
+                        ->getSearchResultsUsing(function (string $search) use ($epgId): array {
+                            $searchLower = strtolower($search);
+
+                            return EpgChannel::query()
+                                ->where('user_id', auth()->id())
+                                ->when($epgId, fn ($q) => $q->where('epg_id', $epgId))
+                                ->where(function ($query) use ($searchLower): void {
+                                    $query->whereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                                        ->orWhereRaw('LOWER(display_name) LIKE ?', ["%{$searchLower}%"])
+                                        ->orWhereRaw('LOWER(channel_id) LIKE ?', ["%{$searchLower}%"]);
+                                })
+                                ->limit(50)
+                                ->get()
+                                ->mapWithKeys(fn (EpgChannel $channel): array => [
+                                    $channel->getKey() => $channel->name.' ['.($channel->epg?->name ?? 'Unknown').']',
+                                ])
+                                ->all();
+                        })
+                        ->getOptionLabelUsing(function (mixed $value): ?string {
+                            $channel = EpgChannel::with('epg')->find($value);
+
+                            return $channel ? $channel->name.' ['.($channel->epg?->name ?? 'Unknown').']' : null;
+                        }),
+                ]),
         ];
     }
 
@@ -315,37 +366,60 @@ class CandidatesRelationManager extends RelationManager
             ->send();
     }
 
-    protected static function applyAlternative(EpgMapCandidate $record, int $epgChannelId): void
+    protected static function applyAlternative(EpgMapCandidate $record, int $epgChannelId, bool $isManual = false): void
     {
         if (! static::canReview($record) || $epgChannelId <= 0) {
             return;
         }
 
-        $validIds = collect([$record->epg_channel_id, ...collect($record->alternatives ?? [])
-            ->pluck('epg_channel_id')
-            ->all(),
-        ])->flip();
+        if ($isManual) {
+            $epgChannel = EpgChannel::with('epg')
+                ->where('user_id', $record->epgMap?->user_id)
+                ->find($epgChannelId);
 
-        if (! $validIds->has($epgChannelId)) {
-            Notification::make()
-                ->danger()
-                ->title(__('Invalid candidate'))
-                ->body(__('That EPG channel is not part of this candidate review row.'))
-                ->send();
+            if (! $epgChannel) {
+                Notification::make()
+                    ->danger()
+                    ->title(__('Invalid selection'))
+                    ->body(__('That EPG channel could not be found.'))
+                    ->send();
 
-            return;
+                return;
+            }
+
+            $selected = [
+                'display_name' => $epgChannel->display_name ?: $epgChannel->name,
+                'confidence' => 100,
+                'reason' => 'Manual selection',
+                'normalized_value' => $epgChannel->name,
+            ];
+        } else {
+            $validIds = collect([$record->epg_channel_id, ...collect($record->alternatives ?? [])
+                ->pluck('epg_channel_id')
+                ->all(),
+            ])->flip();
+
+            if (! $validIds->has($epgChannelId)) {
+                Notification::make()
+                    ->danger()
+                    ->title(__('Invalid candidate'))
+                    ->body(__('That EPG channel is not part of this candidate review row.'))
+                    ->send();
+
+                return;
+            }
+
+            $selected = collect([
+                [
+                    'epg_channel_id' => $record->epg_channel_id,
+                    'display_name' => $record->top_matched_value,
+                    'confidence' => $record->top_confidence,
+                    'reason' => $record->top_reason,
+                    'normalized_value' => $record->top_normalized_value,
+                ],
+                ...($record->alternatives ?? []),
+            ])->firstWhere('epg_channel_id', $epgChannelId);
         }
-
-        $selected = collect([
-            [
-                'epg_channel_id' => $record->epg_channel_id,
-                'display_name' => $record->top_matched_value,
-                'confidence' => $record->top_confidence,
-                'reason' => $record->top_reason,
-                'normalized_value' => $record->top_normalized_value,
-            ],
-            ...($record->alternatives ?? []),
-        ])->firstWhere('epg_channel_id', $epgChannelId);
 
         static::applyChoices($record->epgMap, [$record->channel_id => $epgChannelId]);
 
