@@ -103,30 +103,24 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             $channels = [];
             if ($this->channels) {
                 $channels = Channel::whereIn('id', $this->channels);
-                $totalChannelCount = $channels->where('is_vod', false)->count();
+                $totalChannelCount = $channels->eligibleForEpgMapping()->count();
                 $mappedCount = $channels
-                    ->where('is_vod', false)
+                    ->eligibleForEpgMapping()
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = Channel::whereIn('id', $this->channels)
-                    ->where([
-                        ['is_vod', false],
-                        ['epg_map_enabled', true],
-                    ])
+                    ->eligibleForEpgMapping()
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });
             } elseif ($playlist) {
-                $totalChannelCount = $playlist->channels()->where('is_vod', false)->count();
+                $totalChannelCount = $playlist->channels()->eligibleForEpgMapping()->count();
                 $mappedCount = $playlist->channels()
-                    ->where('is_vod', false)
+                    ->eligibleForEpgMapping()
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = $playlist->channels()
-                    ->where([
-                        ['is_vod', false],
-                        ['epg_map_enabled', true],
-                    ])
+                    ->eligibleForEpgMapping()
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);
                     });

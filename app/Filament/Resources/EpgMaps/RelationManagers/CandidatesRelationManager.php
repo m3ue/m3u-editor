@@ -421,8 +421,7 @@ class CandidatesRelationManager extends RelationManager
                 ->whereKey((int) $channelId)
                 ->where('user_id', $map->user_id)
                 ->where('playlist_id', $map->playlist_id)
-                ->where('is_vod', false)
-                ->where('epg_map_enabled', true)
+                ->eligibleForEpgMapping()
                 ->whereNull('epg_channel_id')
                 ->update(['epg_channel_id' => (int) $epgChannelId]);
         }

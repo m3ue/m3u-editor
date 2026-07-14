@@ -24,7 +24,7 @@ class EpgMappingStateTool extends BaseTool
 {
     public function description(): Stringable|string
     {
-        return 'Show EPG mapping state. FIRST CALL: always omit playlist_id — this lists every playlist with mapped/unmapped counts so the user can choose one. SECOND CALL: pass the playlist_id the user chose to get a per-group breakdown. Never guess or infer a playlist_id; always list playlists first and let the user pick.';
+        return 'Show EPG mapping state. FIRST CALL: always omit playlist_id. This lists every playlist with mapped/unmapped counts so the user can choose one. SECOND CALL: pass the playlist_id the user chose to get a per-group breakdown. Never guess or infer a playlist_id; always list playlists first and let the user pick.';
     }
 
     /** @return array<string, mixed> */
@@ -32,7 +32,7 @@ class EpgMappingStateTool extends BaseTool
     {
         return [
             'playlist_id' => $schema->integer()
-                ->description(__('The playlist ID chosen by the user. Omit on the first call — you must list playlists first so the user can select one.')),
+                ->description(__('The playlist ID chosen by the user. Omit on the first call. You must list playlists first so the user can select one.')),
             'group' => $schema->string()
                 ->description(__('Filter to a specific group within the playlist. Omit to show all groups.')),
         ];
@@ -79,6 +79,7 @@ class EpgMappingStateTool extends BaseTool
         $playlistIds = $playlists->pluck('id');
         $channelStats = Channel::whereIn('playlist_id', $playlistIds)
             ->where('user_id', auth()->id())
+            ->eligibleForEpgMapping()
             ->select('playlist_id')
             ->selectRaw('COUNT(*) as total, COUNT(epg_channel_id) as mapped')
             ->groupBy('playlist_id')
@@ -91,7 +92,7 @@ class EpgMappingStateTool extends BaseTool
             $mapped = $stats ? (int) $stats->mapped : 0;
             $unmapped = $total - $mapped;
 
-            $lines[] = "  #{$playlist->id} {$playlist->name} — {$mapped}/{$total} mapped, {$unmapped} unmapped";
+            $lines[] = "  #{$playlist->id} {$playlist->name} - {$mapped}/{$total} mapped, {$unmapped} unmapped";
         }
 
         $lines[] = '';
@@ -112,6 +113,7 @@ class EpgMappingStateTool extends BaseTool
 
         $query = Channel::where('playlist_id', $playlistId)
             ->where('user_id', auth()->id())
+            ->eligibleForEpgMapping()
             ->select('group')
             ->selectRaw('COUNT(*) as total, COUNT(epg_channel_id) as mapped')
             ->groupBy('group');
@@ -133,11 +135,11 @@ class EpgMappingStateTool extends BaseTool
         if ($rows->isEmpty()) {
             $suffix = $group ? " group \"{$group}\"" : '';
 
-            return "No channels found in playlist #{$playlistId}{$suffix}.";
+            return "No eligible live TV channels found in playlist #{$playlistId}{$suffix}.";
         }
 
         $lines = [
-            "EPG Mapping State — {$playlist->name} (id: {$playlistId})",
+            "EPG Mapping State - {$playlist->name} (id: {$playlistId})",
             '',
             str_pad('Group', 42).str_pad('Mapped', 10).str_pad('Unmapped', 10).'Total',
             str_repeat('-', 72),

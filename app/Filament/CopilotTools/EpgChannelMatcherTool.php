@@ -82,16 +82,28 @@ class EpgChannelMatcherTool extends BaseTool
         $totalUnmapped = Channel::where('playlist_id', $playlistId)
             ->where('user_id', auth()->id())
             ->where('group', $group)
+            ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
             ->count();
 
         if ($totalUnmapped === 0) {
-            return "No unmapped channels in group \"{$group}\" for playlist #{$playlistId}. All channels in this group are already mapped.";
+            $totalEligible = Channel::where('playlist_id', $playlistId)
+                ->where('user_id', auth()->id())
+                ->where('group', $group)
+                ->eligibleForEpgMapping()
+                ->count();
+
+            if ($totalEligible === 0) {
+                return "No eligible live TV channels in group \"{$group}\" for playlist #{$playlistId}. The group may contain only VOD content or have EPG mapping disabled.";
+            }
+
+            return "All {$totalEligible} eligible live TV channel(s) in group \"{$group}\" for playlist #{$playlistId} are already mapped.";
         }
 
         $channels = Channel::where('playlist_id', $playlistId)
             ->where('user_id', auth()->id())
             ->where('group', $group)
+            ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
             ->orderBy('name')
             ->offset($offset)
@@ -108,7 +120,7 @@ class EpgChannelMatcherTool extends BaseTool
         $matcher = app(SimilaritySearchService::class);
 
         // Preload matching EPG channels once for the whole batch instead of
-        // issuing a LIKE scan per channel — most EPG sources are large enough
+        // issuing a LIKE scan per channel. Most EPG sources are large enough
         // that N round-trips dominate the request time.
         $unionTerms = $channels->flatMap(
             fn (Channel $channel): array => $matcher->searchTermsFor(
@@ -200,9 +212,9 @@ class EpgChannelMatcherTool extends BaseTool
         $currentPage = (int) floor($offset / $limit) + 1;
 
         $lines = [
-            "EPG Match Preview — {$group} (playlist: {$playlistName})",
+            "EPG Match Preview - {$group} (playlist: {$playlistName})",
             "EPG Source: {$epgName} (id: {$epgId})",
-            "Channels {$rangeStart}–{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
+            "Channels {$rangeStart}-{$rangeEnd} of {$totalUnmapped} unmapped (page {$currentPage}/{$totalPages})",
             '',
         ];
 
@@ -224,7 +236,7 @@ class EpgChannelMatcherTool extends BaseTool
                 $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" → normalized: \"{$m['cleaned_name']}\"";
 
                 foreach ($m['candidates'] as $i => $c) {
-                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) — {$c['score']}% — {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
+                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) - {$c['score']}% - {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
                 }
             }
 
@@ -232,7 +244,7 @@ class EpgChannelMatcherTool extends BaseTool
         }
 
         if (! empty($unresolved)) {
-            $lines[] = 'UNRESOLVED (no match found — will remain unmapped):';
+            $lines[] = 'UNRESOLVED (no match found, will remain unmapped):';
 
             foreach ($unresolved as $u) {
                 $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" → normalized: \"{$u['cleaned_name']}\"";
@@ -250,7 +262,7 @@ class EpgChannelMatcherTool extends BaseTool
 
         if ($totalUnmapped > $offset + $limit) {
             $nextOffset = $offset + $limit;
-            $lines[] = "More channels available — call this tool again with offset={$nextOffset} to continue.";
+            $lines[] = "More channels available. Call this tool again with offset={$nextOffset} to continue.";
         }
 
         $lines[] = '';

@@ -47,6 +47,58 @@ it('rewrites xtream timeshift URL from /live/ to /timeshift/', function () {
         ->toContain('/464938.ts');
 });
 
+it('uses app timezone (not hardcoded UTC) as the source when converting xtream timeshift date', function () {
+    // Simulate an installation with a non-UTC app timezone (e.g. Australia/Melbourne = UTC+10).
+    // The date sent by the player is in local time. The provider server timezone is UTC.
+    // Expected: the stamp shifts by the UTC+10 → UTC offset (−10 h), producing 11:00 UTC from 21:00 AEST.
+    config(['app.timezone' => 'Australia/Melbourne']);
+    app('config')->set('app.timezone', 'Australia/Melbourne');
+    date_default_timezone_set('Australia/Melbourne');
+
+    $this->playlist->update(['server_timezone' => 'UTC']);
+
+    $request = Request::create('/timeshift/user/pass/30/2024-12-01:21-00/123.ts');
+    $request->merge([
+        'timeshift_duration' => 30,
+        'timeshift_date' => '2024-12-01:21-00',
+    ]);
+
+    $streamUrl = 'https://provider.domain/live/user/pass/464938.ts';
+
+    $result = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $this->playlist);
+
+    // 21:00 Melbourne (AEDT = UTC+11 in December) converted to UTC = 10:00. The stamp should be 10:00, not 21:00.
+    expect($result)->toContain('2024-12-01:10-00');
+
+    // Restore default timezone so this test doesn't pollute others.
+    date_default_timezone_set('UTC');
+});
+
+it('converts unix timestamp date parameter and produces correct timeshift URL', function () {
+    // 2024-12-01 15:30:00 UTC as a unix timestamp
+    $unixTimestamp = \Carbon\Carbon::create(2024, 12, 1, 15, 30, 0, 'UTC')->timestamp;
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/464938.ts',
+        'catchup' => '1',
+    ]);
+
+    $response = $this->get(route('xtream.stream.timeshift.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'duration' => 30,
+        'date' => (string) $unixTimestamp,
+        'streamId' => $channel->id,
+        'format' => 'ts',
+    ]));
+
+    $response->assertRedirect();
+    expect($response->headers->get('Location'))->toContain('/timeshift/');
+});
+
 it('rewrites TiviMate utc timeshift URL from /live/ to /streaming/timeshift.php', function () {
     $utc = time() - 1800; // 30 minutes ago
     $lutc = time();

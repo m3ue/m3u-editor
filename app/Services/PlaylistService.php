@@ -801,8 +801,11 @@ class PlaylistService
                 $stamp = preg_replace('/:(\d{2})$/', '', $stamp); // Remove seconds if present
             }
 
-            // Incoming Xtream date is always UTC (Xtream standard); convert to provider timezone
-            $stamp = Carbon::createFromFormat('Y-m-d:H-i', $stamp, 'UTC')
+            // Convert from the app's configured timezone to the provider timezone.
+            // Using config('app.timezone') keeps this consistent with how the unix-timestamp
+            // path in XtreamStreamController formats the date (Carbon::createFromTimestamp uses
+            // the PHP default timezone, which Laravel sets to config('app.timezone')).
+            $stamp = Carbon::createFromFormat('Y-m-d:H-i', $stamp, config('app.timezone', 'UTC'))
                 ->setTimezone($providerTz)
                 ->format('Y-m-d:H-i');
 

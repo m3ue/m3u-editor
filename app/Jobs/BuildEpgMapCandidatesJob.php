@@ -78,8 +78,7 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
         $channels = Channel::query()
             ->where('user_id', $map->user_id)
             ->where('playlist_id', $map->playlist_id)
-            ->where('is_vod', false)
-            ->where('epg_map_enabled', true)
+            ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
             ->orderBy('name')
             ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
