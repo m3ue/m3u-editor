@@ -7,6 +7,7 @@ use App\Settings\GeneralSettings;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
 use NotificationChannels\Telegram\TelegramChannel;
 
@@ -49,7 +50,7 @@ function telegramAlertFailedJobEvent(string $resolvedName): JobFailed
 it('sends a telegram alert routed to the configured chat when enabled', function () {
     telegramAlertMockSettings([
         'telegram_alerts_enabled' => true,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
         'telegram_chat_id' => '123456789',
     ]);
 
@@ -64,7 +65,7 @@ it('sends a telegram alert routed to the configured chat when enabled', function
 it('does not send a telegram alert when the toggle is disabled', function () {
     telegramAlertMockSettings([
         'telegram_alerts_enabled' => false,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
         'telegram_chat_id' => '123456789',
     ]);
 
@@ -87,20 +88,23 @@ it('does not send a telegram alert when the bot token or chat id is missing', fu
 it('reports telegram as an enabled alert channel only when fully configured', function () {
     telegramAlertMockSettings([
         'telegram_alerts_enabled' => true,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
         'telegram_chat_id' => '123456789',
     ]);
     expect(app(AlertService::class)->isEnabled())->toBeTrue();
 
     telegramAlertMockSettings([
         'telegram_alerts_enabled' => true,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
     ]);
     expect(app(AlertService::class)->isEnabled())->toBeFalse();
 });
 
 it('builds a plain-text telegram message with the configured bot token', function () {
-    $notification = new TelegramAlert('[ERROR] Something went wrong', 'test-token');
+    $token = 'test-token';
+    $encryptedToken = Crypt::encryptString($token);
+
+    $notification = new TelegramAlert('[ERROR] Something went wrong', $encryptedToken);
 
     expect($notification->via(new AnonymousNotifiable))
         ->toBe([TelegramChannel::class]);
@@ -111,13 +115,13 @@ it('builds a plain-text telegram message with the configured bot token', functio
     expect($payload['text'])->toBe('[ERROR] Something went wrong')
         ->and($payload)->not->toHaveKey('parse_mode')
         ->and($message->hasToken())->toBeTrue()
-        ->and($message->token)->toBe('test-token');
+        ->and($message->token)->toBe($token);
 });
 
 it('forwards other job failures to telegram via the job failed listener', function () {
     $settings = telegramAlertMockSettings([
         'telegram_alerts_enabled' => true,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
         'telegram_chat_id' => '123456789',
     ]);
 
@@ -130,7 +134,7 @@ it('forwards other job failures to telegram via the job failed listener', functi
 it('does not alert on a failed telegram alert delivery to avoid loops', function () {
     $settings = telegramAlertMockSettings([
         'telegram_alerts_enabled' => true,
-        'telegram_bot_token' => 'test-token',
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
         'telegram_chat_id' => '123456789',
     ]);
 

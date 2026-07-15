@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Notifications\TelegramAlert;
 use App\Settings\GeneralSettings;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Notification;
 use Spatie\DiscordAlerts\Facades\DiscordAlert;
 use Spatie\SlackAlerts\Facades\SlackAlert;
@@ -38,7 +39,7 @@ class AlertService
         if ($this->telegramConfigured()) {
             try {
                 Notification::route('telegram', $this->settings->telegram_chat_id)
-                    ->notify(new TelegramAlert($message, $this->settings->telegram_bot_token));
+                    ->notify(new TelegramAlert($message, Crypt::encryptString($this->settings->telegram_bot_token)));
             } catch (Throwable) {
                 // Silently ignore.
             }

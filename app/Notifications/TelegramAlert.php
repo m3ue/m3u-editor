@@ -5,8 +5,11 @@ namespace App\Notifications;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification as BaseNotification;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Log;
 use NotificationChannels\Telegram\TelegramChannel;
 use NotificationChannels\Telegram\TelegramMessage;
+use Throwable;
 
 /**
  * On-demand notification used by the AlertService to forward alert messages
@@ -17,6 +20,10 @@ use NotificationChannels\Telegram\TelegramMessage;
 class TelegramAlert extends BaseNotification implements ShouldQueue
 {
     use Queueable;
+
+    public int $tries = 3;
+
+    public int $maxExceptions = 3;
 
     public function __construct(
         private readonly string $message,
@@ -36,8 +43,16 @@ class TelegramAlert extends BaseNotification implements ShouldQueue
         // Send as plain text (no parse mode) so forwarded log content can
         // never break Telegram's Markdown entity parsing.
         return TelegramMessage::create()
-            ->token($this->botToken)
+            ->token(Crypt::decryptString($this->botToken))
             ->normal()
             ->content($this->message);
+    }
+
+    /**
+     * Handle a job failure.
+     */
+    public function failed(Throwable $exception): void
+    {
+        Log::error("Telegram alert job failed: {$exception->getMessage()}");
     }
 }
