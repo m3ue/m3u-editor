@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Support;
+namespace App\Services;
 
-class PlaylistAuthPasswordGenerator
+class PasswordGeneratorService
 {
     private const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 

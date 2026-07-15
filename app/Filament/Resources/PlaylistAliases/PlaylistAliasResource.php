@@ -2,8 +2,8 @@
 
 namespace App\Filament\Resources\PlaylistAliases;
 
-use App\Filament\Actions\GeneratePasswordAction;
 use App\Facades\PlaylistFacade;
+use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;

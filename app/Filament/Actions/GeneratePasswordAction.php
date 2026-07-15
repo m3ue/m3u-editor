@@ -2,7 +2,7 @@
 
 namespace App\Filament\Actions;
 
-use App\Support\PlaylistAuthPasswordGenerator;
+use App\Services\PasswordGeneratorService;
 use Filament\Actions\Action;
 use Filament\Schemas\Components\Utilities\Set;
 
@@ -15,7 +15,7 @@ class GeneratePasswordAction
             ->icon('heroicon-o-arrow-path')
             ->tooltip(__('Generate a secure password'))
             ->action(function (Set $set) use ($field): void {
-                $set($field, PlaylistAuthPasswordGenerator::generate());
+                $set($field, PasswordGeneratorService::generate());
             });
     }
 }
