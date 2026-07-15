@@ -201,7 +201,7 @@ class PlaylistGenerateController extends Controller
                         }
                     }
 
-                    if ($logoProxyEnabled) {
+                    if ($logoProxyEnabled && filter_var($icon, FILTER_VALIDATE_URL) && ! str_starts_with($icon, url('/'))) {
                         // Proxy the logo through the logo proxy controller
                         $icon = LogoProxyController::generateProxyUrl($icon);
                     }

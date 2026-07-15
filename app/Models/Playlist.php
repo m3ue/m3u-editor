@@ -69,6 +69,7 @@ class Playlist extends Model
         'probe_timeout' => 'integer',
         'find_replace_rules' => 'array',
         'sort_alpha_config' => 'array',
+        'channel_enable_rules' => 'array',
         'auto_sync_to_custom_config' => 'array',
         'emby_config' => 'array',
         'custom_headers' => 'array',

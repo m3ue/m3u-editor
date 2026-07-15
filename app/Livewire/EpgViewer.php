@@ -119,9 +119,9 @@ class EpgViewer extends Component implements HasActions, HasForms
                             // Logo override takes precedence
                             $icon = $updated->logo;
                         } elseif ($updated->logo_type === ChannelLogoType::Epg) {
-                            $icon = $updated->epgChannel?->icon ?? '';
+                            $icon = $updated->epgChannel?->icon_custom ?? $updated->epgChannel?->icon ?? '';
                         } elseif ($updated->logo_type === ChannelLogoType::Channel) {
-                            $icon = $updated->logo ?? '';
+                            $icon = $updated->logo_internal ?? '';
                         }
                         if (empty($icon)) {
                             $icon = url('/placeholder.png');

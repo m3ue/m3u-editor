@@ -19,6 +19,7 @@ enum SyncRunPhase: string
     case SeriesStrmPostProbe = 'series_strm_post_probe';
 
     case FindReplace = 'find_replace';
+    case ChannelEnableRules = 'channel_enable_rules';
     case ChannelMerge = 'channel_merge';
     case LiveProbe = 'live_probe';
     case CustomPlaylistSync = 'custom_playlist_sync';
@@ -40,6 +41,7 @@ enum SyncRunPhase: string
             self::SeriesProbe => 'Series Stream Probe',
             self::SeriesStrmPostProbe => 'Series STRM Files (Post-Probe)',
             self::FindReplace => 'Find & Replace / Sort',
+            self::ChannelEnableRules => 'Channel Enable/Disable Rules',
             self::ChannelMerge => 'Channel Merge',
             self::LiveProbe => 'Live Stream Probe',
             self::CustomPlaylistSync => 'Custom Playlist Sync',
@@ -62,6 +64,7 @@ enum SyncRunPhase: string
             self::SeriesProbe,
             self::SeriesStrmPostProbe => 'warning',
             self::FindReplace,
+            self::ChannelEnableRules,
             self::ChannelMerge,
             self::LiveProbe,
             self::CustomPlaylistSync => 'gray',
