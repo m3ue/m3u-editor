@@ -14,8 +14,10 @@ use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
 use App\Pivots\PlaylistAuthPivot;
 use App\Services\DateFormatService;
+use App\Support\PlaylistAuthPasswordGenerator;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
+use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -30,6 +32,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
@@ -227,6 +230,18 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->password()
                                 ->required()
                                 ->revealable()
+                                ->suffixAction(
+                                    Action::make('generatePassword')
+                                        ->label(__('Generate password'))
+                                        ->icon(view('components.icons.rotate-ccw-key'))
+                                        ->tooltip(__('Generate a secure password'))
+                                        ->action(function (Set $set): void {
+                                            $set(
+                                                'password',
+                                                PlaylistAuthPasswordGenerator::generate(),
+                                            );
+                                        }),
+                                )
                                 ->columnSpan(1),
                             DateTimePicker::make('expires_at')
                                 ->label(__('Expiration (date & time)'))
