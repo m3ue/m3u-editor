@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Users;
 
+use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Models\User;
 use App\Services\DateFormatService;
@@ -22,6 +23,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Str;
 use STS\FilamentImpersonate\Actions\Impersonate;
 
 class UserResource extends Resource implements CopilotResource
@@ -110,7 +112,8 @@ class UserResource extends Resource implements CopilotResource
                     ->revealable()
                     ->columnSpanFull()
                     ->hidden(fn ($get, $record) => ! $record ? false : ! $get('update_password'))
-                    ->required(),
+                    ->required()
+                    ->suffixAction(GeneratePasswordAction::make(generator: fn (): string => Str::password(16))),
                 // Forms\Components\TextInput::make('avatar_url')
                 //     ->url(),
                 // Forms\Components\Textarea::make('app_authentication_secret')
