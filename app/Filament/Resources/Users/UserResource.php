@@ -23,6 +23,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Str;
 use STS\FilamentImpersonate\Actions\Impersonate;
 
 class UserResource extends Resource implements CopilotResource
@@ -112,7 +113,7 @@ class UserResource extends Resource implements CopilotResource
                     ->columnSpanFull()
                     ->hidden(fn ($get, $record) => ! $record ? false : ! $get('update_password'))
                     ->required()
-                    ->suffixAction(GeneratePasswordAction::make()),
+                    ->suffixAction(GeneratePasswordAction::make(generator: fn (): string => Str::password(16))),
                 // Forms\Components\TextInput::make('avatar_url')
                 //     ->url(),
                 // Forms\Components\Textarea::make('app_authentication_secret')

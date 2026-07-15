@@ -9,3 +9,10 @@ it('builds the generate password action', function (): void {
     expect($action)->toBeInstanceOf(Action::class)
         ->and($action->getName())->toBe('generatePassword');
 });
+
+it('accepts a custom generator closure', function (): void {
+    $action = GeneratePasswordAction::make(generator: fn (): string => 'custom-secret');
+
+    expect($action)->toBeInstanceOf(Action::class)
+        ->and($action->getName())->toBe('generatePassword');
+});
