@@ -370,7 +370,7 @@ it('next_stream_config key is always present in the broadcast start payload', fu
     expect($captured)->toHaveKey('next_stream_config');
 });
 
-it('computeNextStreamConfig resolves audio_stream_index for the NEXT programme, not the current one', function () {
+it('computeNextStreamConfig forwards preferred_audio_language for the NEXT programme', function () {
     $network = Network::factory()->create([
         'broadcast_enabled' => true,
         'preferred_audio_track' => 'eng',
@@ -398,13 +398,9 @@ it('computeNextStreamConfig resolves audio_stream_index for the NEXT programme, 
     $service->shouldReceive('resolveSubtitleInfo')
         ->with($network, Mockery::on(fn ($p) => $p->is($nextProgramme)), 0)
         ->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
-    $service->shouldReceive('resolveAudioStreamIndex')
-        ->once()
-        ->with($network, Mockery::on(fn ($p) => $p->is($nextProgramme)))
-        ->andReturn(7);
 
     $method = new ReflectionMethod(NetworkBroadcastService::class, 'computeNextStreamConfig');
     $result = $method->invoke($service, $network, $currentProgramme);
 
-    expect($result['audio_stream_index'])->toBe(7);
+    expect($result['preferred_audio_language'])->toBe('eng');
 });
