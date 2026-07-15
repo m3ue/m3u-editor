@@ -82,3 +82,72 @@ it('allows exact Plex stream ids as track preferences', function () {
     expect($url)->toContain('audioStreamID=102')
         ->and($url)->toContain('subtitleStreamID=201');
 });
+
+it('omits stream ids when the Plex language code does not match any stream', function () {
+    fakePlexMetadataWithStreams();
+
+    $request = new Request;
+    $request->merge([
+        'PreferredAudioTrack' => 'fra',
+        'PreferredSubtitleTrack' => 'deu',
+    ]);
+
+    $url = makePlexTrackPreferenceService()->getDirectStreamUrl($request, 'item-1');
+
+    expect($url)->not->toContain('audioStreamID')
+        ->and($url)->not->toContain('subtitleStreamID');
+});
+
+it('ignores whitespace-only Plex track preferences', function () {
+    fakePlexMetadataWithStreams();
+
+    $request = new Request;
+    $request->merge([
+        'PreferredAudioTrack' => '   ',
+        'PreferredSubtitleTrack' => "\t",
+    ]);
+
+    $url = makePlexTrackPreferenceService()->getDirectStreamUrl($request, 'item-1');
+
+    expect($url)->not->toContain('audioStreamID')
+        ->and($url)->not->toContain('subtitleStreamID');
+});
+
+it('prefers exact language code match over partial match for Plex streams', function () {
+    Http::fake([
+        'http://plex.local:32400/library/metadata/item-1' => Http::response([
+            'MediaContainer' => [
+                'Metadata' => [[
+                    'Media' => [[
+                        'Part' => [[
+                            'key' => '/library/parts/file.ts',
+                            'Stream' => [
+                                [
+                                    'id' => 201,
+                                    'streamType' => 2,
+                                    'languageCode' => 'fre',
+                                    'displayTitle' => 'French AAC',
+                                ],
+                                [
+                                    'id' => 202,
+                                    'streamType' => 2,
+                                    'languageCode' => 'eng',
+                                    'displayTitle' => 'English AAC',
+                                ],
+                            ],
+                        ]],
+                    ]],
+                ]],
+            ],
+        ], 200),
+    ]);
+
+    $request = new Request;
+    $request->merge(['PreferredAudioTrack' => 'eng']);
+
+    $url = makePlexTrackPreferenceService()->getDirectStreamUrl($request, 'item-1');
+
+    // Should match the exact 'eng' code, not 'fre' which contains 'e' but not 'eng'
+    expect($url)->toContain('audioStreamID=202')
+        ->and($url)->not->toContain('audioStreamID=201');
+});
