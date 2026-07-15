@@ -2953,6 +2953,17 @@ class M3uProxyService
     }
 
     /**
+     * Get the proxy URL for an arbitrary broadcast HLS file (segment or sub-playlist)
+     * by its already-extensioned filename. Used for subtitle-enabled broadcasts, where
+     * the proxy serves .ts/.vtt segments and .m3u8 video/subtitle variant playlists
+     * under the same generic endpoint.
+     */
+    public function getProxyBroadcastFileUrl(Network $network, string $filename): string
+    {
+        return "{$this->getPublicUrl()}/broadcast/{$network->uuid}/segment/{$filename}";
+    }
+
+    /**
      * Get the failover resolver URL for smart failover handling.
      * This URL is passed to m3u-proxy so it can call back to validate failover channels
      * before attempting to stream from them.
