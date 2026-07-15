@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PlaylistAliases;
 
+use App\Filament\Actions\GeneratePasswordAction;
 use App\Facades\PlaylistFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
@@ -658,7 +659,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->label(__('Password'))
                         ->columnSpan(1)
                         ->password()
-                        ->revealable(),
+                        ->revealable()
+                        ->suffixAction(GeneratePasswordAction::make()),
                     Forms\Components\DateTimePicker::make('expires_at')
                         ->label(__('Expiration (date & time)'))
                         ->seconds(false)
