@@ -372,6 +372,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             Schemas\Components\Fieldset::make(__('Provider Credentials'))
                 ->columnSpanFull()
                 ->schema([
+                    Forms\Components\Toggle::make('inherit_dns_failover')
+                        ->label(__('Inherit DNS failover from source playlist'))
+                        ->helperText(__('When enabled, if the source playlist fails over to a new URL, this alias will automatically follow the new URL while keeping its own credentials.'))
+                        ->default(true)
+                        ->columnSpanFull(),
                     Forms\Components\Repeater::make('xtream_config')
                         ->label(__('Credentials'))
                         ->helperText(__('Provider credentials to use for this alias. At least one set of credentials is required.'))

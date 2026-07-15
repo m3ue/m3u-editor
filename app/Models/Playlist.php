@@ -422,6 +422,8 @@ class Playlist extends Model
             return;
         }
 
+        $oldPrimaryUrl = rtrim($this->xtream_config['url'] ?? '', '/');
+
         $newFallbacks = array_values(array_filter(
             $allUrls,
             fn (string $u) => $u !== $normalizedWorking
@@ -441,6 +443,31 @@ class Playlist extends Model
             ->where('url', $oldEpgUrl)
             ->first()
             ?->update(['url' => $newEpgUrl]);
+
+        // Propagate the new URL to aliases that inherit DNS failover from this playlist.
+        if ($oldPrimaryUrl && $oldPrimaryUrl !== $normalizedWorking) {
+            $this->aliases()
+                ->where('inherit_dns_failover', true)
+                ->chunkById(20, function (Collection $aliases) use ($oldPrimaryUrl, $normalizedWorking): void {
+                    foreach ($aliases as $alias) {
+                        $entries = $alias->xtream_config;
+                        $changed = false;
+
+                        foreach ($entries as &$entry) {
+                            if (rtrim((string) ($entry['url'] ?? ''), '/') === $oldPrimaryUrl) {
+                                $entry['url'] = $normalizedWorking;
+                                $changed = true;
+                            }
+                        }
+                        unset($entry);
+
+                        if ($changed) {
+                            $alias->update(['xtream_config' => $entries]);
+                        }
+                    }
+                });
+        }
+
         $this->update([
             'xtream_config' => $config,
             'xtream_fallback_urls' => $newFallbacks,
