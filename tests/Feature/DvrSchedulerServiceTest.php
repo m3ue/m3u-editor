@@ -20,6 +20,7 @@ use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
+use App\Jobs\DvrDeepScan;
 use App\Jobs\StartDvrRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\Channel;
@@ -37,7 +38,6 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Queue::fake();
-    config(['dvr.scheduler_lookahead_minutes' => 30]);
 
     $this->user = User::factory()->create();
     $this->setting = DvrSetting::factory()->enabled()->for($this->user)->create([
@@ -70,7 +70,7 @@ it('creates a scheduled recording for a matching series programme', function () 
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
@@ -101,7 +101,7 @@ it('does not duplicate a recording for a programme already scheduled', function 
             'status' => DvrRecordingStatus::Scheduled,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -119,7 +119,7 @@ it('skips non-new programmes when new_only is enabled', function () {
         'is_new' => false,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -136,7 +136,7 @@ it('schedules a new-only programme when is_new is true', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -156,7 +156,7 @@ it('creates a scheduled recording for a once rule with a valid programme_id', fu
             'programme_id' => $programme->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -170,7 +170,7 @@ it('disables a once rule when the programme_id no longer exists', function () {
             'programme_id' => 99999,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect($rule->fresh()->enabled)->toBeFalse();
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
@@ -196,7 +196,7 @@ it('schedules a once rule with no programme_id using the current dummy epg slot'
             'channel_id' => $channel->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect($rule->fresh()->enabled)->toBeFalse();
@@ -216,7 +216,7 @@ it('does not schedule a once rule with no programme_id when playlist has no dumm
             'channel_id' => $channel->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
     expect($rule->fresh()->enabled)->toBeTrue();
@@ -239,10 +239,10 @@ it('does not duplicate a dummy epg once recording on subsequent ticks', function
             'channel_id' => $channel->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
     // Re-enable the rule and tick again to verify dedup works (not just the disabled-rule guard)
     $rule->update(['enabled' => true]);
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -260,7 +260,7 @@ it('creates a scheduled recording for a manual rule within the lookahead window'
             'manual_end' => now()->addMinutes(70),
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->title)
@@ -277,7 +277,7 @@ it('creates a scheduled recording for a manual rule more than 30 minutes in the 
             'manual_end' => now()->addHours(3),
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -292,7 +292,7 @@ it('skips a manual rule whose end time has already passed', function () {
             'manual_end' => now()->subMinutes(5),
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -319,7 +319,7 @@ it('does not schedule when the dvr setting is at capacity', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -339,7 +339,7 @@ it('does not process disabled rules', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -418,7 +418,7 @@ it('re-schedules the same programme after a failed recording', function () {
             'epg_programme_data' => ['epg_channel_id' => 'test.channel'],
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     // A new Scheduled recording should have been created alongside the Failed one
     expect(
@@ -447,7 +447,7 @@ it('applies default_start_early_seconds and default_end_late_seconds offsets', f
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->firstOrFail();
 
@@ -472,8 +472,8 @@ it('does not create a duplicate manual recording on a second tick', function () 
             'manual_end' => now()->addMinutes(70),
         ]);
 
-    $this->service->tick();
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -495,7 +495,7 @@ it('schedules a once rule for a programme starting more than 30 minutes in the f
             'programme_id' => $programme->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -515,7 +515,7 @@ it('schedules a once rule for a programme that is currently airing', function ()
             'programme_id' => $programme->id,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
@@ -543,7 +543,7 @@ it('resolves stream_url via programme epg_channel_id when rule has no channel_id
         'epg_channel_id' => 'channel.test.epg.fallback',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->firstOrFail();
 
@@ -564,7 +564,7 @@ it('does not schedule a programme whose EPG channel has no playlist mapping', fu
         'epg_channel_id' => 'channel.no.match',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -662,7 +662,7 @@ it('uses proxy URL only when both DVR setting use_proxy and playlist proxy are e
         'epg_channel_id' => 'proxy.test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->firstOrFail();
 
@@ -702,7 +702,7 @@ it('unique_se mode skips a programme when the same (season, episode) was already
         'episode' => 5,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     // Should NOT create a new recording for the re-run
     $newRecordings = DvrRecording::where('dvr_recording_rule_id', $rule->id)
@@ -743,7 +743,7 @@ it('unique_se mode still records a different episode (different season/episode n
         'episode' => 6,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
@@ -777,7 +777,7 @@ it('all mode records every programme regardless of prior S/E recordings', functi
         'episode' => 5,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     // All mode ignores S/E dedup — re-run is recorded
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
@@ -805,7 +805,7 @@ it('does not create a duplicate recording when two rules match the same programm
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::count())->toBe(1);
     expect(DvrRecording::first()->dvr_recording_rule_id)->toBe($ruleA->id);
@@ -833,7 +833,7 @@ it('dedup is scoped per DVR setting — a recording in setting A does not block 
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::count())->toBe(2);
 });
@@ -850,7 +850,7 @@ it('recordings store the correct series_key and normalized_title', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::firstOrFail();
 
@@ -873,7 +873,7 @@ it('manual rules derive series_key from the channel title when available', funct
             'manual_end' => now()->addMinutes(65),
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::firstOrFail();
 
@@ -912,7 +912,7 @@ it('does not re-schedule a programme that was user-cancelled', function () {
             'scheduled_end' => $programme->end_time->copy()->addMinutes(5),
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     // User cancelled — scheduler should not create a new recording
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
@@ -951,7 +951,7 @@ it('retries a failed recording within the airing window when attempt_count is be
 
     Queue::fake();
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $failedRecording->refresh();
 
@@ -995,7 +995,7 @@ it('does not retry a failed recording when attempt_count has reached max', funct
             'attempt_count' => 3,
         ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     // Should not retry — no new row, existing row still Failed
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1)
@@ -1014,7 +1014,7 @@ it('attempt_count starts at 1 for newly created recordings', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     $recording = DvrRecording::firstOrFail();
 
@@ -1054,7 +1054,7 @@ it('match_mode exact only records exact title match', function () {
         'start_time' => now()->addMinutes(6),
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
@@ -1086,7 +1086,7 @@ it('match_mode starts_with records titles beginning with the pattern', function 
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
@@ -1114,7 +1114,7 @@ it('match_mode contains records titles containing the pattern', function () {
         'epg_channel_id' => 'test.channel',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(3);
 });
@@ -1146,7 +1146,7 @@ it('match_mode tmdb records programmes by tmdb_id', function () {
         'tmdb_id' => '12345',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
@@ -1168,7 +1168,7 @@ it('match_mode tmdb with no tmdb_id on rule matches nothing', function () {
         'tmdb_id' => '12345',
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
@@ -1199,7 +1199,7 @@ it('higher priority rules are processed first during scheduling', function () {
         'start_time' => now()->addMinutes(5),
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $highPriority->id)->count())->toBe(1);
     expect(DvrRecording::where('dvr_recording_rule_id', $lowPriority->id)->count())->toBe(1);
@@ -1311,7 +1311,7 @@ it('does not create a duplicate recording when the same programme drifts to a ne
         'episode' => 12,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 
@@ -1326,7 +1326,7 @@ it('does not create a duplicate recording when the same programme drifts to a ne
         'episode' => 12,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect(DvrRecording::first()->id)->toBe($originalRecording->id);
@@ -1356,7 +1356,7 @@ it('dedup by programme_uid is case-sensitive for title', function () {
         'episode' => 13,
     ]);
 
-    $this->service->tick();
+    $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
@@ -1417,4 +1417,97 @@ it('immediately schedules recordings when a disabled series rule is re-enabled',
         ->toBe(DvrRecordingStatus::Scheduled);
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->programme_start->toDateTimeString())
         ->toBe($programme->start_time->toDateTimeString());
+});
+
+// --- tick() does NOT scan EPG (deep scan is separate) ---
+
+it('tick() does not scan EPG or create scheduled recordings from rules', function () {
+    // A series rule with a matching programme would normally be scheduled by
+    // matchAndSchedule. After the architecture change, tick() only handles
+    // trigger/stop of already-scheduled recordings, so the rule stays un-scheduled
+    // until the daily DvrDeepScan job (or scheduleRuleImmediately on create) runs.
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Outside Tick Window']);
+
+    EpgProgramme::factory()->create([
+        'title' => 'Outside Tick Window',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addHour(),
+        'end_time' => now()->addHour()->addMinutes(30),
+    ]);
+
+    $this->service->tick();
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
+});
+
+// --- DvrDeepScan: daily job covers the full initial_lookahead_days window ---
+
+it('DvrDeepScan schedules programmes outside the 30-minute window', function () {
+    config(['dvr.initial_lookahead_days' => 14]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Deep Scan Show']);
+
+    // Programme starts 5 days from now — well outside the 30-min tick window
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Deep Scan Show',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addDays(5),
+        'end_time' => now()->addDays(5)->addHour(),
+    ]);
+
+    $job = new DvrDeepScan;
+    $job->handle(app(DvrSchedulerService::class));
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->programme_start->toDateTimeString())
+        ->toBe($programme->start_time->toDateTimeString());
+});
+
+it('DvrDeepScan schedules programmes outside the default initial_lookahead_days window', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Deep Scan Default']);
+
+    EpgProgramme::factory()->create([
+        'title' => 'Deep Scan Default',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addDays(13)->addHour(),
+        'end_time' => now()->addDays(13)->addHours(2),
+    ]);
+
+    $job = new DvrDeepScan;
+    $job->handle(app(DvrSchedulerService::class));
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
+it('DvrDeepScan is idempotent — running it twice does not create duplicate recordings', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Idempotent Show']);
+
+    EpgProgramme::factory()->create([
+        'title' => 'Idempotent Show',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addDays(2),
+        'end_time' => now()->addDays(2)->addHour(),
+    ]);
+
+    $job = new DvrDeepScan;
+    $job->handle(app(DvrSchedulerService::class));
+    $job->handle(app(DvrSchedulerService::class));
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });

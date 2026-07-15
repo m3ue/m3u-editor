@@ -30,23 +30,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | DVR — Scheduler
+    | DVR — Deep scan schedule
     |--------------------------------------------------------------------------
     |
-    | How many minutes ahead the scheduler looks for upcoming programmes.
+    | Hour of the day (0-23) at which the daily DvrDeepScan job runs. The job
+    | matches all enabled rules against the EPG with the `initial_lookahead_days`
+    | window so new EPG data added between scans gets scheduled.
     |
     */
 
-    'scheduler_lookahead_minutes' => (int) env('DVR_SCHEDULER_LOOKAHEAD_MINUTES', 30),
+    'deep_scan_hour' => (int) env('DVR_DEEP_SCAN_HOUR', 3),
 
     /*
     |--------------------------------------------------------------------------
     | DVR — Initial schedule scan
     |--------------------------------------------------------------------------
     |
-    | How many days ahead to scan when a series rule is created or re-enabled.
-    | This is a one-time full scan so users see upcoming scheduled recordings
-    | immediately instead of waiting up to 30 minutes for the tick to find them.
+    | How many days ahead to scan when a series rule is created or re-enabled
+    | (via DvrRecordingRule::scheduleRuleImmediately) and during the daily
+    | DvrDeepScan job. Covers up to this many days of EPG so users see scheduled
+    | recordings well in advance of airtime.
     |
     */
 

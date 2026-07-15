@@ -17,30 +17,34 @@ use App\Models\EpgProgramme;
 use App\Support\SeriesKey;
 use Exception;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * DvrSchedulerService — Runs every minute via the DvrSchedulerTick job.
+ * DvrSchedulerService — DVR scheduling, matching, trigger, and stop logic.
+ *
+ * Used by:
+ *   - DvrSchedulerTick (every minute) — trigger/stop of due recordings
+ *   - DvrDeepScan (daily) — match all rules against EPG with `initial_lookahead_days` window
+ *   - DvrRecordingRule model — scheduleRuleImmediately() on rule create / re-enable
  *
  * Responsibilities:
- * 1. Match enabled rules against upcoming epg_programmes (30-min lookahead)
- * 2. Deduplicate: skip programmes that already have a recording row
- * 3. Conflict resolution: respect max_concurrent_recordings
- * 4. Create SCHEDULED recording rows
- * 5. Trigger recordings whose scheduled_start <= now
- * 6. Stop recordings whose scheduled_end <= now
+ *   1. Match enabled rules against upcoming epg_programmes and create SCHEDULED rows
+ *   2. Deduplicate: skip programmes that already have a recording row
+ *   3. Conflict resolution: respect max_concurrent_recordings
+ *   4. Trigger recordings whose scheduled_start <= now
+ *   5. Stop recordings whose scheduled_end <= now
  */
 class DvrSchedulerService
 {
     /**
-     * Execute one scheduler tick.
+     * Execute one scheduler tick (runs every minute via DvrSchedulerTick).
      *
-     * The trigger/stop steps always run for minute-level precision. Rule matching
-     * is throttled via a cache key (default: every 5 minutes) since the 30-minute
-     * lookahead makes sub-5-minute re-evaluation wasteful. When there are no enabled
-     * rules and no active recordings the tick exits silently to avoid log noise.
+     * Only handles trigger/stop of already-scheduled recordings. Rule matching
+     * runs in the daily DvrDeepScan job and on rule create/re-enable via
+     * DvrRecordingRule::scheduleRuleImmediately(), so there is no per-tick EPG
+     * query here. When there are no enabled rules and no active recordings the
+     * tick exits silently to avoid log noise.
      */
     public function tick(): void
     {
@@ -56,20 +60,7 @@ class DvrSchedulerService
                 return;
             }
 
-            // Rule matching is expensive (EPG queries per rule). Throttle it to run
-            // every N minutes — well within the 30-minute lookahead window.
-            if ($hasRules) {
-                $matchIntervalMinutes = max(1, (int) config('dvr.scheduler_match_interval_minutes', 5));
-                $cacheKey = 'dvr_scheduler_last_match';
-
-                if (! Cache::has($cacheKey)) {
-                    $lookaheadMinutes = (int) config('dvr.scheduler_lookahead_minutes', 30);
-                    $this->matchAndSchedule($lookaheadMinutes);
-                    Cache::put($cacheKey, true, now()->addMinutes($matchIntervalMinutes));
-                }
-            }
-
-            // These always run every minute for start/stop precision.
+            // Minute-level precision for trigger and stop.
             $this->triggerPendingRecordings();
             $this->stopExpiredRecordings();
         } catch (Exception $e) {
@@ -95,9 +86,13 @@ class DvrSchedulerService
     /**
      * Match all enabled rules against upcoming programmes and create SCHEDULED rows.
      *
+     * Called by:
+     *   - DvrDeepScan scheduled job (daily, with the `initial_lookahead_days` window)
+     *   - DvrRecordingRule::scheduleRuleImmediately() (on rule create / re-enable)
+     *
      * @param  int  $lookaheadMinutes  How many minutes ahead to search
      */
-    private function matchAndSchedule(int $lookaheadMinutes): void
+    public function matchAndSchedule(int $lookaheadMinutes): void
     {
         $rules = DvrRecordingRule::enabled()
             ->with(['dvrSetting.playlist', 'channel.epgChannel', 'sourceChannel.epgChannel', 'epgChannel'])
