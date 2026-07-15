@@ -33,6 +33,67 @@ beforeEach(function () {
     Storage::disk('local')->deleteDirectory('playlist-epg-files');
 });
 
+/**
+ * @param  array<string, mixed>  $programme
+ */
+function createCachedProgrammeExportFixture(array $programme): Playlist
+{
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/export.xml',
+        'is_cached' => true,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.export',
+        'display_name' => 'Export Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'export-channel',
+        'title' => 'Export Channel',
+        'channel' => 1,
+    ]);
+
+    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
+    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
+        'cache_created' => time(),
+        'cache_version' => 'v2',
+    ], JSON_THROW_ON_ERROR));
+    Storage::disk('local')->put(
+        "{$cacheDirectory}/programmes-".now()->format('Y-m-d').'.jsonl',
+        json_encode([
+            'channel' => 'source.export',
+            'programme' => array_merge([
+                'start' => now()->startOfDay()->addHour()->toISOString(),
+                'stop' => now()->startOfDay()->addHours(2)->toISOString(),
+                'title' => 'Export Programme',
+                'subtitle' => '',
+                'desc' => '',
+                'category' => '',
+                'episode_num' => '',
+                'episode_nums' => [],
+                'rating' => '',
+                'icon' => '',
+                'images' => [],
+                'new' => false,
+                'previously_shown' => false,
+                'premiere' => false,
+                'urls' => [],
+                'production_year' => null,
+            ], $programme),
+        ], JSON_THROW_ON_ERROR)."\n",
+    );
+
+    return $playlist;
+}
+
 test('epg download does not crash when epg source file is missing', function () {
     $user = User::factory()->create();
 
@@ -384,6 +445,190 @@ test('legacy scalar episode numbers emit only valid xmltv namespace identities',
 
     expect($episodeNumbers)->toBe([
         ['system' => 'xmltv_ns', 'value' => '0.4.'],
+    ]);
+});
+
+test('cached epg generation exports programme urls and structural signals', function () {
+    $playlist = createCachedProgrammeExportFixture([
+        'urls' => [
+            ['system' => 'imdb', 'value' => 'https://www.imdb.com/title/tt0090390/'],
+            ['system' => '', 'value' => 'https://example.com/programmes/export'],
+            ['system' => 'unsafe', 'value' => 'javascript:alert(1)'],
+        ],
+        'production_year' => 2024,
+        'previously_shown' => true,
+        'premiere' => true,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+    $urls = [];
+    foreach ($xpath->query('//programme[@channel="export-channel"]/url') as $url) {
+        $urls[] = [
+            'system' => $url->hasAttribute('system') ? $url->getAttribute('system') : null,
+            'value' => $url->textContent,
+        ];
+    }
+
+    expect($urls)->toBe([
+        ['system' => 'imdb', 'value' => 'https://www.imdb.com/title/tt0090390/'],
+        ['system' => null, 'value' => 'https://example.com/programmes/export'],
+    ])->and($xpath->query('//programme[@channel="export-channel"]/date[text()="2024"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="export-channel"]/previously-shown'))->toHaveCount(1)
+        ->and($xpath->query('//programme[@channel="export-channel"]/premiere'))->toHaveCount(1);
+});
+
+test('cached epg generation exports deterministic dtd valid programme artwork', function () {
+    $primaryIconUrl = 'https://example.com/artwork/primary.jpg';
+    $playlist = createCachedProgrammeExportFixture([
+        'desc' => 'Artwork description',
+        'production_year' => 2024,
+        'category' => 'Drama',
+        'urls' => [
+            ['system' => 'imdb', 'value' => 'https://www.imdb.com/title/tt0090390/'],
+        ],
+        'episode_nums' => [
+            ['system' => 'onscreen', 'value' => 'S01E02'],
+        ],
+        'previously_shown' => true,
+        'premiere' => true,
+        'rating' => 'TV-14',
+        'icon' => $primaryIconUrl,
+        'new' => true,
+        'images' => [
+            [
+                'url' => 'https://example.com/artwork/backdrop.jpg',
+                'type' => 'backdrop',
+                'width' => 1280,
+                'height' => 720,
+                'orient' => 'L',
+                'size' => 3,
+                'system' => 'tmdb',
+            ],
+            [
+                'url' => 'https://example.com/artwork/poster.jpg',
+                'type' => 'poster',
+                'width' => 300,
+                'height' => 450,
+                'orient' => '',
+                'size' => 2,
+            ],
+            [
+                'url' => 'https://example.com/artwork/still.jpg',
+                'type' => 'still',
+                'width' => -1,
+                'height' => -2,
+                'orient' => 'square',
+                'size' => 4,
+            ],
+            [
+                'url' => 'https://example.com/artwork/logo.png',
+                'type' => 'logo',
+                'width' => 600,
+                'height' => 200,
+                'orient' => 'L',
+                'size' => 3,
+            ],
+            [
+                'url' => 'https://example.com/artwork/backdrop.jpg',
+                'type' => 'poster',
+                'orient' => 'P',
+                'size' => 1,
+            ],
+            [
+                'url' => $primaryIconUrl,
+                'type' => 'poster',
+                'orient' => 'P',
+                'size' => 3,
+            ],
+            [
+                'url' => 'not-a-url',
+                'type' => 'poster',
+                'orient' => 'P',
+                'size' => 1,
+            ],
+        ],
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $xml = gzdecode($response->getContent());
+    $dtdPath = realpath(base_path('tests/Fixtures/xmltv-programme-export.dtd'));
+    expect($dtdPath)->not->toBeFalse();
+
+    $xmlWithLocalDtd = str_replace(
+        '<!DOCTYPE tv SYSTEM "xmltv.dtd">',
+        '<!DOCTYPE tv SYSTEM "file://'.$dtdPath.'">',
+        $xml,
+    );
+
+    $previousInternalErrors = libxml_use_internal_errors(true);
+    libxml_clear_errors();
+
+    try {
+        $document = new DOMDocument;
+        expect($document->loadXML($xmlWithLocalDtd, LIBXML_DTDLOAD))->toBeTrue()
+            ->and($document->validate())->toBeTrue();
+    } finally {
+        libxml_clear_errors();
+        libxml_use_internal_errors($previousInternalErrors);
+    }
+
+    $xpath = new DOMXPath($document);
+    $programmePath = '//programme[@channel="export-channel"]';
+    expect($xpath->query($programmePath.'/icon'))->toHaveCount(1)
+        ->and($xpath->query($programmePath.'/icon[@src="'.$primaryIconUrl.'"]'))->toHaveCount(1)
+        ->and($xpath->query($programmePath.'/icon[@type or @orient or @size]'))->toHaveCount(0)
+        ->and($xpath->query($programmePath.'/image[@width or @height]'))->toHaveCount(0);
+
+    $images = [];
+    foreach ($xpath->query($programmePath.'/image') as $image) {
+        $images[] = [
+            'url' => $image->textContent,
+            'type' => $image->hasAttribute('type') ? $image->getAttribute('type') : null,
+            'size' => $image->hasAttribute('size') ? $image->getAttribute('size') : null,
+            'orient' => $image->hasAttribute('orient') ? $image->getAttribute('orient') : null,
+            'system' => $image->hasAttribute('system') ? $image->getAttribute('system') : null,
+        ];
+    }
+
+    expect($images)->toBe([
+        [
+            'url' => 'https://example.com/artwork/backdrop.jpg',
+            'type' => 'backdrop',
+            'size' => '3',
+            'orient' => 'L',
+            'system' => 'tmdb',
+        ],
+        [
+            'url' => 'https://example.com/artwork/poster.jpg',
+            'type' => 'poster',
+            'size' => '2',
+            'orient' => 'P',
+            'system' => null,
+        ],
+        [
+            'url' => 'https://example.com/artwork/still.jpg',
+            'type' => 'still',
+            'size' => null,
+            'orient' => null,
+            'system' => null,
+        ],
+        [
+            'url' => 'https://example.com/artwork/logo.png',
+            'type' => null,
+            'size' => '3',
+            'orient' => 'L',
+            'system' => null,
+        ],
     ]);
 });
 

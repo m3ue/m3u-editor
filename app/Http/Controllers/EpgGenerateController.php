@@ -43,6 +43,73 @@ class EpgGenerateController extends Controller
     }
 
     /**
+     * @param  array<int, mixed>  $images
+     */
+    private function formatProgrammeImages(array $images, ?string $primaryIconUrl, bool $proxyEnabled): string
+    {
+        $xml = '';
+        $seenUrls = [];
+        $primaryIconUrl = trim((string) $primaryIconUrl);
+
+        if ($primaryIconUrl !== '') {
+            $seenUrls[$primaryIconUrl] = true;
+        }
+
+        foreach ($images as $image) {
+            if (! is_array($image)) {
+                continue;
+            }
+
+            $rawUrl = is_string($image['url'] ?? null) ? trim($image['url']) : '';
+            if ($rawUrl === '' || isset($seenUrls[$rawUrl]) || ! filter_var($rawUrl, FILTER_VALIDATE_URL)) {
+                continue;
+            }
+            $seenUrls[$rawUrl] = true;
+
+            $sourceType = is_string($image['type'] ?? null) ? mb_strtolower(trim($image['type'])) : '';
+            $type = in_array($sourceType, ['poster', 'backdrop', 'still', 'person', 'character'], true)
+                ? $sourceType
+                : null;
+
+            $width = is_numeric($image['width'] ?? null) ? max(0, (int) $image['width']) : 0;
+            $height = is_numeric($image['height'] ?? null) ? max(0, (int) $image['height']) : 0;
+
+            $orient = is_string($image['orient'] ?? null) ? mb_strtoupper(trim($image['orient'])) : '';
+            if (! in_array($orient, ['P', 'L'], true)) {
+                $orient = $width > 0 && $height > 0
+                    ? ($width > $height ? 'L' : 'P')
+                    : '';
+            }
+
+            $size = is_int($image['size'] ?? null) || is_string($image['size'] ?? null)
+                ? trim((string) $image['size'])
+                : '';
+            if (! in_array($size, ['1', '2', '3'], true)) {
+                $largestDimension = max($width, $height);
+                $size = match (true) {
+                    $largestDimension === 0 => '',
+                    $largestDimension < 200 => '1',
+                    $largestDimension <= 400 => '2',
+                    default => '3',
+                };
+            }
+
+            $system = is_string($image['system'] ?? null) ? trim($image['system']) : '';
+            $attributes = '';
+            foreach (['type' => $type, 'size' => $size, 'orient' => $orient, 'system' => $system] as $name => $value) {
+                if ($value !== null && $value !== '') {
+                    $attributes .= ' '.$name.'="'.$this->escapeXml($value).'"';
+                }
+            }
+
+            $url = $proxyEnabled ? LogoProxyController::generateProxyUrl($rawUrl) : $rawUrl;
+            $xml .= '    <image'.$attributes.'>'.$this->escapeXml($url).'</image>'.PHP_EOL;
+        }
+
+        return $xml;
+    }
+
+    /**
      * Generate the EPG XML file
      *
      * @return Response
@@ -381,14 +448,11 @@ class EpgGenerateController extends Controller
                                 if ($programme['desc']) {
                                     $progXml .= '    <desc>'.$this->escapeXml($programme['desc']).'</desc>'.PHP_EOL;
                                 }
+                                if (! empty($programme['production_year'])) {
+                                    $progXml .= '    <date>'.$this->escapeXml($programme['production_year']).'</date>'.PHP_EOL;
+                                }
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
-                                }
-                                foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
-                                    $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
-                                        ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
-                                        : '';
-                                    $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
                                 if ($programme['icon']) {
                                     $icon = $logoProxyEnabled
@@ -396,29 +460,42 @@ class EpgGenerateController extends Controller
                                         : $programme['icon'];
                                     $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
                                 }
-                                // Program artwork images (NEW)
-                                if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
-                                    foreach ($programme['images'] as $image) {
-                                        $rawUrl = $image['url'] ?? '';
-                                        $proxiedUrl = $logoProxyEnabled && $rawUrl
-                                            ? LogoProxyController::generateProxyUrl($rawUrl)
-                                            : $rawUrl;
-
-                                        $url = $this->escapeXml($proxiedUrl);
-                                        $type = $this->escapeXml($image['type']);
-                                        $width = $this->escapeXml($image['width']);
-                                        $height = $this->escapeXml($image['height']);
-                                        $orient = $this->escapeXml($image['orient']);
-                                        $size = $this->escapeXml($image['size']);
-
-                                        $progXml .= "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n";
+                                foreach ($programme['urls'] ?? [] as $url) {
+                                    $urlValue = is_string($url['value'] ?? null) ? trim($url['value']) : '';
+                                    if ($urlValue === '' || ! filter_var($urlValue, FILTER_VALIDATE_URL)) {
+                                        continue;
                                     }
+
+                                    $urlSystem = is_string($url['system'] ?? null) ? trim($url['system']) : '';
+                                    $systemAttribute = $urlSystem !== ''
+                                        ? ' system="'.$this->escapeXml($urlSystem).'"'
+                                        : '';
+                                    $progXml .= '    <url'.$systemAttribute.'>'.$this->escapeXml($urlValue).'</url>'.PHP_EOL;
+                                }
+                                foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
+                                    $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
+                                        ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
+                                        : '';
+                                    $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
+                                }
+                                if (! empty($programme['previously_shown'])) {
+                                    $progXml .= '    <previously-shown />'.PHP_EOL;
+                                }
+                                if (! empty($programme['premiere'])) {
+                                    $progXml .= '    <premiere />'.PHP_EOL;
+                                }
+                                if (! empty($programme['new']) && $programme['new']) {
+                                    $progXml .= '    <new />'.PHP_EOL;
                                 }
                                 if ($programme['rating']) {
                                     $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
-                                if (! empty($programme['new']) && $programme['new']) {
-                                    $progXml .= '    <new />'.PHP_EOL;
+                                if (! empty($programme['images']) && is_array($programme['images'])) {
+                                    $progXml .= $this->formatProgrammeImages(
+                                        $programme['images'],
+                                        $programme['icon'] ?? null,
+                                        $logoProxyEnabled,
+                                    );
                                 }
 
                                 $progXml .= '  </programme>'.PHP_EOL;

@@ -1,0 +1,45 @@
+<!ELEMENT tv (channel*, programme*)>
+<!ATTLIST tv generator-info-name CDATA #IMPLIED
+             generator-info-url CDATA #IMPLIED>
+
+<!ELEMENT channel (display-name+, icon*)>
+<!ATTLIST channel id CDATA #REQUIRED>
+
+<!ELEMENT display-name (#PCDATA)>
+<!ATTLIST display-name lang CDATA #IMPLIED>
+
+<!ELEMENT programme (title+, sub-title*, desc*, date?, category*, icon*, url*, episode-num*, previously-shown?, premiere?, new?, rating*, image*)>
+<!ATTLIST programme start CDATA #REQUIRED
+                    stop CDATA #IMPLIED
+                    channel CDATA #REQUIRED>
+
+<!ELEMENT title (#PCDATA)>
+<!ELEMENT sub-title (#PCDATA)>
+<!ELEMENT desc (#PCDATA)>
+<!ELEMENT date (#PCDATA)>
+<!ELEMENT category (#PCDATA)>
+
+<!ELEMENT icon EMPTY>
+<!ATTLIST icon src CDATA #REQUIRED
+               width CDATA #IMPLIED
+               height CDATA #IMPLIED>
+
+<!ELEMENT url (#PCDATA)>
+<!ATTLIST url system CDATA #IMPLIED>
+
+<!ELEMENT episode-num (#PCDATA)>
+<!ATTLIST episode-num system CDATA "onscreen">
+
+<!ELEMENT previously-shown EMPTY>
+<!ELEMENT premiere (#PCDATA)>
+<!ELEMENT new EMPTY>
+
+<!ELEMENT rating (value, icon*)>
+<!ATTLIST rating system CDATA #IMPLIED>
+<!ELEMENT value (#PCDATA)>
+
+<!ELEMENT image (#PCDATA)>
+<!ATTLIST image type (poster | backdrop | still | person | character) #IMPLIED
+                size (1 | 2 | 3) #IMPLIED
+                orient (P | L) #IMPLIED
+                system CDATA #IMPLIED>
