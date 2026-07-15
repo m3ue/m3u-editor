@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PlaylistAuths;
 
+use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\PlaylistAuthResource\Pages;
 use App\Filament\Resources\PlaylistAuthResource\RelationManagers;
@@ -323,6 +324,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                                 ->password()
                                 ->required()
                                 ->revealable()
+                                ->suffixAction(GeneratePasswordAction::make())
                                 ->columnSpan(1),
                             DateTimePicker::make('expires_at')
                                 ->label(__('Expiration (date & time)'))
