@@ -464,7 +464,7 @@ class NetworkBroadcastService
             'audio_codec' => $network->audio_codec,
             'preset' => $network->transcode_preset,
             'hwaccel' => $network->hwaccel,
-            // Audio stream index resolved from preferred_audio_language (null = use default).
+            // Audio stream index resolved from preferred_audio_track (null = use default).
             // For Local mode the proxy FFmpeg uses this to select the right audio track.
             'audio_stream_index' => $ffmpegAudioStreamIndex,
             // Whether the proxy should detect embedded subtitle tracks on the source and
@@ -968,29 +968,19 @@ class NetworkBroadcastService
         // transcoding locally instead (much more reliable for live broadcasting).
         $transcodeOptions['skip_plex_transcode'] = true;
 
-        // Inject the preferred audio stream index when a language is configured.
-        // For Server transcode mode, the media server honors AudioStreamIndex in
-        // the URL and emits only the chosen track. For Local/Direct mode, the
-        // index is forwarded so the proxy FFmpeg layer can select the right stream.
-        if (! empty($network->preferred_audio_language)) {
-            $audioStreamIndex = $service->getAudioStreamIndexForLanguage($itemId, $network->preferred_audio_language);
-
-            if ($audioStreamIndex !== null) {
-                $request->merge(['AudioStreamIndex' => $audioStreamIndex]);
-
-                Log::debug('Audio stream index resolved for preferred language', [
-                    'network_id' => $network->id,
-                    'language' => $network->preferred_audio_language,
-                    'audio_stream_index' => $audioStreamIndex,
-                ]);
-            } else {
-                Log::debug('Preferred audio language not found in media streams, using default', [
-                    'network_id' => $network->id,
-                    'language' => $network->preferred_audio_language,
-                ]);
-            }
-        }
-
+        // Inject the preferred audio track preference into the request so the media
+        // server's own track-prefs logic (Plex resolvePreferredStreamId / Emby
+        // resolvePreferredStreamIndex) picks the right stream when it builds the
+        // direct URL. Doing this here is what makes the audio selection work in
+        // both direct and transcode modes for the current programme.
+        //
+        // Note: the proxy payload's audio_stream_index for the CURRENT programme
+        // is also resolved via the same preferred_audio_track by startViaProxy()
+        // (resolveAudioStreamIndex -> getAudioStreamIndexForLanguage) so the proxy
+        // FFmpeg -map target is known without a second media-server roundtrip.
+        // The audio_stream_index for the NEXT programme (auto-transition) is
+        // resolved separately by computeNextStreamConfig() so the next programme's
+        // selection survives the zero-round-trip boundary.
         $streamUrl = $service->getDirectStreamUrl($request, $itemId, 'ts', $transcodeOptions);
 
         return $streamUrl;
@@ -1629,7 +1619,7 @@ class NetworkBroadcastService
      */
     protected function resolveAudioStreamIndex(Network $network, ?NetworkProgramme $programme = null): ?int
     {
-        if (empty($network->preferred_audio_language)) {
+        if (empty($network->preferred_audio_track)) {
             return null;
         }
 
@@ -1654,18 +1644,20 @@ class NetworkBroadcastService
         }
 
         return MediaServerService::make($integration)
-            ->getAudioStreamIndexForLanguage($itemId, $network->preferred_audio_language);
+            ->getAudioStreamIndexForLanguage($itemId, $network->preferred_audio_track);
     }
 
     /**
      * Whether the proxy should attempt to detect and expose embedded subtitle
-     * tracks for this broadcast. Forced off in Server transcode mode, since the
-     * media server's own transcode strips subtitle streams before the proxy ever
-     * receives the file — the operator's toggle would otherwise silently do nothing.
+     * tracks for this broadcast. Derived from preferred_subtitle_track (any
+     * non-empty value means the operator wants subtitles). Forced off in Server
+     * transcode mode, since the media server's own transcode strips subtitle
+     * streams before the proxy ever receives the file — the operator's preference
+     * would otherwise silently do nothing.
      */
     protected function subtitlesEnabledForProxy(Network $network): bool
     {
-        return (bool) $network->subtitles_enabled
+        return ! empty($network->preferred_subtitle_track)
             && ($network->transcode_mode ?? null) !== TranscodeMode::Server;
     }
 

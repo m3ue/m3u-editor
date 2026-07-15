@@ -72,19 +72,19 @@ it('sends required broadcast fields in the payload', function () {
         ->toHaveKey('callback_url');
 });
 
-it('sends subtitles_enabled true for direct mode when the toggle is on', function () {
+it('sends subtitles_enabled true for direct mode when a preferred subtitle track is set', function () {
     $payload = invokeStartViaProxyAndCapturePayload([
         'transcode_mode' => TranscodeMode::Direct->value,
-        'subtitles_enabled' => true,
+        'preferred_subtitle_track' => 'eng',
     ]);
 
     expect($payload['subtitles_enabled'])->toBeTrue();
 });
 
-it('forces subtitles_enabled false in Server transcode mode even when the toggle is on', function () {
+it('forces subtitles_enabled false in Server transcode mode even when a preferred subtitle track is set', function () {
     $payload = invokeStartViaProxyAndCapturePayload([
         'transcode_mode' => TranscodeMode::Server->value,
-        'subtitles_enabled' => true,
+        'preferred_subtitle_track' => 'eng',
     ]);
 
     expect($payload['subtitles_enabled'])->toBeFalse();
@@ -119,7 +119,7 @@ it('rewrites a VideoCodec=copy remux URL to static when seek is required, so Emb
         'broadcast_pid' => null,
         'broadcast_started_at' => null,
         'transcode_mode' => TranscodeMode::Direct->value,
-        'subtitles_enabled' => true,
+        'preferred_subtitle_track' => 'eng',
     ]);
 
     $programme = NetworkProgramme::factory()->create([
@@ -316,7 +316,7 @@ it('zeroes subtitle_seek_seconds when the subtitle url was already seeked server
         'broadcast_pid' => null,
         'broadcast_started_at' => null,
         'transcode_mode' => TranscodeMode::Direct->value,
-        'subtitles_enabled' => true,
+        'preferred_subtitle_track' => 'eng',
     ]);
 
     $programme = NetworkProgramme::factory()->create([
@@ -403,7 +403,7 @@ it('appends a #range= byte offset to the rewritten-static URL when seek is requi
         'broadcast_pid' => null,
         'broadcast_started_at' => null,
         'transcode_mode' => TranscodeMode::Direct->value,
-        'subtitles_enabled' => false,
+        'preferred_subtitle_track' => null,
     ]);
 
     $integration = MediaServerIntegration::factory()->create([
@@ -482,7 +482,7 @@ it('omits the #range= byte offset on the rewritten-static URL when size meta is 
         'broadcast_pid' => null,
         'broadcast_started_at' => null,
         'transcode_mode' => TranscodeMode::Direct->value,
-        'subtitles_enabled' => false,
+        'preferred_subtitle_track' => null,
     ]);
 
     $integration = MediaServerIntegration::factory()->create([
@@ -614,7 +614,7 @@ it('keeps the original resolved audio index when the URL is a raw passthrough wi
         0,
     );
 
-    // No preferred_audio_language configured -> resolveAudioStreamIndex returns null,
+    // No preferred_audio_track configured -> resolveAudioStreamIndex returns null,
     // and the URL has no VideoCodec=copy remux to begin with.
     expect($payload['audio_stream_index'])->toBeNull();
 });

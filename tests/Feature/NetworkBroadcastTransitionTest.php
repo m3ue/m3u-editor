@@ -373,7 +373,7 @@ it('next_stream_config key is always present in the broadcast start payload', fu
 it('computeNextStreamConfig resolves audio_stream_index for the NEXT programme, not the current one', function () {
     $network = Network::factory()->create([
         'broadcast_enabled' => true,
-        'preferred_audio_language' => 'eng',
+        'preferred_audio_track' => 'eng',
     ]);
 
     $currentProgramme = NetworkProgramme::factory()->create([
