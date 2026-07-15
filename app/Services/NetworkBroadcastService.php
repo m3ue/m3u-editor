@@ -437,14 +437,6 @@ class NetworkBroadcastService
         // the subtitle was in fact already server-seeked.
         $subtitleSeekSeconds = $subtitleInfo['server_seeked'] ? 0 : $seekPosition;
 
-        // Audio track mapping:
-        //   - Static (or post-rewrite) URL: preserves all original streams, so the resolved
-        //     absolute MediaStreams index IS the correct ffmpeg -map target.
-        //   - Remux URL (no seek, rewrite didn't fire): Emby already remuxed to ONE audio
-        //     track at position 0, so ffmpeg must -map 0:a:0 regardless of original index.
-        $resolvedAudioStreamIndex = $this->resolveAudioStreamIndex($network);
-        $ffmpegAudioStreamIndex = ($urlIsRemux && $resolvedAudioStreamIndex !== null) ? 0 : $resolvedAudioStreamIndex;
-
         $payload = [
             'stream_url' => $streamUrl,
             'seek_seconds' => $ffmpegSeekSeconds,
@@ -464,9 +456,14 @@ class NetworkBroadcastService
             'audio_codec' => $network->audio_codec,
             'preset' => $network->transcode_preset,
             'hwaccel' => $network->hwaccel,
-            // Audio stream index resolved from preferred_audio_track (null = use default).
-            // For Local mode the proxy FFmpeg uses this to select the right audio track.
-            'audio_stream_index' => $ffmpegAudioStreamIndex,
+            // Preferred audio language (ISO 639 code, e.g. "eng", "jpn") forwarded to the
+            // proxy so FFmpeg can select via -map 0:a:m:language:XX?. This replaces the
+            // earlier PHP-side index resolution, which required a media-server round-trip
+            // and broke on remux URLs. For Server mode the pref is already baked into the
+            // stream URL via AudioStreamIndex, so this is null (proxy uses default).
+            'preferred_audio_language' => ($network->transcode_mode ?? null) !== TranscodeMode::Server
+                ? $network->preferred_audio_track
+                : null,
             // Whether the proxy should detect embedded subtitle tracks on the source and
             // expose them as a toggleable WebVTT rendition in the HLS output. Only meaningful
             // outside Server mode: Media Server transcoding strips subtitle tracks before the
@@ -899,12 +896,19 @@ class NetworkBroadcastService
             $request->merge(['static' => 'true']); // static stream for HLS
         }
 
-        if (! empty($network->preferred_audio_track)) {
-            $request->merge(['PreferredAudioTrack' => $network->preferred_audio_track]);
-        }
+        // For Server transcode mode the media server honors AudioStreamIndex /
+        // SubtitleStreamIndex URL params, so we forward the preferences and let
+        // PlexService/EmbyJellyfinService resolve them to concrete indexes.
+        // For Local/Direct mode the proxy handles selection natively via FFmpeg's
+        // -map 0:a:m:language:XX? filter, so we skip the media-server round-trip.
+        if (($network->transcode_mode ?? null) === TranscodeMode::Server) {
+            if (! empty($network->preferred_audio_track)) {
+                $request->merge(['PreferredAudioTrack' => $network->preferred_audio_track]);
+            }
 
-        if (! empty($network->preferred_subtitle_track)) {
-            $request->merge(['PreferredSubtitleTrack' => $network->preferred_subtitle_track]);
+            if (! empty($network->preferred_subtitle_track)) {
+                $request->merge(['PreferredSubtitleTrack' => $network->preferred_subtitle_track]);
+            }
         }
 
         // Use media server's native seeking if we need to seek
@@ -971,16 +975,10 @@ class NetworkBroadcastService
         // Inject the preferred audio track preference into the request so the media
         // server's own track-prefs logic (Plex resolvePreferredStreamId / Emby
         // resolvePreferredStreamIndex) picks the right stream when it builds the
-        // direct URL. Doing this here is what makes the audio selection work in
-        // both direct and transcode modes for the current programme.
-        //
-        // Note: the proxy payload's audio_stream_index for the CURRENT programme
-        // is also resolved via the same preferred_audio_track by startViaProxy()
-        // (resolveAudioStreamIndex -> getAudioStreamIndexForLanguage) so the proxy
-        // FFmpeg -map target is known without a second media-server roundtrip.
-        // The audio_stream_index for the NEXT programme (auto-transition) is
-        // resolved separately by computeNextStreamConfig() so the next programme's
-        // selection survives the zero-round-trip boundary.
+        // direct URL — only for Server transcode mode (see the conditional above).
+        // For Local/Direct mode, the raw language string is forwarded to the proxy
+        // via startViaProxy() / computeNextStreamConfig() and FFmpeg handles
+        // selection with -map 0:a:m:language:XX?, avoiding this round-trip entirely.
         $streamUrl = $service->getDirectStreamUrl($request, $itemId, 'ts', $transcodeOptions);
 
         return $streamUrl;
@@ -1517,14 +1515,6 @@ class NetworkBroadcastService
         $callbackUrl = $this->getProxyService()->getBroadcastCallbackUrl();
         $nextSubtitleInfo = $this->resolveSubtitleInfo($network, $nextProgramme, 0);
 
-        // See the matching comment in startViaProxy(): a VideoCodec=copy remux already
-        // selected a single audio track server-side, so ffmpeg must map 0:a:0, not the
-        // original resolved index — otherwise the next-programme auto-transition dies
-        // the same way the initial start would.
-        $nextUrlIsRemux = preg_match('/[?&]VideoCodec=copy\b/', $nextStreamUrl);
-        $nextResolvedAudioStreamIndex = $this->resolveAudioStreamIndex($network, $nextProgramme);
-        $nextFfmpegAudioStreamIndex = ($nextUrlIsRemux && $nextResolvedAudioStreamIndex !== null) ? 0 : $nextResolvedAudioStreamIndex;
-
         $config = [
             'stream_url' => $nextStreamUrl,
             'seek_seconds' => 0,
@@ -1539,7 +1529,11 @@ class NetworkBroadcastService
             'audio_codec' => $network->audio_codec,
             'preset' => $network->transcode_preset,
             'hwaccel' => $network->hwaccel,
-            'audio_stream_index' => $nextFfmpegAudioStreamIndex,
+            // Preferred audio language forwarded to the proxy for FFmpeg -map selection.
+            // Null in Server mode (the stream URL already carries AudioStreamIndex).
+            'preferred_audio_language' => ($network->transcode_mode ?? null) !== TranscodeMode::Server
+                ? $network->preferred_audio_track
+                : null,
             'subtitles_enabled' => $this->subtitlesEnabledForProxy($network),
             'subtitle_url' => $nextSubtitleInfo['url'],
             'subtitle_language' => $nextSubtitleInfo['language'],
@@ -1603,48 +1597,6 @@ class NetworkBroadcastService
         }
 
         return $config;
-    }
-
-    /**
-     * Resolve the network-level preferred audio stream index.
-     *
-     * Returns null when no language is configured so the proxy/media server
-     * uses its own default. This method is intentionally cheap: it only queries
-     * the media server when a language preference is set AND the programme
-     * has a resolvable item ID; otherwise it returns null immediately.
-     *
-     * Accepts an explicit programme so computeNextStreamConfig() can resolve the
-     * audio index for the upcoming programme's content, not whatever is currently
-     * airing — defaults to the current programme for the startViaProxy() call site.
-     */
-    protected function resolveAudioStreamIndex(Network $network, ?NetworkProgramme $programme = null): ?int
-    {
-        if (empty($network->preferred_audio_track)) {
-            return null;
-        }
-
-        $programme ??= $network->getCurrentProgramme();
-        if (! $programme) {
-            return null;
-        }
-
-        $content = $programme->contentable;
-        if (! $content) {
-            return null;
-        }
-
-        $integration = $network->mediaServerIntegration ?? $this->getIntegrationFromContent($content);
-        if (! $integration) {
-            return null;
-        }
-
-        $itemId = $this->getMediaServerItemId($content);
-        if (! $itemId) {
-            return null;
-        }
-
-        return MediaServerService::make($integration)
-            ->getAudioStreamIndexForLanguage($itemId, $network->preferred_audio_track);
     }
 
     /**

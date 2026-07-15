@@ -90,6 +90,24 @@ it('forces subtitles_enabled false in Server transcode mode even when a preferre
     expect($payload['subtitles_enabled'])->toBeFalse();
 });
 
+it('sends preferred_audio_language as the raw column value for non-Server mode', function () {
+    $payload = invokeStartViaProxyAndCapturePayload([
+        'transcode_mode' => TranscodeMode::Direct->value,
+        'preferred_audio_track' => 'jpn',
+    ]);
+
+    expect($payload['preferred_audio_language'])->toBe('jpn');
+});
+
+it('sends preferred_audio_language as null in Server mode (the stream URL carries AudioStreamIndex)', function () {
+    $payload = invokeStartViaProxyAndCapturePayload([
+        'transcode_mode' => TranscodeMode::Server->value,
+        'preferred_audio_track' => 'eng',
+    ]);
+
+    expect($payload['preferred_audio_language'])->toBeNull();
+});
+
 /*
 |--------------------------------------------------------------------------
 | Seek handling (avoid double-seeking video while subtitles need the
@@ -110,8 +128,8 @@ it('applies the full ffmpeg seek for a static Direct-mode URL that does not seek
 
 it('rewrites a VideoCodec=copy remux URL to static when seek is required, so Emby server-seeks via StartTimeTicks', function () {
     // Uses an explicit Mockery setup (not invokeStartViaProxyAndCapturePayload) because
-    // this test needs to control resolveAudioStreamIndex and resolveSubtitleInfo to
-    // assert the post-rewrite contracts on audio_stream_index and subtitle_seek_seconds.
+    // this test needs to control resolveSubtitleInfo to assert the post-rewrite contracts
+    // on subtitle_seek_seconds.
     $network = Network::factory()->create([
         'enabled' => true,
         'broadcast_enabled' => true,
@@ -131,8 +149,6 @@ it('rewrites a VideoCodec=copy remux URL to static when seek is required, so Emb
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    // Emby resolved the preferred-language track at absolute MediaStreams index 1.
-    $service->shouldReceive('resolveAudioStreamIndex')->with($network)->andReturn(1);
     // Subtitle URL is also server-pre-seeked by Emby (Jul 6 single-authority fix).
     $service->shouldReceive('resolveSubtitleInfo')->andReturn([
         'url' => 'http://emby.local/Videos/1/ms_1/Subtitles/2/27150000000/Stream.srt?api_key=abc',
@@ -176,9 +192,6 @@ it('rewrites a VideoCodec=copy remux URL to static when seek is required, so Emb
         ->and($captured['stream_url'])->toContain('static=true')
         // Static doesn't server-seek (Emby ignores StartTimeTicks) -> ffmpeg MUST seek via input -ss.
         ->and($captured['seek_seconds'])->toBe(2715)
-        // Static preserves all original streams; resolved absolute MediaStreams index is the
-        // correct ffmpeg -map target (replaces the old "remux -> audio at position 0" rule).
-        ->and($captured['audio_stream_index'])->toBe(1)
         // Subtitle URL was already server-pre-seeked by Emby (Jul 6 single-authority fix).
         ->and($captured['subtitle_seek_seconds'])->toBe(0);
 });
@@ -202,8 +215,6 @@ it('keeps a VideoCodec=copy remux URL unchanged when no seek is required (progra
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    // Emby resolved the preferred-language track at absolute MediaStreams index 1.
-    $service->shouldReceive('resolveAudioStreamIndex')->with($network)->andReturn(1);
     $service->shouldReceive('resolveSubtitleInfo')->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
     $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
 
@@ -232,18 +243,12 @@ it('keeps a VideoCodec=copy remux URL unchanged when no seek is required (progra
 
     // URL untouched (no StartTimeTicks to honor, no rewrite needed).
     expect($captured['stream_url'])->toContain('VideoCodec=copy')
-        ->and($captured['seek_seconds'])->toBe(0)
-        // AudioStreamIndex on a remux means the server already remuxed to a single
-        // audio track at position 0 — ffmpeg must map 0:a:0.
-        ->and($captured['audio_stream_index'])->toBe(0);
+        ->and($captured['seek_seconds'])->toBe(0);
 });
 
 it('keeps a VideoCodec=copy remux URL unchanged when no seek is required', function () {
     // No seek at all — broadcast begins from the start of the programme. The remux URL
     // is fine as-is; we shouldn't waste a rewrite or strip server-side audio selection.
-    //
-    // This test requires mocking resolveAudioStreamIndex because invokeStartViaProxyAndCapturePayload
-    // doesn't mock it (and the real resolver would need an Emby item with the right MediaStreams).
     $network = Network::factory()->create([
         'enabled' => true,
         'broadcast_enabled' => true,
@@ -262,8 +267,6 @@ it('keeps a VideoCodec=copy remux URL unchanged when no seek is required', funct
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    // Without the rewrite, the remux pre-selects a single audio track at position 0.
-    $service->shouldReceive('resolveAudioStreamIndex')->with($network)->andReturn(1);
     $service->shouldReceive('resolveSubtitleInfo')->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
     $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
 
@@ -292,9 +295,7 @@ it('keeps a VideoCodec=copy remux URL unchanged when no seek is required', funct
     // URL untouched (no StartTimeTicks to rewrite around, no seek required).
     expect($captured['stream_url'])->toContain('VideoCodec=copy')
         ->and($captured['stream_url'])->not->toContain('StartTimeTicks')
-        ->and($captured['seek_seconds'])->toBe(0)
-        // Remux pre-selected audio -> ffmpeg must map the single track at position 0.
-        ->and($captured['audio_stream_index'])->toBe(0);
+        ->and($captured['seek_seconds'])->toBe(0);
 });
 
 it('skips the redundant ffmpeg seek for Server transcode mode URLs that already seeked server-side', function () {
@@ -328,7 +329,6 @@ it('zeroes subtitle_seek_seconds when the subtitle url was already seeked server
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    $service->shouldReceive('resolveAudioStreamIndex')->andReturn(null);
     $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
     // Emby served the subtitle already seeked server-side (startPositionTicks), so it
     // shares the video's timeline origin and the proxy must not seek it again.
@@ -440,7 +440,6 @@ it('appends a #range= byte offset to the rewritten-static URL when seek is requi
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    $service->shouldReceive('resolveAudioStreamIndex')->andReturn(null);
     $service->shouldReceive('resolveSubtitleInfo')->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
     $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
     $service->shouldReceive('getMediaServerItemId')->andReturn('42');
@@ -514,7 +513,6 @@ it('omits the #range= byte offset on the rewritten-static URL when size meta is 
 
     $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
     $service->shouldAllowMockingProtectedMethods();
-    $service->shouldReceive('resolveAudioStreamIndex')->andReturn(null);
     $service->shouldReceive('resolveSubtitleInfo')->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
     $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
     $service->shouldReceive('getMediaServerItemId')->andReturn('42');
@@ -550,71 +548,16 @@ it('omits the #range= byte offset on the rewritten-static URL when size meta is 
 
 /*
 |--------------------------------------------------------------------------
-| Audio stream index handling (avoid mapping the original absolute index
-| against an already-remuxed single-track stream)
+| Audio language handling (proxy-side FFmpeg -map 0:a:m:language:XX?)
 |--------------------------------------------------------------------------
 */
 
-it('maps audio track 0 when a VideoCodec=copy remux already selected the preferred audio track server-side', function () {
-    $network = Network::factory()->create([
-        'enabled' => true,
-        'broadcast_enabled' => true,
-        'broadcast_requested' => true,
-        'broadcast_pid' => null,
-        'broadcast_started_at' => null,
-        'transcode_mode' => TranscodeMode::Direct->value,
-    ]);
-
-    $programme = NetworkProgramme::factory()->create([
-        'network_id' => $network->id,
-        'start_time' => now()->subMinutes(5),
-        'end_time' => now()->addMinutes(55),
-        'duration_seconds' => 3600,
-    ]);
-
-    $service = Mockery::mock(NetworkBroadcastService::class)->makePartial();
-    $service->shouldAllowMockingProtectedMethods();
-    // Emby resolved the preferred-language track at absolute MediaStreams index 2.
-    $service->shouldReceive('resolveAudioStreamIndex')->with($network)->andReturn(2);
-    $service->shouldReceive('resolveSubtitleInfo')->andReturn(['url' => null, 'language' => null, 'server_seeked' => false]);
-    $service->shouldReceive('computeNextStreamConfig')->andReturn(null);
-
-    $method = new ReflectionMethod(NetworkBroadcastService::class, 'startViaProxy');
-    $method->invoke(
-        $service,
-        $network,
-        'http://emby.local/Videos/1/stream.ts?api_key=abc&AudioStreamIndex=2&VideoCodec=copy',
-        0,
-        3600,
-        $programme,
-    );
-
-    $captured = [];
-    Http::assertSent(function ($request) use (&$captured) {
-        if (str_contains($request->url(), '/broadcast/') && str_contains($request->url(), '/start')) {
-            $captured = $request->data();
-
-            return true;
-        }
-
-        return false;
-    });
-
-    // Emby's remux already narrowed the stream to a single audio track (always at
-    // position 0) — ffmpeg must not re-select index 2, which no longer exists in the
-    // already-filtered stream (that mismatch is what crashes the whole broadcast with
-    // "Unable to map stream at a:0").
-    expect($captured['audio_stream_index'])->toBe(0);
-});
-
-it('keeps the original resolved audio index when the URL is a raw passthrough with no server-side selection', function () {
+it('sends null preferred_audio_language when no preferred audio track is configured', function () {
     $payload = invokeStartViaProxyAndCapturePayload(
         ['transcode_mode' => TranscodeMode::Direct->value],
         'http://example.com/video.ts',
         0,
     );
 
-    // No preferred_audio_track configured -> resolveAudioStreamIndex returns null,
-    // and the URL has no VideoCodec=copy remux to begin with.
-    expect($payload['audio_stream_index'])->toBeNull();
+    expect($payload['preferred_audio_language'])->toBeNull();
 });
