@@ -761,6 +761,14 @@ class NetworkBroadcastService
             $request->merge(['static' => 'true']); // static stream for HLS
         }
 
+        if (! empty($network->preferred_audio_track)) {
+            $request->merge(['PreferredAudioTrack' => $network->preferred_audio_track]);
+        }
+
+        if (! empty($network->preferred_subtitle_track)) {
+            $request->merge(['PreferredSubtitleTrack' => $network->preferred_subtitle_track]);
+        }
+
         // Use media server's native seeking if we need to seek
         if ($seekSeconds > 0) {
             // Jellyfin/Emby use ticks (100-nanosecond intervals)
