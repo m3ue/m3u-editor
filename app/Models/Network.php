@@ -35,6 +35,8 @@ class Network extends Model
         'transcode_mode' => TranscodeMode::class,
         'video_bitrate' => 'integer',
         'audio_bitrate' => 'integer',
+        'preferred_audio_track' => 'string',
+        'preferred_subtitle_track' => 'string',
         'broadcast_started_at' => 'datetime',
         'broadcast_pid' => 'integer',
         'broadcast_programme_id' => 'integer',

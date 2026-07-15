@@ -809,6 +809,26 @@ class NetworkResource extends Resource implements CopilotResource
                                             ->nullable(),
                                     ])->visible(fn (Get $get): bool => $get('transcode_mode') === TranscodeMode::Local->value),
 
+                                    Grid::make(2)->schema([
+                                        TextInput::make('preferred_audio_track')
+                                            ->label(__('Preferred Audio Track'))
+                                            ->helperText(__(
+                                                'Plex only. Enter a language code such as eng or jpn, or a Plex stream ID.'
+                                            ))
+                                            ->placeholder(__('eng'))
+                                            ->maxLength(64)
+                                            ->nullable(),
+
+                                        TextInput::make('preferred_subtitle_track')
+                                            ->label(__('Preferred Subtitle Track'))
+                                            ->helperText(__(
+                                                'Plex only. Enter a language code such as eng or jpn, or a Plex stream ID.'
+                                            ))
+                                            ->placeholder(__('eng'))
+                                            ->maxLength(64)
+                                            ->nullable(),
+                                    ]),
+
                                     Select::make('hwaccel')
                                         ->label(__('Hardware Acceleration'))
                                         ->placeholder(__('Auto/Default'))

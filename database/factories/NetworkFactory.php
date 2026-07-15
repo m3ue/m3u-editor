@@ -41,6 +41,8 @@ class NetworkFactory extends Factory
             'audio_bitrate' => 192,
             'video_codec' => null,
             'audio_codec' => null,
+            'preferred_audio_track' => null,
+            'preferred_subtitle_track' => null,
             'transcode_preset' => null,
             'hwaccel' => null,
         ];
