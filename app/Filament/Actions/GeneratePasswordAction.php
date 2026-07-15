@@ -12,7 +12,7 @@ class GeneratePasswordAction
     {
         return Action::make('generatePassword')
             ->label(__('Generate password'))
-            ->icon(view('components.icons.rotate-ccw-key'))
+            ->icon('heroicon-o-arrow-path')
             ->tooltip(__('Generate a secure password'))
             ->action(function (Set $set) use ($field): void {
                 $set($field, PlaylistAuthPasswordGenerator::generate());
