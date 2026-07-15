@@ -818,7 +818,7 @@ class NetworkResource extends Resource implements CopilotResource
                                         TextInput::make('preferred_audio_track')
                                             ->label(__('Preferred Audio Track'))
                                             ->helperText(__(
-                                                'Plex only. Enter a language code such as eng or jpn, or a Plex stream ID.'
+                                                'Enter a language code (e.g. eng, jpn) or a stream ID/index.'
                                             ))
                                             ->placeholder(__('eng'))
                                             ->maxLength(64)
@@ -827,7 +827,7 @@ class NetworkResource extends Resource implements CopilotResource
                                         TextInput::make('preferred_subtitle_track')
                                             ->label(__('Preferred Subtitle Track'))
                                             ->helperText(__(
-                                                'Plex only. Enter a language code such as eng or jpn, or a Plex stream ID.'
+                                                'Enter a language code (e.g. eng, jpn) or a stream ID/index.'
                                             ))
                                             ->placeholder(__('eng'))
                                             ->maxLength(64)

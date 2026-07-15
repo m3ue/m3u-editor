@@ -438,15 +438,23 @@ class PlexService implements MediaServer
         $normalizedPreference = strtolower($preference);
         $streams = $metadata['Media'][0]['Part'][0]['Stream'] ?? [];
 
-        foreach ($streams as $stream) {
-            if ((int) ($stream['streamType'] ?? 0) !== $streamType) {
-                continue;
-            }
+        $typed = array_filter($streams, fn ($s) => (int) ($s['streamType'] ?? 0) === $streamType);
 
+        // First pass: exact match on any field
+        foreach ($typed as $stream) {
             foreach (['languageCode', 'language', 'title', 'displayTitle', 'extendedDisplayTitle'] as $key) {
-                $value = strtolower((string) ($stream[$key] ?? ''));
+                if (strtolower((string) ($stream[$key] ?? '')) === $normalizedPreference) {
+                    $id = (string) ($stream['id'] ?? '');
 
-                if ($value === $normalizedPreference || str_contains($value, $normalizedPreference)) {
+                    return $id !== '' ? $id : null;
+                }
+            }
+        }
+
+        // Second pass: substring match (less precise, used as fallback)
+        foreach ($typed as $stream) {
+            foreach (['languageCode', 'language', 'title', 'displayTitle', 'extendedDisplayTitle'] as $key) {
+                if (str_contains(strtolower((string) ($stream[$key] ?? '')), $normalizedPreference)) {
                     $id = (string) ($stream['id'] ?? '');
 
                     return $id !== '' ? $id : null;

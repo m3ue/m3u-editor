@@ -415,6 +415,49 @@ class EmbyJellyfinService implements MediaServer
     }
 
     /**
+     * Resolve an Emby/Jellyfin audio or subtitle stream index from a user preference.
+     *
+     * @param  array<string, mixed>  $mediaSources
+     */
+    protected function resolvePreferredStreamIndex(array $mediaSources, string $type, string $preference): ?int
+    {
+        $preference = trim($preference);
+
+        if ($preference === '') {
+            return null;
+        }
+
+        if (is_numeric($preference)) {
+            return (int) $preference;
+        }
+
+        $normalizedPreference = strtolower($preference);
+        $streams = $mediaSources[0]['MediaStreams'] ?? [];
+
+        $typed = array_filter($streams, fn ($s) => strtolower((string) ($s['Type'] ?? '')) === strtolower($type));
+
+        // First pass: exact match
+        foreach ($typed as $stream) {
+            foreach (['Language', 'DisplayLanguage', 'Title', 'DisplayTitle'] as $key) {
+                if (strtolower((string) ($stream[$key] ?? '')) === $normalizedPreference) {
+                    return isset($stream['Index']) ? (int) $stream['Index'] : null;
+                }
+            }
+        }
+
+        // Second pass: substring fallback
+        foreach ($typed as $stream) {
+            foreach (['Language', 'DisplayLanguage', 'Title', 'DisplayTitle'] as $key) {
+                if (str_contains(strtolower((string) ($stream[$key] ?? '')), $normalizedPreference)) {
+                    return isset($stream['Index']) ? (int) $stream['Index'] : null;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Get the direct stream URL for an item (internal use only - contains API key).
      *
      * @param  string  $itemId  The media server's item ID
@@ -441,7 +484,48 @@ class EmbyJellyfinService implements MediaServer
             $params['static'] = 'true';
         }
 
-        // Forward relevant parameters from the incoming request
+        // Resolve preferred track preferences to concrete stream indexes
+        $hasTrackPreference = $request->has('PreferredAudioTrack') || $request->has('PreferredSubtitleTrack');
+        if ($hasTrackPreference) {
+            try {
+                $response = $this->client()->get("/Items/{$itemId}", ['Fields' => 'MediaSources']);
+
+                if ($response->successful()) {
+                    $mediaSources = $response->json('MediaSources') ?? [];
+
+                    if ($request->has('PreferredAudioTrack')) {
+                        $index = $this->resolvePreferredStreamIndex(
+                            $mediaSources,
+                            'Audio',
+                            (string) $request->input('PreferredAudioTrack')
+                        );
+
+                        if ($index !== null) {
+                            $params['AudioStreamIndex'] = $index;
+                        }
+                    }
+
+                    if ($request->has('PreferredSubtitleTrack')) {
+                        $index = $this->resolvePreferredStreamIndex(
+                            $mediaSources,
+                            'Subtitle',
+                            (string) $request->input('PreferredSubtitleTrack')
+                        );
+
+                        if ($index !== null) {
+                            $params['SubtitleStreamIndex'] = $index;
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                Log::warning('EmbyJellyfinService: failed to resolve preferred track', [
+                    'item_id' => $itemId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Forward relevant parameters from the incoming request (explicit indexes take precedence)
         $forwardParams = ['StartTimeTicks', 'AudioStreamIndex', 'SubtitleStreamIndex'];
         foreach ($forwardParams as $param) {
             if ($request->has($param)) {
