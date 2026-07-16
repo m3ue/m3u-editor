@@ -611,7 +611,7 @@ it('reuses normalized arr queue status for an approved owned request', function 
         'http://radarr.test/api/v3/queue*' => Http::response([
             'records' => [[
                 'id' => 91,
-                'movie' => ['title' => 'Alien'],
+                'movie' => ['title' => 'Alien', 'tmdbId' => 348],
                 'status' => 'downloading',
                 'trackedDownloadState' => 'importing',
                 'size' => 100,
@@ -874,6 +874,128 @@ it('does not persist completed status from a title only match when external id d
 
     $this->getJson(requestActionUrl('request_status', ['request_id' => $mediaRequest->id]))
         ->assertOk()
+        ->assertJsonPath('data.request.status', 'approved')
+        ->assertJsonMissingPath('data.request.progress');
+
+    expect($mediaRequest->fresh()->status)->toBe('approved');
+});
+
+it('allows a new pending request after a completed request with the same identity', function () {
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'completed',
+        'requested_at' => now()->subDay(),
+    ]);
+
+    $second = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
+
+    expect($second->id)->not->toBeNull()
+        ->and(MediaRequest::count())->toBe(2);
+});
+
+it('allows a new pending request after a rejected request with the same identity', function () {
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'rejected',
+        'requested_at' => now()->subDay(),
+    ]);
+
+    $second = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
+
+    expect($second->id)->not->toBeNull()
+        ->and(MediaRequest::count())->toBe(2);
+});
+
+it('does not title-match a queue item lacking external id when the request has a stable external id', function () {
+    $mediaRequest = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    Http::fake([
+        'http://radarr.test/api/v3/queue*' => Http::response([
+            'records' => [[
+                'id' => 91,
+                'movie' => ['title' => 'Alien'],
+                'status' => 'downloading',
+                'trackedDownloadState' => null,
+                'size' => 100,
+                'sizeleft' => 50,
+            ]],
+        ]),
+    ]);
+
+    $response = $this->getJson(requestActionUrl('request_status', ['request_id' => $mediaRequest->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('data.request.status', 'approved')
+        ->assertJsonMissingPath('data.request.progress');
+
+    expect($mediaRequest->fresh()->status)->toBe('approved');
+});
+
+it('does not persist completed status from an external id null queue title match', function () {
+    $mediaRequest = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    Http::fake([
+        'http://radarr.test/api/v3/queue*' => Http::response([
+            'records' => [[
+                'id' => 91,
+                'movie' => ['title' => 'Alien'],
+                'status' => 'completed',
+                'trackedDownloadState' => 'imported',
+                'size' => 100,
+                'sizeleft' => 0,
+            ]],
+        ]),
+    ]);
+
+    $response = $this->getJson(requestActionUrl('request_status', ['request_id' => $mediaRequest->id]));
+
+    $response->assertOk()
         ->assertJsonPath('data.request.status', 'approved')
         ->assertJsonMissingPath('data.request.progress');
 

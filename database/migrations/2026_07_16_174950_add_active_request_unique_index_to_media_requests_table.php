@@ -1,8 +1,7 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -11,12 +10,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('media_requests', function (Blueprint $table) {
-            $table->unique(
-                ['playlist_auth_id', 'arr_integration_id', 'external_id', 'request_type'],
-                'media_requests_active_unique'
-            )->where("status IN ('pending', 'approved')");
-        });
+        DB::statement(
+            'CREATE UNIQUE INDEX media_requests_active_unique'
+            .' ON media_requests (playlist_auth_id, arr_integration_id, external_id, request_type)'
+            ." WHERE status IN ('pending', 'approved')"
+        );
     }
 
     /**
@@ -24,8 +22,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('media_requests', function (Blueprint $table) {
-            $table->dropIndex('media_requests_active_unique');
-        });
+        DB::statement('DROP INDEX IF EXISTS media_requests_active_unique');
     }
 };

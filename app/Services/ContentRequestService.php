@@ -299,8 +299,12 @@ class ContentRequestService
         try {
             $queueItem = collect(ArrService::make($integration)->fetchQueue())
                 ->first(function (array $item) use ($mediaRequest): bool {
-                    if ($mediaRequest->external_id !== null && isset($item['externalId'])) {
-                        return (string) $item['externalId'] === $mediaRequest->external_id;
+                    if ($mediaRequest->external_id !== null) {
+                        if (isset($item['externalId'])) {
+                            return (string) $item['externalId'] === $mediaRequest->external_id;
+                        }
+
+                        return false;
                     }
 
                     return mb_strtolower(trim($item['title']))
