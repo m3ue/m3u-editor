@@ -12,6 +12,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
@@ -1034,4 +1035,130 @@ it('returns stable dismiss errors for missing foreign and non-dismissible reques
             ->assertJsonPath('error.code', 'request_not_found')
             ->assertJsonMissing(['title' => 'Foreign']);
     }
+});
+
+it('reconciles duplicate active requests before creating the unique index', function () {
+    DB::statement('DROP INDEX IF EXISTS media_requests_active_unique');
+
+    DB::table('migrations')
+        ->where('migration', '2026_07_16_174950_add_active_request_unique_index_to_media_requests_table')
+        ->delete();
+
+    $pendingOld = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now()->subDays(3),
+        'notes' => 'Original pending',
+    ]);
+
+    $approved = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'approved',
+        'requested_at' => now()->subDays(2),
+        'reviewed_at' => now()->subDays(2),
+        'notes' => 'Admin approved',
+    ]);
+
+    $pendingNew = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now()->subDay(),
+        'notes' => 'Newer pending',
+    ]);
+
+    $completed = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'completed',
+        'requested_at' => now()->subWeeks(2),
+    ]);
+
+    $rejected = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'rejected',
+        'requested_at' => now()->subWeeks(3),
+        'reviewed_at' => now()->subWeeks(3),
+    ]);
+
+    $ownerRequests = collect([1, 2])->map(fn (int $number): MediaRequest => MediaRequest::create([
+        'playlist_auth_id' => null,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => "Owner Request {$number}",
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now()->subDays($number),
+    ]));
+
+    $migration = require database_path('migrations/2026_07_16_174950_add_active_request_unique_index_to_media_requests_table.php');
+    $migration->up();
+
+    expect($approved->fresh()->status)->toBe('approved')
+        ->and($approved->fresh()->notes)->toBe('Admin approved');
+
+    expect($pendingOld->fresh()->status)->toBe('rejected')
+        ->and($pendingOld->fresh()->reviewed_at)->not->toBeNull()
+        ->and($pendingOld->fresh()->notes)->toBe('Original pending');
+
+    expect($pendingNew->fresh()->status)->toBe('rejected')
+        ->and($pendingNew->fresh()->reviewed_at)->not->toBeNull()
+        ->and($pendingNew->fresh()->notes)->toBe('Newer pending');
+
+    expect($completed->fresh()->status)->toBe('completed');
+    expect($rejected->fresh()->status)->toBe('rejected');
+    expect($ownerRequests->map->fresh()->pluck('status')->all())->toBe(['pending', 'pending']);
+
+    foreach (['completed', 'rejected'] as $historicalStatus) {
+        MediaRequest::create([
+            'playlist_auth_id' => $this->auth->id,
+            'arr_integration_id' => $this->radarr->id,
+            'title' => "Additional {$historicalStatus} history",
+            'external_id' => '348',
+            'request_type' => 'movie',
+            'payload' => [],
+            'status' => $historicalStatus,
+            'requested_at' => now(),
+        ]);
+    }
+
+    expect(MediaRequest::where('external_id', '348')->where('status', 'completed')->count())->toBe(2)
+        ->and(MediaRequest::where('external_id', '348')->where('status', 'rejected')->count())->toBe(4);
+
+    $this->expectException(QueryException::class);
+
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien Again',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
 });
