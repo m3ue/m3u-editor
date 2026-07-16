@@ -123,6 +123,19 @@ it('does not fetch Emby metadata when no track preferences are set', function ()
     Http::assertNothingSent();
 });
 
+it('does not set static=true when a preferred Emby audio track resolves to an index', function () {
+    fakeEmbyItemWithStreams();
+
+    $request = new Request;
+    $request->merge(['PreferredAudioTrack' => 'jpn']);
+
+    $url = makeEmbyTrackPreferenceService()->getDirectStreamUrl($request, 'item-1');
+
+    expect($url)->toContain('AudioStreamIndex=2')
+        ->and($url)->toContain('VideoCodec=copy')
+        ->and($url)->not->toContain('static=true');
+});
+
 it('prefers exact language match over partial match for Emby streams', function () {
     Http::fake([
         'http://emby.local:8096/Items/item-1*' => Http::response([

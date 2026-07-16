@@ -16,6 +16,7 @@ use App\Models\Playlist;
 use App\Services\LogoCacheService;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkScheduleService;
+use App\Support\Iso639Languages;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -815,22 +816,24 @@ class NetworkResource extends Resource implements CopilotResource
                                     ])->visible(fn (Get $get): bool => $get('transcode_mode') === TranscodeMode::Local->value),
 
                                     Grid::make(2)->schema([
-                                        TextInput::make('preferred_audio_track')
-                                            ->label(__('Preferred Audio Track'))
+                                        Select::make('preferred_audio_track')
+                                            ->label(__('Preferred Audio Language'))
                                             ->helperText(__(
-                                                'Enter a language code (e.g. eng, jpn) for the preferred audio track.'
+                                                'The preferred audio language for this broadcast. Applies to every item in the schedule.'
                                             ))
-                                            ->placeholder(__('eng'))
-                                            ->maxLength(64)
+                                            ->options(Iso639Languages::options())
+                                            ->searchable()
+                                            ->placeholder(__('None (default track)'))
                                             ->nullable(),
 
-                                        TextInput::make('preferred_subtitle_track')
-                                            ->label(__('Preferred Subtitle Track'))
+                                        Select::make('preferred_subtitle_track')
+                                            ->label(__('Preferred Subtitle Language'))
                                             ->helperText(__(
-                                                'Enter a language code (e.g. eng, jpn) to enable subtitles in that language. Leaving this empty disables subtitles.'
+                                                'Enables subtitles in this language for the broadcast. Leaving this empty disables subtitles.'
                                             ))
-                                            ->placeholder(__('eng'))
-                                            ->maxLength(64)
+                                            ->options(Iso639Languages::options())
+                                            ->searchable()
+                                            ->placeholder(__('None (subtitles disabled)'))
                                             ->nullable(),
                                     ]),
 

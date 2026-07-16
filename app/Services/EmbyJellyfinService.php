@@ -490,15 +490,16 @@ class EmbyJellyfinService implements MediaServer
             'session_id' => true,
         ]);
 
-        // When an AudioStreamIndex is requested we cannot use static=true — the server
+        // When an AudioStreamIndex is active we cannot use static=true — the server
         // ignores AudioStreamIndex on a raw-file pass-through. Instead use VideoCodec=copy
         // so the server remuxes with the selected audio track while leaving the video
         // bitstream untouched (no video transcoding overhead).
+        //
+        // This must account for PreferredAudioTrack resolving to an index below, not just
+        // a literal AudioStreamIndex on the incoming request — the network broadcast flow
+        // only ever sends PreferredAudioTrack, so checking the raw request alone left this
+        // permanently false and silently defeated audio-track selection.
         $audioStreamIndexRequested = $request->has('AudioStreamIndex');
-
-        if (empty($effectiveTranscodeOptions) && ! $audioStreamIndexRequested) {
-            $params['static'] = 'true';
-        }
 
         // Resolve preferred track preferences to concrete stream indexes
         $hasTrackPreference = $request->has('PreferredAudioTrack') || $request->has('PreferredSubtitleTrack');
@@ -518,6 +519,7 @@ class EmbyJellyfinService implements MediaServer
 
                         if ($index !== null) {
                             $params['AudioStreamIndex'] = $index;
+                            $audioStreamIndexRequested = true;
                         }
                     }
 
@@ -547,6 +549,10 @@ class EmbyJellyfinService implements MediaServer
             if ($request->has($param)) {
                 $params[$param] = $request->input($param);
             }
+        }
+
+        if (empty($effectiveTranscodeOptions) && ! $audioStreamIndexRequested) {
+            $params['static'] = 'true';
         }
 
         // Copy video stream when audio selection is active without a full Server transcode.
@@ -762,43 +768,6 @@ class EmbyJellyfinService implements MediaServer
             'item_id' => $itemId,
             'attempts' => $attempts,
         ]);
-
-        return null;
-    }
-
-    /**
-     * Return the MediaStreams array index of the first audio stream matching the given
-     * ISO 639 language code (2- or 3-letter). Returns null if not found or on error.
-     */
-    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int
-    {
-        try {
-            $item = $this->fetchItemWithMediaStreams($itemId);
-
-            if (! $item) {
-                return null;
-            }
-
-            $streams = $item['MediaStreams'] ?? [];
-            $lang = strtolower($languageCode);
-
-            foreach ($streams as $stream) {
-                if (($stream['Type'] ?? '') !== 'Audio') {
-                    continue;
-                }
-
-                $streamLang = strtolower($stream['Language'] ?? '');
-                if ($streamLang === $lang) {
-                    return (int) $stream['Index'];
-                }
-            }
-        } catch (Exception $e) {
-            Log::warning('EmbyJellyfinService: Failed to look up audio stream for language', [
-                'item_id' => $itemId,
-                'language' => $languageCode,
-                'error' => $e->getMessage(),
-            ]);
-        }
 
         return null;
     }
