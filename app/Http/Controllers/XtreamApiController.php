@@ -30,6 +30,7 @@ use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\StreamProfile;
 use App\Models\ViewerWatchProgress;
+use App\Services\ContentRequestService;
 use App\Services\DvrRecorderService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
@@ -41,13 +42,23 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class XtreamApiController extends Controller
 {
+    private const REQUEST_ACTIONS = [
+        'request_search',
+        'request_submit',
+        'request_history',
+        'request_status',
+        'request_dismiss',
+    ];
+
     /**
      * Xtream API request handler.
      *
@@ -389,6 +400,17 @@ class XtreamApiController extends Controller
      */
     public function handle(Request $request)
     {
+        $action = (string) $request->input('action', 'panel');
+        if (in_array($action, self::REQUEST_ACTIONS, true)) {
+            $credentialValidator = Validator::make($request->all(), [
+                'username' => ['required', 'string'],
+                'password' => ['required', 'string'],
+            ]);
+            if ($credentialValidator->fails()) {
+                return $this->requestValidationError($credentialValidator->errors()->keys());
+            }
+        }
+
         // Authenticate the user based on the provided credentials
         $request->validate([
             'username' => 'required|string',
@@ -398,8 +420,23 @@ class XtreamApiController extends Controller
 
         // If no authentication method worked, return error
         if (! $playlist || $authMethod === 'none') {
+            if (in_array($action, self::REQUEST_ACTIONS, true)) {
+                return $this->requestError('authentication_failed', 'The credentials are invalid.', 401);
+            }
+
             return response()->json(['error' => 'Unauthorized'], 401);
         }
+
+        $playlistAuth = $authMethod === 'playlist_auth'
+            ? PlaylistAuth::where('username', $username)
+                ->where('password', $password)
+                ->where('enabled', true)
+                ->where(function ($query) {
+                    $query->whereNull('expires_at')
+                        ->orWhere('expires_at', '>', now());
+                })
+                ->first()
+            : null;
 
         $urlSafePass = urlencode($password);
         $urlSafeUser = urlencode($username);
@@ -432,7 +469,11 @@ class XtreamApiController extends Controller
             : [];
 
         $baseUrl = ProxyFacade::getBaseUrl();
-        $action = $request->input('action', 'panel');
+        $rateLimitedResponse = $this->requestRateLimit($action, $playlist, $authMethod, $playlistAuth);
+        if ($rateLimitedResponse) {
+            return $rateLimitedResponse;
+        }
+
         if (
             $action === 'panel' ||
             $action === 'get_user_info' ||
@@ -455,20 +496,6 @@ class XtreamApiController extends Controller
                 $streams = $playlist->streams ?? 1;
                 $activeConnections = 0;
             }
-            // Resolve the PlaylistAuth once — used for the per-auth connection limit
-            // override and for feature advertisement (DVR, requests, AIOStreams, proxy).
-            $playlistAuth = null;
-            if ($authMethod === 'playlist_auth') {
-                $playlistAuth = PlaylistAuth::where('username', $username)
-                    ->where('password', $password)
-                    ->where('enabled', true)
-                    ->where(function ($query) {
-                        $query->whereNull('expires_at')
-                            ->orWhere('expires_at', '>', now());
-                    })
-                    ->first();
-            }
-
             // Override max_connections when the request is authenticated via a PlaylistAuth
             // that has a specific per-auth limit configured.
             if ($playlistAuth?->max_connections) {
@@ -546,6 +573,39 @@ class XtreamApiController extends Controller
                 'version' => config('dev.version'),
                 'features' => $features,
             ];
+
+            if (in_array('requests', $features, true)) {
+                $m3uEditorPayload['requests'] = [
+                    'api_version' => 1,
+                    'actions' => [
+                        'search' => 'request_search',
+                        'submit' => 'request_submit',
+                        'history' => 'request_history',
+                        'status' => 'request_status',
+                        'dismiss' => 'request_dismiss',
+                    ],
+                    'content_types' => ['movie', 'series'],
+                    'approval_behavior' => $playlistAuth->auto_approve_requests
+                        ? 'auto_approval'
+                        : 'pending_approval',
+                    'error_codes' => [
+                        'invalid_request',
+                        'authentication_failed',
+                        'request_access_denied',
+                        'rate_limited',
+                        'providers_unavailable',
+                        'provider_unavailable',
+                        'submission_failed',
+                        'invalid_integration',
+                        'invalid_seasons',
+                        'not_found',
+                        'already_requested',
+                        'already_available',
+                        'request_not_found',
+                        'request_not_dismissible',
+                    ],
+                ];
+            }
 
             if (! empty($aiostreamsData)) {
                 $m3uEditorPayload['aiostreams'] = $aiostreamsData;
@@ -1898,6 +1958,16 @@ class XtreamApiController extends Controller
             return $this->getSeriesProgress($request, $playlist, $authMethod, $username, $password);
         } elseif ($action === 'get_recently_watched') {
             return $this->getRecentlyWatched($request, $playlist, $authMethod, $username, $password);
+        } elseif ($action === 'request_search') {
+            return $this->searchRequests($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === 'request_submit') {
+            return $this->submitRequest($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === 'request_history') {
+            return $this->requestHistory($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === 'request_status') {
+            return $this->requestStatus($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === 'request_dismiss') {
+            return $this->dismissRequest($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'get_dvr_recordings') {
             return $this->getDvrRecordings($request, $playlist, $username, $password);
         } elseif ($action === 'get_dvr_recording') {
@@ -3069,7 +3139,7 @@ class XtreamApiController extends Controller
      */
     private function requestsFeatureEnabled($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
     {
-        if ($authMethod === 'playlist_auth' && ! ($playlistAuth?->request_enabled)) {
+        if ($authMethod !== 'playlist_auth' || ! ($playlistAuth?->request_enabled)) {
             return false;
         }
 
@@ -3091,6 +3161,324 @@ class XtreamApiController extends Controller
             ->enabled()
             ->guestEnabled()
             ->exists();
+    }
+
+    private function searchRequests(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        $effectivePlaylist = $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth);
+        if (! $effectivePlaylist) {
+            return $this->requestError(
+                'request_access_denied',
+                'Content requests are not available for these credentials.',
+                403,
+            );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'query' => ['required', 'string', 'min:2', 'max:100'],
+            'type' => ['nullable', 'string', 'in:movie,series'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ]);
+        if ($validator->fails()) {
+            return $this->requestValidationError($validator->errors()->keys());
+        }
+
+        $validated = $validator->validated();
+
+        $search = app(ContentRequestService::class)->search(
+            $effectivePlaylist,
+            $validated['query'],
+            $validated['type'] ?? null,
+        );
+        if ($search['searched_providers'] > 0
+            && $search['unavailable_providers'] === $search['searched_providers']) {
+            return $this->requestError(
+                'providers_unavailable',
+                'All request providers are temporarily unavailable.',
+                503,
+            );
+        }
+
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 20);
+        $total = count($search['results']);
+        $results = array_slice($search['results'], ($page - 1) * $perPage, $perPage);
+
+        return $this->requestSuccess(
+            ['results' => $results],
+            [
+                'pagination' => [
+                    'current_page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'last_page' => max(1, (int) ceil($total / $perPage)),
+                ],
+                'partial' => $search['unavailable_providers'] > 0,
+                'unavailable_providers' => $search['unavailable_providers'],
+            ],
+        );
+    }
+
+    /** @param array<string, mixed> $data */
+    private function requestSuccess(array $data, array $meta = [], int $status = 200): JsonResponse
+    {
+        $payload = [
+            'api_version' => 1,
+            'data' => $data,
+        ];
+
+        if ($meta !== []) {
+            $payload['meta'] = $meta;
+        }
+
+        return response()->json($payload, $status);
+    }
+
+    private function requestError(string $code, string $message, int $status): JsonResponse
+    {
+        return response()->json([
+            'api_version' => 1,
+            'error' => [
+                'code' => $code,
+                'message' => $message,
+            ],
+        ], $status);
+    }
+
+    /** @param array<int, string> $fields */
+    private function requestValidationError(array $fields): JsonResponse
+    {
+        return response()->json([
+            'api_version' => 1,
+            'error' => [
+                'code' => 'invalid_request',
+                'message' => 'The request parameters are invalid.',
+                'fields' => $fields,
+            ],
+        ], 422);
+    }
+
+    private function requestRateLimit(
+        string $action,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): ?JsonResponse {
+        $limit = match ($action) {
+            'request_search' => 20,
+            'request_submit' => 5,
+            'request_history' => 60,
+            'request_status' => 120,
+            'request_dismiss' => 20,
+            default => null,
+        };
+
+        if ($limit === null
+            || ! $playlistAuth
+            || ! $this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
+            return null;
+        }
+
+        $key = "xtream-request:{$action}:{$playlistAuth->id}";
+        if (RateLimiter::tooManyAttempts($key, $limit)) {
+            $retryAfter = RateLimiter::availableIn($key);
+
+            return $this->requestError(
+                'rate_limited',
+                'Too many requests. Please try again later.',
+                429,
+            )->header('Retry-After', (string) $retryAfter);
+        }
+
+        RateLimiter::hit($key, 60);
+
+        return null;
+    }
+
+    private function submitRequest(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        $effectivePlaylist = $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth);
+        if (! $effectivePlaylist || ! $playlistAuth) {
+            return $this->requestError(
+                'request_access_denied',
+                'Content requests are not available for these credentials.',
+                403,
+            );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'type' => ['required', 'string', 'in:movie,series'],
+            'integration_id' => ['required', 'integer', 'min:1'],
+            'external_id' => ['required', 'integer', 'min:1'],
+            'seasons' => ['nullable', 'array', 'min:1'],
+            'seasons.*' => ['integer', 'min:0', 'distinct'],
+        ]);
+        if ($validator->fails()) {
+            return $this->requestValidationError($validator->errors()->keys());
+        }
+
+        $validated = $validator->validated();
+
+        $result = app(ContentRequestService::class)->submit(
+            $effectivePlaylist,
+            $playlistAuth,
+            $validated['type'],
+            (int) $validated['integration_id'],
+            (int) $validated['external_id'],
+            $validated['seasons'] ?? null,
+        );
+
+        if (! $result['ok']) {
+            $status = match ($result['code'] ?? null) {
+                'already_requested', 'already_available' => 409,
+                'not_found' => 404,
+                'provider_unavailable' => 503,
+                'submission_failed' => 502,
+                default => 422,
+            };
+
+            return $this->requestError($result['code'], $result['error'], $status);
+        }
+
+        return $this->requestSuccess([
+            'status' => $result['status'],
+            'request' => $result['request'],
+        ], status: $result['status'] === 'pending_approval' ? 201 : 200);
+    }
+
+    private function requestHistory(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        if (! $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth) || ! $playlistAuth) {
+            return $this->requestError(
+                'request_access_denied',
+                'Content requests are not available for these credentials.',
+                403,
+            );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ]);
+        if ($validator->fails()) {
+            return $this->requestValidationError($validator->errors()->keys());
+        }
+
+        $validated = $validator->validated();
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 20);
+        $history = app(ContentRequestService::class)->history($playlistAuth, $page, $perPage);
+
+        return $this->requestSuccess(
+            ['requests' => $history['requests']],
+            ['pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $history['total'],
+                'last_page' => max(1, (int) ceil($history['total'] / $perPage)),
+            ]],
+        );
+    }
+
+    private function requestStatus(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        if (! $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth) || ! $playlistAuth) {
+            return $this->requestError(
+                'request_access_denied',
+                'Content requests are not available for these credentials.',
+                403,
+            );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'request_id' => ['required', 'integer', 'min:1'],
+        ]);
+        if ($validator->fails()) {
+            return $this->requestValidationError($validator->errors()->keys());
+        }
+
+        $mediaRequest = app(ContentRequestService::class)->status(
+            $playlistAuth,
+            (int) $validator->validated()['request_id'],
+        );
+        if (! $mediaRequest) {
+            return $this->requestError('request_not_found', 'The request was not found.', 404);
+        }
+
+        return $this->requestSuccess(['request' => $mediaRequest]);
+    }
+
+    private function dismissRequest(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        if (! $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth) || ! $playlistAuth) {
+            return $this->requestError(
+                'request_access_denied',
+                'Content requests are not available for these credentials.',
+                403,
+            );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'request_id' => ['required', 'integer', 'min:1'],
+        ]);
+        if ($validator->fails()) {
+            return $this->requestValidationError($validator->errors()->keys());
+        }
+
+        $requestId = (int) $validator->validated()['request_id'];
+        $result = app(ContentRequestService::class)->dismiss($playlistAuth, $requestId);
+        if (! $result['ok']) {
+            return match ($result['code']) {
+                'request_not_dismissible' => $this->requestError(
+                    'request_not_dismissible',
+                    'Only completed or rejected requests can be dismissed.',
+                    409,
+                ),
+                default => $this->requestError('request_not_found', 'The request was not found.', 404),
+            };
+        }
+
+        return $this->requestSuccess([
+            'dismissed' => true,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    private function authorizedRequestPlaylist(
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): ?Playlist {
+        if (! $this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
+            return null;
+        }
+
+        $effectivePlaylist = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        return $effectivePlaylist instanceof Playlist ? $effectivePlaylist : null;
     }
 
     /**
