@@ -116,10 +116,11 @@ class XtreamService
             $originalServer = $this->server;
 
             foreach ($this->fallbackUrls as $fallbackUrl) {
-                // Rebuild the URL with the fallback server
+                // Normalize for use as a base URL in HTTP calls (no trailing slash, spaces encoded)
+                $fallbackUrl = rtrim($fallbackUrl, '/');
                 $fallbackCallUrl = str_replace(
                     rtrim($originalServer, '/'),
-                    rtrim($fallbackUrl, '/'),
+                    str($fallbackUrl)->replace(' ', '%20')->toString(),
                     $url
                 );
 
@@ -130,7 +131,9 @@ class XtreamService
 
                 $result = $this->attemptCall($fallbackCallUrl, $timeout, $user_agent, $verify);
                 if ($result !== null) {
-                    // Failover succeeded — update the primary URL
+                    // Failover succeeded — update the primary URL.
+                    // Pass the raw (unencoded) URL so promoteXtreamUrl can match it
+                    // against getOrderedXtreamUrls() which also returns raw URLs.
                     $this->server = $fallbackUrl;
                     if ($this->playlist) {
                         $this->playlist->promoteXtreamUrl($fallbackUrl);

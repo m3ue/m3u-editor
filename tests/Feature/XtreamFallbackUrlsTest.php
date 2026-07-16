@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\XtreamHealthService;
@@ -111,6 +112,36 @@ describe('Playlist::promoteXtreamUrl', function () {
             ->and($playlist->xtream_fallback_urls)->toContain('http://primary.example.com:8080')
             ->and($playlist->xtream_fallback_urls)->toContain('http://fallback1.example.com:8080')
             ->and($playlist->xtream_fallback_urls)->not->toContain('http://fallback2.example.com:8080');
+    });
+
+    it('updates all EPGs pointing to any old Xtream URL, not just the old primary', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'user',
+                'password' => 'pass',
+            ],
+            'xtream_fallback_urls' => [
+                'http://fallback1.example.com:8080',
+                'http://fallback2.example.com:8080',
+            ],
+        ]);
+
+        $newEpgUrl = 'http://fallback2.example.com:8080/xmltv.php?username=user&password=pass';
+
+        // One EPG at the old primary URL, one at a fallback (simulating a prior partial promotion)
+        Epg::factory()->for($user)->create(['url' => 'http://primary.example.com:8080/xmltv.php?username=user&password=pass']);
+        Epg::factory()->for($user)->create(['url' => 'http://fallback1.example.com:8080/xmltv.php?username=user&password=pass']);
+
+        $playlist->promoteXtreamUrl('http://fallback2.example.com:8080');
+
+        expect(Epg::where('url', $newEpgUrl)->count())->toBe(2)
+            ->and(Epg::whereIn('url', [
+                'http://primary.example.com:8080/xmltv.php?username=user&password=pass',
+                'http://fallback1.example.com:8080/xmltv.php?username=user&password=pass',
+            ])->count())->toBe(0);
     });
 
     it('does nothing when the URL is not in the list', function () {

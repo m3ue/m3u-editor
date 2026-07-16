@@ -416,9 +416,13 @@ class Playlist extends Model
     public function promoteXtreamUrl(string $workingUrl): void
     {
         $allUrls = $this->getOrderedXtreamUrls();
-        $normalizedWorking = rtrim($workingUrl, '/');
 
-        if (! in_array($normalizedWorking, $allUrls)) {
+        // Normalize the working URL to ensure it matches the stored format (no trailing slash, no spaces)
+        // It might, or might not be, cleaned up already, so we normalize it here to be safe.
+        $workingUrl = rtrim($workingUrl, '/');
+        $workingUrl = str($workingUrl)->replace(' ', '%20')->toString();
+
+        if (! in_array($workingUrl, $allUrls)) {
             return;
         }
 
@@ -426,36 +430,44 @@ class Playlist extends Model
 
         $newFallbacks = array_values(array_filter(
             $allUrls,
-            fn (string $u) => $u !== $normalizedWorking
+            fn (string $u) => $u !== $workingUrl
         ));
 
         $config = $this->xtream_config;
-        $config['url'] = $normalizedWorking;
+        $config['url'] = $workingUrl;
 
-        // Update the associated EPG URL if one exists for this playlist's Xtream endpoint
-        $oldBaseUrl = str($this->xtream_config['url'] ?? '')->replace(' ', '%20')->toString();
+        // Update any associated EPG whose URL points to any of the old Xtream endpoints.
+        // Using whereIn across all non-primary URLs guards against cases where a previous
+        // failover already moved the EPG to a fallback URL rather than the original primary.
         $username = urlencode($this->xtream_config['username'] ?? '');
         $password = urlencode($this->xtream_config['password'] ?? '');
-        $oldEpgUrl = "{$oldBaseUrl}/xmltv.php?username={$username}&password={$password}";
-        $newEpgUrl = "{$normalizedWorking}/xmltv.php?username={$username}&password={$password}";
+        $newEpgUrl = "{$workingUrl}/xmltv.php?username={$username}&password={$password}";
 
-        Epg::where('user_id', $this->user_id)
-            ->where('url', $oldEpgUrl)
-            ->first()
-            ?->update(['url' => $newEpgUrl]);
+        if (! empty($newFallbacks)) {
+            $oldEpgUrls = array_map(
+                fn (string $url) => $url."/xmltv.php?username={$username}&password={$password}",
+                $newFallbacks
+            );
+
+            Epg::where('user_id', $this->user_id)
+                ->whereIn('url', $oldEpgUrls)
+                ->update(['url' => $newEpgUrl]);
+        }
 
         // Propagate the new URL to aliases that inherit DNS failover from this playlist.
-        if ($oldPrimaryUrl && $oldPrimaryUrl !== $normalizedWorking) {
+        // Match against all non-primary URLs rather than just the old primary, because a
+        // prior failover may have already moved the alias entry to a different fallback URL.
+        if ($oldPrimaryUrl && $oldPrimaryUrl !== $workingUrl) {
             $this->aliases()
                 ->where('inherit_dns_failover', true)
-                ->chunkById(20, function (Collection $aliases) use ($oldPrimaryUrl, $normalizedWorking): void {
+                ->chunkById(20, function (Collection $aliases) use ($newFallbacks, $workingUrl): void {
                     foreach ($aliases as $alias) {
                         $entries = $alias->xtream_config;
                         $changed = false;
 
                         foreach ($entries as &$entry) {
-                            if (rtrim((string) ($entry['url'] ?? ''), '/') === $oldPrimaryUrl) {
-                                $entry['url'] = $normalizedWorking;
+                            if (in_array(rtrim((string) ($entry['url'] ?? ''), '/'), $newFallbacks)) {
+                                $entry['url'] = $workingUrl;
                                 $changed = true;
                             }
                         }
