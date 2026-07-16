@@ -302,16 +302,17 @@ class NetworkContentRelationManager extends RelationManager
     protected function getRecordActions(): array
     {
         return [
-            EditAction::make()
-                ->icon('heroicon-o-pencil-square')
-                ->button()
-                ->hiddenLabel(),
             DeleteAction::make()
                 ->icon('heroicon-o-x-circle')
                 ->button()
                 ->hiddenLabel(),
 
             $this->getTrackPreferencesAction(),
+
+            EditAction::make()
+                ->icon('heroicon-m-pencil-square')
+                ->button()
+                ->hiddenLabel(),
         ];
     }
 
