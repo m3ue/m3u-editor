@@ -327,11 +327,13 @@ class ProcessM3uImport implements ShouldQueue
             return $primaryUrl;
         }
 
+        $workingUrl = rtrim($workingUrl, '/');
+        $workingUrl = str($workingUrl)->replace(' ', '%20')->toString();
         if ($workingUrl !== rtrim($primaryUrl, '/')) {
             $playlist->promoteXtreamUrl($workingUrl);
             Log::info("Xtream sync: failover to {$workingUrl}", ['playlist_id' => $playlist->id]);
 
-            return str($workingUrl)->replace(' ', '%20')->toString();
+            return $workingUrl;
         }
 
         return $primaryUrl;
