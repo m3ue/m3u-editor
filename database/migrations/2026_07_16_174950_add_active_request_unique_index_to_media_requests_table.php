@@ -15,7 +15,7 @@ return new class extends Migration
             .'SELECT id FROM ('
             .'SELECT id, ROW_NUMBER() OVER ('
             .'PARTITION BY playlist_auth_id, arr_integration_id, external_id, request_type'
-            .' ORDER BY CASE WHEN status = ? THEN 0 ELSE 1 END, id DESC'
+            .' ORDER BY CASE WHEN status = ? THEN 0 ELSE 1 END, requested_at DESC, id'
             .') AS rn'
             .' FROM media_requests WHERE status IN (?, ?)'
             .' AND playlist_auth_id IS NOT NULL AND external_id IS NOT NULL'

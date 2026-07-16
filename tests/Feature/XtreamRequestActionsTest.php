@@ -1162,3 +1162,91 @@ it('reconciles duplicate active requests before creating the unique index', func
         'requested_at' => now(),
     ]);
 });
+
+it('reconciles pending requests by newest requested_at when no approved row exists', function () {
+    DB::statement('DROP INDEX IF EXISTS media_requests_active_unique');
+
+    DB::table('migrations')
+        ->where('migration', '2026_07_16_174950_add_active_request_unique_index_to_media_requests_table')
+        ->delete();
+
+    // Lower ID (created first) but NEWER requested_at - should WIN
+    $pendingNewerLowerId = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now()->subHour(),
+        'notes' => 'Newer request, lower ID',
+    ]);
+
+    // Higher ID (created later) but OLDER requested_at - should LOSE
+    $pendingOlderHigherId = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now()->subDays(2),
+        'notes' => 'Older request, higher ID',
+    ]);
+
+    // Historical completed/rejected should remain untouched
+    $completed = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'completed',
+        'requested_at' => now()->subWeeks(2),
+    ]);
+
+    $rejected = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'rejected',
+        'requested_at' => now()->subWeeks(3),
+        'reviewed_at' => now()->subWeeks(3),
+    ]);
+
+    $migration = require database_path('migrations/2026_07_16_174950_add_active_request_unique_index_to_media_requests_table.php');
+    $migration->up();
+
+    // The newer request (lower ID, later requested_at) should remain pending
+    expect($pendingNewerLowerId->fresh()->status)->toBe('pending')
+        ->and($pendingNewerLowerId->fresh()->reviewed_at)->toBeNull()
+        ->and($pendingNewerLowerId->fresh()->notes)->toBe('Newer request, lower ID');
+
+    // The older request (higher ID, earlier requested_at) should be rejected
+    expect($pendingOlderHigherId->fresh()->status)->toBe('rejected')
+        ->and($pendingOlderHigherId->fresh()->reviewed_at)->not->toBeNull()
+        ->and($pendingOlderHigherId->fresh()->notes)->toBe('Older request, higher ID');
+
+    // Historical rows unchanged
+    expect($completed->fresh()->status)->toBe('completed');
+    expect($rejected->fresh()->status)->toBe('rejected');
+
+    // Unique index should prevent new pending with same identity
+    $this->expectException(QueryException::class);
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien Again',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
+});
