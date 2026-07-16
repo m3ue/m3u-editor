@@ -767,43 +767,6 @@ class EmbyJellyfinService implements MediaServer
     }
 
     /**
-     * Return the MediaStreams array index of the first audio stream matching the given
-     * ISO 639 language code (2- or 3-letter). Returns null if not found or on error.
-     */
-    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int
-    {
-        try {
-            $item = $this->fetchItemWithMediaStreams($itemId);
-
-            if (! $item) {
-                return null;
-            }
-
-            $streams = $item['MediaStreams'] ?? [];
-            $lang = strtolower($languageCode);
-
-            foreach ($streams as $stream) {
-                if (($stream['Type'] ?? '') !== 'Audio') {
-                    continue;
-                }
-
-                $streamLang = strtolower($stream['Language'] ?? '');
-                if ($streamLang === $lang) {
-                    return (int) $stream['Index'];
-                }
-            }
-        } catch (Exception $e) {
-            Log::warning('EmbyJellyfinService: Failed to look up audio stream for language', [
-                'item_id' => $itemId,
-                'language' => $languageCode,
-                'error' => $e->getMessage(),
-            ]);
-        }
-
-        return null;
-    }
-
-    /**
      * Return the first available text-based subtitle stream for the item, or null if none
      * exists. Covers both embedded and external (sidecar file) subtitle streams — this is
      * Emby/Jellyfin's own metadata, which knows about external subtitles that a raw ffprobe
