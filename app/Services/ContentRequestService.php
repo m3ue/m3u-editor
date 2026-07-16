@@ -10,6 +10,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Services\Arr\ArrService;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -136,20 +137,33 @@ class ContentRequestService
             return ['ok' => false, 'code' => 'invalid_integration', 'error' => 'The selected integration is not available.'];
         }
 
-        if (MediaRequest::query()
-            ->where('playlist_auth_id', $playlistAuth->id)
-            ->where('arr_integration_id', $integration->id)
-            ->where('external_id', (string) $externalId)
-            ->where('request_type', $type)
-            ->whereIn('status', ['pending', 'approved'])
-            ->exists()) {
-            return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
+        try {
+            $mediaRequest = MediaRequest::create([
+                'playlist_auth_id' => $playlistAuth->id,
+                'arr_integration_id' => $integration->id,
+                'title' => 'Pending lookup',
+                'external_id' => (string) $externalId,
+                'request_type' => $type,
+                'payload' => [],
+                'status' => 'pending',
+                'requested_at' => now(),
+            ]);
+        } catch (QueryException $e) {
+            $message = $e->getMessage();
+            if (str_contains($message, 'UNIQUE constraint failed')
+                || str_contains($message, 'SQLSTATE[23505')) {
+                return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
+            }
+
+            throw $e;
         }
 
         $service = ArrService::make($integration);
 
         try {
             if ($service->checkExists($externalId)['exists']) {
+                $mediaRequest->delete();
+
                 return ['ok' => false, 'code' => 'already_available', 'error' => 'This title is already available.'];
             }
 
@@ -159,6 +173,8 @@ class ContentRequestService
                 fn (array $result): bool => (int) ($result[$externalKey] ?? 0) === $externalId,
             );
         } catch (Throwable $throwable) {
+            $mediaRequest->delete();
+
             Log::warning('Content request lookup failed', [
                 'integration_id' => $integration->id,
                 'error' => $throwable->getMessage(),
@@ -168,6 +184,8 @@ class ContentRequestService
         }
 
         if (! $item) {
+            $mediaRequest->delete();
+
             return ['ok' => false, 'code' => 'not_found', 'error' => 'The requested title was not found.'];
         }
 
@@ -188,6 +206,8 @@ class ContentRequestService
                 ->all();
 
             if (array_diff($selectedSeasons, $availableSeasons) !== []) {
+                $mediaRequest->delete();
+
                 return ['ok' => false, 'code' => 'invalid_seasons', 'error' => 'One or more selected seasons are unavailable.'];
             }
 
@@ -200,18 +220,12 @@ class ContentRequestService
                 ->all();
         }
 
-        if (! $playlistAuth->auto_approve_requests) {
-            $mediaRequest = MediaRequest::create([
-                'playlist_auth_id' => $playlistAuth->id,
-                'arr_integration_id' => $integration->id,
-                'title' => $item['title'] ?? 'Unknown',
-                'external_id' => (string) $externalId,
-                'request_type' => $type,
-                'payload' => $payload,
-                'status' => 'pending',
-                'requested_at' => now(),
-            ]);
+        $mediaRequest->update([
+            'title' => $item['title'] ?? 'Unknown',
+            'payload' => $payload,
+        ]);
 
+        if (! $playlistAuth->auto_approve_requests) {
             return [
                 'ok' => true,
                 'status' => 'pending_approval',
@@ -221,6 +235,8 @@ class ContentRequestService
 
         $result = $service->add($payload);
         if (! ($result['ok'] ?? false)) {
+            $mediaRequest->delete();
+
             return [
                 'ok' => false,
                 'code' => 'submission_failed',
@@ -228,22 +244,15 @@ class ContentRequestService
             ];
         }
 
-        $mediaRequest = MediaRequest::create([
-            'playlist_auth_id' => $playlistAuth->id,
-            'arr_integration_id' => $integration->id,
-            'title' => $item['title'] ?? 'Unknown',
-            'external_id' => (string) $externalId,
-            'request_type' => $type,
-            'payload' => $payload,
+        $mediaRequest->update([
             'status' => 'approved',
-            'requested_at' => now(),
             'reviewed_at' => now(),
         ]);
 
         return [
             'ok' => true,
             'status' => 'approved',
-            'request' => $this->formatRequest($mediaRequest),
+            'request' => $this->formatRequest($mediaRequest->fresh()),
         ];
     }
 
@@ -288,8 +297,14 @@ class ContentRequestService
 
         try {
             $queueItem = collect(ArrService::make($integration)->fetchQueue())
-                ->first(fn (array $item): bool => mb_strtolower(trim($item['title']))
-                    === mb_strtolower(trim($mediaRequest->title)));
+                ->first(function (array $item) use ($mediaRequest): bool {
+                    if ($mediaRequest->external_id !== null && isset($item['externalId'])) {
+                        return (string) $item['externalId'] === $mediaRequest->external_id;
+                    }
+
+                    return mb_strtolower(trim($item['title']))
+                        === mb_strtolower(trim($mediaRequest->title));
+                });
         } catch (Throwable $throwable) {
             Log::warning('Content request status lookup failed', [
                 'integration_id' => $integration->id,
@@ -298,6 +313,8 @@ class ContentRequestService
 
             $queueItem = null;
         }
+
+        $canPersistCompleted = false;
 
         if ($queueItem) {
             $status = ArrQueueMonitor::resolveStatus(
@@ -309,6 +326,8 @@ class ContentRequestService
             $protocol = $queueItem['protocol'] ?? null;
             $size = $queueItem['size'];
             $timeLeft = $queueItem['timeLeft'] ?? null;
+            $canPersistCompleted = $mediaRequest->external_id === null
+                || (string) ($queueItem['externalId'] ?? '') === $mediaRequest->external_id;
         } else {
             $eventQuery = ArrQueueEvent::query()
                 ->where('arr_integration_id', $integration->id)
@@ -331,12 +350,15 @@ class ContentRequestService
             $protocol = null;
             $size = $event->size;
             $timeLeft = null;
+            $canPersistCompleted = true;
         }
 
         if (in_array($status, ['completed', 'imported'], true)) {
             $status = 'completed';
-            $mediaRequest->update(['status' => $status]);
-            $formatted = $this->formatRequest($mediaRequest);
+            if ($canPersistCompleted) {
+                $mediaRequest->update(['status' => $status]);
+                $formatted = $this->formatRequest($mediaRequest);
+            }
         }
 
         return array_merge($formatted, [

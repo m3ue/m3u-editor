@@ -313,6 +313,7 @@ class RadarrService extends BaseArrService
                 return [
                     'id' => $item['id'] ?? null,
                     'downloadId' => $item['downloadId'] ?? null,
+                    'externalId' => $movie['tmdbId'] ?? null,
                     'title' => $movie['title'] ?? $item['title'] ?? 'Unknown',
                     'status' => $item['status'] ?? 'unknown',
                     'progress' => max(0, min(100, $progress)),

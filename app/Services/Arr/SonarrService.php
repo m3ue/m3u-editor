@@ -556,6 +556,7 @@ class SonarrService extends BaseArrService
                 return [
                     'id' => $item['id'] ?? null,
                     'downloadId' => $item['downloadId'] ?? null,
+                    'externalId' => $series['tvdbId'] ?? null,
                     'title' => $series['title'] ?? $item['title'] ?? 'Unknown',
                     'status' => $item['status'] ?? 'unknown',
                     'progress' => max(0, min(100, $progress)),

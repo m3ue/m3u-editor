@@ -9,6 +9,7 @@ use App\Models\PlaylistAuth;
 use App\Models\PlaylistRequestSetting;
 use App\Models\User;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
@@ -682,6 +683,202 @@ it('dismisses only owned completed or rejected requests', function (string $stat
 
     expect($mediaRequest->fresh())->toBeNull();
 })->with(['completed', 'rejected']);
+
+it('enforces unique active request constraint at the database level', function () {
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
+
+    $this->expectException(QueryException::class);
+
+    MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'pending',
+        'requested_at' => now(),
+    ]);
+});
+
+it('prevents duplicate arr add side effects and returns already_requested for the loser', function () {
+    $this->auth->update(['auto_approve_requests' => true]);
+
+    $arrPostCount = 0;
+    Http::fake(function (ClientRequest $request) use (&$arrPostCount) {
+        $path = parse_url($request->url(), PHP_URL_PATH);
+
+        if ($request->method() === 'GET' && $path === '/api/v3/movie') {
+            return Http::response([]);
+        }
+
+        if ($request->method() === 'GET' && $path === '/api/v3/movie/lookup') {
+            return Http::response([[
+                'tmdbId' => 348,
+                'title' => 'Alien',
+                'titleSlug' => 'alien',
+                'images' => [],
+            ]]);
+        }
+
+        if ($request->method() === 'POST' && $path === '/api/v3/movie') {
+            $arrPostCount++;
+
+            return Http::response(['id' => 91, 'title' => 'Alien'], 201);
+        }
+
+        return Http::response([], 500);
+    });
+
+    $payload = [
+        'type' => 'movie',
+        'integration_id' => $this->radarr->id,
+        'external_id' => 348,
+    ];
+
+    $response1 = $this->postJson(requestActionUrl('request_submit'), $payload);
+    $response2 = $this->postJson(requestActionUrl('request_submit'), $payload);
+
+    $response1->assertOk()
+        ->assertJsonPath('data.status', 'approved');
+
+    $response2->assertConflict()
+        ->assertJsonPath('error.code', 'already_requested');
+
+    expect(MediaRequest::count())->toBe(1)
+        ->and($arrPostCount)->toBe(1);
+});
+
+it('releases the active claim when arr submission fails allowing retry', function () {
+    $this->auth->update(['auto_approve_requests' => true]);
+
+    $postAttempts = 0;
+    Http::fake(function (ClientRequest $request) use (&$postAttempts) {
+        $path = parse_url($request->url(), PHP_URL_PATH);
+
+        if ($request->method() === 'GET' && $path === '/api/v3/movie') {
+            return Http::response([]);
+        }
+
+        if ($request->method() === 'GET' && $path === '/api/v3/movie/lookup') {
+            return Http::response([[
+                'tmdbId' => 348,
+                'title' => 'Alien',
+                'titleSlug' => 'alien',
+                'images' => [],
+            ]]);
+        }
+
+        if ($request->method() === 'POST' && $path === '/api/v3/movie') {
+            $postAttempts++;
+
+            if ($postAttempts <= 3) {
+                return Http::response(['error' => 'Provider rejected'], 500);
+            }
+
+            return Http::response(['id' => 91, 'title' => 'Alien'], 201);
+        }
+
+        return Http::response([], 500);
+    });
+
+    $payload = [
+        'type' => 'movie',
+        'integration_id' => $this->radarr->id,
+        'external_id' => 348,
+    ];
+
+    $this->postJson(requestActionUrl('request_submit'), $payload)
+        ->assertStatus(502)
+        ->assertJsonPath('error.code', 'submission_failed');
+
+    expect(MediaRequest::count())->toBe(0);
+
+    $this->postJson(requestActionUrl('request_submit'), $payload)
+        ->assertOk()
+        ->assertJsonPath('data.status', 'approved');
+
+    expect(MediaRequest::count())->toBe(1);
+});
+
+it('correlates live queue status by external id not by title alone', function () {
+    $mediaRequest = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    Http::fake([
+        'http://radarr.test/api/v3/queue*' => Http::response([
+            'records' => [[
+                'id' => 91,
+                'movie' => ['title' => 'Alien', 'tmdbId' => 9999],
+                'status' => 'downloading',
+                'trackedDownloadState' => null,
+                'size' => 100,
+                'sizeleft' => 50,
+            ]],
+        ]),
+    ]);
+
+    $response = $this->getJson(requestActionUrl('request_status', ['request_id' => $mediaRequest->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('data.request.status', 'approved')
+        ->assertJsonMissingPath('data.request.progress');
+
+    expect($mediaRequest->fresh()->status)->toBe('approved');
+});
+
+it('does not persist completed status from a title only match when external id differs', function () {
+    $mediaRequest = MediaRequest::create([
+        'playlist_auth_id' => $this->auth->id,
+        'arr_integration_id' => $this->radarr->id,
+        'title' => 'Alien',
+        'external_id' => '348',
+        'request_type' => 'movie',
+        'payload' => [],
+        'status' => 'approved',
+        'requested_at' => now(),
+    ]);
+
+    ArrQueueEvent::create([
+        'arr_integration_id' => $this->radarr->id,
+        'user_id' => $this->user->id,
+        'external_id' => '9999',
+        'title' => 'Alien',
+        'event_type' => 'Download',
+        'status' => 'imported',
+        'quality' => 'Bluray-1080p',
+        'size' => 100,
+        'progress' => 100,
+        'last_event_at' => now(),
+    ]);
+    Http::fake([
+        'http://radarr.test/api/v3/queue*' => Http::response(['records' => []]),
+    ]);
+
+    $this->getJson(requestActionUrl('request_status', ['request_id' => $mediaRequest->id]))
+        ->assertOk()
+        ->assertJsonPath('data.request.status', 'approved')
+        ->assertJsonMissingPath('data.request.progress');
+
+    expect($mediaRequest->fresh()->status)->toBe('approved');
+});
 
 it('returns stable dismiss errors for missing foreign and non-dismissible requests', function () {
     $pending = MediaRequest::create([
