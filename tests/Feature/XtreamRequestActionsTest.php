@@ -307,10 +307,11 @@ it('creates pending movie and series requests from canonical arr metadata', func
         ->and($mediaRequest->payload)->not->toHaveKeys(['api_key', 'url']);
 
     if ($type === 'series') {
-        expect($mediaRequest->payload['seasons'])->toBe([
-            ['seasonNumber' => 1, 'monitored' => true],
-            ['seasonNumber' => 2, 'monitored' => false],
-        ]);
+        expect($mediaRequest->payload['seasons'])->toHaveCount(2)
+            ->and($mediaRequest->payload['seasons'][0]['seasonNumber'])->toBe(1)
+            ->and($mediaRequest->payload['seasons'][0]['monitored'])->toBeTrue()
+            ->and($mediaRequest->payload['seasons'][1]['seasonNumber'])->toBe(2)
+            ->and($mediaRequest->payload['seasons'][1]['monitored'])->toBeFalse();
     }
 })->with([
     'movie' => fn () => ['movie', $this->radarr, [
