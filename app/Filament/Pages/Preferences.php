@@ -56,6 +56,7 @@ use Filament\Support\Enums\Width;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
@@ -2068,7 +2069,7 @@ HTML))
 
                                                 try {
                                                     NotificationFacade::route('telegram', $chatId)
-                                                        ->notifyNow(new TelegramAlert('[TEST] This is a test alert from m3u-editor. Your Telegram integration is working correctly.', $botToken));
+                                                        ->notifyNow(new TelegramAlert('[TEST] This is a test alert from m3u-editor. Your Telegram integration is working correctly.', Crypt::encryptString($botToken)));
 
                                                     Notification::make()
                                                         ->title(__('Test Alert Sent'))
@@ -2078,7 +2079,7 @@ HTML))
                                                 } catch (Exception $e) {
                                                     Notification::make()
                                                         ->title(__('Failed to Send Alert'))
-                                                        ->body($e->getMessage())
+                                                        ->body(__('Could not send the test alert. Check your bot token and chat ID and try again.'))
                                                         ->danger()
                                                         ->send();
                                                 }
