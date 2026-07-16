@@ -958,9 +958,59 @@ class PlexService implements MediaServer
         }
     }
 
-    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0, ?string $preferredLanguage = null): ?array
     {
         return null;
+    }
+
+    /**
+     * @return array{
+     *     audio: list<array{index: int, label: string, language: ?string}>,
+     *     subtitle: list<array{index: int, label: string, language: ?string}>,
+     * }
+     */
+    public function getAvailableTracks(string $itemId): array
+    {
+        $empty = ['audio' => [], 'subtitle' => []];
+
+        try {
+            $response = $this->client()->get("/library/metadata/{$itemId}");
+
+            if (! $response->successful()) {
+                return $empty;
+            }
+
+            $metadata = $response->json('MediaContainer.Metadata.0');
+            $streams = $metadata['Media'][0]['Part'][0]['Stream'] ?? [];
+
+            $tracks = ['audio' => [], 'subtitle' => []];
+            $typeMap = [2 => 'audio', 3 => 'subtitle'];
+
+            foreach ($streams as $stream) {
+                $type = $typeMap[(int) ($stream['streamType'] ?? 0)] ?? null;
+                if (! $type) {
+                    continue;
+                }
+
+                $language = $stream['language'] ?? $stream['languageCode'] ?? null;
+                $label = $stream['extendedDisplayTitle'] ?? $stream['displayTitle'] ?? $stream['title'] ?? ($language ?? 'Unknown');
+
+                $tracks[$type][] = [
+                    'index' => (int) ($stream['id'] ?? 0),
+                    'label' => $label,
+                    'language' => $language,
+                ];
+            }
+
+            return $tracks;
+        } catch (Exception $e) {
+            Log::warning('PlexService: Failed to list available tracks', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $empty;
+        }
     }
 
     public function getStreamByteSize(string $itemId): ?array

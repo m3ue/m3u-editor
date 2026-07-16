@@ -151,3 +151,25 @@ it('prefers exact language code match over partial match for Plex streams', func
     expect($url)->toContain('audioStreamID=202')
         ->and($url)->not->toContain('audioStreamID=201');
 });
+
+it('getAvailableTracks lists real audio and subtitle streams for the picker UI', function () {
+    fakePlexMetadataWithStreams();
+
+    $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['audio'])->toHaveCount(2)
+        ->and($tracks['subtitle'])->toHaveCount(1)
+        ->and(collect($tracks['audio'])->pluck('index')->all())->toBe([101, 102])
+        ->and($tracks['subtitle'][0]['index'])->toBe(201)
+        ->and($tracks['subtitle'][0]['language'])->toBe('eng');
+});
+
+it('getAvailableTracks returns empty arrays when the metadata request fails', function () {
+    Http::fake([
+        'http://plex.local:32400/library/metadata/item-1' => Http::response([], 500),
+    ]);
+
+    $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks)->toBe(['audio' => [], 'subtitle' => []]);
+});

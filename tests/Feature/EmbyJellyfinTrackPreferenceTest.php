@@ -166,3 +166,106 @@ it('prefers exact language match over partial match for Emby streams', function 
     expect($url)->toContain('AudioStreamIndex=2')
         ->and($url)->not->toContain('AudioStreamIndex=1');
 });
+
+/**
+ * fetchItemWithMediaStreams() (used by getSubtitleUrl and getAvailableTracks) calls
+ * GET /Items?Ids={id} — a different endpoint shape than getDirectStreamUrl's
+ * GET /Items/{id}, so these tests fake that shape specifically.
+ */
+function fakeEmbyItemsEndpointWithStreams(): void
+{
+    Http::fake([
+        'http://emby.local:8096/Items*' => Http::response([
+            'Items' => [[
+                'Id' => 'item-1',
+                'MediaSources' => [['Id' => 'ms-1']],
+                'MediaStreams' => [
+                    [
+                        'Index' => 0,
+                        'Type' => 'Video',
+                        'Language' => 'und',
+                        'DisplayTitle' => 'H.264 1080p',
+                    ],
+                    [
+                        'Index' => 1,
+                        'Type' => 'Audio',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English AAC 2.0',
+                    ],
+                    [
+                        'Index' => 2,
+                        'Type' => 'Audio',
+                        'Language' => 'jpn',
+                        'DisplayTitle' => 'Japanese AAC 2.0',
+                    ],
+                    [
+                        'Index' => 3,
+                        'Type' => 'Subtitle',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English SRT',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                    ],
+                    [
+                        'Index' => 4,
+                        'Type' => 'Subtitle',
+                        'Language' => 'jpn',
+                        'DisplayTitle' => 'Japanese SRT',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                    ],
+                    [
+                        'Index' => 5,
+                        'Type' => 'Subtitle',
+                        'Language' => 'spa',
+                        'DisplayTitle' => 'Spanish PGS (bitmap)',
+                        'Codec' => 'pgssub',
+                        'IsTextSubtitleStream' => false,
+                    ],
+                ],
+            ]],
+        ], 200),
+    ]);
+}
+
+it('getSubtitleUrl returns the stream matching the preferred language', function () {
+    fakeEmbyItemsEndpointWithStreams();
+
+    $subtitle = makeEmbyTrackPreferenceService()->getSubtitleUrl('item-1', 0, 'jpn');
+
+    expect($subtitle)->not->toBeNull()
+        ->and($subtitle['language'])->toBe('jpn')
+        ->and($subtitle['url'])->toContain('/Subtitles/4/');
+});
+
+it('getSubtitleUrl falls back to the first text subtitle when the preferred language has no match', function () {
+    fakeEmbyItemsEndpointWithStreams();
+
+    $subtitle = makeEmbyTrackPreferenceService()->getSubtitleUrl('item-1', 0, 'fra');
+
+    expect($subtitle)->not->toBeNull()
+        ->and($subtitle['language'])->toBe('eng')
+        ->and($subtitle['url'])->toContain('/Subtitles/3/');
+});
+
+it('getSubtitleUrl skips bitmap-only subtitle streams even when they match the preferred language', function () {
+    fakeEmbyItemsEndpointWithStreams();
+
+    $subtitle = makeEmbyTrackPreferenceService()->getSubtitleUrl('item-1', 0, 'spa');
+
+    // 'spa' only exists as a bitmap (PGS) stream, which can't be converted to WebVTT —
+    // falls back to the first text stream instead of returning the unusable bitmap one.
+    expect($subtitle)->not->toBeNull()
+        ->and($subtitle['language'])->toBe('eng');
+});
+
+it('getAvailableTracks lists real audio and subtitle streams for the picker UI', function () {
+    fakeEmbyItemsEndpointWithStreams();
+
+    $tracks = makeEmbyTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['audio'])->toHaveCount(2)
+        ->and($tracks['subtitle'])->toHaveCount(3)
+        ->and(collect($tracks['audio'])->pluck('language')->all())->toBe(['eng', 'jpn'])
+        ->and(collect($tracks['subtitle'])->pluck('index')->all())->toBe([3, 4, 5]);
+});
