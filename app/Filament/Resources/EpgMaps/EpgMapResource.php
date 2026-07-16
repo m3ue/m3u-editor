@@ -174,15 +174,6 @@ class EpgMapResource extends Resource implements CopilotResource
                     })
                     ->hidden(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending)
                     ->tooltip(__('Manually trigger this EPG mapping to run again. This will not modify the "Recurring" setting.')),
-                ViewAction::make('reviewCandidates')
-                    ->label(__('Review Candidates'))
-                    ->icon('heroicon-s-magnifying-glass')
-                    ->button()
-                    ->hiddenLabel()
-                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null
-                        || $record->user_id !== Auth::id()
-                        || $record->epg?->user_id !== Auth::id())
-                    ->tooltip(__('Review explainable candidates for unresolved channels from this map.')),
                 Action::make('restart')
                     ->label(__('Restart Now'))
                     ->icon('heroicon-s-arrow-path')
@@ -213,6 +204,15 @@ class EpgMapResource extends Resource implements CopilotResource
                     })
                     ->hidden(fn ($record) => ! ($record->status === Status::Processing || $record->status === Status::Pending))
                     ->tooltip(__('Restart existing mapping process.')),
+                ViewAction::make('reviewCandidates')
+                    ->label(__('Review Candidates'))
+                    ->icon('heroicon-s-magnifying-glass')
+                    ->button()
+                    ->hiddenLabel()
+                    ->hidden(fn (EpgMap $record): bool => $record->playlist_id === null
+                        || $record->user_id !== Auth::id()
+                        || $record->epg?->user_id !== Auth::id())
+                    ->tooltip(__('Review explainable candidates for unresolved channels from this map.')),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
