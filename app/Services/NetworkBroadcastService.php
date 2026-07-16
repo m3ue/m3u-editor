@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Enums\TranscodeMode;
 use App\Models\MediaServerIntegration;
 use App\Models\Network;
+use App\Models\NetworkContent;
 use App\Models\NetworkProgramme;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -461,14 +463,16 @@ class NetworkBroadcastService
             // earlier PHP-side index resolution, which required a media-server round-trip
             // and broke on remux URLs. For Server mode the pref is already baked into the
             // stream URL via AudioStreamIndex, so this is null (proxy uses default).
+            // Falls back to the network-level default when this specific item has no
+            // per-content override (see NetworkContent::preferred_audio_track).
             'preferred_audio_language' => ($network->transcode_mode ?? null) !== TranscodeMode::Server
-                ? $network->preferred_audio_track
+                ? $this->resolveTrackPreference($network, $programme->contentable, 'preferred_audio_track')
                 : null,
             // Whether the proxy should detect embedded subtitle tracks on the source and
             // expose them as a toggleable WebVTT rendition in the HLS output. Only meaningful
             // outside Server mode: Media Server transcoding strips subtitle tracks before the
             // proxy ever receives the stream.
-            'subtitles_enabled' => $this->subtitlesEnabledForProxy($network),
+            'subtitles_enabled' => $this->subtitlesEnabledForProxy($network, $programme->contentable),
             // Explicit subtitle URL resolved from the media server's own metadata (covers
             // embedded AND external/sidecar-file subtitles). When present, the proxy uses
             // this directly as a second FFmpeg input instead of probing the raw video stream.
@@ -902,12 +906,15 @@ class NetworkBroadcastService
         // For Local/Direct mode the proxy handles selection natively via FFmpeg's
         // -map 0:a:m:language:XX? filter, so we skip the media-server round-trip.
         if (($network->transcode_mode ?? null) === TranscodeMode::Server) {
-            if (! empty($network->preferred_audio_track)) {
-                $request->merge(['PreferredAudioTrack' => $network->preferred_audio_track]);
+            $preferredAudioTrack = $this->resolveTrackPreference($network, $content, 'preferred_audio_track');
+            $preferredSubtitleTrack = $this->resolveTrackPreference($network, $content, 'preferred_subtitle_track');
+
+            if (! empty($preferredAudioTrack)) {
+                $request->merge(['PreferredAudioTrack' => $preferredAudioTrack]);
             }
 
-            if (! empty($network->preferred_subtitle_track)) {
-                $request->merge(['PreferredSubtitleTrack' => $network->preferred_subtitle_track]);
+            if (! empty($preferredSubtitleTrack)) {
+                $request->merge(['PreferredSubtitleTrack' => $preferredSubtitleTrack]);
             }
         }
 
@@ -987,7 +994,7 @@ class NetworkBroadcastService
     /**
      * Get the media server item ID from content.
      */
-    protected function getMediaServerItemId($content): ?string
+    public function getMediaServerItemId($content): ?string
     {
         // First priority: Check info array for media server ID
         // This is the most reliable for media server content
@@ -1016,7 +1023,7 @@ class NetworkBroadcastService
     /**
      * Get media server integration from content.
      */
-    protected function getIntegrationFromContent($content): ?MediaServerIntegration
+    public function getIntegrationFromContent($content): ?MediaServerIntegration
     {
         // Try to extract from cover URL
         $coverUrl = $content->info['cover_big'] ?? $content->info['movie_image'] ?? null;
@@ -1532,9 +1539,9 @@ class NetworkBroadcastService
             // Preferred audio language forwarded to the proxy for FFmpeg -map selection.
             // Null in Server mode (the stream URL already carries AudioStreamIndex).
             'preferred_audio_language' => ($network->transcode_mode ?? null) !== TranscodeMode::Server
-                ? $network->preferred_audio_track
+                ? $this->resolveTrackPreference($network, $nextProgramme->contentable, 'preferred_audio_track')
                 : null,
-            'subtitles_enabled' => $this->subtitlesEnabledForProxy($network),
+            'subtitles_enabled' => $this->subtitlesEnabledForProxy($network, $nextProgramme->contentable),
             'subtitle_url' => $nextSubtitleInfo['url'],
             'subtitle_language' => $nextSubtitleInfo['language'],
             // A next programme always starts from its own beginning, so neither the video
@@ -1600,16 +1607,42 @@ class NetworkBroadcastService
     }
 
     /**
-     * Whether the proxy should attempt to detect and expose embedded subtitle
-     * tracks for this broadcast. Derived from preferred_subtitle_track (any
-     * non-empty value means the operator wants subtitles). Forced off in Server
-     * transcode mode, since the media server's own transcode strips subtitle
-     * streams before the proxy ever receives the file — the operator's preference
-     * would otherwise silently do nothing.
+     * Resolve the effective track preference (audio or subtitle language/index) for a
+     * specific content item: a per-item override on its NetworkContent row takes
+     * precedence over the Network-level default. $column is 'preferred_audio_track' or
+     * 'preferred_subtitle_track' — both the Network and NetworkContent tables share the
+     * same column names and value shape (ISO 639 code or a media-server stream index).
+     *
+     * $content may be null (e.g. a programme with no resolvable contentable) — falls
+     * back to the network-level default in that case, same as if no override existed.
      */
-    protected function subtitlesEnabledForProxy(Network $network): bool
+    protected function resolveTrackPreference(Network $network, mixed $content, string $column): ?string
     {
-        return ! empty($network->preferred_subtitle_track)
+        if ($content instanceof Model) {
+            $override = NetworkContent::findForNetwork($network, $content)?->{$column};
+
+            if (! empty($override)) {
+                return $override;
+            }
+        }
+
+        return $network->{$column};
+    }
+
+    /**
+     * Whether the proxy should attempt to detect and expose embedded subtitle
+     * tracks for this broadcast. Derived from the effective preferred_subtitle_track
+     * (per-item override, or the Network-level default — any non-empty value means
+     * the operator wants subtitles). Forced off in Server transcode mode, since the
+     * media server's own transcode strips subtitle streams before the proxy ever
+     * receives the file — the operator's preference would otherwise silently do nothing.
+     *
+     * $content is optional so existing call sites without a resolved contentable still
+     * work (falls back to the network-level default only).
+     */
+    protected function subtitlesEnabledForProxy(Network $network, mixed $content = null): bool
+    {
+        return ! empty($this->resolveTrackPreference($network, $content, 'preferred_subtitle_track'))
             && ($network->transcode_mode ?? null) !== TranscodeMode::Server;
     }
 
@@ -1631,15 +1664,16 @@ class NetworkBroadcastService
      * server-side seek — keeping both on one timeline origin. The returned 'server_seeked'
      * flag propagates to subtitle_seek_seconds so the proxy never double-seeks the input.
      *
+     * When no sidecar/embedded URL can be resolved via the media server's metadata API
+     * (Local/WebDAV stubs, or no match found), 'language' still carries the effective
+     * preferred language so the proxy can attempt its own embedded-stream language match
+     * (-map 0:s:m:language:XX?) instead of falling back to "any subtitle track".
+     *
      * @return array{url: ?string, language: ?string, server_seeked: bool}
      */
     protected function resolveSubtitleInfo(Network $network, ?NetworkProgramme $programme = null, int $seekSeconds = 0): array
     {
         $empty = ['url' => null, 'language' => null, 'server_seeked' => false];
-
-        if (! $this->subtitlesEnabledForProxy($network)) {
-            return $empty;
-        }
 
         $programme ??= $network->getCurrentProgramme();
         if (! $programme) {
@@ -1651,18 +1685,25 @@ class NetworkBroadcastService
             return $empty;
         }
 
+        if (! $this->subtitlesEnabledForProxy($network, $content)) {
+            return $empty;
+        }
+
+        $preferredLanguage = $this->resolveTrackPreference($network, $content, 'preferred_subtitle_track');
+        $noSidecar = ['url' => null, 'language' => $preferredLanguage, 'server_seeked' => false];
+
         $integration = $network->mediaServerIntegration ?? $this->getIntegrationFromContent($content);
         if (! $integration) {
-            return $empty;
+            return $noSidecar;
         }
 
         $itemId = $this->getMediaServerItemId($content);
         if (! $itemId) {
-            return $empty;
+            return $noSidecar;
         }
 
-        $subtitle = MediaServerService::make($integration)->getSubtitleUrl($itemId, $seekSeconds);
+        $subtitle = MediaServerService::make($integration)->getSubtitleUrl($itemId, $seekSeconds, $preferredLanguage);
 
-        return $subtitle ?? $empty;
+        return $subtitle ?? $noSidecar;
     }
 }
