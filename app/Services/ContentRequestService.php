@@ -11,6 +11,7 @@ use App\Models\PlaylistAuth;
 use App\Services\Arr\ArrService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -138,7 +139,7 @@ class ContentRequestService
         }
 
         try {
-            $mediaRequest = MediaRequest::create([
+            $mediaRequest = DB::transaction(fn (): MediaRequest => MediaRequest::create([
                 'playlist_auth_id' => $playlistAuth->id,
                 'arr_integration_id' => $integration->id,
                 'title' => 'Pending lookup',
@@ -147,7 +148,7 @@ class ContentRequestService
                 'payload' => [],
                 'status' => 'pending',
                 'requested_at' => now(),
-            ]);
+            ]));
         } catch (QueryException $e) {
             $message = $e->getMessage();
             if (str_contains($message, 'UNIQUE constraint failed')
