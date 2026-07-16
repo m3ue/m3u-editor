@@ -26,6 +26,21 @@ class ContentRequestService
             ->get();
     }
 
+    /** @return array<int, string> */
+    public function contentTypes(Playlist $playlist): array
+    {
+        $integrationTypes = $this->integrations($playlist)
+            ->pluck('type')
+            ->unique();
+
+        return collect([
+            'movie' => 'radarr',
+            'series' => 'sonarr',
+        ])->filter(fn (string $integrationType): bool => $integrationTypes->contains($integrationType))
+            ->keys()
+            ->all();
+    }
+
     /**
      * @return array{
      *     results: array<int, array<string, mixed>>,
@@ -81,7 +96,16 @@ class ContentRequestService
                     'fanart' => $item['fanart'] ?? null,
                     'genres' => $item['genres'] ?? [],
                     'rating' => $item['rating'] ?? null,
-                    'seasons' => $item['seasons'] ?? [],
+                    'seasons' => $mediaType === 'series'
+                        ? collect($item['seasons'] ?? [])
+                            ->pluck('seasonNumber')
+                            ->filter(fn (mixed $season): bool => is_numeric($season) && (int) $season >= 0)
+                            ->map(fn (mixed $season): int => (int) $season)
+                            ->unique()
+                            ->sort()
+                            ->values()
+                            ->all()
+                        : [],
                     'already_available' => (bool) ($item['existsInLibrary'] ?? false),
                 ];
             }

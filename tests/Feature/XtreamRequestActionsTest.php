@@ -8,6 +8,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\PlaylistRequestSetting;
 use App\Models\User;
+use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
@@ -17,8 +18,13 @@ use Illuminate\Support\Facades\RateLimiter;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    config(['cache.default' => 'array']);
+
     Http::preventStrayRequests();
     Queue::fake();
+    $cache = app('cache')->store('array');
+    app()->instance(Repository::class, $cache);
+    RateLimiter::swap(new Illuminate\Cache\RateLimiter($cache));
 
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
@@ -95,6 +101,14 @@ it('advertises auto approval only for credentials configured to auto approve', f
     $this->getJson(requestActionUrl('panel'))
         ->assertOk()
         ->assertJsonPath('m3u_editor.requests.approval_behavior', 'auto_approval');
+});
+
+it('advertises only content types backed by available integrations', function () {
+    $this->sonarr->delete();
+
+    $this->getJson(requestActionUrl('panel'))
+        ->assertOk()
+        ->assertJsonPath('m3u_editor.requests.content_types', ['movie']);
 });
 
 it('denies request actions when the capability gate is disabled', function () {
@@ -194,6 +208,9 @@ it('searches only enabled guest integrations and returns paginated deduplicated 
         'guest_enabled' => false,
         'url' => 'http://private-radarr.test',
     ]);
+    ArrIntegration::factory()->for($this->user)->radarr()->guestEnabled()->create([
+        'url' => 'http://duplicate-radarr.test',
+    ]);
 
     Http::fake([
         'http://radarr.test/api/v3/movie/lookup*' => Http::response([[
@@ -204,6 +221,10 @@ it('searches only enabled guest integrations and returns paginated deduplicated 
             'overview' => 'In space no one can hear you scream.',
             'remotePoster' => 'https://images.test/alien.jpg',
             'images' => [],
+        ]]),
+        'http://duplicate-radarr.test/api/v3/movie/lookup*' => Http::response([[
+            'tmdbId' => 348,
+            'title' => 'Alien',
         ]]),
         'http://sonarr.test/api/v3/series/lookup*' => Http::response([]),
     ]);
@@ -228,7 +249,29 @@ it('searches only enabled guest integrations and returns paginated deduplicated 
         ->assertJsonMissingPath('data.results.0.api_key')
         ->assertJsonMissingPath('data.results.0.root_folder_path');
 
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
+});
+
+it('normalizes series seasons for client selection', function () {
+    Http::fake([
+        'http://sonarr.test/api/v3/series/lookup*' => Http::response([[
+            'tvdbId' => 81189,
+            'title' => 'Breaking Bad',
+            'seasons' => [
+                ['seasonNumber' => 1, 'monitored' => true, 'statistics' => ['episodeCount' => 7]],
+                ['seasonNumber' => 0, 'monitored' => false],
+            ],
+        ]]),
+    ]);
+
+    $this->getJson(requestActionUrl('request_search', [
+        'query' => 'Breaking Bad',
+        'type' => 'series',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('data.results.0.seasons', [0, 1])
+        ->assertJsonMissingPath('data.results.0.seasons.0.monitored')
+        ->assertJsonMissingPath('data.results.0.seasons.0.statistics');
 });
 
 it('returns an empty successful search result when providers return no matches', function () {
@@ -239,9 +282,20 @@ it('returns an empty successful search result when providers return no matches',
 
     $this->getJson(requestActionUrl('request_search', ['query' => 'Unknown']))
         ->assertOk()
-        ->assertJsonPath('data.results', [])
-        ->assertJsonPath('meta.pagination.total', 0)
-        ->assertJsonPath('meta.partial', false);
+        ->assertExactJson([
+            'api_version' => 1,
+            'data' => ['results' => []],
+            'meta' => [
+                'pagination' => [
+                    'current_page' => 1,
+                    'per_page' => 20,
+                    'total' => 0,
+                    'last_page' => 1,
+                ],
+                'partial' => false,
+                'unavailable_providers' => 0,
+            ],
+        ]);
 });
 
 it('returns safe partial search results when one provider is unavailable', function () {
@@ -273,9 +327,13 @@ it('returns a stable error when every searched provider is unavailable', functio
 
     $this->getJson(requestActionUrl('request_search', ['query' => 'Alien']))
         ->assertServiceUnavailable()
-        ->assertJsonPath('api_version', 1)
-        ->assertJsonPath('error.code', 'providers_unavailable')
-        ->assertJsonMissingPath('error.exception')
+        ->assertExactJson([
+            'api_version' => 1,
+            'error' => [
+                'code' => 'providers_unavailable',
+                'message' => 'All request providers are temporarily unavailable.',
+            ],
+        ])
         ->assertDontSee('private provider failure');
 });
 

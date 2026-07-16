@@ -575,6 +575,8 @@ class XtreamApiController extends Controller
             ];
 
             if (in_array('requests', $features, true)) {
+                $requestPlaylist = $this->authorizedRequestPlaylist($playlist, $authMethod, $playlistAuth);
+
                 $m3uEditorPayload['requests'] = [
                     'api_version' => 1,
                     'actions' => [
@@ -584,7 +586,9 @@ class XtreamApiController extends Controller
                         'status' => 'request_status',
                         'dismiss' => 'request_dismiss',
                     ],
-                    'content_types' => ['movie', 'series'],
+                    'content_types' => $requestPlaylist
+                        ? app(ContentRequestService::class)->contentTypes($requestPlaylist)
+                        : [],
                     'approval_behavior' => $playlistAuth->auto_approve_requests
                         ? 'auto_approval'
                         : 'pending_approval',
