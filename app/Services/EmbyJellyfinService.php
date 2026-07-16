@@ -787,7 +787,7 @@ class EmbyJellyfinService implements MediaServer
      *
      * @return array{url: string, language: ?string, server_seeked: bool}|null
      */
-    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0, ?string $preferredLanguage = null): ?array
     {
         try {
             $item = $this->fetchItemWithMediaStreams($itemId);
@@ -808,17 +808,29 @@ class EmbyJellyfinService implements MediaServer
 
             $streams = $item['MediaStreams'] ?? [];
 
-            foreach ($streams as $stream) {
-                if (($stream['Type'] ?? '') !== 'Subtitle') {
-                    continue;
-                }
+            // Bitmap subtitle formats (PGS, VobSub) can't be converted to WebVTT —
+            // ffmpeg's webvtt encoder only supports text-to-text conversion.
+            $textStreams = array_values(array_filter(
+                $streams,
+                fn (array $s): bool => ($s['Type'] ?? '') === 'Subtitle' && ($s['IsTextSubtitleStream'] ?? false)
+            ));
 
-                // Bitmap subtitle formats (PGS, VobSub) can't be converted to WebVTT —
-                // ffmpeg's webvtt encoder only supports text-to-text conversion.
-                if (! ($stream['IsTextSubtitleStream'] ?? false)) {
-                    continue;
+            // Prefer the stream matching the requested language; fall back to the first
+            // text stream when nothing matches (or no preference was given) so subtitles
+            // are still offered instead of silently disabled.
+            $stream = null;
+            if ($preferredLanguage !== null && trim($preferredLanguage) !== '') {
+                $normalized = strtolower(trim($preferredLanguage));
+                foreach ($textStreams as $candidate) {
+                    if (strtolower((string) ($candidate['Language'] ?? '')) === $normalized) {
+                        $stream = $candidate;
+                        break;
+                    }
                 }
+            }
+            $stream ??= $textStreams[0] ?? null;
 
+            if ($stream) {
                 $index = $stream['Index'];
                 $format = $stream['Codec'] ?? 'srt';
 
@@ -841,6 +853,53 @@ class EmbyJellyfinService implements MediaServer
         }
 
         return null;
+    }
+
+    /**
+     * @return array{
+     *     audio: list<array{index: int, label: string, language: ?string}>,
+     *     subtitle: list<array{index: int, label: string, language: ?string}>,
+     * }
+     */
+    public function getAvailableTracks(string $itemId): array
+    {
+        $empty = ['audio' => [], 'subtitle' => []];
+
+        try {
+            $item = $this->fetchItemWithMediaStreams($itemId);
+
+            if (! $item) {
+                return $empty;
+            }
+
+            $streams = $item['MediaStreams'] ?? [];
+            $tracks = ['audio' => [], 'subtitle' => []];
+
+            foreach ($streams as $stream) {
+                $type = strtolower((string) ($stream['Type'] ?? ''));
+                if ($type !== 'audio' && $type !== 'subtitle') {
+                    continue;
+                }
+
+                $language = $stream['Language'] ?? null;
+                $label = $stream['DisplayTitle'] ?? $stream['Title'] ?? ($language ?? 'Unknown');
+
+                $tracks[$type][] = [
+                    'index' => (int) $stream['Index'],
+                    'label' => $label,
+                    'language' => $language,
+                ];
+            }
+
+            return $tracks;
+        } catch (Exception $e) {
+            Log::warning('EmbyJellyfinService: Failed to list available tracks', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $empty;
+        }
     }
 
     /**

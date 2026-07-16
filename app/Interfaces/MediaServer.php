@@ -35,11 +35,16 @@ interface MediaServer
     public function getDirectStreamUrl(Request $request, string $itemId, string $container = 'ts', array $transcodeOptions = []): string;
 
     /**
-     * Return the first available text-based subtitle stream for the item, or null if none
-     * exists. Covers both embedded and external (sidecar file) subtitle streams — the media
-     * server's own metadata is authoritative for external subtitles, which a raw ffprobe of
-     * the video file itself can never see. Bitmap subtitle formats (PGS/VobSub) are skipped,
-     * since ffmpeg's webvtt encoder only supports text-to-text conversion.
+     * Return a text-based subtitle stream for the item, or null if none exists. Covers both
+     * embedded and external (sidecar file) subtitle streams — the media server's own metadata
+     * is authoritative for external subtitles, which a raw ffprobe of the video file itself can
+     * never see. Bitmap subtitle formats (PGS/VobSub) are skipped, since ffmpeg's webvtt encoder
+     * only supports text-to-text conversion.
+     *
+     * When $preferredLanguage is given, prefers a stream matching that language (exact match on
+     * the stream's own language tag) and only falls back to the first available text stream when
+     * nothing matches — without this, subtitle "selection" was purely accidental (whichever text
+     * stream happened to be listed first), regardless of what the operator actually configured.
      *
      * When $seekSeconds > 0 the returned URL must be seeked server-side so the subtitle cues
      * are rebased to zero at that content-time — matching the video's own server-side seek so
@@ -49,7 +54,22 @@ interface MediaServer
      *
      * @return array{url: string, language: ?string, server_seeked: bool}|null
      */
-    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array;
+    public function getSubtitleUrl(string $itemId, int $seekSeconds = 0, ?string $preferredLanguage = null): ?array;
+
+    /**
+     * List this item's real audio/subtitle streams, for building a per-item track
+     * preference picker (NetworkContentRelationManager's "Track Preferences" action).
+     * Unlike the Network-level default (a single ISO code applied across arbitrarily
+     * many titles), this is scoped to one known item, so it can offer the operator its
+     * actual tracks instead of a generic language list. Returns empty arrays when the
+     * integration has no stream-listing API (Local/WebDAV).
+     *
+     * @return array{
+     *     audio: list<array{index: int, label: string, language: ?string}>,
+     *     subtitle: list<array{index: int, label: string, language: ?string}>,
+     * }
+     */
+    public function getAvailableTracks(string $itemId): array;
 
     public function getImageUrl(string $itemId, string $imageType = 'Primary'): string;
 

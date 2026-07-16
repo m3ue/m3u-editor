@@ -8,6 +8,8 @@ use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Network;
 use App\Models\NetworkContent;
+use App\Services\MediaServerService;
+use App\Services\NetworkBroadcastService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -308,7 +310,113 @@ class NetworkContentRelationManager extends RelationManager
                 ->icon('heroicon-o-x-circle')
                 ->button()
                 ->hiddenLabel(),
+
+            $this->getTrackPreferencesAction(),
         ];
+    }
+
+    /**
+     * Per-item audio/subtitle track override, sourced from that item's own real
+     * streams (unlike the Network-level default, which is a single ISO code applied
+     * across every item in the schedule — this is scoped to one known title, so it
+     * can offer the operator its actual tracks instead of a generic language list).
+     * Only shown for integrations that can list real stream metadata (Emby/Jellyfin/Plex);
+     * Local/WebDAV have no MediaStreams-equivalent API to source options from.
+     */
+    protected function getTrackPreferencesAction(): Action
+    {
+        return Action::make('trackPreferences')
+            ->label(__('Track Preferences'))
+            ->icon('heroicon-o-language')
+            ->button()
+            ->modalHeading(fn (NetworkContent $record): string => __('Track Preferences: :title', ['title' => $record->title]))
+            ->visible(fn (NetworkContent $record): bool => $this->supportsTrackPreferences($record))
+            ->schema(function (NetworkContent $record): array {
+                $tracks = $this->getAvailableTracksFor($record);
+
+                return [
+                    Select::make('preferred_audio_track')
+                        ->label(__('Audio Track'))
+                        ->options($this->trackOptions($tracks['audio']))
+                        ->placeholder(__('Use network default'))
+                        ->native(false)
+                        ->nullable(),
+
+                    Select::make('preferred_subtitle_track')
+                        ->label(__('Subtitle Track'))
+                        ->options($this->trackOptions($tracks['subtitle']))
+                        ->placeholder(__('Use network default'))
+                        ->helperText(__('Only shown if this title has embedded or sidecar subtitle tracks.'))
+                        ->native(false)
+                        ->nullable()
+                        ->visible(fn () => ! empty($tracks['subtitle'])),
+                ];
+            })
+            ->fillForm(fn (NetworkContent $record): array => [
+                'preferred_audio_track' => $record->preferred_audio_track,
+                'preferred_subtitle_track' => $record->preferred_subtitle_track,
+            ])
+            ->action(function (array $data, NetworkContent $record): void {
+                $record->update([
+                    'preferred_audio_track' => $data['preferred_audio_track'] ?: null,
+                    'preferred_subtitle_track' => $data['preferred_subtitle_track'] ?: null,
+                ]);
+
+                Notification::make()
+                    ->success()
+                    ->title(__('Track preferences updated'))
+                    ->send();
+            });
+    }
+
+    /**
+     * Whether this content item's media server integration can list real stream
+     * metadata to populate the track-preference selects. A cheap type check (no
+     * API call) so it's safe to evaluate for every visible table row.
+     */
+    protected function supportsTrackPreferences(NetworkContent $record): bool
+    {
+        $integration = $record->network?->mediaServerIntegration;
+
+        return $integration && ($integration->isEmby() || $integration->isJellyfin() || $integration->isPlex());
+    }
+
+    /**
+     * Fetch this item's real audio/subtitle streams from its media server integration.
+     * Only called when the modal actually opens (schema closures are lazy), not on
+     * every table row render — unlike supportsTrackPreferences(), which must stay
+     * API-call-free since it runs per row just to decide button visibility.
+     *
+     * @return array{audio: list<array{index: int, label: string, language: ?string}>, subtitle: list<array{index: int, label: string, language: ?string}>}
+     */
+    protected function getAvailableTracksFor(NetworkContent $record): array
+    {
+        $empty = ['audio' => [], 'subtitle' => []];
+
+        $integration = $record->network?->mediaServerIntegration;
+        $content = $record->contentable;
+
+        if (! $integration || ! $content) {
+            return $empty;
+        }
+
+        $itemId = app(NetworkBroadcastService::class)->getMediaServerItemId($content);
+        if (! $itemId) {
+            return $empty;
+        }
+
+        return MediaServerService::make($integration)->getAvailableTracks($itemId);
+    }
+
+    /**
+     * @param  list<array{index: int, label: string, language: ?string}>  $tracks
+     * @return array<string, string>
+     */
+    protected function trackOptions(array $tracks): array
+    {
+        return collect($tracks)
+            ->mapWithKeys(fn (array $track): array => [(string) $track['index'] => $track['label']])
+            ->toArray();
     }
 
     /**
