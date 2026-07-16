@@ -944,11 +944,6 @@ class WebDavMediaService implements MediaServer
         ];
     }
 
-    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int
-    {
-        return null;
-    }
-
     public function getSubtitleUrl(string $itemId, int $seekSeconds = 0): ?array
     {
         return null;

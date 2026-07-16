@@ -35,13 +35,6 @@ interface MediaServer
     public function getDirectStreamUrl(Request $request, string $itemId, string $container = 'ts', array $transcodeOptions = []): string;
 
     /**
-     * Return the audio stream index for the given ISO 639 language code, or null if not found.
-     * The returned value is service-specific: Emby/Jellyfin use the MediaStreams array index;
-     * Plex uses the stream's ID field. Both map to AudioStreamIndex on the outgoing request.
-     */
-    public function getAudioStreamIndexForLanguage(string $itemId, string $languageCode): ?int;
-
-    /**
      * Return the first available text-based subtitle stream for the item, or null if none
      * exists. Covers both embedded and external (sidecar file) subtitle streams — the media
      * server's own metadata is authoritative for external subtitles, which a raw ffprobe of
