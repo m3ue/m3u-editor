@@ -126,7 +126,10 @@ class ChannelsRelationManager extends RelationManager
                             ->where('tags.type', '=', $ownerRecord->uuid);
                     })
                     ->orderByRaw("{$orderByClause} {$direction}")
-                    ->select('channels.*', DB::raw("{$orderByClause} as tag_name_sort"))
+                    ->select(
+                        'channels.*',
+                        DB::raw("{$orderByClause} as tag_name_sort"),
+                        DB::raw('COALESCE(channel_custom_playlist.sort, channels.sort) as pivot_sort'))
                     ->distinct();
             });
         $defaultColumns = ChannelResource::getTableColumns(showGroup: true, showPlaylist: true);
