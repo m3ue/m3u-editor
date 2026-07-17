@@ -446,7 +446,7 @@ class VodRelationManager extends RelationManager
             ->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true)->whereHas('tags', function ($tagQuery) use ($tag) {
+                ->modifyQueryUsing(fn ($query) => $query->whereHas('tags', function ($tagQuery) use ($tag) {
                     $tagQuery->where('type', $tag->type)
                         ->where('name->en', $tag->name);
                 }))
@@ -457,13 +457,12 @@ class VodRelationManager extends RelationManager
         array_unshift(
             $tabs,
             Tab::make(__('All'))
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true))
                 ->badge($ownerRecord->channels()->where('is_vod', true)->count())
         );
         array_push(
             $tabs,
             Tab::make(__('Uncategorized'))
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
+                ->modifyQueryUsing(fn ($query) => $query->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 }))
                 ->badge($ownerRecord->channels()->where('is_vod', true)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
