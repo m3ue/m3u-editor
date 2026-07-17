@@ -56,7 +56,7 @@ class DvrRecordingRule extends Model
         });
 
         static::created(function (self $rule): void {
-            if ($rule->enabled && $rule->type === DvrRuleType::Series) {
+            if ($rule->enabled && in_array($rule->type, [DvrRuleType::Series, DvrRuleType::Manual], true)) {
                 app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);
             }
         });
@@ -80,10 +80,10 @@ class DvrRecordingRule extends Model
                 $rule->series_mode = DvrSeriesMode::All;
             }
 
-            // Detect enabled transition false → true for series rules and trigger immediate scheduling
+            // Detect enabled transition false → true for series/manual rules and trigger immediate scheduling
             if (
                 $rule->enabled
-                && $rule->type === DvrRuleType::Series
+                && in_array($rule->type, [DvrRuleType::Series, DvrRuleType::Manual], true)
                 && $rule->getOriginal('enabled') === false
             ) {
                 app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);

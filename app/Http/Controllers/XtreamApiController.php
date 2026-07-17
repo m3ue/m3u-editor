@@ -2887,7 +2887,7 @@ class XtreamApiController extends Controller
         $rule = DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
-            'type' => DvrRuleType::Once,
+            'type' => DvrRuleType::Manual,
             'channel_id' => $channelId,
             'series_title' => $title,
             'match_mode' => DvrMatchMode::Exact,
