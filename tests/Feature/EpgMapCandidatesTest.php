@@ -13,9 +13,14 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    config([
+        'broadcasting.default' => 'null',
+    ]);
+    Queue::fake();
     $this->user = User::factory()->create();
     $this->epg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create(['name' => 'Community XMLTV']));
     $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());

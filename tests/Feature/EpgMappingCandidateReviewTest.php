@@ -1,25 +1,34 @@
 <?php
 
 use App\Enums\EpgMapCandidateStatus;
+use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\CopilotTools\EpgMappingApplyTool;
 use App\Filament\Resources\EpgMaps\Pages\ListEpgMaps;
 use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
 use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Jobs\BuildEpgMapCandidatesJob;
+use App\Jobs\MapPlaylistChannelsToEpgChunk;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\EpgMap;
 use App\Models\Group;
+use App\Models\Job;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\SimilaritySearchService;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Ai\Tools\Request;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    config([
+        'broadcasting.default' => 'null',
+    ]);
+    Queue::fake();
     $this->user = User::factory()->create();
     $this->epg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create(['name' => 'Community XMLTV']));
     $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
@@ -79,6 +88,31 @@ it('returns explainable candidates from only the selected source', function () {
         ->and($result['candidates'][0]['reason'])->toContain('normalized');
 });
 
+it('filters caller supplied candidates to the selected source', function () {
+    $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create());
+    $crossSource = EpgChannel::factory()->for($otherEpg)->for($this->user)->create([
+        'name' => 'Selected Station',
+        'display_name' => 'Selected Station',
+        'channel_id' => 'selected-station.cross-source',
+    ]);
+    $selectedSource = candidateReviewEpgChannel([
+        'name' => 'Selected Station',
+        'display_name' => 'Selected Station',
+        'channel_id' => 'selected-station.local',
+    ]);
+    $channel = candidateReviewChannel('Selected Station');
+    $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        prefetchedCandidates: new Collection([$crossSource, $selectedSource]),
+    );
+
+    expect($result['automatic_match']?->id)->toBe($selectedSource->id)
+        ->and(array_column($result['candidates'], 'epg_channel_id'))->toBe([$selectedSource->id]);
+});
+
 it('keeps exact normalized matches automatic', function () {
     $candidate = candidateReviewEpgChannel([
         'name' => 'ESPN News',
@@ -96,6 +130,173 @@ it('keeps exact normalized matches automatic', function () {
     expect($result['automatic_match']?->id)->toBe($candidate->id)
         ->and($result['candidates'][0]['confidence'])->toBe(100)
         ->and($result['candidates'][0]['reason'])->toContain('Exact normalized');
+});
+
+it('keeps an unambiguous exact selected source identifier automatic', function () {
+    $identifierMatch = candidateReviewEpgChannel([
+        'name' => 'Different Guide Name',
+        'display_name' => 'Different Guide Name',
+        'channel_id' => 'metro-news.provider',
+    ]);
+    $channel = candidateReviewChannel('Unrelated Playlist Name');
+    $channel->update(['stream_id' => 'metro-news.provider']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['automatic_match']?->id)->toBe($identifierMatch->id)
+        ->and($result['decision'])->toBe('exact_identifier')
+        ->and($result['candidates'][0]['epg_channel_id'])->toBe($identifierMatch->id);
+});
+
+it('gives an unambiguous selected source identifier precedence over a conflicting name', function () {
+    $nameMatch = candidateReviewEpgChannel([
+        'name' => 'Metro News',
+        'display_name' => 'Metro News',
+        'channel_id' => 'metro-news.other',
+    ]);
+    $identifierMatch = candidateReviewEpgChannel([
+        'name' => 'Different Guide Name',
+        'display_name' => 'Different Guide Name',
+        'channel_id' => 'metro-news.provider',
+    ]);
+    $channel = candidateReviewChannel('Metro News');
+    $channel->update(['stream_id' => 'metro-news.provider']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+    );
+
+    expect($result['automatic_match']?->id)->toBe($identifierMatch->id)
+        ->and($result['automatic_match']?->id)->not->toBe($nameMatch->id)
+        ->and($result['decision'])->toBe('identifier_conflict')
+        ->and($result['candidates'][0]['epg_channel_id'])->toBe($identifierMatch->id)
+        ->and(array_column($result['candidates'], 'epg_channel_id'))->toBe([$identifierMatch->id, $nameMatch->id])
+        ->and($result['explanation'])->toContain('identifier');
+});
+
+it('abstains when an exact identifier resolves to multiple guide rows', function () {
+    candidateReviewEpgChannel([
+        'name' => 'Metro News East',
+        'display_name' => 'Metro News East',
+        'channel_id' => 'metro-news.provider',
+    ]);
+    candidateReviewEpgChannel([
+        'name' => 'Metro News West',
+        'display_name' => 'Metro News West',
+        'channel_id' => 'metro-news.provider',
+    ]);
+    $channel = candidateReviewChannel('Metro News');
+    $channel->update(['stream_id' => 'metro-news.provider']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['automatic_match'])->toBeNull()
+        ->and($result['decision'])->toBe('ambiguous_identifier')
+        ->and($result['candidates'])->toHaveCount(2)
+        ->and($result['explanation'])->toContain('multiple rows');
+});
+
+it('abstains from duplicate normalized names in either insertion order', function (bool $reverseOrder) {
+    $candidates = [
+        [
+            'name' => 'Regional News',
+            'display_name' => 'Regional News',
+            'channel_id' => 'regional-news.east',
+        ],
+        [
+            'name' => 'Regional News',
+            'display_name' => 'Regional News',
+            'channel_id' => 'regional-news.west',
+        ],
+    ];
+
+    foreach ($reverseOrder ? array_reverse($candidates) : $candidates as $attributes) {
+        candidateReviewEpgChannel($attributes);
+    }
+
+    $channel = candidateReviewChannel('Regional News');
+    $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['automatic_match'])->toBeNull()
+        ->and($result['decision'])->toBe('ambiguous_name')
+        ->and($result['candidates'])->toHaveCount(2)
+        ->and($result['candidates'][0]['confidence'])->toBe(100)
+        ->and($result['candidates'][1]['confidence'])->toBe(100)
+        ->and($result['explanation'])->toContain('multiple identifiers');
+})->with([
+    'east inserted first' => false,
+    'west inserted first' => true,
+]);
+
+it('requires the named top two margin for soft automatic matches', function (string $secondName, bool $automatic, string $decision, int $expectedMargin) {
+    $top = candidateReviewEpgChannel([
+        'name' => 'Alpha Sport Central',
+        'display_name' => 'Alpha Sport Central',
+        'channel_id' => 'alpha-guide.top',
+    ]);
+    candidateReviewEpgChannel([
+        'name' => $secondName,
+        'display_name' => $secondName,
+        'channel_id' => 'alpha-guide.second',
+    ]);
+    $channel = candidateReviewChannel('Alpha Sports Central');
+    $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+    $actualMargin = $result['candidates'][0]['confidence'] - $result['candidates'][1]['confidence'];
+
+    expect((bool) $result['automatic_match'])->toBe($automatic)
+        ->and($result['automatic_match']?->id)->toBe($automatic ? $top->id : null)
+        ->and($result['decision'])->toBe($decision)
+        ->and($result['candidates'])->toHaveCount(2)
+        ->and($actualMargin)->toBe($expectedMargin)
+        ->and(SimilaritySearchService::MIN_AUTOMATIC_MATCH_MARGIN)->toBe(10);
+})->with([
+    'tie' => ['Alpha Sports Centra', false, 'insufficient_margin', 0],
+    'below margin' => ['Alpha Sport Centra', false, 'insufficient_margin', 5],
+    'at margin' => ['Alpha Spor Centra', true, 'soft_match', 10],
+]);
+
+it('keeps an unambiguous callsign automatic in the canonical decision', function () {
+    $candidate = candidateReviewEpgChannel([
+        'name' => 'CBS Thirteen Sacramento',
+        'display_name' => 'CBS Thirteen Sacramento',
+        'channel_id' => 'KOVR-DT',
+    ]);
+    $channel = candidateReviewChannel('US: CBS 13 (KOVR) Stockton HD');
+    $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['automatic_match']?->id)->toBe($candidate->id)
+        ->and($result['decision'])->toBe('exact_callsign')
+        ->and($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id)
+        ->and($result['candidates'][0]['reason'])->toContain('callsign');
+});
+
+it('abstains when a callsign matches multiple guide identifiers', function () {
+    candidateReviewEpgChannel([
+        'name' => 'CBS Thirteen Sacramento',
+        'display_name' => 'CBS Thirteen Sacramento',
+        'channel_id' => 'KOVR-DT',
+    ]);
+    candidateReviewEpgChannel([
+        'name' => 'Independent Sacramento',
+        'display_name' => 'Independent Sacramento',
+        'channel_id' => 'KOVR-LD',
+    ]);
+    $channel = candidateReviewChannel('US: CBS 13 (KOVR) Stockton HD');
+    $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+    $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+    expect($result['automatic_match'])->toBeNull()
+        ->and($result['decision'])->toBe('ambiguous_callsign')
+        ->and($result['candidates'])->toHaveCount(2)
+        ->and($result['explanation'])->toContain('multiple identifiers');
 });
 
 it('ranks database candidates before applying the query bound', function () {
@@ -123,7 +324,8 @@ it('ranks database candidates before applying the query bound', function () {
 
     $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
 
-    expect($retrievedCandidates)->toBe(250)
+    // 250 filler + 1 target = 251 retrieved (new limit is 5000)
+    expect($retrievedCandidates)->toBe(251)
         ->and($result['candidates'][0]['epg_channel_id'])->toBe($candidate->id);
 });
 
@@ -297,6 +499,218 @@ it('preload-batching produces the same top candidates as per-channel queries', f
         ->and($batchedB['candidates'][0]['epg_channel_id'])->toBe($directB['candidates'][0]['epg_channel_id'])
         ->and($batchedA['automatic_match']?->id)->toBe($directA['automatic_match']?->id)
         ->and($batchedB['automatic_match']?->id)->toBe($directB['automatic_match']?->id);
+});
+
+it('bounds prefetched loading and keeps direct decision parity', function () {
+    EpgChannel::factory()
+        ->count(260)
+        ->for($this->epg)
+        ->for($this->user)
+        ->sequence(fn ($sequence): array => [
+            'name' => "Metro Regional Feed {$sequence->index}",
+            'display_name' => "Metro Regional Feed {$sequence->index}",
+            'channel_id' => "metro-regional-{$sequence->index}",
+        ])
+        ->create();
+    candidateReviewEpgChannel([
+        'name' => 'Metro Regional Prime',
+        'display_name' => 'Metro Regional Prime',
+        'channel_id' => 'metro-regional-prime',
+    ]);
+    $channel = candidateReviewChannel('Metro Regional Prime');
+
+    $matcher = new SimilaritySearchService;
+    $direct = $matcher->findEpgChannelCandidates($channel, $this->epg);
+    $terms = $matcher->searchTermsFor($channel);
+    $prefetched = $matcher->loadEpgCandidates($this->epg, $terms);
+    $batched = $matcher->findEpgChannelCandidates(
+        channel: $channel,
+        epg: $this->epg,
+        prefetchedCandidates: $prefetched,
+    );
+
+    expect($prefetched)->toHaveCount(250)
+        ->and($batched['decision'])->toBe($direct['decision'])
+        ->and($batched['automatic_match']?->id)->toBe($direct['automatic_match']?->id)
+        ->and(array_column($batched['candidates'], 'epg_channel_id'))
+        ->toBe(array_column($direct['candidates'], 'epg_channel_id'));
+});
+
+describe('Candidate truncation safety (overflow beyond 250)', function () {
+    it('abstains when duplicate normalized identity exists beyond the 250-row bound', function () {
+        // Create 250 filler channels that have SAME relevance score as target matches
+        // by including all search terms ("target", "channel") in their names
+        // They will be created FIRST so they get lower IDs and win the tiebreaker
+        // Use unrelated filler words to avoid scoring as review candidates
+        EpgChannel::factory()
+            ->count(250)
+            ->for($this->epg)
+            ->for($this->user)
+            ->sequence(fn ($sequence): array => [
+                'name' => "Unrelated Filler Network {$sequence->index}",
+                'display_name' => "Unrelated Filler Network {$sequence->index}",
+                'channel_id' => "unrelated-filler-{$sequence->index}",
+            ])
+            ->create();
+
+        // The real match - same normalized name as search target, but created AFTER
+        // so it gets higher ID and ranks AFTER the 250 fillers in tiebreaker
+        $realMatch = candidateReviewEpgChannel([
+            'name' => 'Target Channel',
+            'display_name' => 'Target Channel',
+            'channel_id' => 'target-channel-real',
+        ]);
+
+        // Another channel with same normalized name - also created after
+        candidateReviewEpgChannel([
+            'name' => 'Target Channel',
+            'display_name' => 'Target Channel',
+            'channel_id' => 'target-channel-dup',
+        ]);
+
+        $channel = candidateReviewChannel('Target Channel');
+        $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+        // Even though the duplicates are beyond the 250-row limit, the decision
+        // must still detect the ambiguous_name and abstain
+        expect($result['automatic_match'])->toBeNull()
+            ->and($result['decision'])->toBe('ambiguous_name')
+            ->and($result['candidates'])->toHaveCount(2)
+            ->and($result['explanation'])->toContain('multiple identifiers');
+    });
+
+    it('abstains when close soft runner-up exists beyond the 250-row bound', function () {
+        // Create 250 filler channels with same relevance score, created first
+        // Use unrelated filler words to avoid scoring as review candidates
+        EpgChannel::factory()
+            ->count(250)
+            ->for($this->epg)
+            ->for($this->user)
+            ->sequence(fn ($sequence): array => [
+                'name' => "Unrelated Filler Network {$sequence->index}",
+                'display_name' => "Unrelated Filler Network {$sequence->index}",
+                'channel_id' => "unrelated-filler-{$sequence->index}",
+            ])
+            ->create();
+
+        // Top candidate - created after fillers, so ranks after them
+        $topMatch = candidateReviewEpgChannel([
+            'name' => 'Alpha Sport Central',
+            'display_name' => 'Alpha Sport Central',
+            'channel_id' => 'alpha-guide-top',
+        ]);
+
+        // Close runner-up - also created after
+        candidateReviewEpgChannel([
+            'name' => 'Alpha Sport Centra',  // One char diff - high confidence but below margin
+            'display_name' => 'Alpha Sport Centra',
+            'channel_id' => 'alpha-guide-second',
+        ]);
+
+        $channel = candidateReviewChannel('Alpha Sports Central');
+        $channel->update(['stream_id' => 'provider-unrelated-id']);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+        // The runner-up beyond 250 should still force abstention due to insufficient margin
+        expect($result['automatic_match'])->toBeNull()
+            ->and($result['decision'])->toBe('insufficient_margin')
+            ->and($result['candidates'])->toHaveCount(2);
+    });
+
+    it('abstains when ambiguous identifier exists beyond the 250-row bound', function () {
+        // Create 250 filler channels with same relevance score, created first
+        EpgChannel::factory()
+            ->count(250)
+            ->for($this->epg)
+            ->for($this->user)
+            ->sequence(fn ($sequence): array => [
+                'name' => "Unrelated Filler Network {$sequence->index}",
+                'display_name' => "Unrelated Filler Network {$sequence->index}",
+                'channel_id' => "unrelated-filler-{$sequence->index}",
+            ])
+            ->create();
+
+        // Two channels with same identifier - created after fillers
+        candidateReviewEpgChannel([
+            'name' => 'Metro News East',
+            'display_name' => 'Metro News East',
+            'channel_id' => 'metro-news.provider',
+        ]);
+        candidateReviewEpgChannel([
+            'name' => 'Metro News West',
+            'display_name' => 'Metro News West',
+            'channel_id' => 'metro-news.provider',
+        ]);
+
+        $channel = candidateReviewChannel('Metro News');
+        $channel->update(['stream_id' => 'metro-news.provider']);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidates($channel, $this->epg);
+
+        // Even beyond 250, ambiguous_identifier must be detected
+        expect($result['automatic_match'])->toBeNull()
+            ->and($result['decision'])->toBe('ambiguous_identifier')
+            ->and($result['candidates'])->toHaveCount(2)
+            ->and($result['explanation'])->toContain('multiple rows');
+    });
+});
+
+it('uses the same settings decision and ranking in background review and copilot', function () {
+    $this->actingAs($this->user);
+    $runnerUp = candidateReviewEpgChannel([
+        'name' => 'Metro Sports',
+        'display_name' => 'Metro Sports',
+        'channel_id' => 'metro-sports.sd',
+    ]);
+    $winner = candidateReviewEpgChannel([
+        'name' => 'Metro Sports UHD',
+        'display_name' => 'Metro Sports UHD',
+        'channel_id' => 'metro-sports.uhd',
+    ]);
+    $channel = candidateReviewChannel('Metro Sports HD');
+    $channel->update([
+        'group' => $this->group->name,
+        'stream_id' => 'provider-unrelated-id',
+    ]);
+    $settings = ['remove_quality_indicators' => false];
+    $map = EpgMap::factory()->create([
+        'user_id' => $this->user->id,
+        'epg_id' => $this->epg->id,
+        'playlist_id' => $this->playlist->id,
+        'status' => 'completed',
+        'settings' => $settings,
+    ]);
+
+    $batchNo = 'canonical-parity-'.uniqid();
+    (new MapPlaylistChannelsToEpgChunk(
+        channelIds: [$channel->id],
+        epgId: $this->epg->id,
+        epgMapId: $map->id,
+        settings: $settings,
+        batchNo: $batchNo,
+        totalChannels: 1,
+    ))->handle();
+    $backgroundMatch = Job::where('batch_no', $batchNo)->firstOrFail()->payload[0]['epg_channel_id'];
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+    $review = $map->candidates()->where('channel_id', $channel->id)->firstOrFail();
+
+    $copilot = (string) (new EpgChannelMatcherTool)->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $this->group->name,
+        'epg_id' => $this->epg->id,
+    ]));
+
+    expect($backgroundMatch)->toBe($winner->id)
+        ->and($review->automatic_match)->toBeTrue()
+        ->and($review->epg_channel_id)->toBe($winner->id)
+        ->and($review->alternatives[0]['epg_channel_id'])->toBe($runnerUp->id)
+        ->and($copilot)->toContain('AUTOMATIC MATCHES')
+        ->and(strpos($copilot, "epg_channel_id: {$winner->id}"))
+        ->toBeLessThan(strpos($copilot, "epg_channel_id: {$runnerUp->id}"));
 });
 
 it('shows candidate details and applies only an explicit valid confirmation', function () {

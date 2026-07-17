@@ -81,7 +81,7 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
             ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
             ->orderBy('name')
-            ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
+            ->get(['id', 'name', 'name_custom', 'title', 'title_custom', 'stream_id', 'stream_id_custom']);
 
         if ($channels->isEmpty()) {
             $map->candidates()->delete();
@@ -96,37 +96,11 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
         // the build, and reset progress so the poll can observe it moving.
         $map->candidates()->delete();
 
-        // Preload matching EPG channels once for the whole batch instead of
-        // issuing a LIKE scan per channel — reuses the batch-prefetch API
-        // added to SimilaritySearchService so this stays cheap on very
-        // large EPG sources.
-        $unionTerms = $channels->flatMap(
-            fn (Channel $channel): array => $matcher->searchTermsFor(
-                channel: $channel,
-                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
-                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
-            ),
-        )->unique()->values()->all();
-        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms);
-
         $processed = 0;
         $rows = [];
 
         foreach ($channels as $channel) {
-            $cleanedTitle = $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings);
-            $cleanedName = $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings);
-            $result = $matcher->findEpgChannelCandidates(
-                channel: $channel,
-                epg: $epg,
-                removeQualityIndicators: $settings['remove_quality_indicators'] ?? false,
-                similarityThreshold: $settings['similarity_threshold'] ?? 70,
-                fuzzyMaxDistance: $settings['fuzzy_max_distance'] ?? 25,
-                exactMatchDistance: $settings['exact_match_distance'] ?? 8,
-                customQualityIndicators: $settings['quality_indicators'] ?? null,
-                cleanedTitle: $cleanedTitle,
-                cleanedName: $cleanedName,
-                prefetchedCandidates: $prefetched,
-            );
+            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings);
 
             $top = $result['candidates'][0] ?? null;
             $alternatives = $top ? array_slice($result['candidates'], 1) : [];
@@ -138,7 +112,7 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
                 'original_name' => $result['original_name'],
                 'normalized_name' => $result['normalized_name'],
                 'top_confidence' => $top['confidence'] ?? 0,
-                'top_reason' => $top['reason'] ?? '',
+                'top_reason' => '['.$result['decision'].'] '.($top['reason'] ?? $result['explanation']),
                 'top_matched_value' => $top['matched_value'] ?? '',
                 'top_normalized_value' => $top['normalized_value'] ?? '',
                 'is_exact' => ($top['confidence'] ?? 0) === 100,

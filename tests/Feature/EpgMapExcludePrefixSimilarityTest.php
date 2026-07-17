@@ -34,7 +34,7 @@ beforeEach(function () {
     $migration->up();
 
     $this->user = User::factory()->create();
-    $this->epg = Epg::factory()->for($this->user)->create();
+    $this->epg = Epg::withoutEvents(fn () => Epg::factory()->for($this->user)->create());
     $this->playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
     $this->group = Group::factory()->for($this->playlist)->for($this->user)->create();
 });
@@ -158,5 +158,89 @@ describe('MapPlaylistChannelsToEpgChunk exclude prefixes', function () {
         ]);
 
         expect(Job::where('batch_no', $batchNo)->exists())->toBeFalse();
+    });
+});
+
+describe('SimilaritySearchService identifier normalization safety', function () {
+    it('does not apply prefix cleanup to stream_id identifier', function () {
+        // EPG channel with identifier that matches the channel's stream_id AFTER prefix removal
+        // This would be a FALSE match if prefix cleanup were applied to the identifier
+        $epgChannel = EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+            'name' => 'Target Channel',
+            'display_name' => 'Target Channel',
+            'channel_id' => 'target.channel',
+        ]);
+
+        // Channel has a stream_id with a prefix that would match the EPG channel_id
+        // if prefix cleanup were incorrectly applied to the identifier
+        $channel = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+            'title' => 'Some Channel',
+            'name' => 'Some Channel',
+            'stream_id' => 'US: target.channel',  // Prefix "US: " would be stripped by exclude_prefixes
+        ]);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidatesUsingSettings($channel, $this->epg, [
+            'exclude_prefixes' => ['US: '],
+            'use_regex' => false,
+            'similarity_threshold' => 70,
+            'fuzzy_max_distance' => 25,
+            'exact_match_distance' => 8,
+        ]);
+
+        // The identifier "US: target.channel" should NOT match "target.channel"
+        // because identifier evidence must remain raw except UTF-8 trim and case folding
+        expect($result['automatic_match'])->toBeNull()
+            ->and($result['decision'])->toBe('no_candidates')
+            ->and($result['candidates'])->toBeEmpty();
+    });
+
+    it('does not apply regex cleanup to stream_id identifier', function () {
+        $epgChannel = EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+            'name' => 'Target Channel',
+            'display_name' => 'Target Channel',
+            'channel_id' => 'target-channel',
+        ]);
+
+        $channel = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+            'title' => 'Some Channel',
+            'name' => 'Some Channel',
+            'stream_id' => 'US:target.channel',  // Regex would strip "US:" and "." -> "targetchannel"
+        ]);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidatesUsingSettings($channel, $this->epg, [
+            'exclude_prefixes' => ['US:'],
+            'use_regex' => true,
+            'similarity_threshold' => 70,
+            'fuzzy_max_distance' => 25,
+            'exact_match_distance' => 8,
+        ]);
+
+        // Regex cleanup must NOT be applied to identifier
+        expect($result['automatic_match'])->toBeNull()
+            ->and($result['decision'])->toBe('no_candidates');
+    });
+
+    it('only applies UTF-8 trim and case folding to identifier for exact match', function () {
+        $epgChannel = EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+            'name' => 'Target Channel',
+            'display_name' => 'Target Channel',
+            'channel_id' => '  TARGET.CHANNEL  ',
+        ]);
+
+        $channel = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+            'title' => 'Some Channel',
+            'name' => 'Some Channel',
+            'stream_id' => 'target.channel',  // Case-insensitive match after trim
+        ]);
+
+        $result = (new SimilaritySearchService)->findEpgChannelCandidatesUsingSettings($channel, $this->epg, [
+            'similarity_threshold' => 70,
+            'fuzzy_max_distance' => 25,
+            'exact_match_distance' => 8,
+        ]);
+
+        // Only UTF-8 trim and case folding should apply - this IS a valid exact identifier match
+        expect($result['automatic_match']?->id)->toBe($epgChannel->id)
+            ->and($result['decision'])->toBe('exact_identifier');
     });
 });

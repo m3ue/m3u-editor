@@ -6,6 +6,7 @@ namespace App\Filament\CopilotTools;
 
 use App\Models\Channel;
 use App\Models\Epg;
+use App\Models\EpgMap;
 use App\Models\Playlist;
 use App\Services\SimilaritySearchService;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
@@ -20,7 +21,7 @@ use Stringable;
  * suffixes (| HD, | FHD, | EAST, etc.) from channel names, then scores
  * each cleaned name against display_name and additional_display_names in
  * the chosen EPG source. Returns:
- *   - Exact matches ready for auto-apply
+ *   - Automatic matches ready for confirmation
  *   - Fuzzy candidates needing human review (top 3 per channel)
  *   - Unresolved channels with no usable candidate
  *
@@ -34,7 +35,7 @@ class EpgChannelMatcherTool extends BaseTool
 
     public function description(): Stringable|string
     {
-        return 'Match unmapped IPTV channels in a playlist group to EPG guide channels. Strips IPTV prefixes (US:, UK:, PM:, etc.) and quality suffixes (| HD, | FHD, etc.) from channel names, then finds EPG candidates using exact and fuzzy matching. Returns exact matches ready to auto-apply, fuzzy candidates for human review, and unresolved channels. Always ask the user which EPG source (epg_id) to use. Call EpgMappingStateTool first to identify the playlist and group.';
+        return 'Match unmapped IPTV channels in a playlist group to EPG guide channels using the latest map settings for that playlist and source. Returns safe automatic matches for confirmation, review-only candidates, and unresolved channels. Always ask the user which EPG source (epg_id) to use. Call EpgMappingStateTool first to identify the playlist and group.';
     }
 
     /** @return array<string, mixed> */
@@ -108,45 +109,36 @@ class EpgChannelMatcherTool extends BaseTool
             ->orderBy('name')
             ->offset($offset)
             ->limit($limit)
-            ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
+            ->get(['id', 'name', 'name_custom', 'title', 'title_custom', 'stream_id', 'stream_id_custom']);
 
         if (! $epg->channels()->exists()) {
             return "EPG source \"{$epg->name}\" (id: {$epgId}) has no channels loaded. Please sync the EPG source first.";
         }
 
-        $exactMatches = [];
+        $automaticMatches = [];
         $fuzzyMatches = [];
         $unresolved = [];
         $matcher = app(SimilaritySearchService::class);
-
-        // Preload matching EPG channels once for the whole batch instead of
-        // issuing a LIKE scan per channel. Most EPG sources are large enough
-        // that N round-trips dominate the request time.
-        $unionTerms = $channels->flatMap(
-            fn (Channel $channel): array => $matcher->searchTermsFor(
-                channel: $channel,
-                cleanedTitle: $channel->title_custom ?? $channel->title,
-                cleanedName: $channel->name_custom ?? $channel->name,
-            ),
-        )->unique()->values()->all();
-        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms);
+        $settings = EpgMap::query()
+            ->where('user_id', auth()->id())
+            ->where('playlist_id', $playlistId)
+            ->where('epg_id', $epgId)
+            ->latest('id')
+            ->value('settings') ?? [];
 
         foreach ($channels as $channel) {
-            $result = $matcher->findEpgChannelCandidates(
-                channel: $channel,
-                epg: $epg,
-                removeQualityIndicators: true,
-                prefetchedCandidates: $prefetched,
-            );
+            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings);
             $topCandidate = $result['candidates'][0] ?? null;
 
-            if ($result['automatic_match'] && ($topCandidate['confidence'] ?? 0) === 100) {
-                $exactMatches[] = [
+            if ($result['automatic_match']) {
+                $automaticMatches[] = [
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
                     'cleaned_name' => $result['normalized_name'],
                     'epg_channel_id' => $result['automatic_match']->id,
                     'epg_display_name' => $topCandidate['display_name'],
+                    'decision' => $result['decision'],
+                    'candidates' => $result['candidates'],
                 ];
 
                 continue;
@@ -157,12 +149,14 @@ class EpgChannelMatcherTool extends BaseTool
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
                     'cleaned_name' => $result['normalized_name'],
+                    'decision' => $result['decision'],
                 ];
             } else {
                 $fuzzyMatches[] = [
                     'channel_id' => $channel->id,
                     'original_name' => $channel->name,
                     'cleaned_name' => $result['normalized_name'],
+                    'decision' => $result['decision'],
                     'candidates' => array_map(fn (array $candidate): array => [
                         'epg_channel_id' => $candidate['epg_channel_id'],
                         'display_name' => $candidate['display_name'],
@@ -170,6 +164,7 @@ class EpgChannelMatcherTool extends BaseTool
                         'reason' => $candidate['reason'],
                         'matched_value' => $candidate['matched_value'],
                         'normalized_value' => $candidate['normalized_value'],
+                        'evidence' => $candidate['evidence'],
                     ], $result['candidates']),
                 ];
             }
@@ -180,7 +175,7 @@ class EpgChannelMatcherTool extends BaseTool
             $group,
             $epg->name,
             $epgId,
-            $exactMatches,
+            $automaticMatches,
             $fuzzyMatches,
             $unresolved,
             $offset,
@@ -190,7 +185,7 @@ class EpgChannelMatcherTool extends BaseTool
     }
 
     /**
-     * @param  list<array<string, mixed>>  $exactMatches
+     * @param  list<array<string, mixed>>  $automaticMatches
      * @param  list<array<string, mixed>>  $fuzzyMatches
      * @param  list<array<string, mixed>>  $unresolved
      */
@@ -199,7 +194,7 @@ class EpgChannelMatcherTool extends BaseTool
         string $group,
         string $epgName,
         int $epgId,
-        array $exactMatches,
+        array $automaticMatches,
         array $fuzzyMatches,
         array $unresolved,
         int $offset,
@@ -218,12 +213,16 @@ class EpgChannelMatcherTool extends BaseTool
             '',
         ];
 
-        if (! empty($exactMatches)) {
-            $lines[] = 'EXACT MATCHES (confirm with user before applying):';
+        if (! empty($automaticMatches)) {
+            $lines[] = 'AUTOMATIC MATCHES (confirm with user before applying):';
 
-            foreach ($exactMatches as $m) {
+            foreach ($automaticMatches as $m) {
                 $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\"";
-                $lines[] = "    → {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']})";
+                $lines[] = "    -> {$m['epg_display_name']} (epg_channel_id: {$m['epg_channel_id']}) [{$m['decision']}]";
+
+                foreach ($m['candidates'] as $i => $c) {
+                    $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) - {$c['confidence']}% - {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
+                }
             }
 
             $lines[] = '';
@@ -233,7 +232,7 @@ class EpgChannelMatcherTool extends BaseTool
             $lines[] = 'FUZZY MATCHES (ask user to choose the correct candidate or skip):';
 
             foreach ($fuzzyMatches as $m) {
-                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" → normalized: \"{$m['cleaned_name']}\"";
+                $lines[] = "  Channel #{$m['channel_id']} \"{$m['original_name']}\" -> normalized: \"{$m['cleaned_name']}\" [{$m['decision']}]";
 
                 foreach ($m['candidates'] as $i => $c) {
                     $lines[] = '    '.($i + 1).". {$c['display_name']} (epg_channel_id: {$c['epg_channel_id']}) - {$c['score']}% - {$c['reason']}; compared \"{$c['matched_value']}\" as \"{$c['normalized_value']}\"";
@@ -247,15 +246,15 @@ class EpgChannelMatcherTool extends BaseTool
             $lines[] = 'UNRESOLVED (no match found, will remain unmapped):';
 
             foreach ($unresolved as $u) {
-                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" → normalized: \"{$u['cleaned_name']}\"";
+                $lines[] = "  Channel #{$u['channel_id']} \"{$u['original_name']}\" -> normalized: \"{$u['cleaned_name']}\" [{$u['decision']}]";
             }
 
             $lines[] = '';
         }
 
         $lines[] = sprintf(
-            'Summary: %d exact, %d fuzzy, %d unresolved.',
-            count($exactMatches),
+            'Summary: %d automatic, %d fuzzy, %d unresolved.',
+            count($automaticMatches),
             count($fuzzyMatches),
             count($unresolved)
         );
@@ -266,7 +265,7 @@ class EpgChannelMatcherTool extends BaseTool
         }
 
         $lines[] = '';
-        $lines[] = 'Present this plan to the user. Get approval for the exact matches and resolve the fuzzy ones before calling EpgMappingApplyTool.';
+        $lines[] = 'Present this plan to the user. Get approval for the automatic matches and resolve the fuzzy ones before calling EpgMappingApplyTool.';
 
         return implode("\n", $lines);
     }
