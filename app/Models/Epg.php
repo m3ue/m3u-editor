@@ -226,18 +226,24 @@ class Epg extends Model
     }
 
     /**
-     * Get PlaylistAliases for playlists that have channels mapped to this EPG.
+     * Get PlaylistAliases for playlists (standard or custom) that have channels mapped to this EPG.
      */
     public function getPlaylistAliases(): SupportCollection|Collection
     {
-        $ids = PlaylistAlias::join('playlists', 'playlists.id', '=', 'playlist_aliases.playlist_id')
+        $idsFromPlaylist = PlaylistAlias::join('playlists', 'playlists.id', '=', 'playlist_aliases.playlist_id')
             ->join('channels', 'channels.playlist_id', '=', 'playlists.id')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
             ->where('epg_channels.epg_id', $this->id)
-            ->pluck('playlist_aliases.id')
-            ->unique()
-            ->values()
-            ->all();
+            ->pluck('playlist_aliases.id');
+
+        $idsFromCustomPlaylist = PlaylistAlias::join('custom_playlists', 'custom_playlists.id', '=', 'playlist_aliases.custom_playlist_id')
+            ->join('channel_custom_playlist', 'channel_custom_playlist.custom_playlist_id', '=', 'custom_playlists.id')
+            ->join('channels', 'channels.id', '=', 'channel_custom_playlist.channel_id')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+            ->where('epg_channels.epg_id', $this->id)
+            ->pluck('playlist_aliases.id');
+
+        $ids = $idsFromPlaylist->concat($idsFromCustomPlaylist)->unique()->values()->all();
 
         return $ids ? PlaylistAlias::whereIn('id', $ids)->get() : collect();
     }
