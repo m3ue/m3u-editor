@@ -264,8 +264,135 @@ it('getAvailableTracks lists real audio and subtitle streams for the picker UI',
 
     $tracks = makeEmbyTrackPreferenceService()->getAvailableTracks('item-1');
 
+    // The Spanish PGS (bitmap) stream is excluded — it can't be converted to
+    // WebVTT, so it must never be offered as a pickable per-item override.
     expect($tracks['audio'])->toHaveCount(2)
-        ->and($tracks['subtitle'])->toHaveCount(3)
+        ->and($tracks['subtitle'])->toHaveCount(2)
         ->and(collect($tracks['audio'])->pluck('language')->all())->toBe(['eng', 'jpn'])
-        ->and(collect($tracks['subtitle'])->pluck('index')->all())->toBe([3, 4, 5]);
+        // 'index' is a composite "{type_relative_position}:{absolute_container_index}"
+        // — position 0/1 among subtitle streams specifically (not Emby's absolute
+        // Index 3/4, which is what appears after the colon).
+        ->and(collect($tracks['subtitle'])->pluck('index')->all())->toBe(['0:3', '1:4']);
+});
+
+it('excludes bitmap-format subtitle streams from getAvailableTracks (cannot convert to WebVTT)', function () {
+    // The real field bug: FFmpeg crashes outright (exit code 234) when mapping a
+    // PGS/VobSub bitmap subtitle stream for HLS output, since its default WebVTT
+    // encoder only supports text-to-text conversion. Bitmap streams must not be
+    // offered as pickable per-item overrides — but they still occupy a real
+    // container stream slot, so they must remain counted toward the position
+    // numbering (see the dedicated renumbering test below).
+    fakeEmbyItemsEndpointWithStreams();
+
+    $tracks = makeEmbyTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect(collect($tracks['subtitle'])->pluck('label')->all())
+        ->not->toContain('Spanish PGS (bitmap)')
+        ->and(collect($tracks['subtitle'])->pluck('language')->all())
+        ->not->toContain('spa');
+});
+
+it('keeps subtitle positions aligned with FFmpeg container addressing when a bitmap stream is skipped', function () {
+    // The exact reported bug: a bitmap (PGS) subtitle stream sitting BETWEEN two
+    // real text subtitle streams was previously skipped before incrementing the
+    // position counter, so the second text stream was stored at position "1"
+    // when FFmpeg's own `0:s:N` addressing (which counts every embedded stream,
+    // including the bitmap one) actually sees it at position "2" — silently
+    // selecting the wrong subtitle track (or the bitmap one, or nothing) when an
+    // operator picked the visually-second-listed option.
+    Http::fake([
+        'http://emby.local:8096/Items*' => Http::response([
+            'Items' => [[
+                'Id' => 'item-1',
+                'MediaSources' => [['Id' => 'ms-1']],
+                'MediaStreams' => [
+                    [
+                        'Index' => 3,
+                        'Type' => 'Subtitle',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English (SRT)',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                    ],
+                    [
+                        'Index' => 4,
+                        'Type' => 'Subtitle',
+                        'Language' => 'spa',
+                        'DisplayTitle' => 'Spanish PGS (bitmap)',
+                        'Codec' => 'pgssub',
+                        'IsTextSubtitleStream' => false,
+                    ],
+                    [
+                        'Index' => 5,
+                        'Type' => 'Subtitle',
+                        'Language' => 'fra',
+                        'DisplayTitle' => 'French (SRT)',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                    ],
+                ],
+            ]],
+        ], 200),
+    ]);
+
+    $tracks = makeEmbyTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['subtitle'])->toHaveCount(2)
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:3')
+        // French claims position 2 (not 1) — the bitmap stream at position 1
+        // still occupies a real container slot in FFmpeg's own numbering.
+        ->and($tracks['subtitle'][1]['index'])->toBe('2:5');
+});
+
+it('excludes external subtitle streams from getAvailableTracks (unaddressable via raw-file -map)', function () {
+    // The real field bug: Emby/Jellyfin flags sidecar subtitle files with
+    // IsExternal=true. They can never be reached via FFmpeg's `-map 0:s:{N}?`
+    // type-relative addressing when opening the raw file directly (that only sees
+    // streams actually embedded in the container), so they must not be offered as
+    // pickable per-item overrides or counted toward the position numbering.
+    Http::fake([
+        'http://emby.local:8096/Items*' => Http::response([
+            'Items' => [[
+                'Id' => 'item-1',
+                'MediaSources' => [['Id' => 'ms-1']],
+                'MediaStreams' => [
+                    [
+                        'Index' => 1,
+                        'Type' => 'Subtitle',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English (SRT External)',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                        'IsExternal' => true,
+                    ],
+                    [
+                        'Index' => 2,
+                        'Type' => 'Subtitle',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English (SRT)',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                        'IsExternal' => false,
+                    ],
+                    [
+                        'Index' => 3,
+                        'Type' => 'Subtitle',
+                        'Language' => 'eng',
+                        'DisplayTitle' => 'English (SRT External) 2',
+                        'Codec' => 'srt',
+                        'IsTextSubtitleStream' => true,
+                        'IsExternal' => true,
+                    ],
+                ],
+            ]],
+        ], 200),
+    ]);
+
+    $tracks = makeEmbyTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['subtitle'])->toHaveCount(1)
+        ->and($tracks['subtitle'][0]['label'])->toBe('English (SRT)')
+        // The only embedded stream becomes position 0 — external streams before it
+        // in the source order are not counted.
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:2');
 });

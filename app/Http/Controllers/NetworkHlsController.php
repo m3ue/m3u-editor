@@ -68,13 +68,17 @@ class NetworkHlsController extends Controller
                 return response('Broadcast not available', $response->status());
             }
 
-            $playlist = $response->body();
-
-            if ($this->isMasterPlaylist($playlist)) {
-                // Subtitles are enabled for this network: the proxy returns a master
-                // playlist referencing a video variant + subtitle variant playlist
-                // instead of a flat list of .ts segments.
-                $playlist = $this->rewriteMasterPlaylist($playlist, $network);
+            if ($this->broadcastService->subtitlesEnabledForCurrentBroadcast($network)) {
+                // FFmpeg auto-converts a mapped subtitle stream to WebVTT and writes it
+                // as a companion sub-playlist (live_vtt.m3u8, derived from the video
+                // playlist's own filename) — but it never upgrades live.m3u8 itself
+                // into a proper HLS master playlist referencing both renditions, even
+                // with a subtitle stream mapped. Synthesize that master playlist here;
+                // the video/subtitle sub-playlists are served unchanged via variant()'s
+                // existing fetch-and-rewrite logic (built for this in #1291, but never
+                // actually reachable before now — the proxy alone never emits
+                // #EXT-X-STREAM-INF, confirmed by testing FFmpeg's HLS muxer directly).
+                $playlist = $this->buildMasterPlaylistWithSubtitles($network);
             } else {
                 // Rewrite segment URLs to go through our proxy route
                 // FFmpeg outputs segment names like "live000001.ts" in the playlist
@@ -83,7 +87,7 @@ class NetworkHlsController extends Controller
                 $playlist = preg_replace(
                     '/^(live\d+\.ts)$/m',
                     $baseUrl.'/$1',
-                    $playlist
+                    $response->body()
                 );
             }
 
@@ -182,46 +186,34 @@ class NetworkHlsController extends Controller
     }
 
     /**
-     * Whether a playlist body is a master playlist (subtitles enabled) rather
-     * than a flat media playlist of .ts segments.
+     * Synthesize an HLS master playlist referencing the video variant (the flat
+     * live.m3u8 FFmpeg already produces) and the subtitle variant (the
+     * live_vtt.m3u8 WebVTT sub-playlist FFmpeg automatically derives whenever a
+     * subtitle stream is mapped — same base filename with a "_vtt" suffix before
+     * the extension). Both are served through hls-variant/ (variant()), which
+     * already knows how to fetch an arbitrary .m3u8 from the proxy and rewrite its
+     * bare segment references back through our domain.
+     *
+     * DEFAULT=NO/AUTOSELECT=YES: available in the player's subtitle menu but not
+     * forced on for every viewer — matches the operator's "make it available"
+     * intent (enabling the preference), not "force it on".
+     *
+     * If the source has no subtitle stream at all, FFmpeg never produces
+     * live_vtt.m3u8 despite subtitles being requested — the URI below then 404s,
+     * which players tolerate by simply not offering that rendition.
      */
-    protected function isMasterPlaylist(string $playlist): bool
-    {
-        return str_contains($playlist, '#EXT-X-STREAM-INF');
-    }
-
-    /**
-     * Rewrite a master playlist's references to its video/subtitle variant
-     * sub-playlists so they resolve back through our domain.
-     */
-    protected function rewriteMasterPlaylist(string $playlist, Network $network): string
+    protected function buildMasterPlaylistWithSubtitles(Network $network): string
     {
         $variantBaseUrl = url("/network/{$network->uuid}/hls-variant");
 
-        // FFmpeg marks the subtitle rendition DEFAULT=YES, which forces it on for
-        // every viewer. The operator enabling detection means "make it available",
-        // not "force it on" — flip to available-but-off (AUTOSELECT=YES keeps it
-        // selectable in the player's menu; a bare DEFAULT=NO can make some players
-        // drop it from the menu entirely).
-        $playlist = preg_replace(
-            '/^(#EXT-X-MEDIA:TYPE=SUBTITLES.*?)DEFAULT=YES(.*)$/m',
-            '$1DEFAULT=NO,AUTOSELECT=YES$2',
-            $playlist
-        );
-
-        // The subtitle rendition's URI="live_0_vtt.m3u8" attribute.
-        $playlist = preg_replace_callback(
-            '/URI="([^"]+\.m3u8)"/',
-            fn (array $matches) => 'URI="'.$variantBaseUrl.'/'.$matches[1].'"',
-            $playlist
-        );
-
-        // The bare video-variant playlist reference line, e.g. "live_0.m3u8".
-        return preg_replace(
-            '/^(live[^\s]*\.m3u8)$/m',
-            $variantBaseUrl.'/$1',
-            $playlist
-        );
+        return implode("\n", [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Subtitle",DEFAULT=NO,AUTOSELECT=YES,URI="'.$variantBaseUrl.'/live_vtt.m3u8"',
+            '#EXT-X-STREAM-INF:BANDWIDTH=1400000,SUBTITLES="subs"',
+            $variantBaseUrl.'/live.m3u8',
+            '',
+        ]);
     }
 
     /**
@@ -297,14 +289,10 @@ class NetworkHlsController extends Controller
             return true;
         }
 
-        if ($this->isMasterPlaylist($playlist)) {
-            // Master playlists (subtitles enabled) don't list .ts segments directly —
-            // they're nested in the video variant sub-playlist. Checking that requires
-            // an extra fetch we don't want on this hot path, so treat the presence of
-            // a populated STREAM-INF line as sufficient evidence FFmpeg has started.
-            return true;
-        }
-
+        // The raw playlist fetched from the proxy is always the flat video
+        // playlist — FFmpeg itself never emits a master playlist (subtitles, when
+        // enabled, are synthesized into one separately by buildMasterPlaylistWithSubtitles()
+        // in playlist(), from the same flat live.m3u8 checked here).
         preg_match_all('/^live\d+\.ts$/m', $playlist, $matches);
         $segmentCount = count($matches[0] ?? []);
 
