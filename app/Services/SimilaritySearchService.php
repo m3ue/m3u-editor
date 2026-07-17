@@ -148,12 +148,29 @@ class SimilaritySearchService
     }
 
     /**
+     * Configure the matcher with settings for subsequent searchTermsFor calls.
+     * This sets the instance state without running a full search.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    public function configureForSettings(array $settings): void
+    {
+        $this->removeQualityIndicators = $settings['remove_quality_indicators'] ?? false;
+        $this->upperFuzzyThreshold = $settings['fuzzy_max_distance'] ?? 25;
+        $this->bestFuzzyThreshold = $settings['exact_match_distance'] ?? 8;
+        $this->qualityIndicators = array_map(
+            'mb_strtolower',
+            ($settings['quality_indicators'] ?? null) ?: self::DEFAULT_QUALITY_INDICATORS,
+        );
+    }
+
+    /**
      * Apply one map settings contract to normalization, scoring, retrieval, and decision-making.
      *
      * @param  array<string, mixed>  $settings
      * @return array<string, mixed>
      */
-    public function findEpgChannelCandidatesUsingSettings(Channel $channel, Epg $epg, array $settings): array
+    public function findEpgChannelCandidatesUsingSettings(Channel $channel, Epg $epg, array $settings, ?Collection $prefetchedCandidates = null): array
     {
         return $this->findEpgChannelCandidates(
             channel: $channel,
@@ -165,6 +182,7 @@ class SimilaritySearchService
             customQualityIndicators: ($settings['quality_indicators'] ?? null) ?: null,
             cleanedTitle: $this->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
             cleanedName: $this->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+            prefetchedCandidates: $prefetchedCandidates,
             cleanedIdentifier: $this->cleanIdentifierForMatching($channel->stream_id_custom ?? $channel->stream_id),
         );
     }
@@ -376,7 +394,9 @@ class SimilaritySearchService
 
         [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all(), $identifier, $callsign);
 
-        $databaseCandidates = $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
+        $databaseCandidates = $prefetchedCandidates
+            ? $this->filterPrefetchedCandidates($prefetchedCandidates, $searchTerms, $identifier, $callsign, $epg)
+            : $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
 
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
         $scoredCandidates = [];
@@ -623,6 +643,90 @@ class SimilaritySearchService
             ->orderBy('id')
             ->limit(self::MAX_DATABASE_CANDIDATES)
             ->get();
+    }
+
+    /**
+     * Convert a SQL LIKE pattern (with ! as escape char) to a PHP regex pattern.
+     */
+    private function likePatternToRegex(string $likePattern): string
+    {
+        // Escape regex special chars
+        $regex = preg_quote($likePattern, '/');
+        // Convert SQL LIKE wildcards to regex (%, _ are not regex special chars, so no backslash)
+        $regex = str_replace(['%', '_'], ['.*', '.'], $regex);
+
+        // Handle the escape character ! (not needed in regex since we already escaped)
+        return '/^'.$regex.'$/i';
+    }
+
+    /**
+     * Filter a pre-fetched candidate collection to those relevant for a specific channel.
+     * This avoids running a new database query when a shared candidate set is available.
+     *
+     * @param  Collection<int, EpgChannel>  $prefetchedCandidates
+     * @param  list<string>  $searchTerms
+     * @return Collection<int, EpgChannel>
+     */
+    private function filterPrefetchedCandidates(
+        Collection $prefetchedCandidates,
+        SupportCollection $searchTerms,
+        string $identifier,
+        string $callsign,
+        ?Epg $epg = null,
+    ): Collection {
+        // First filter by EPG source if provided
+        if ($epg !== null) {
+            $prefetchedCandidates = $prefetchedCandidates->filter(fn (EpgChannel $c): bool => $c->epg_id === $epg->id)->values();
+        }
+
+        $regexPatterns = [];
+        foreach ($searchTerms as $term) {
+            $likeTerm = $this->likePattern($term);
+            $regexPatterns[] = $this->likePatternToRegex($likeTerm);
+        }
+
+        $result = $prefetchedCandidates->filter(function (EpgChannel $epgChannel) use ($regexPatterns, $identifier, $callsign): bool {
+            // Exact identifier match
+            if ($identifier !== '' && mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8') === $identifier) {
+                return true;
+            }
+
+            // Exact callsign match
+            if ($callsign !== '') {
+                $callsignLower = $callsign;
+                $channelId = mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8');
+                $name = mb_strtolower(trim((string) $epgChannel->name), 'UTF-8');
+                $displayName = mb_strtolower(trim((string) $epgChannel->display_name), 'UTF-8');
+
+                if ($channelId === $callsignLower || str_starts_with($channelId, $callsignLower.'-')
+                    || $name === $callsignLower || str_starts_with($name, $callsignLower.'-')
+                    || $displayName === $callsignLower || str_starts_with($displayName, $callsignLower.'-')) {
+                    return true;
+                }
+            }
+
+            // Search term matches (name, display_name, channel_id, additional_display_names)
+            $channelId = mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8');
+            $name = mb_strtolower(trim((string) $epgChannel->name), 'UTF-8');
+            $displayName = mb_strtolower(trim((string) $epgChannel->display_name), 'UTF-8');
+
+            foreach ($regexPatterns as $regex) {
+                if (preg_match($regex, $channelId) || preg_match($regex, $name) || preg_match($regex, $displayName)) {
+                    return true;
+                }
+
+                // Check additional_display_names
+                foreach ($epgChannel->additional_display_names ?? [] as $additional) {
+                    if (preg_match($regex, mb_strtolower(trim((string) $additional), 'UTF-8'))) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        })->values();
+
+        return $result;
     }
 
     /**

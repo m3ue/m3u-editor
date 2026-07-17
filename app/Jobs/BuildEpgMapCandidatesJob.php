@@ -92,15 +92,33 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
         $matcher = app(SimilaritySearchService::class);
         $total = $channels->count();
 
+        // Configure matcher with settings so searchTermsFor uses the same cleaning
+        $matcher->configureForSettings($settings);
+
+        // Collect all search terms from all channels for a single shared EPG query
+        // Use the same cleaning logic as findEpgChannelCandidatesUsingSettings
+        $allSearchTerms = $channels
+            ->flatMap(fn (Channel $channel): array => $matcher->searchTermsFor(
+                channel: $channel,
+                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
+                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+            ))
+            ->unique()
+            ->values()
+            ->all();
+
+        // Load EPG candidates once for the entire batch
+        $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $allSearchTerms);
+
         // Clear any prior run upfront so the UI never shows stale rows during
         // the build, and reset progress so the poll can observe it moving.
         $map->candidates()->delete();
-
-        $processed = 0;
         $rows = [];
+        $processed = 0;
 
         foreach ($channels as $channel) {
-            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings);
+            // Pass the shared candidate set so each channel reuses the same EPG query
+            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
 
             $top = $result['candidates'][0] ?? null;
             $alternatives = $top ? array_slice($result['candidates'], 1) : [];

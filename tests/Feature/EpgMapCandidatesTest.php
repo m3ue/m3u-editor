@@ -12,6 +12,7 @@ use App\Models\EpgMapCandidate;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SimilaritySearchService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -359,4 +360,71 @@ it('hides Build Candidates action when the map epg is owned by another user', fu
     ]);
 
     Livewire::test(ViewEpgMap::class, ['record' => $map->id])->assertActionHidden('buildCandidates');
+});
+
+it('builds candidate rows with a single shared EPG query per batch (query count regression)', function () {
+    // Create 10 EPG channels that could match
+    for ($i = 0; $i < 10; $i++) {
+        candidatesEpgChannel([
+            'name' => "Sports Channel {$i}",
+            'display_name' => "Sports Channel {$i}",
+            'channel_id' => "sports-{$i}.us",
+        ]);
+    }
+    // Create 20 playlist channels that need matching
+    for ($i = 0; $i < 20; $i++) {
+        candidatesChannel("Sports Channel {$i} HD");
+    }
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+
+    $queryCount = 0;
+    Event::listen('eloquent.retrieved: '.EpgChannel::class, function () use (&$queryCount): void {
+        $queryCount++;
+    });
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    // With the fix, this should be 1 query (the shared loadEpgCandidates call)
+    // plus any verification queries. Without the fix, it's 20 queries (one per channel).
+    // We expect the optimized path to use significantly fewer queries than channel count.
+    expect($queryCount)->toBeLessThan(20)
+        ->and($map->candidates()->count())->toBe(20);
+});
+
+it('produces identical candidate decisions whether using shared query or per-channel query (parity regression)', function () {
+    // Create EPG channels
+    $epgA = candidatesEpgChannel([
+        'name' => 'ESPN News Plus',
+        'display_name' => 'ESPN News Plus',
+        'channel_id' => 'espnews-plus',
+    ]);
+    $epgB = candidatesEpgChannel([
+        'name' => 'Fox Soccer Channel Premier',
+        'display_name' => 'Fox Soccer Channel Premier',
+        'channel_id' => 'fox-soccer-prem',
+    ]);
+    // Create playlist channels
+    $channelA = candidatesChannel('ESPN News Plus HD');
+    $channelB = candidatesChannel('Fox Soccer Channel Premier HD');
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+
+    // Run the job (which should use shared query after fix)
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    // Also run direct per-channel matching for comparison
+    $matcher = new SimilaritySearchService;
+    $directA = $matcher->findEpgChannelCandidates($channelA, $this->epg, removeQualityIndicators: true);
+    $directB = $matcher->findEpgChannelCandidates($channelB, $this->epg, removeQualityIndicators: true);
+
+    $rows = $map->candidates()->orderBy('channel_id')->get();
+    $rowA = $rows->firstWhere('channel_id', $channelA->id);
+    $rowB = $rows->firstWhere('channel_id', $channelB->id);
+
+    // Decisions must match exactly between shared-query and per-channel paths
+    expect($rowA->automatic_match)->toBe((bool) $directA['automatic_match'])
+        ->and($rowA->epg_channel_id)->toBe($directA['automatic_match']?->id ?? $directA['candidates'][0]['epg_channel_id'] ?? null)
+        ->and($rowB->automatic_match)->toBe((bool) $directB['automatic_match'])
+        ->and($rowB->epg_channel_id)->toBe($directB['automatic_match']?->id ?? $directB['candidates'][0]['epg_channel_id'] ?? null)
+        ->and($rowA->top_confidence)->toBe($directA['candidates'][0]['confidence'] ?? 0)
+        ->and($rowB->top_confidence)->toBe($directB['candidates'][0]['confidence'] ?? 0);
 });

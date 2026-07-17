@@ -126,8 +126,26 @@ class EpgChannelMatcherTool extends BaseTool
             ->latest('id')
             ->value('settings') ?? [];
 
+        // Configure matcher with settings so searchTermsFor uses the same cleaning
+        $matcher->configureForSettings($settings);
+
+        // Collect all search terms from all channels for a single shared EPG query
+        $allSearchTerms = $channels
+            ->flatMap(fn (Channel $channel): array => $matcher->searchTermsFor(
+                channel: $channel,
+                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
+                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+            ))
+            ->unique()
+            ->values()
+            ->all();
+
+        // Load EPG candidates once for the entire batch
+        $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $allSearchTerms);
+
         foreach ($channels as $channel) {
-            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings);
+            // Pass the shared candidate set so each channel reuses the same EPG query
+            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
             $topCandidate = $result['candidates'][0] ?? null;
 
             if ($result['automatic_match']) {
