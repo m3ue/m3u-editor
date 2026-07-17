@@ -126,7 +126,10 @@ class ChannelsRelationManager extends RelationManager
                             ->where('tags.type', '=', $ownerRecord->uuid);
                     })
                     ->orderByRaw("{$orderByClause} {$direction}")
-                    ->select('channels.*', DB::raw("{$orderByClause} as tag_name_sort"))
+                    ->select(
+                        'channels.*',
+                        DB::raw("{$orderByClause} as tag_name_sort"),
+                        DB::raw('COALESCE(channel_custom_playlist.sort, channels.sort) as pivot_sort'))
                     ->distinct();
             });
         $defaultColumns = ChannelResource::getTableColumns(showGroup: true, showPlaylist: true);
@@ -455,7 +458,7 @@ class ChannelsRelationManager extends RelationManager
             ->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {
+                ->modifyQueryUsing(fn ($query) => $query->whereHas('tags', function ($tagQuery) use ($tag) {
                     $tagQuery->where('type', $tag->type)
                         ->where('name->en', $tag->name);
                 }))
@@ -466,13 +469,12 @@ class ChannelsRelationManager extends RelationManager
         array_unshift(
             $tabs,
             Tab::make(__('All'))
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false))
                 ->badge($ownerRecord->channels()->where('is_vod', false)->count())
         );
         array_push(
             $tabs,
             Tab::make(__('Uncategorized'))
-                ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
+                ->modifyQueryUsing(fn ($query) => $query->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
                     $tagQuery->where('type', $ownerRecord->uuid);
                 }))
                 ->badge($ownerRecord->channels()->where('is_vod', false)->whereDoesntHave('tags', function ($tagQuery) use ($ownerRecord) {
