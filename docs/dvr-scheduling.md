@@ -6,34 +6,62 @@ content.
 
 ---
 
-## 1. The Tick Loop
+## 1. The Tick Loop and the Daily Deep Scan
 
-Scheduling is driven by a single recurring job that runs **every minute**.
+Scheduling is split across two recurring jobs:
 
-- Schedule registration: `routes/console.php:98`
+- **`DvrSchedulerTick`** — every minute. Only triggers/stops already-`Scheduled`
+  recordings; it does **not** query the EPG or match rules.
+- **`DvrDeepScan`** — daily (default 03:00, `dvr.deep_scan_hour`). Matches all
+  enabled rules against the EPG using the full `initial_lookahead_days`
+  window (default 14 days) and creates `Scheduled` rows.
+
+This split exists because rule matching is EPG-query-heavy and only needs to
+run often enough to catch new EPG data (XMLTV/Schedules Direct imports),
+while trigger/stop needs minute precision to start and stop recordings on
+time. Running the expensive match step every minute was wasteful; running it
+only once a day keeps the per-minute tick cheap while still catching new EPG
+data within 24h.
+
+- Schedule registration: `routes/console.php`
   ```php
   Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
+  Schedule::job(new DvrDeepScan)->dailyAt(sprintf('%02d:00', $deepScanHour))->withoutOverlapping();
   ```
-- Job: `app/Jobs/DvrSchedulerTick.php`
-  - Implements `ShouldBeUnique` — only one tick can be queued/running at a time.
-  - Dispatched onto the `dvr` queue (handled by the `dvr-queue` Horizon
+- Jobs: `app/Jobs/DvrSchedulerTick.php`, `app/Jobs/DvrDeepScan.php`
+  - Both implement `ShouldBeUnique` — only one instance of each can be
+    queued/running at a time.
+  - Both dispatched onto the `dvr` queue (handled by the `dvr-queue` Horizon
     supervisor).
-  - `tries = 1`, `timeout = 120s`.
-- Service: `app/Services/DvrSchedulerService::tick()` at
-  `app/Services/DvrSchedulerService.php:35`.
+  - `DvrSchedulerTick`: `tries = 1`, `timeout = 120s`.
+  - `DvrDeepScan`: `tries = 1`, `timeout = 600s`.
+- Service: `app/Services/DvrSchedulerService.php`
+  - `tick()` — trigger/stop only, called by `DvrSchedulerTick` every minute.
+  - `matchAndSchedule(int $lookaheadMinutes)` — match rules → create
+    `Scheduled` rows, called by `DvrDeepScan` (daily) and internally by
+    `scheduleRuleImmediately()` (see below).
 
-Each tick does three things in order:
+`DvrSchedulerTick::tick()` does two things in order:
 
-1. **Match rules → create `Scheduled` rows** (`matchAndSchedule`)
-2. **Trigger** any `Scheduled` rows whose `scheduled_start` has arrived
+1. **Trigger** any `Scheduled` rows whose `scheduled_start` has arrived
    (`triggerPendingRecordings`)
-3. **Stop** any `Recording` rows whose `scheduled_end` has passed
+2. **Stop** any `Recording` rows whose `scheduled_end` has passed
    (`stopExpiredRecordings`)
 
-> The tick is also dispatched ad-hoc whenever a user creates/edits a rule or
-> hits "Record" in the UI (Browse Shows, EPG Viewer, rule resource pages) so
-> users do not have to wait up to 60s for the next cron tick to see their
-> recording appear.
+### Immediate scheduling on rule create/re-enable
+
+Since the per-minute tick no longer matches EPG data, `DvrRecordingRule`
+calls `DvrSchedulerService::scheduleRuleImmediately()` directly — synchronously,
+inside the `created` and `saving` (enable-transition) model hooks — for
+**every** rule type (Series, Once, Manual), not just Series. This is what
+makes a newly created or re-enabled rule show up as `Scheduled` within the
+same request, without waiting for the next `DvrDeepScan`.
+
+> `DvrSchedulerTick::dispatch()` is also fired ad-hoc whenever a user
+> creates/edits a rule or hits "Record" in the UI (Browse Shows, EPG Viewer,
+> rule resource pages). This is now mostly a fallback for trigger/stop of an
+> already-in-progress window — the actual scheduling happens synchronously
+> via the model hook above, not via this dispatch.
 
 ---
 
@@ -56,17 +84,20 @@ A rule is matched only while `enabled = true` (see `scopeEnabled`).
 Configured via `config/dvr.php`:
 
 ```php
-'scheduler_lookahead_minutes' => env('DVR_SCHEDULER_LOOKAHEAD_MINUTES', 30),
+'initial_lookahead_days' => env('DVR_INITIAL_LOOKAHEAD_DAYS', 14),
+'deep_scan_hour' => env('DVR_DEEP_SCAN_HOUR', 3),
 ```
 
-The scheduler only considers programmes whose `start_time` falls within
-**now → now + 30 minutes** (default). Anything farther in the future is
-deferred to a later tick. This keeps each tick cheap and lets EPG refreshes
-correct programme metadata before we lock anything in.
+Every matching pass — whether it's the daily `DvrDeepScan` or the immediate
+`scheduleRuleImmediately()` call on rule create/re-enable — uses the same
+**now → now + `initial_lookahead_days` days** window (default 14 days).
+There is no separate short-window "tick lookahead" anymore: matching either
+happens immediately (rule create/re-enable) or once a day (`DvrDeepScan`),
+never on a short interval, since the per-minute tick doesn't match at all.
 
-> Once and Manual rules **bypass** the lookahead because the user explicitly
-> chose the air-time — they schedule as soon as the rule exists, provided the
-> end-time has not passed yet.
+> Once and Manual rules **bypass** the lookahead check entirely because the
+> user explicitly chose the air-time — they schedule as soon as the rule
+> exists, provided the end-time has not passed yet.
 
 ---
 
@@ -156,17 +187,22 @@ channel title will use that title as the series_key instead.
 #### Why `Cancelled` and `Failed` are intentionally excluded
 
 The `whereIn(status, …)` only blocks **active** statuses. If a previous
-attempt was `Cancelled` or `Failed`, the next tick will happily re-schedule
-the same programme. This is by design — a failed recording should be
-retryable, not permanently locked out.
+attempt was `Cancelled` or `Failed`, the next matching pass (immediate
+schedule, or the next `DvrDeepScan`) will happily re-schedule the same
+programme. This is by design — a failed recording should be retryable, not
+permanently locked out.
 
 #### Why this is race-safe
 
-- `DvrSchedulerTick implements ShouldBeUnique` — only one tick runs at a time.
+- `DvrDeepScan implements ShouldBeUnique` — only one deep scan runs at a
+  time. `scheduleRuleImmediately()` (rule create/re-enable) runs synchronously
+  in the request that saves the rule, so it can in principle race with a
+  concurrent `DvrDeepScan` run.
 - The `exists` + `create` pair is wrapped in `DB::transaction()` so the read
-  and the write happen atomically.
-- The combination means even with multiple rules matching the same programme
-  inside a single tick, only one row wins.
+  and the write happen atomically regardless of which path triggered it —
+  this is what actually prevents a duplicate row, not job uniqueness alone.
+- The combination means even with multiple rules (or matching passes)
+  targeting the same programme concurrently, only one row wins.
 
 ### Layer C — `keep_last` (rolling retention, not strictly dedup)
 
@@ -251,7 +287,7 @@ times for dedup and post-processing.
 
 ## 10. Triggering and Stopping
 
-After `matchAndSchedule`, the tick processes:
+Every minute, independently of matching, `DvrSchedulerTick::tick()` runs:
 
 ### `triggerPendingRecordings()` (`:457`)
 
@@ -346,14 +382,15 @@ recording is pulling.
 
 | Concern                         | File |
 |---------------------------------|------|
-| Tick entry job                  | `app/Jobs/DvrSchedulerTick.php` |
+| Tick entry job (trigger/stop)    | `app/Jobs/DvrSchedulerTick.php` |
+| Deep scan entry job (match)      | `app/Jobs/DvrDeepScan.php` |
 | Scheduling logic                | `app/Services/DvrSchedulerService.php` |
 | Capacity check                  | `app/Models/DvrSetting.php:97` |
-| Rule model                      | `app/Models/DvrRecordingRule.php` |
+| Rule model (immediate scheduling on create/re-enable) | `app/Models/DvrRecordingRule.php` |
 | Recording model                 | `app/Models/DvrRecording.php` |
 | Rule-type enum                  | `app/Enums/DvrRuleType.php` |
 | Status enum                     | `app/Enums/DvrRecordingStatus.php` |
-| Schedule registration           | `routes/console.php:98` |
+| Schedule registration           | `routes/console.php` |
 | Config                          | `config/dvr.php` |
 | Retention / `keep_last`         | `app/Services/DvrRetentionService.php` |
 | Recorder (start)                | `app/Services/DvrRecorderService.php` + `app/Jobs/StartDvrRecording.php` |

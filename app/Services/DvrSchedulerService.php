@@ -71,9 +71,11 @@ class DvrSchedulerService
     }
 
     /**
-     * Schedule all upcoming matching programmes for a rule immediately,
-     * bypassing the 30-minute lookahead window. Used when a series rule is
-     * first created or re-enabled so users see scheduled recordings right away.
+     * Schedule all upcoming matching programmes for a rule immediately, using the
+     * full `initial_lookahead_days` window. Used for every rule type (Series, Once,
+     * Manual) when a rule is first created or re-enabled, since the per-minute tick
+     * no longer matches EPG data — without this, a newly created rule would sit
+     * unscheduled until the next daily DvrDeepScan run.
      */
     public function scheduleRuleImmediately(DvrRecordingRule $rule): void
     {

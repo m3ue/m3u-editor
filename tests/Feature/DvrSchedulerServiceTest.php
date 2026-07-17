@@ -1511,3 +1511,50 @@ it('DvrDeepScan is idempotent — running it twice does not create duplicate rec
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
+
+// --- Immediate scheduling must cover every rule type, not just Series ---
+//
+// The per-minute tick no longer matches EPG data at all (see above), so if
+// DvrRecordingRule::boot() only fired scheduleRuleImmediately() for Series
+// rules, a newly created Once or Manual rule would sit unscheduled until the
+// next daily DvrDeepScan (up to 24h). UI flows like Browse Shows and the EPG
+// Viewer create Once rules and dispatch DvrSchedulerTick expecting the
+// recording to materialise within seconds — these tests guard that path.
+
+it('immediately schedules a recording when a once rule with a valid programme_id is created', function () {
+    $programme = EpgProgramme::factory()->create([
+        'title' => 'Breaking News Special',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->addHours(3),
+        'end_time' => now()->addHours(4),
+    ]);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Once,
+            'programme_id' => $programme->id,
+        ]);
+
+    // No tick() or matchAndSchedule() call — creation alone must schedule it.
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
+        ->toBe(DvrRecordingStatus::Scheduled);
+});
+
+it('immediately schedules a recording when a manual rule is created', function () {
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'type' => DvrRuleType::Manual,
+            'manual_start' => now()->addHours(5),
+            'manual_end' => now()->addHours(6),
+        ]);
+
+    // No tick() or matchAndSchedule() call — creation alone must schedule it.
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
+        ->toBe(DvrRecordingStatus::Scheduled);
+});
