@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TranscodeMode;
 use App\Models\Network;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -26,19 +27,23 @@ it('passes through a flat playlist unchanged in structure when subtitles are not
     expect($body)->not->toContain('hls-variant');
 });
 
-it('rewrites a master playlist to point sub-playlists at the hls-variant route', function () {
-    $network = Network::factory()->for($this->user)->broadcasting()->create();
-
-    $master = <<<'M3U8'
-#EXTM3U
-#EXT-X-VERSION:6
-#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="subtitle_0",DEFAULT=YES,LANGUAGE="eng",URI="live_0_vtt.m3u8"
-#EXT-X-STREAM-INF:BANDWIDTH=2340800,RESOLUTION=320x240,CODECS="avc1.f4000d,mp4a.40.2",SUBTITLES="subs"
-live_0.m3u8
-M3U8;
+it('synthesizes a master playlist referencing live_vtt.m3u8 when the network has subtitles enabled', function () {
+    // FFmpeg itself never emits a master playlist (#EXT-X-STREAM-INF) — confirmed by
+    // testing its HLS muxer directly — it just auto-derives a live_vtt.m3u8 WebVTT
+    // sub-playlist alongside the flat video live.m3u8 whenever a subtitle stream is
+    // mapped. NetworkHlsController::playlist() decides whether to synthesize a master
+    // playlist purely from the network's own subtitle preference (not by inspecting
+    // the fetched playlist body, which is always the flat one), so the proxy response
+    // content here is irrelevant — only that the broadcast is reachable (200).
+    $network = Network::factory()->for($this->user)->broadcasting()->create([
+        'preferred_subtitle_track' => 'eng',
+    ]);
 
     Http::fake([
-        '*/broadcast/*/live.m3u8' => Http::response($master, 200),
+        '*/broadcast/*/live.m3u8' => Http::response(
+            "#EXTM3U\n#EXT-X-VERSION:6\n#EXTINF:6.000000,\nlive000001.ts\n",
+            200
+        ),
     ]);
 
     $response = $this->get(url("/network/{$network->uuid}/live.m3u8"));
@@ -47,11 +52,35 @@ M3U8;
     $body = $response->getContent();
 
     $variantBase = url("/network/{$network->uuid}/hls-variant");
-    expect($body)->toContain('URI="'.$variantBase.'/live_0_vtt.m3u8"');
-    expect($body)->toContain($variantBase.'/live_0.m3u8');
-    // Subtitles must be available-but-off by default, not forced on every viewer.
-    expect($body)->toContain('DEFAULT=NO,AUTOSELECT=YES');
-    expect($body)->not->toContain('DEFAULT=YES');
+    expect($body)->toContain('URI="'.$variantBase.'/live_vtt.m3u8"')
+        ->and($body)->toContain($variantBase.'/live.m3u8')
+        // Subtitles must be available-but-off by default, not forced on every viewer.
+        ->and($body)->toContain('DEFAULT=NO,AUTOSELECT=YES')
+        ->and($body)->not->toContain('DEFAULT=YES,');
+});
+
+it('does not synthesize a master playlist for a Server-mode network even with a subtitle preference set', function () {
+    // Server mode always forces subtitles off at the proxy layer — the media server
+    // itself is responsible for subtitle handling there, so the flat-playlist path
+    // must still be taken regardless of preferred_subtitle_track.
+    $network = Network::factory()->for($this->user)->broadcasting()->create([
+        'transcode_mode' => TranscodeMode::Server->value,
+        'preferred_subtitle_track' => 'eng',
+    ]);
+
+    Http::fake([
+        '*/broadcast/*/live.m3u8' => Http::response(
+            "#EXTM3U\n#EXT-X-VERSION:6\n#EXTINF:6.000000,\nlive000001.ts\n",
+            200
+        ),
+    ]);
+
+    $response = $this->get(url("/network/{$network->uuid}/live.m3u8"));
+
+    $response->assertOk();
+    $body = $response->getContent();
+    expect($body)->toContain(url("/network/{$network->uuid}/live000001.ts"))
+        ->and($body)->not->toContain('hls-variant');
 });
 
 it('rewrites a video variant sub-playlist segments through the hls-variant route', function () {
