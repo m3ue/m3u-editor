@@ -86,16 +86,17 @@ class ChannelsRelationManager extends RelationManager
 
                     switch ($driver) {
                         case 'pgsql':
-                            // PostgreSQL uses ->> operator for JSON
-                            $query->whereRaw('LOWER(tags.name->>\'$\') LIKE ?', ['%'.strtolower($search).'%']);
+                            // PostgreSQL uses ->> operator for JSON; tags.name is a translatable
+                            // JSON object ({"en": "..."}), so the key must be the locale, not "$"
+                            $query->whereRaw('LOWER(tags.name->>\'en\') LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'mysql':
-                            // MySQL uses JSON_EXTRACT
-                            $query->whereRaw('LOWER(JSON_EXTRACT(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
+                            // MySQL uses JSON_EXTRACT + JSON_UNQUOTE to read the "en" locale key
+                            $query->whereRaw('LOWER(JSON_UNQUOTE(JSON_EXTRACT(tags.name, "$.en"))) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         case 'sqlite':
-                            // SQLite uses json_extract
-                            $query->whereRaw('LOWER(json_extract(tags.name, "$")) LIKE ?', ['%'.strtolower($search).'%']);
+                            // SQLite uses json_extract to read the "en" locale key
+                            $query->whereRaw('LOWER(json_extract(tags.name, "$.en")) LIKE ?', ['%'.strtolower($search).'%']);
                             break;
                         default:
                             // Fallback - try to search the JSON as text
@@ -110,9 +111,9 @@ class ChannelsRelationManager extends RelationManager
 
                 // Build the ORDER BY clause based on database type
                 $orderByClause = match ($driver) {
-                    'pgsql' => 'tags.name->>\'$\'',
-                    'mysql' => 'JSON_EXTRACT(tags.name, "$")',
-                    'sqlite' => 'json_extract(tags.name, "$")',
+                    'pgsql' => 'tags.name->>\'en\'',
+                    'mysql' => 'JSON_UNQUOTE(JSON_EXTRACT(tags.name, "$.en"))',
+                    'sqlite' => 'json_extract(tags.name, "$.en")',
                     default => 'CAST(tags.name AS TEXT)'
                 };
 
