@@ -115,9 +115,12 @@ class SimilaritySearchService
 
     private bool $removeQualityIndicators = false;
 
+    /** @var array<string, list<int>> */
+    private array $exactNormalizedNameCandidateIds = [];
+
     /**
      * Apply the map's configured prefix or regex cleanup before any matching strategy runs.
-     * Used for channel names/titles only — NOT for identifiers.
+     * Used for channel names/titles only, not for identifiers.
      *
      * @param  array<string, mixed>  $settings
      */
@@ -184,6 +187,7 @@ class SimilaritySearchService
             cleanedName: $this->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
             prefetchedCandidates: $prefetchedCandidates,
             cleanedIdentifier: $this->cleanIdentifierForMatching($channel->stream_id_custom ?? $channel->stream_id),
+            prioritizeNameMatch: $settings['prioritize_name_match'] ?? false,
         );
     }
 
@@ -222,6 +226,7 @@ class SimilaritySearchService
         ?string $cleanedName = null,
         ?Collection $prefetchedCandidates = null,
         ?string $cleanedIdentifier = null,
+        bool $prioritizeNameMatch = false,
     ): ?EpgChannel {
         return $this->findEpgChannelCandidates(
             channel: $channel,
@@ -235,6 +240,7 @@ class SimilaritySearchService
             cleanedName: $cleanedName,
             prefetchedCandidates: $prefetchedCandidates,
             cleanedIdentifier: $cleanedIdentifier,
+            prioritizeNameMatch: $prioritizeNameMatch,
         )['automatic_match'];
     }
 
@@ -347,6 +353,7 @@ class SimilaritySearchService
         ?string $cleanedName = null,
         ?Collection $prefetchedCandidates = null,
         ?string $cleanedIdentifier = null,
+        bool $prioritizeNameMatch = false,
     ): array {
         $this->removeQualityIndicators = $removeQualityIndicators;
         $this->upperFuzzyThreshold = $fuzzyMaxDistance;
@@ -398,6 +405,40 @@ class SimilaritySearchService
         $databaseCandidates = $prefetchedCandidates
             ? $this->filterPrefetchedCandidates($prefetchedCandidates, $searchTerms, $identifier, $callsign, $epg)
             : $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
+
+        if ($prefetchedCandidates !== null && $identifier !== '') {
+            $databaseCandidates = $databaseCandidates
+                ->merge($epg->channels()
+                    ->whereRaw('TRIM(LOWER(channel_id)) = ?', [$identifier])
+                    ->whereNotIn('id', $databaseCandidates->modelKeys())
+                    ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+                    ->orderBy('id')
+                    ->limit(2)
+                    ->get())
+                ->unique('id')
+                ->values();
+        }
+
+        if ($prefetchedCandidates !== null && $callsign !== '') {
+            $callsignPrefix = $callsign.'-%';
+            $databaseCandidates = $databaseCandidates
+                ->merge($epg->channels()
+                    ->where(function (Builder $query) use ($callsign, $callsignPrefix): void {
+                        $query->whereRaw('TRIM(LOWER(channel_id)) = ?', [$callsign])
+                            ->orWhereRaw('TRIM(LOWER(channel_id)) LIKE ?', [$callsignPrefix])
+                            ->orWhereRaw('TRIM(LOWER(name)) = ?', [$callsign])
+                            ->orWhereRaw('TRIM(LOWER(name)) LIKE ?', [$callsignPrefix])
+                            ->orWhereRaw('TRIM(LOWER(display_name)) = ?', [$callsign])
+                            ->orWhereRaw('TRIM(LOWER(display_name)) LIKE ?', [$callsignPrefix]);
+                    })
+                    ->whereNotIn('id', $databaseCandidates->modelKeys())
+                    ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+                    ->orderBy('id')
+                    ->limit(2)
+                    ->get())
+                ->unique('id')
+                ->values();
+        }
 
         if ($prefetchedCandidates !== null && $databaseCandidates->isEmpty()) {
             $databaseCandidates = $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
@@ -494,11 +535,11 @@ class SimilaritySearchService
         }
 
         usort($scoredCandidates, fn (array $first, array $second): int => [
-            $this->evidencePriority($second['evidence']),
+            $this->candidatePriority($second, $prioritizeNameMatch),
             $second['confidence'],
             -$second['epg_channel_id'],
         ] <=> [
-            $this->evidencePriority($first['evidence']),
+            $this->candidatePriority($first, $prioritizeNameMatch),
             $first['confidence'],
             -$first['epg_channel_id'],
         ]);
@@ -506,7 +547,7 @@ class SimilaritySearchService
         // Verify decision completeness by running targeted queries for any
         // decision-critical evidence that might exist beyond the bounded window.
         // This ensures decisions don't depend on arbitrary row cutoffs.
-        $scoredCandidates = $this->verifyDecisionCompleteness(
+        $completeness = $this->verifyDecisionCompleteness(
             epg: $epg,
             scoredCandidates: $scoredCandidates,
             identifier: $identifier,
@@ -515,13 +556,15 @@ class SimilaritySearchService
             regionCode: $regionCode,
             similarityThreshold: $similarityThreshold,
         );
+        $scoredCandidates = $completeness['candidates'];
+        $softMarginComplete = $completeness['soft_margin_complete'];
 
         usort($scoredCandidates, fn (array $first, array $second): int => [
-            $this->evidencePriority($second['evidence']),
+            $this->candidatePriority($second, $prioritizeNameMatch),
             $second['confidence'],
             -$second['epg_channel_id'],
         ] <=> [
-            $this->evidencePriority($first['evidence']),
+            $this->candidatePriority($first, $prioritizeNameMatch),
             $first['confidence'],
             -$first['epg_channel_id'],
         ]);
@@ -568,7 +611,7 @@ class SimilaritySearchService
             } elseif ($topCandidate['is_exact']) {
                 $automaticMatch = $topCandidate['model'];
                 $decision = 'exact_name';
-            } elseif (($meetsDistanceRule || $meetsWordRule) && ! $hasSafeMargin) {
+            } elseif (($meetsDistanceRule || $meetsWordRule) && (! $hasSafeMargin || ! $softMarginComplete)) {
                 $decision = 'insufficient_margin';
             } elseif ($meetsDistanceRule || $meetsWordRule) {
                 $automaticMatch = $topCandidate['model'];
@@ -608,7 +651,7 @@ class SimilaritySearchService
     /**
      * Fetch the bounded candidate set using the canonical query.
      *
-     * @param  list<string>  $searchTerms
+     * @param  SupportCollection<int, string>  $searchTerms
      * @return Collection<int, EpgChannel>
      */
     private function fetchBoundedCandidates(
@@ -655,7 +698,7 @@ class SimilaritySearchService
      * This avoids running a new database query when a shared candidate set is available.
      *
      * @param  Collection<int, EpgChannel>  $prefetchedCandidates
-     * @param  list<string>  $searchTerms
+     * @param  SupportCollection<int, string>  $searchTerms
      * @return Collection<int, EpgChannel>
      */
     private function filterPrefetchedCandidates(
@@ -720,7 +763,7 @@ class SimilaritySearchService
      * of where rows fall relative to the MAX_DATABASE_CANDIDATES limit.
      *
      * @param  list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int, is_exact: bool, matched_value: string, normalized_value: string, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, display_name: string}>  $scoredCandidates
-     * @return list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int, is_exact: bool, matched_value: string, normalized_value: string, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, display_name: string}>
+     * @return array{candidates: list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int, is_exact: bool, matched_value: string, normalized_value: string, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, display_name: string}>, soft_margin_complete: bool}
      */
     private function verifyDecisionCompleteness(
         Epg $epg,
@@ -732,38 +775,46 @@ class SimilaritySearchService
         int $similarityThreshold,
     ): array {
         if ($scoredCandidates === []) {
-            return $scoredCandidates;
+            return ['candidates' => [], 'soft_margin_complete' => true];
         }
 
         $topCandidate = $scoredCandidates[0];
+        $softMarginComplete = true;
 
         // 1. If top candidate has identifier evidence, verify no other rows
         //    share the same identifier (ambiguous_identifier detection).
         if ($identifier !== '' && $topCandidate['evidence'] === 'identifier') {
-            $scoredCandidates = $this->verifyIdentifierCompleteness($epg, $scoredCandidates, $identifier, $regionCode);
+            $scoredCandidates = $this->verifyIdentifierCompleteness($epg, $scoredCandidates, $identifier);
         }
 
         // 2. If top candidate has callsign evidence, verify no other rows
         //    share the same callsign (ambiguous_callsign detection).
         if ($callsign !== '' && $topCandidate['evidence'] === 'callsign') {
-            $scoredCandidates = $this->verifyCallsignCompleteness($epg, $scoredCandidates, $callsign, $regionCode);
+            $scoredCandidates = $this->verifyCallsignCompleteness($epg, $scoredCandidates, $callsign);
         }
 
         // 3. If top candidate is an exact name match, verify no other rows
         //    share the same normalized name but different channel_id
         //    (ambiguous_name detection).
         if ($topCandidate['is_exact'] && $topCandidate['evidence'] !== 'identifier' && $topCandidate['evidence'] !== 'callsign') {
-            $scoredCandidates = $this->verifyExactNameCompleteness($epg, $scoredCandidates, $normalizedChan, $topCandidate, $regionCode, $similarityThreshold);
+            $scoredCandidates = $this->verifyExactNameCompleteness($epg, $scoredCandidates, $normalizedChan, $regionCode);
         }
 
         // 4. If top candidate is a soft match, verify we have the true
         //    runner-up by confidence (insufficient_margin detection).
         if (($topCandidate['evidence'] !== 'identifier' && $topCandidate['evidence'] !== 'callsign' && ! $topCandidate['is_exact'])
             && ($topCandidate['distance'] < $this->upperFuzzyThreshold)) {
-            $scoredCandidates = $this->verifySoftMarginCompleteness($epg, $scoredCandidates, $normalizedChan, $topCandidate, $regionCode, $similarityThreshold);
+            $softMarginComplete = $this->isSoftMarginComplete(
+                $epg,
+                $scoredCandidates,
+                $normalizedChan,
+                $topCandidate,
+                $regionCode,
+                $similarityThreshold,
+            );
         }
 
-        return $scoredCandidates;
+        return ['candidates' => $scoredCandidates, 'soft_margin_complete' => $softMarginComplete];
     }
 
     /**
@@ -776,14 +827,24 @@ class SimilaritySearchService
         Epg $epg,
         array $scoredCandidates,
         string $identifier,
-        ?string $regionCode,
     ): array {
+        $identifierMatches = collect($scoredCandidates)
+            ->where('evidence', 'identifier')
+            ->count();
+        $neededMatches = max(0, 2 - $identifierMatches);
+
+        if ($neededMatches === 0) {
+            return $scoredCandidates;
+        }
+
         $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
 
         $additional = $epg->channels()
             ->whereRaw('TRIM(LOWER(channel_id)) = ?', [$identifier])
             ->whereNotIn('id', $existingIds)
             ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->orderBy('id')
+            ->limit($neededMatches)
             ->get();
 
         foreach ($additional as $epgChannel) {
@@ -816,12 +877,21 @@ class SimilaritySearchService
         Epg $epg,
         array $scoredCandidates,
         string $callsign,
-        ?string $regionCode,
     ): array {
+        $callsignIdentities = collect($scoredCandidates)
+            ->where('evidence', 'callsign')
+            ->map(fn (array $candidate): string => $this->candidateIdentity($candidate))
+            ->unique();
+
+        if ($callsignIdentities->count() >= 2) {
+            return $scoredCandidates;
+        }
+
         $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
         $callsignPrefix = $callsign.'-%';
-
-        $additional = $epg->channels()
+        $identityExpression = $this->candidateIdentityExpression(DB::connection()->getConfig('driver'));
+        $matchingQuery = $epg->channels()->getQuery();
+        $matchingIds = $matchingQuery
             ->where(function (Builder $query) use ($callsign, $callsignPrefix): void {
                 $query->whereRaw('TRIM(LOWER(channel_id)) = ?', [$callsign])
                     ->orWhereRaw('TRIM(LOWER(channel_id)) LIKE ?', [$callsignPrefix])
@@ -830,8 +900,17 @@ class SimilaritySearchService
                     ->orWhereRaw('TRIM(LOWER(display_name)) = ?', [$callsign])
                     ->orWhereRaw('TRIM(LOWER(display_name)) LIKE ?', [$callsignPrefix]);
             })
+            ->selectRaw('MIN(id) AS id')
+            ->groupByRaw($identityExpression)
+            ->orderByRaw('MIN(id)')
+            ->limit(2)
+            ->pluck('id');
+
+        $additional = $epg->channels()
+            ->whereIn('id', $matchingIds)
             ->whereNotIn('id', $existingIds)
             ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->orderBy('id')
             ->get();
 
         foreach ($additional as $epgChannel) {
@@ -869,40 +948,21 @@ class SimilaritySearchService
         Epg $epg,
         array $scoredCandidates,
         string $normalizedChan,
-        array $topCandidate,
         ?string $regionCode,
-        int $similarityThreshold,
     ): array {
-        $topIdentity = $this->candidateIdentity($topCandidate);
         $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
+        $matchingIds = $this->exactNormalizedNameCandidateIds($epg, $normalizedChan);
+        $missingIds = array_values(array_diff($matchingIds, $existingIds));
 
-        // Find candidates with same normalized name but different channel_id
+        if ($missingIds === []) {
+            return $scoredCandidates;
+        }
+
         $additional = $epg->channels()
-            ->whereNotIn('id', $existingIds)
+            ->whereIn('id', $missingIds)
             ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
-            ->get()
-            ->filter(function (EpgChannel $epgChannel) use ($normalizedChan, $topIdentity): bool {
-                $values = [
-                    ['field' => 'channel ID', 'value' => $epgChannel->channel_id],
-                    ['field' => 'name', 'value' => $epgChannel->name],
-                    ['field' => 'display name', 'value' => $epgChannel->display_name],
-                ];
-                foreach ($epgChannel->additional_display_names ?? [] as $additionalDisplayName) {
-                    $values[] = ['field' => 'alternate display name', 'value' => $additionalDisplayName];
-                }
-
-                foreach ($values as $value) {
-                    $comparison = $this->compareNormalizedValues($normalizedChan, $value['value'], $value['field']);
-                    if ($comparison && $comparison['is_exact'] && $this->candidateIdentity([
-                        'model' => $epgChannel,
-                        'epg_channel_id' => $epgChannel->id,
-                    ]) !== $topIdentity) {
-                        return true;
-                    }
-                }
-
-                return false;
-            });
+            ->orderBy('id')
+            ->get();
 
         foreach ($additional as $epgChannel) {
             $values = [
@@ -945,117 +1005,270 @@ class SimilaritySearchService
         return $scoredCandidates;
     }
 
-    /**
-     * Verify we have the true runner-up by confidence for soft matches.
-     *
-     * @param  list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int, is_exact: bool, matched_value: string, normalized_value: string, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, display_name: string}>  $scoredCandidates
-     * @return list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int, is_exact: bool, matched_value: string, normalized_value: string, reason: string, distance: int, levenshtein_confidence: int, word_similarity: float, display_name: string}>
-     */
-    private function verifySoftMarginCompleteness(
+    /** @return list<int> */
+    private function exactNormalizedNameCandidateIds(Epg $epg, string $normalizedChan): array
+    {
+        $driver = DB::connection()->getConfig('driver');
+        $compactNormalizedName = str_replace(' ', '', $normalizedChan);
+        $cacheKey = implode('|', [
+            $epg->id,
+            $driver,
+            $compactNormalizedName,
+            $this->removeQualityIndicators ? '1' : '0',
+            hash('sha256', implode('\0', $this->qualityIndicators)),
+        ]);
+
+        if (array_key_exists($cacheKey, $this->exactNormalizedNameCandidateIds)) {
+            return $this->exactNormalizedNameCandidateIds[$cacheKey];
+        }
+
+        if ($driver === 'sqlite') {
+            DB::connection()->getPdo()->sqliteCreateFunction(
+                'm3ue_normalize_epg_name',
+                fn (?string $value): string => str_replace(' ', '', $this->normalizeChannelName($value)),
+                1,
+            );
+        }
+
+        $identityExpression = $this->candidateIdentityExpression($driver);
+        $matchingQuery = $epg->channels()->getQuery();
+
+        return $this->exactNormalizedNameCandidateIds[$cacheKey] = $matchingQuery
+            ->where(function (Builder $query) use ($compactNormalizedName, $driver): void {
+                foreach (['channel_id', 'name', 'display_name'] as $column) {
+                    $query->orWhereRaw(
+                        $this->compactNormalizedNameExpression($column, $driver).' = ?',
+                        [$compactNormalizedName],
+                    );
+                }
+
+                $query->orWhereRaw(
+                    $this->exactAdditionalDisplayNameCondition($driver),
+                    [$compactNormalizedName],
+                );
+            })
+            ->selectRaw('MIN(id) AS id')
+            ->groupByRaw($identityExpression)
+            ->orderByRaw('MIN(id)')
+            ->limit(2)
+            ->pluck('id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+    }
+
+    private function candidateIdentityExpression(string $driver): string
+    {
+        return match ($driver) {
+            'mysql', 'mariadb' => "COALESCE(NULLIF(TRIM(LOWER(channel_id)), ''), CONCAT('row:', id))",
+            default => "COALESCE(NULLIF(TRIM(LOWER(channel_id)), ''), 'row:' || id)",
+        };
+    }
+
+    private function compactNormalizedNameExpression(string $column, string $driver): string
+    {
+        $expression = $this->normalizedNameExpression($column, $driver);
+
+        if ($driver === 'sqlite') {
+            return $expression;
+        }
+
+        return $driver === 'pgsql'
+            ? "regexp_replace({$expression}, '[[:space:]]+', '', 'g')"
+            : "REGEXP_REPLACE({$expression}, '[[:space:]]+', '')";
+    }
+
+    private function normalizedNameExpression(string $column, string $driver): string
+    {
+        if ($driver === 'sqlite') {
+            return "m3ue_normalize_epg_name({$column})";
+        }
+
+        $ignoredWords = collect($this->stopWords)
+            ->merge($this->removeQualityIndicators ? $this->qualityIndicators : [])
+            ->map(fn (string $word): string => mb_strtolower($word, 'UTF-8'))
+            ->filter(fn (string $word): bool => preg_match('/^[\p{L}\p{N}]+$/u', $word) === 1)
+            ->unique()
+            ->map(fn (string $word): string => preg_quote($word, '/'))
+            ->implode('|');
+
+        if ($driver === 'pgsql') {
+            $expression = "LOWER(normalize(COALESCE({$column}, ''), NFKC))";
+            $expression = "regexp_replace({$expression}, '\\[[^]]*\\]|\\([^)]*\\)', '', 'g')";
+            $expression = "regexp_replace({$expression}, '[^[:alnum:][:space:]]', '', 'g')";
+            if ($ignoredWords !== '') {
+                $expression = "regexp_replace({$expression}, '\\m(?:{$ignoredWords})\\M', '', 'g')";
+            }
+
+            return "TRIM(regexp_replace({$expression}, '[[:space:]]+', ' ', 'g'))";
+        }
+
+        $expression = "LOWER(COALESCE({$column}, ''))";
+        $expression = "REGEXP_REPLACE({$expression}, '\\\\[[^]]*\\\\]|\\\\([^)]*\\\\)', '')";
+        $expression = "REGEXP_REPLACE({$expression}, '[^[:alnum:][:space:]]', '')";
+        if ($ignoredWords !== '') {
+            $expression = "REGEXP_REPLACE({$expression}, '\\\\b(?:{$ignoredWords})\\\\b', '')";
+        }
+
+        return "TRIM(REGEXP_REPLACE({$expression}, '[[:space:]]+', ' '))";
+    }
+
+    private function exactAdditionalDisplayNameCondition(string $driver): string
+    {
+        return match ($driver) {
+            'pgsql' => 'EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE '.$this->compactNormalizedNameExpression('elem', $driver).' = ?)',
+            'sqlite' => 'EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE '.$this->compactNormalizedNameExpression('json_each.value', $driver).' = ?)',
+            'mysql', 'mariadb' => "EXISTS (SELECT 1 FROM JSON_TABLE(COALESCE(additional_display_names, JSON_ARRAY()), '$[*]' COLUMNS (value TEXT PATH '$')) AS additional_names WHERE ".$this->compactNormalizedNameExpression('additional_names.value', $driver).' = ?)',
+            default => "LOWER(CAST(additional_display_names AS CHAR)) LIKE CONCAT('%', ?, '%')",
+        };
+    }
+
+    /** @param  list<array{model: EpgChannel, epg_channel_id: int, evidence: string, confidence: int}>  $scoredCandidates */
+    private function isSoftMarginComplete(
         Epg $epg,
         array $scoredCandidates,
         string $normalizedChan,
         array $topCandidate,
         ?string $regionCode,
         int $similarityThreshold,
-    ): array {
+    ): bool {
         $topIdentity = $this->candidateIdentity($topCandidate);
-        $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
-
         $currentRunnerUp = collect($scoredCandidates)
             ->first(fn (array $candidate): bool => $this->candidateIdentity($candidate) !== $topIdentity);
 
-        if ($currentRunnerUp === null) {
-            $runnerUpConfidence = 0;
-        } else {
-            $runnerUpConfidence = $currentRunnerUp['confidence'];
+        if ($currentRunnerUp !== null
+            && $topCandidate['confidence'] - $currentRunnerUp['confidence'] < self::MIN_AUTOMATIC_MATCH_MARGIN) {
+            return true;
         }
 
-        $additional = $epg->channels()
+        $unsafeConfidence = $topCandidate['confidence'] - self::MIN_AUTOMATIC_MATCH_MARGIN;
+        $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
+        $driver = DB::connection()->getConfig('driver');
+
+        return ! $epg->channels()
             ->whereNotIn('id', $existingIds)
-            ->select('id', 'epg_id', 'channel_id', 'name', 'display_name', 'additional_display_names')
-            ->get()
-            ->filter(function (EpgChannel $epgChannel) use ($normalizedChan, $topIdentity, $runnerUpConfidence, $similarityThreshold): bool {
-                $values = [
-                    ['field' => 'channel ID', 'value' => $epgChannel->channel_id],
-                    ['field' => 'name', 'value' => $epgChannel->name],
-                    ['field' => 'display name', 'value' => $epgChannel->display_name],
-                ];
-                foreach ($epgChannel->additional_display_names ?? [] as $additionalDisplayName) {
-                    $values[] = ['field' => 'alternate display name', 'value' => $additionalDisplayName];
-                }
-
-                $bestComparison = null;
-                foreach ($values as $value) {
-                    $comparison = $this->compareNormalizedValues($normalizedChan, $value['value'], $value['field']);
-                    if ($comparison && ($bestComparison === null || $comparison['confidence'] > $bestComparison['confidence'])) {
-                        $bestComparison = $comparison;
+            ->where(function (Builder $query) use ($driver, $normalizedChan, $unsafeConfidence, $similarityThreshold, $regionCode): void {
+                if ($driver === 'sqlite') {
+                    $this->registerSqliteSoftMarginFunction($normalizedChan, $unsafeConfidence, $similarityThreshold, $regionCode !== null);
+                    foreach (['channel_id', 'name', 'display_name'] as $column) {
+                        $query->orWhereRaw("m3ue_is_unsafe_epg_margin({$column}) = 1");
                     }
+                    $query->orWhereRaw('EXISTS (SELECT 1 FROM json_each(additional_display_names) WHERE m3ue_is_unsafe_epg_margin(json_each.value) = 1)');
+
+                    return;
                 }
 
-                if (! $bestComparison || $bestComparison['confidence'] < self::MIN_REVIEW_CONFIDENCE) {
-                    return false;
+                if ($driver === 'pgsql') {
+                    foreach (['channel_id', 'name', 'display_name'] as $column) {
+                        $query->orWhereRaw($this->postgresPotentialSoftCompetitorCondition(
+                            $column,
+                            $normalizedChan,
+                            $unsafeConfidence,
+                            $similarityThreshold,
+                            $regionCode,
+                        ));
+                    }
+                    $query->orWhereRaw('EXISTS (SELECT 1 FROM jsonb_array_elements_text(additional_display_names) AS elem WHERE '.$this->postgresPotentialSoftCompetitorCondition(
+                        'elem',
+                        $normalizedChan,
+                        $unsafeConfidence,
+                        $similarityThreshold,
+                        $regionCode,
+                    ).')');
+
+                    return;
                 }
 
-                if ($bestComparison['confidence'] <= $runnerUpConfidence) {
-                    return false;
+                foreach (explode(' ', $normalizedChan) as $term) {
+                    $likeTerm = $this->likePattern($term);
+                    $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                        ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                    $this->addJsonSearchCondition($query, $term);
+                }
+            })
+            ->exists();
+    }
+
+    private function registerSqliteSoftMarginFunction(
+        string $normalizedChan,
+        int $unsafeConfidence,
+        int $similarityThreshold,
+        bool $mayReceiveRegionBonus,
+    ): void {
+        DB::connection()->getPdo()->sqliteCreateFunction(
+            'm3ue_is_unsafe_epg_margin',
+            function (?string $value) use ($normalizedChan, $unsafeConfidence, $similarityThreshold, $mayReceiveRegionBonus): int {
+                $comparison = $this->compareNormalizedValues($normalizedChan, $value, 'candidate');
+                if ($comparison === null) {
+                    return 0;
                 }
 
-                if ($this->candidateIdentity([
-                    'model' => $epgChannel,
-                    'epg_channel_id' => $epgChannel->id,
-                ]) === $topIdentity) {
-                    return false;
-                }
+                $confidence = min(100, $comparison['confidence'] + ($mayReceiveRegionBonus ? 5 : 0));
+                $distance = max(0, $comparison['distance'] - ($mayReceiveRegionBonus ? self::PREFERRED_REGION_DISTANCE_BONUS : 0));
+                $meetsDistanceRule = $distance < $this->bestFuzzyThreshold
+                    && $comparison['levenshtein_confidence'] >= max(60, $similarityThreshold);
+                $meetsWordRule = $distance >= $this->bestFuzzyThreshold
+                    && $distance < $this->upperFuzzyThreshold
+                    && $comparison['word_similarity'] >= $this->embedSimThreshold;
 
-                $meetsDistanceRule = $bestComparison['distance'] < $this->bestFuzzyThreshold
-                    && $bestComparison['levenshtein_confidence'] >= max(60, $similarityThreshold);
-                $meetsWordRule = $bestComparison['distance'] >= $this->bestFuzzyThreshold
-                    && $bestComparison['distance'] < $this->upperFuzzyThreshold
-                    && $bestComparison['word_similarity'] >= $this->embedSimThreshold;
+                return $confidence > $unsafeConfidence && ($meetsDistanceRule || $meetsWordRule) ? 1 : 0;
+            },
+            1,
+        );
+    }
 
-                return $meetsDistanceRule || $meetsWordRule;
-            });
+    private function postgresPotentialSoftCompetitorCondition(
+        string $column,
+        string $normalizedChan,
+        int $unsafeConfidence,
+        int $similarityThreshold,
+        ?string $regionCode,
+    ): string {
+        $normalizedExpression = $this->normalizedNameExpression($column, 'pgsql');
+        $compactExpression = $this->compactNormalizedNameExpression($column, 'pgsql');
+        $compactName = str_replace(' ', '', $normalizedChan);
+        $quotedCompactName = DB::connection()->getPdo()->quote($compactName);
+        $distance = $this->postgresLevenshteinExpression($normalizedExpression, $normalizedChan);
+        $wordSimilarity = $this->postgresWordSimilarityExpression($normalizedExpression, $normalizedChan);
+        $normalizedLength = mb_strlen($normalizedChan, 'UTF-8');
+        $maximumLength = "greatest(char_length(normalized_value), {$normalizedLength})";
+        $levenshteinConfidence = "CASE WHEN {$maximumLength} > 0 THEN greatest(0, round((1 - (distance::numeric / {$maximumLength})) * 100)) ELSE 0 END";
+        $containment = "(compact_value <> '' AND ({$quotedCompactName} LIKE '%' || compact_value || '%' OR compact_value LIKE '%' || {$quotedCompactName} || '%'))";
+        $baseConfidence = "greatest({$levenshteinConfidence}, CASE WHEN {$compactExpression} = {$quotedCompactName} THEN 100 WHEN {$wordSimilarity} >= {$this->embedSimThreshold} THEN round({$wordSimilarity} * 100) WHEN {$containment} THEN 80 ELSE 0 END)";
+        $baseConfidence = str_replace(
+            [$compactExpression, $wordSimilarity],
+            ['compact_value', 'word_similarity'],
+            $baseConfidence,
+        );
+        $quotedRegionCode = $regionCode === null ? null : DB::connection()->getPdo()->quote(mb_strtolower($regionCode, 'UTF-8'));
+        $inPreferredRegion = $quotedRegionCode === null
+            ? 'false'
+            : "position({$quotedRegionCode} in LOWER(COALESCE(channel_id, '') || ' ' || COALESCE(name, ''))) > 0";
+        $adjustedDistance = 'CASE WHEN '.$inPreferredRegion.' THEN greatest(0, distance - '.self::PREFERRED_REGION_DISTANCE_BONUS.') ELSE distance END';
+        $adjustedConfidence = "least(100, {$baseConfidence} + CASE WHEN {$inPreferredRegion} THEN 5 ELSE 0 END)";
+        $meetsDistanceRule = "({$adjustedDistance} < {$this->bestFuzzyThreshold} AND {$levenshteinConfidence} >= ".max(60, $similarityThreshold).')';
+        $meetsWordRule = "({$adjustedDistance} >= {$this->bestFuzzyThreshold} AND {$adjustedDistance} < {$this->upperFuzzyThreshold} AND word_similarity >= {$this->embedSimThreshold})";
+        $lengthDifferenceLimit = $this->upperFuzzyThreshold + ($regionCode === null ? 0 : self::PREFERRED_REGION_DISTANCE_BONUS);
 
-        foreach ($additional as $epgChannel) {
-            $values = [
-                ['field' => 'channel ID', 'value' => $epgChannel->channel_id],
-                ['field' => 'name', 'value' => $epgChannel->name],
-                ['field' => 'display name', 'value' => $epgChannel->display_name],
-            ];
-            foreach ($epgChannel->additional_display_names ?? [] as $additionalDisplayName) {
-                $values[] = ['field' => 'alternate display name', 'value' => $additionalDisplayName];
-            }
+        return "(abs(char_length({$normalizedExpression}) - {$normalizedLength}) < {$lengthDifferenceLimit} AND EXISTS (WITH metrics AS MATERIALIZED (SELECT {$normalizedExpression} AS normalized_value, {$compactExpression} AS compact_value, {$distance} AS distance, {$wordSimilarity} AS word_similarity) SELECT 1 FROM metrics WHERE normalized_value <> '' AND ({$meetsDistanceRule} OR {$meetsWordRule}) AND {$adjustedConfidence} > {$unsafeConfidence}))";
+    }
 
-            $bestComparison = null;
-            foreach ($values as $value) {
-                $comparison = $this->compareNormalizedValues($normalizedChan, $value['value'], $value['field']);
-                if ($comparison && ($bestComparison === null || $comparison['confidence'] > $bestComparison['confidence'])) {
-                    $bestComparison = $comparison;
-                }
-            }
+    private function postgresLevenshteinExpression(string $normalizedExpression, string $normalizedChan): string
+    {
+        $quotedTarget = DB::connection()->getPdo()->quote($normalizedChan);
 
-            if ($bestComparison && $bestComparison['confidence'] >= self::MIN_REVIEW_CONFIDENCE) {
-                $inPreferredRegion = $regionCode && str_contains(
-                    mb_strtolower(($epgChannel->channel_id ?? '').' '.($epgChannel->name ?? ''), 'UTF-8'),
-                    $regionCode,
-                );
-                if ($inPreferredRegion) {
-                    $bestComparison['distance'] = max(0, $bestComparison['distance'] - self::PREFERRED_REGION_DISTANCE_BONUS);
-                    $bestComparison['confidence'] = min(100, $bestComparison['confidence'] + 5);
-                    $bestComparison['reason'] .= __('; preferred region');
-                }
+        return "COALESCE((WITH RECURSIVE input AS (SELECT convert_to({$normalizedExpression}, 'UTF8') AS source, convert_to({$quotedTarget}, 'UTF8') AS target), matrix(position, distances, source, target, target_length, final_position) AS (SELECT octet_length(target), ARRAY(SELECT generate_series(0, octet_length(target))), source, target, octet_length(target), ((octet_length(source) + 1) * (octet_length(target) + 1)) - 1 FROM input UNION ALL SELECT position + 1, distances || CASE WHEN mod(position + 1, target_length + 1) = 0 THEN ((position + 1) / (target_length + 1))::int ELSE least(distances[((((position + 1) / (target_length + 1))::int - 1) * (target_length + 1)) + mod(position + 1, target_length + 1) + 1] + 1, distances[(((position + 1) / (target_length + 1))::int * (target_length + 1)) + mod(position + 1, target_length + 1)] + 1, distances[((((position + 1) / (target_length + 1))::int - 1) * (target_length + 1)) + mod(position + 1, target_length + 1)] + CASE WHEN get_byte(source, ((position + 1) / (target_length + 1))::int - 1) = get_byte(target, mod(position + 1, target_length + 1) - 1) THEN 0 ELSE 1 END) END, source, target, target_length, final_position FROM matrix WHERE position < final_position) SELECT distances[final_position + 1] FROM matrix WHERE position = final_position), 0)";
+    }
 
-                $scoredCandidates[] = [
-                    'model' => $epgChannel,
-                    'epg_channel_id' => $epgChannel->id,
-                    'display_name' => $epgChannel->display_name ?: $epgChannel->name ?: $epgChannel->channel_id,
-                    ...$bestComparison,
-                ];
-            }
-        }
+    private function postgresWordSimilarityExpression(string $normalizedExpression, string $normalizedChan): string
+    {
+        $targetVector = $this->textToVector($normalizedChan);
+        $targetMagnitude = sqrt((float) array_sum(array_map(fn (int $count): int => $count ** 2, $targetVector)));
+        $values = collect($targetVector)
+            ->map(fn (int $count, string $word): string => '('.DB::connection()->getPdo()->quote($word).', '.$count.'::float)')
+            ->implode(', ');
 
-        return $scoredCandidates;
+        return "COALESCE((WITH candidate_words AS (SELECT word, COUNT(*)::float AS frequency FROM regexp_split_to_table({$normalizedExpression}, '[[:space:]]+') AS words(word) WHERE word <> '' GROUP BY word) SELECT SUM(target.frequency * COALESCE(candidate.frequency, 0)) / NULLIF({$targetMagnitude} * SQRT((SELECT SUM(frequency * frequency) FROM candidate_words)), 0) FROM (VALUES {$values}) AS target(word, frequency) LEFT JOIN candidate_words AS candidate USING (word)), 0)";
     }
 
     /**
@@ -1116,12 +1329,19 @@ class SimilaritySearchService
         return mb_strtolower(trim((string) $candidate['model']->channel_id), 'UTF-8') ?: 'row:'.$candidate['epg_channel_id'];
     }
 
-    private function evidencePriority(string $evidence): int
+    /** @param  array{evidence: string, is_exact: bool}  $candidate */
+    private function candidatePriority(array $candidate, bool $prioritizeNameMatch): int
     {
-        return match ($evidence) {
-            'identifier' => 2,
-            'callsign' => 1,
-            default => 0,
+        if ($prioritizeNameMatch
+            && $candidate['is_exact']
+            && ! in_array($candidate['evidence'], ['identifier', 'callsign'], true)) {
+            return 3;
+        }
+
+        return match ($candidate['evidence']) {
+            'identifier' => $prioritizeNameMatch ? 2 : 3,
+            'callsign' => $prioritizeNameMatch ? 1 : 2,
+            default => $candidate['is_exact'] ? 1 : 0,
         };
     }
 

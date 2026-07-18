@@ -394,6 +394,48 @@ it('builds candidate rows with a single shared EPG query per batch (query count 
         ->and($map->candidates()->count())->toBe(20);
 });
 
+it('bounds EPG queries and hydration for a large shared candidate batch', function () {
+    candidatesEpgChannel([
+        'name' => 'Metro News',
+        'display_name' => 'Metro News',
+        'channel_id' => 'metro-news.primary',
+    ]);
+    EpgChannel::factory()
+        ->count(999)
+        ->for($this->epg)
+        ->for($this->user)
+        ->sequence(fn ($sequence): array => [
+            'name' => "Metro News Regional Feed {$sequence->index}",
+            'display_name' => "Metro News Regional Feed {$sequence->index}",
+            'channel_id' => "metro-news-regional-{$sequence->index}",
+        ])
+        ->create();
+
+    for ($i = 0; $i < 20; $i++) {
+        candidatesChannel('Metro News');
+    }
+
+    $map = candidatesMap([]);
+    $retrievedCandidates = 0;
+    $candidateQueries = 0;
+
+    Event::listen('eloquent.retrieved: '.EpgChannel::class, function () use (&$retrievedCandidates): void {
+        $retrievedCandidates++;
+    });
+    DB::listen(function ($query) use (&$candidateQueries): void {
+        if (str_contains($query->sql, 'epg_channels') && str_starts_with(strtolower(ltrim($query->sql)), 'select')) {
+            $candidateQueries++;
+        }
+    });
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    expect($map->candidates()->count())->toBe(20)
+        ->and($map->candidates()->where('automatic_match', true)->count())->toBe(20)
+        ->and($retrievedCandidates)->toBeLessThanOrEqual(252)
+        ->and($candidateQueries)->toBeLessThanOrEqual(25);
+});
+
 it('matches all channels in term-budgeted batches when unique terms exceed 200', function () {
     // 210 unique names, each producing exactly one unique search term.
     // On committed head 84b2fa8a the all-playlist union truncates to 200 terms,
