@@ -126,65 +126,78 @@ class EpgChannelMatcherTool extends BaseTool
             ->latest('id')
             ->value('settings') ?? [];
 
-        // Configure matcher with settings so searchTermsFor uses the same cleaning
         $matcher->configureForSettings($settings);
 
-        // Collect all search terms from all channels for a single shared EPG query
-        $allSearchTerms = $channels
-            ->flatMap(fn (Channel $channel): array => $matcher->searchTermsFor(
-                channel: $channel,
-                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
-                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
-            ))
-            ->unique()
-            ->values()
-            ->all();
+        $channelArray = $channels->all();
+        $channelIndex = 0;
 
-        // Load EPG candidates once for the entire batch
-        $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $allSearchTerms);
+        while ($channelIndex < count($channelArray)) {
+            $batchTerms = [];
+            $batchStart = $channelIndex;
 
-        foreach ($channels as $channel) {
-            // Pass the shared candidate set so each channel reuses the same EPG query
-            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
-            $topCandidate = $result['candidates'][0] ?? null;
+            while ($channelIndex < count($channelArray)) {
+                $channel = $channelArray[$channelIndex];
+                $channelTerms = $matcher->searchTermsFor(
+                    channel: $channel,
+                    cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
+                    cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+                );
+                $proposedTerms = array_unique(array_merge($batchTerms, $channelTerms));
 
-            if ($result['automatic_match']) {
-                $automaticMatches[] = [
-                    'channel_id' => $channel->id,
-                    'original_name' => $channel->name,
-                    'cleaned_name' => $result['normalized_name'],
-                    'epg_channel_id' => $result['automatic_match']->id,
-                    'epg_display_name' => $topCandidate['display_name'],
-                    'decision' => $result['decision'],
-                    'candidates' => $result['candidates'],
-                ];
+                if (count($proposedTerms) > 200 && $channelIndex > $batchStart) {
+                    break;
+                }
 
-                continue;
+                $batchTerms = $proposedTerms;
+                $channelIndex++;
             }
 
-            if ($result['candidates'] === []) {
-                $unresolved[] = [
-                    'channel_id' => $channel->id,
-                    'original_name' => $channel->name,
-                    'cleaned_name' => $result['normalized_name'],
-                    'decision' => $result['decision'],
-                ];
-            } else {
-                $fuzzyMatches[] = [
-                    'channel_id' => $channel->id,
-                    'original_name' => $channel->name,
-                    'cleaned_name' => $result['normalized_name'],
-                    'decision' => $result['decision'],
-                    'candidates' => array_map(fn (array $candidate): array => [
-                        'epg_channel_id' => $candidate['epg_channel_id'],
-                        'display_name' => $candidate['display_name'],
-                        'score' => $candidate['confidence'],
-                        'reason' => $candidate['reason'],
-                        'matched_value' => $candidate['matched_value'],
-                        'normalized_value' => $candidate['normalized_value'],
-                        'evidence' => $candidate['evidence'],
-                    ], $result['candidates']),
-                ];
+            $batchTermsArray = array_values($batchTerms);
+            $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $batchTermsArray);
+
+            for ($i = $batchStart; $i < $channelIndex; $i++) {
+                $channel = $channelArray[$i];
+                $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
+                $topCandidate = $result['candidates'][0] ?? null;
+
+                if ($result['automatic_match']) {
+                    $automaticMatches[] = [
+                        'channel_id' => $channel->id,
+                        'original_name' => $channel->name,
+                        'cleaned_name' => $result['normalized_name'],
+                        'epg_channel_id' => $result['automatic_match']->id,
+                        'epg_display_name' => $topCandidate['display_name'],
+                        'decision' => $result['decision'],
+                        'candidates' => $result['candidates'],
+                    ];
+
+                    continue;
+                }
+
+                if ($result['candidates'] === []) {
+                    $unresolved[] = [
+                        'channel_id' => $channel->id,
+                        'original_name' => $channel->name,
+                        'cleaned_name' => $result['normalized_name'],
+                        'decision' => $result['decision'],
+                    ];
+                } else {
+                    $fuzzyMatches[] = [
+                        'channel_id' => $channel->id,
+                        'original_name' => $channel->name,
+                        'cleaned_name' => $result['normalized_name'],
+                        'decision' => $result['decision'],
+                        'candidates' => array_map(fn (array $candidate): array => [
+                            'epg_channel_id' => $candidate['epg_channel_id'],
+                            'display_name' => $candidate['display_name'],
+                            'score' => $candidate['confidence'],
+                            'reason' => $candidate['reason'],
+                            'matched_value' => $candidate['matched_value'],
+                            'normalized_value' => $candidate['normalized_value'],
+                            'evidence' => $candidate['evidence'],
+                        ], $result['candidates']),
+                    ];
+                }
             }
         }
 

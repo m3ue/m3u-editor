@@ -312,9 +312,10 @@ class SimilaritySearchService
     /**
      * Return the automatic match decision and explainable review candidates from the same scoring pass.
      *
-     * `$prefetchedCandidates` remains accepted for public compatibility. The
-     * automatic decision always uses the canonical bounded selected-source
-     * query so page-local or batch-local prefetch scope cannot alter confidence.
+     * Prefetched candidates are used for the canonical scoring pass, with a
+     * bounded direct fallback only when the shared filter yields zero
+     * candidates for a channel. Existing completeness probes still protect
+     * decisions regardless of candidate source.
      *
      * @param  array<int, string>|null  $customQualityIndicators
      * @return array{
@@ -397,6 +398,10 @@ class SimilaritySearchService
         $databaseCandidates = $prefetchedCandidates
             ? $this->filterPrefetchedCandidates($prefetchedCandidates, $searchTerms, $identifier, $callsign, $epg)
             : $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
+
+        if ($prefetchedCandidates !== null && $databaseCandidates->isEmpty()) {
+            $databaseCandidates = $this->fetchBoundedCandidates($epg, $callsign, $identifier, $searchTerms, $relevanceSql, $relevanceBindings);
+        }
 
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;
         $scoredCandidates = [];
@@ -646,20 +651,6 @@ class SimilaritySearchService
     }
 
     /**
-     * Convert a SQL LIKE pattern (with ! as escape char) to a PHP regex pattern.
-     */
-    private function likePatternToRegex(string $likePattern): string
-    {
-        // Escape regex special chars
-        $regex = preg_quote($likePattern, '/');
-        // Convert SQL LIKE wildcards to regex (%, _ are not regex special chars, so no backslash)
-        $regex = str_replace(['%', '_'], ['.*', '.'], $regex);
-
-        // Handle the escape character ! (not needed in regex since we already escaped)
-        return '/^'.$regex.'$/i';
-    }
-
-    /**
      * Filter a pre-fetched candidate collection to those relevant for a specific channel.
      * This avoids running a new database query when a shared candidate set is available.
      *
@@ -674,24 +665,17 @@ class SimilaritySearchService
         string $callsign,
         ?Epg $epg = null,
     ): Collection {
-        // First filter by EPG source if provided
         if ($epg !== null) {
             $prefetchedCandidates = $prefetchedCandidates->filter(fn (EpgChannel $c): bool => $c->epg_id === $epg->id)->values();
         }
 
-        $regexPatterns = [];
-        foreach ($searchTerms as $term) {
-            $likeTerm = $this->likePattern($term);
-            $regexPatterns[] = $this->likePatternToRegex($likeTerm);
-        }
+        $loweredTerms = $searchTerms->map(fn (string $term): string => mb_strtolower($term, 'UTF-8'))->all();
 
-        $result = $prefetchedCandidates->filter(function (EpgChannel $epgChannel) use ($regexPatterns, $identifier, $callsign): bool {
-            // Exact identifier match
+        $result = $prefetchedCandidates->filter(function (EpgChannel $epgChannel) use ($loweredTerms, $identifier, $callsign): bool {
             if ($identifier !== '' && mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8') === $identifier) {
                 return true;
             }
 
-            // Exact callsign match
             if ($callsign !== '') {
                 $callsignLower = $callsign;
                 $channelId = mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8');
@@ -705,19 +689,17 @@ class SimilaritySearchService
                 }
             }
 
-            // Search term matches (name, display_name, channel_id, additional_display_names)
             $channelId = mb_strtolower(trim((string) $epgChannel->channel_id), 'UTF-8');
             $name = mb_strtolower(trim((string) $epgChannel->name), 'UTF-8');
             $displayName = mb_strtolower(trim((string) $epgChannel->display_name), 'UTF-8');
 
-            foreach ($regexPatterns as $regex) {
-                if (preg_match($regex, $channelId) || preg_match($regex, $name) || preg_match($regex, $displayName)) {
+            foreach ($loweredTerms as $term) {
+                if (str_contains($channelId, $term) || str_contains($name, $term) || str_contains($displayName, $term)) {
                     return true;
                 }
 
-                // Check additional_display_names
                 foreach ($epgChannel->additional_display_names ?? [] as $additional) {
-                    if (preg_match($regex, mb_strtolower(trim((string) $additional), 'UTF-8'))) {
+                    if (str_contains(mb_strtolower(trim((string) $additional), 'UTF-8'), $term)) {
                         return true;
                     }
                 }
@@ -980,26 +962,14 @@ class SimilaritySearchService
         $topIdentity = $this->candidateIdentity($topCandidate);
         $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
 
-        // Get the current runner-up confidence (different identity)
         $currentRunnerUp = collect($scoredCandidates)
             ->first(fn (array $candidate): bool => $this->candidateIdentity($candidate) !== $topIdentity);
 
         if ($currentRunnerUp === null) {
-            // No runner-up in current set, need to check if one exists beyond the bound
             $runnerUpConfidence = 0;
         } else {
             $runnerUpConfidence = $currentRunnerUp['confidence'];
         }
-
-        // We only need to check if there's a candidate with confidence >
-        // runnerUpConfidence that could change the margin decision.
-        // Since we're looking for the true second-best, we check all remaining
-        // rows but only keep those that could beat the current runner-up.
-
-        // For efficiency, we do a full scan of remaining rows but only for
-        // candidates that could potentially have higher confidence than the
-        // current runner-up. This is a bounded operation since we only scan
-        // rows not already in our candidate set.
 
         $additional = $epg->channels()
             ->whereNotIn('id', $existingIds)
@@ -1038,7 +1008,6 @@ class SimilaritySearchService
                     return false;
                 }
 
-                // Check if it meets soft match criteria
                 $meetsDistanceRule = $bestComparison['distance'] < $this->bestFuzzyThreshold
                     && $bestComparison['levenshtein_confidence'] >= max(60, $similarityThreshold);
                 $meetsWordRule = $bestComparison['distance'] >= $this->bestFuzzyThreshold

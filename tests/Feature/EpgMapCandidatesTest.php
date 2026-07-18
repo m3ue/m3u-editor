@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\EpgMapCandidateStatus;
+use App\Filament\CopilotTools\EpgChannelMatcherTool;
 use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
 use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Jobs\BuildEpgMapCandidatesJob;
@@ -12,9 +13,11 @@ use App\Models\EpgMapCandidate;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
-use App\Services\SimilaritySearchService;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Ai\Tools\Request;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -391,40 +394,140 @@ it('builds candidate rows with a single shared EPG query per batch (query count 
         ->and($map->candidates()->count())->toBe(20);
 });
 
-it('produces identical candidate decisions whether using shared query or per-channel query (parity regression)', function () {
-    // Create EPG channels
-    $epgA = candidatesEpgChannel([
-        'name' => 'ESPN News Plus',
-        'display_name' => 'ESPN News Plus',
-        'channel_id' => 'espnews-plus',
-    ]);
-    $epgB = candidatesEpgChannel([
-        'name' => 'Fox Soccer Channel Premier',
-        'display_name' => 'Fox Soccer Channel Premier',
-        'channel_id' => 'fox-soccer-prem',
-    ]);
-    // Create playlist channels
-    $channelA = candidatesChannel('ESPN News Plus HD');
-    $channelB = candidatesChannel('Fox Soccer Channel Premier HD');
-    $map = candidatesMap(['remove_quality_indicators' => true]);
+it('matches all channels in term-budgeted batches when unique terms exceed 200', function () {
+    // 210 unique names, each producing exactly one unique search term.
+    // On committed head 84b2fa8a the all-playlist union truncates to 200 terms,
+    // so the last 10 channels are silently dropped. With term-budgeted batches
+    // each batch fits within the 200-term cap and every channel is matched.
+    $epgChannels = [];
+    for ($i = 0; $i < 210; $i++) {
+        $name = sprintf('UniqueName%03d', $i);
+        $epgChannels[$i] = candidatesEpgChannel([
+            'name' => $name,
+            'display_name' => $name,
+            'channel_id' => strtolower($name),
+        ]);
+    }
 
-    // Run the job (which should use shared query after fix)
+    $channels = [];
+    for ($i = 0; $i < 210; $i++) {
+        $name = sprintf('UniqueName%03d', $i);
+        $channels[$i] = candidatesChannel($name);
+    }
+
+    $map = candidatesMap([]);
     (new BuildEpgMapCandidatesJob($map->id))->handle();
 
-    // Also run direct per-channel matching for comparison
-    $matcher = new SimilaritySearchService;
-    $directA = $matcher->findEpgChannelCandidates($channelA, $this->epg, removeQualityIndicators: true);
-    $directB = $matcher->findEpgChannelCandidates($channelB, $this->epg, removeQualityIndicators: true);
-
     $rows = $map->candidates()->orderBy('channel_id')->get();
-    $rowA = $rows->firstWhere('channel_id', $channelA->id);
-    $rowB = $rows->firstWhere('channel_id', $channelB->id);
 
-    // Decisions must match exactly between shared-query and per-channel paths
-    expect($rowA->automatic_match)->toBe((bool) $directA['automatic_match'])
-        ->and($rowA->epg_channel_id)->toBe($directA['automatic_match']?->id ?? $directA['candidates'][0]['epg_channel_id'] ?? null)
-        ->and($rowB->automatic_match)->toBe((bool) $directB['automatic_match'])
-        ->and($rowB->epg_channel_id)->toBe($directB['automatic_match']?->id ?? $directB['candidates'][0]['epg_channel_id'] ?? null)
-        ->and($rowA->top_confidence)->toBe($directA['candidates'][0]['confidence'] ?? 0)
-        ->and($rowB->top_confidence)->toBe($directB['candidates'][0]['confidence'] ?? 0);
+    expect($rows)->toHaveCount(210);
+
+    for ($i = 0; $i < 210; $i++) {
+        $row = $rows->firstWhere('channel_id', $channels[$i]->id);
+        expect($row)->not->toBeNull("Channel {$i} should have a candidate row")
+            ->and($row->epg_channel_id)->toBe($epgChannels[$i]->id);
+    }
+});
+
+it('matches a late channel whose unique candidate is outside the shared cap dominated by a broad term', function () {
+    for ($i = 0; $i < 250; $i++) {
+        candidatesEpgChannel([
+            'name' => "BroadChannel {$i}",
+            'display_name' => "BroadChannel {$i}",
+            'channel_id' => "broad-{$i}",
+        ]);
+    }
+
+    $lateEpg = candidatesEpgChannel([
+        'name' => 'ZetaUnique999',
+        'display_name' => 'ZetaUnique999',
+        'channel_id' => 'zeta-unique-999',
+    ]);
+
+    $broadChannel = candidatesChannel('BroadChannel');
+    $lateChannel = candidatesChannel('ZetaUnique999');
+
+    $map = candidatesMap([]);
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    $rows = $map->candidates()->get();
+    $lateRow = $rows->where('channel_id', $lateChannel->id)->first();
+
+    expect($lateRow)->not->toBeNull()
+        ->and($lateRow->epg_channel_id)->toBe($lateEpg->id)
+        ->and($lateRow->automatic_match)->toBeTrue();
+});
+
+it('retrieves exactly one shared batch for 20 channels whose terms fit one batch', function () {
+    for ($i = 0; $i < 20; $i++) {
+        candidatesEpgChannel([
+            'name' => "Sports Channel {$i}",
+            'display_name' => "Sports Channel {$i}",
+            'channel_id' => "sports-{$i}.us",
+        ]);
+    }
+    for ($i = 0; $i < 20; $i++) {
+        candidatesChannel("Sports Channel {$i} HD");
+    }
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+
+    $sharedBatchRetrievals = 0;
+    DB::listen(function ($query) use (&$sharedBatchRetrievals): void {
+        if (str_contains($query->sql, 'CASE WHEN')
+            && str_contains($query->sql, 'display_name')
+            && str_contains($query->sql, '250')) {
+            $sharedBatchRetrievals++;
+        }
+    });
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    expect($sharedBatchRetrievals)->toBe(1)
+        ->and($map->candidates()->count())->toBe(20);
+});
+
+it('EpgChannelMatcherTool uses shared batch retrieval for a normal multi-channel request', function () {
+    $this->actingAs($this->user);
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Batch Group']);
+
+    for ($i = 0; $i < 20; $i++) {
+        $name = "MatchTool Channel {$i}";
+        candidatesEpgChannel([
+            'name' => $name,
+            'display_name' => $name,
+            'channel_id' => strtolower(str_replace(' ', '-', $name)),
+        ]);
+        Channel::factory()
+            ->for($this->playlist)
+            ->for($this->user)
+            ->for($group)
+            ->create([
+                'name' => "{$name} HD",
+                'title' => "{$name} HD",
+                'stream_id' => str("{$name} HD")->slug(),
+                'group' => $group->name,
+                'is_vod' => false,
+                'epg_map_enabled' => true,
+                'epg_channel_id' => null,
+            ]);
+    }
+
+    $sharedBatchRetrievals = 0;
+    DB::listen(function ($query) use (&$sharedBatchRetrievals): void {
+        if (str_contains($query->sql, 'CASE WHEN')
+            && str_contains($query->sql, 'display_name')
+            && str_contains($query->sql, '250')) {
+            $sharedBatchRetrievals++;
+        }
+    });
+
+    $output = (string) (new EpgChannelMatcherTool)->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+    ]));
+
+    expect($output)->toContain('AUTOMATIC MATCHES')
+        ->and(substr_count($output, 'Channel #'))->toBe(20)
+        ->and($sharedBatchRetrievals)->toBe(1);
 });

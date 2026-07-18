@@ -92,65 +92,70 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
         $matcher = app(SimilaritySearchService::class);
         $total = $channels->count();
 
-        // Configure matcher with settings so searchTermsFor uses the same cleaning
         $matcher->configureForSettings($settings);
 
-        // Collect all search terms from all channels for a single shared EPG query
-        // Use the same cleaning logic as findEpgChannelCandidatesUsingSettings
-        $allSearchTerms = $channels
-            ->flatMap(fn (Channel $channel): array => $matcher->searchTermsFor(
-                channel: $channel,
-                cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
-                cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
-            ))
-            ->unique()
-            ->values()
-            ->all();
-
-        // Load EPG candidates once for the entire batch
-        $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $allSearchTerms);
-
-        // Clear any prior run upfront so the UI never shows stale rows during
-        // the build, and reset progress so the poll can observe it moving.
         $map->candidates()->delete();
         $rows = [];
         $processed = 0;
+        $channelIndex = 0;
 
-        foreach ($channels as $channel) {
-            // Pass the shared candidate set so each channel reuses the same EPG query
-            $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
+        while ($channelIndex < $total) {
+            $batchTerms = [];
+            $batchStart = $channelIndex;
 
-            $top = $result['candidates'][0] ?? null;
-            $alternatives = $top ? array_slice($result['candidates'], 1) : [];
+            while ($channelIndex < $total) {
+                $channel = $channels[$channelIndex];
+                $channelTerms = $matcher->searchTermsFor(
+                    channel: $channel,
+                    cleanedTitle: $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings),
+                    cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
+                );
+                $proposedTerms = array_unique(array_merge($batchTerms, $channelTerms));
 
-            $rows[] = [
-                'epg_map_id' => $map->id,
-                'channel_id' => $channel->id,
-                'epg_channel_id' => $top['epg_channel_id'] ?? null,
-                'original_name' => $result['original_name'],
-                'normalized_name' => $result['normalized_name'],
-                'top_confidence' => $top['confidence'] ?? 0,
-                'top_reason' => '['.$result['decision'].'] '.($top['reason'] ?? $result['explanation']),
-                'top_matched_value' => $top['matched_value'] ?? '',
-                'top_normalized_value' => $top['normalized_value'] ?? '',
-                'is_exact' => ($top['confidence'] ?? 0) === 100,
-                'automatic_match' => (bool) $result['automatic_match'],
-                'alternatives' => $alternatives ? json_encode($alternatives, JSON_THROW_ON_ERROR) : null,
-                'status' => EpgMapCandidateStatus::Pending->value,
-                'applied_at' => null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
+                if (count($proposedTerms) > 200 && $channelIndex > $batchStart) {
+                    break;
+                }
 
-            $processed++;
+                $batchTerms = $proposedTerms;
+                $channelIndex++;
+            }
 
-            // Flush every 200 rows and report progress so the polling UI
-            // can display a live progress bar (page polls every 3s while
-            // candidates_building is true).
-            if (count($rows) >= 200) {
-                $map->candidates()->insert($rows);
-                $rows = [];
-                $map->update(['candidates_progress' => round($processed / $total * 100, 1)]);
+            $batchTermsArray = array_values($batchTerms);
+            $prefetchedCandidates = $matcher->loadEpgCandidates($epg, $batchTermsArray);
+
+            for ($i = $batchStart; $i < $channelIndex; $i++) {
+                $channel = $channels[$i];
+                $result = $matcher->findEpgChannelCandidatesUsingSettings($channel, $epg, $settings, $prefetchedCandidates);
+
+                $top = $result['candidates'][0] ?? null;
+                $alternatives = $top ? array_slice($result['candidates'], 1) : [];
+
+                $rows[] = [
+                    'epg_map_id' => $map->id,
+                    'channel_id' => $channel->id,
+                    'epg_channel_id' => $top['epg_channel_id'] ?? null,
+                    'original_name' => $result['original_name'],
+                    'normalized_name' => $result['normalized_name'],
+                    'top_confidence' => $top['confidence'] ?? 0,
+                    'top_reason' => '['.$result['decision'].'] '.($top['reason'] ?? $result['explanation']),
+                    'top_matched_value' => $top['matched_value'] ?? '',
+                    'top_normalized_value' => $top['normalized_value'] ?? '',
+                    'is_exact' => ($top['confidence'] ?? 0) === 100,
+                    'automatic_match' => (bool) $result['automatic_match'],
+                    'alternatives' => $alternatives ? json_encode($alternatives, JSON_THROW_ON_ERROR) : null,
+                    'status' => EpgMapCandidateStatus::Pending->value,
+                    'applied_at' => null,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+
+                $processed++;
+
+                if (count($rows) >= 200) {
+                    $map->candidates()->insert($rows);
+                    $rows = [];
+                    $map->update(['candidates_progress' => round($processed / $total * 100, 1)]);
+                }
             }
         }
 
