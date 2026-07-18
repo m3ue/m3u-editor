@@ -115,6 +115,7 @@ it('playlist touch starts on-demand requested broadcast', function () {
     ]);
 
     $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('subtitlesEnabledForCurrentBroadcast')->andReturn(false);
     $service->shouldReceive('markConnectionSeen')->once()->andReturnUsing(function (Network $n): void {
         $n->update(['broadcast_last_connection_at' => now()]);
     });
@@ -158,6 +159,7 @@ it('playlist fetch does not refresh on-demand connection heartbeat while already
     ]);
 
     $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('subtitlesEnabledForCurrentBroadcast')->andReturn(false);
     $service->shouldNotReceive('markConnectionSeen');
     $service->shouldNotReceive('startRequested');
     app()->instance(NetworkBroadcastService::class, $service);
@@ -197,6 +199,7 @@ it('waits briefly for first on-demand playlist after start', function () {
     ]);
 
     $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('subtitlesEnabledForCurrentBroadcast')->andReturn(false);
     $service->shouldReceive('markConnectionSeen')->once()->andReturnUsing(function (Network $n): void {
         $n->update([
             'broadcast_last_connection_at' => now(),
@@ -242,6 +245,7 @@ it('playlist cold-start is skipped when lock is already held by a concurrent req
     $lock->get();
 
     $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('subtitlesEnabledForCurrentBroadcast')->andReturn(false);
     $service->shouldNotReceive('startNow');
     $service->shouldNotReceive('markConnectionSeen');
     app()->instance(NetworkBroadcastService::class, $service);
@@ -278,6 +282,7 @@ it('waits for runway even when startup playlist initially returns 200 with too f
     ]);
 
     $service = Mockery::mock(NetworkBroadcastService::class);
+    $service->shouldReceive('subtitlesEnabledForCurrentBroadcast')->andReturn(false);
     $service->shouldNotReceive('startNow');
     app()->instance(NetworkBroadcastService::class, $service);
 

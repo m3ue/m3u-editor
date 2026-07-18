@@ -64,9 +64,20 @@ interface MediaServer
      * actual tracks instead of a generic language list. Returns empty arrays when the
      * integration has no stream-listing API (Local/WebDAV).
      *
+     * 'index' is a composite "{type_relative_position}:{native_id}" string, e.g.
+     * "1:395784" — the type-relative position (0-indexed among streams of that same
+     * type, e.g. "the 2nd audio stream") is what NetworkBroadcastService forwards to
+     * the proxy for FFmpeg's `-map 0:a:{N}?` in Direct/Local mode; native_id (the
+     * media server's own stream identifier — Plex's database-wide stream ID, Emby's
+     * absolute container index) is what's forwarded to the media server's own
+     * PreferredAudioTrack/PreferredSubtitleTrack resolution in Server mode. Neither
+     * value alone works for both: FFmpeg has no notion of Plex's opaque ID, and the
+     * media server's own resolver doesn't need (and Plex's doesn't have) a
+     * type-relative position.
+     *
      * @return array{
-     *     audio: list<array{index: int, label: string, language: ?string}>,
-     *     subtitle: list<array{index: int, label: string, language: ?string}>,
+     *     audio: list<array{index: string, label: string, language: ?string}>,
+     *     subtitle: list<array{index: string, label: string, language: ?string}>,
      * }
      */
     public function getAvailableTracks(string $itemId): array;

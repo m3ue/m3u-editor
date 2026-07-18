@@ -118,11 +118,15 @@ it('saves the selected per-item audio and subtitle track override', function () 
         'ownerRecord' => $network,
         'pageClass' => EditNetwork::class,
     ])
+        // Only audio stream (Index 1) -> type-relative position 0 -> "0:1";
+        // only subtitle stream (Index 2) -> position 0 -> "0:2". These composite
+        // values are exactly what getAvailableTracks() builds into the Select's
+        // options, so they're what the picker actually submits.
         ->callAction(TestAction::make('trackPreferences')->table($content), data: [
-            'preferred_audio_track' => '1',
-            'preferred_subtitle_track' => '2',
+            'preferred_audio_track' => '0:1',
+            'preferred_subtitle_track' => '0:2',
         ]);
 
-    expect($content->refresh()->preferred_audio_track)->toBe('1')
-        ->and($content->preferred_subtitle_track)->toBe('2');
+    expect($content->refresh()->preferred_audio_track)->toBe('0:1')
+        ->and($content->preferred_subtitle_track)->toBe('0:2');
 });

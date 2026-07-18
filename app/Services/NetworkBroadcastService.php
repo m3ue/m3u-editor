@@ -909,11 +909,16 @@ class NetworkBroadcastService
             $preferredAudioTrack = $this->resolveTrackPreference($network, $content, 'preferred_audio_track');
             $preferredSubtitleTrack = $this->resolveTrackPreference($network, $content, 'preferred_subtitle_track');
 
-            if (! empty($preferredAudioTrack)) {
+            // NOTE: not empty($x) — a resolved track preference can legitimately be
+            // the string "0" (the first stream of that type), and PHP's empty("0")
+            // is true. That silently dropped the preference whenever the operator's
+            // pick happened to be the first audio/subtitle track — very much not a
+            // rare case.
+            if ($preferredAudioTrack !== null && $preferredAudioTrack !== '') {
                 $request->merge(['PreferredAudioTrack' => $preferredAudioTrack]);
             }
 
-            if (! empty($preferredSubtitleTrack)) {
+            if ($preferredSubtitleTrack !== null && $preferredSubtitleTrack !== '') {
                 $request->merge(['PreferredSubtitleTrack' => $preferredSubtitleTrack]);
             }
         }
@@ -1611,22 +1616,55 @@ class NetworkBroadcastService
      * specific content item: a per-item override on its NetworkContent row takes
      * precedence over the Network-level default. $column is 'preferred_audio_track' or
      * 'preferred_subtitle_track' — both the Network and NetworkContent tables share the
-     * same column names and value shape (ISO 639 code or a media-server stream index).
+     * same column names.
+     *
+     * The Network-level default is always a plain ISO 639 code (e.g. "eng") — it's
+     * forwarded as-is regardless of mode; both Server (the media server's own fuzzy
+     * language matching) and Direct/Local (FFmpeg's `-map ...:m:language:XX` metadata
+     * specifier) already understand plain language codes natively.
+     *
+     * A per-item override from the Track Preferences picker is a composite
+     * "{type_relative_position}:{native_id}" string (see
+     * NetworkContentRelationManager::getTrackPreferencesAction() /
+     * MediaServer::getAvailableTracks()) — neither half works for both modes alone:
+     * native_id is the media server's own stream identifier (Plex's database-wide
+     * stream ID, Emby's absolute container index), meaningful only to that media
+     * server's own PreferredAudioTrack/PreferredSubtitleTrack resolution (Server
+     * mode); type_relative_position (e.g. "the 2nd audio stream") is what FFmpeg's
+     * plain index specifier (`-map 0:a:{N}?`) needs to select that exact stream when
+     * opening the file directly (Direct/Local mode) — unlike the metadata specifier,
+     * a plain index degrades gracefully via `?` if the position no longer exists.
      *
      * $content may be null (e.g. a programme with no resolvable contentable) — falls
      * back to the network-level default in that case, same as if no override existed.
      */
     protected function resolveTrackPreference(Network $network, mixed $content, string $column): ?string
     {
+        $value = null;
+
         if ($content instanceof Model) {
             $override = NetworkContent::findForNetwork($network, $content)?->{$column};
 
-            if (! empty($override)) {
-                return $override;
+            // NOTE: not empty($override) — a resolved position can legitimately be
+            // "0" (the first stream of that type), which PHP's empty() treats as
+            // falsy. Explicit null/'' checks throughout this method avoid silently
+            // dropping that valid pick.
+            if ($override !== null && $override !== '') {
+                $value = $override;
             }
         }
 
-        return $network->{$column};
+        $value ??= $network->{$column};
+
+        if ($value === null || $value === '' || ! str_contains($value, ':')) {
+            return $value;
+        }
+
+        [$position, $nativeId] = explode(':', $value, 2);
+
+        return ($network->transcode_mode ?? null) === TranscodeMode::Server
+            ? $nativeId
+            : $position;
     }
 
     /**
@@ -1642,8 +1680,27 @@ class NetworkBroadcastService
      */
     protected function subtitlesEnabledForProxy(Network $network, mixed $content = null): bool
     {
-        return ! empty($this->resolveTrackPreference($network, $content, 'preferred_subtitle_track'))
+        $preference = $this->resolveTrackPreference($network, $content, 'preferred_subtitle_track');
+
+        // NOTE: not empty($preference) — a resolved subtitle track position can
+        // legitimately be "0" (the first subtitle stream), and PHP's empty("0") is
+        // true. That silently disabled subtitles whenever the operator's per-item
+        // pick happened to be the first subtitle track in the file.
+        return $preference !== null && $preference !== ''
             && ($network->transcode_mode ?? null) !== TranscodeMode::Server;
+    }
+
+    /**
+     * Whether subtitles should be exposed for the network's CURRENTLY airing
+     * programme. Public (unlike subtitlesEnabledForProxy()) because
+     * NetworkHlsController needs it to decide whether to synthesize an HLS master
+     * playlist referencing a subtitle rendition, or serve the plain video playlist.
+     */
+    public function subtitlesEnabledForCurrentBroadcast(Network $network): bool
+    {
+        $content = $network->getCurrentProgramme()?->contentable;
+
+        return $this->subtitlesEnabledForProxy($network, $content);
     }
 
     /**

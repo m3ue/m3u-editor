@@ -240,6 +240,12 @@ return [
         'efa75f73069a',
         '507b196dbfbd',
         '48dd79fe5852',
+        // ChannelsRelationManager (PR #1298): reformatting the ->select() call
+        // to add a COALESCE(channel_custom_playlist.sort, channels.sort)
+        // pivot-sort column (fixing a Postgres DISTINCT/ORDER BY mismatch)
+        // shifted this same $orderByClause DB::raw() onto a new hash. Column
+        // identifiers are hardcoded; no user input reaches either DB::raw().
+        '05222ff0ad74',
 
         // EpgApiController: $coalesce is built exclusively from
         // $grammar->wrap('column.name') calls on hardcoded column identifiers.
