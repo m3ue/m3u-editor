@@ -210,13 +210,27 @@ class MediaServerProxyController extends Controller
                     array_values($headers)
                 ));
                 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+                    // A player that seeks abandons this connection without closing it (it just
+                    // opens a new one for the new Range). ignore_user_abort(true) above means
+                    // PHP won't notice on its own, and CURLOPT_LOW_SPEED_LIMIT never trips here
+                    // because Plex/Emby keeps sending data just fine — nobody's reading it, but
+                    // it's not a stall. Without this check the worker is pinned forever.
+                    if (connection_aborted()) {
+                        return 0;
+                    }
                     echo $data;
                     flush();
 
                     return strlen($data);
                 });
+                curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+                curl_setopt($ch, CURLOPT_XFERINFOFUNCTION, fn () => connection_aborted() ? 1 : 0);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 0); // No timeout for streaming
+                curl_setopt($ch, CURLOPT_TIMEOUT, 0); // No total timeout for streaming
+                // Abort if the upstream stalls completely (0 bytes) for 30s, so a dead
+                // Plex/Emby/Jellyfin session can't pin a PHP-FPM worker forever.
+                curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+                curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 30);
                 curl_exec($ch);
                 curl_close($ch);
             }, $statusCode, $responseHeaders);
@@ -601,15 +615,26 @@ class MediaServerProxyController extends Controller
                 $ch = curl_init($fileUrl);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, ["Range: {$rangeHeader}"]);
                 curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+                    // See proxyStream(): a seek abandons this connection without closing it,
+                    // and ignore_user_abort(true) means PHP won't notice unless we check here.
+                    if (connection_aborted()) {
+                        return 0;
+                    }
                     echo $data;
                     flush();
 
                     return strlen($data);
                 });
+                curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+                curl_setopt($ch, CURLOPT_XFERINFOFUNCTION, fn () => connection_aborted() ? 1 : 0);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
                 curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+                // Abort if the upstream stalls completely (0 bytes) for 30s, so a dead
+                // WebDAV connection can't pin a PHP-FPM worker forever.
+                curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+                curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 30);
 
                 if ($username && $password) {
                     curl_setopt($ch, CURLOPT_USERPWD, "{$username}:{$password}");
