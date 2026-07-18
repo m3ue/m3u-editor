@@ -5,11 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\MediaServerIntegration;
 use App\Models\Network;
 use App\Models\NetworkProgramme;
+use App\Services\M3uProxyService;
 use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * NetworkStreamController - Stream the currently-scheduled content for a Network.
@@ -26,7 +26,7 @@ class NetworkStreamController extends Controller
      *
      * @param  string  $container  The container format (ts, mp4, mkv, etc.)
      */
-    public function stream(Request $request, Network $network, string $container = 'ts'): StreamedResponse
+    public function stream(Request $request, Network $network, string $container = 'ts'): RedirectResponse
     {
         if (! $network->enabled) {
             abort(404, 'Network is disabled');
@@ -94,20 +94,6 @@ class NetworkStreamController extends Controller
 
         $fullUrl = $streamUrl.'?'.http_build_query($params);
 
-        // Get content type based on container
-        $contentType = $this->getContentTypeForContainer($container);
-
-        // Build headers for the upstream request
-        $headers = [
-            'X-Emby-Token' => $integration->api_key,
-            'Accept' => '*/*',
-        ];
-
-        // Handle range requests for seeking
-        if ($request->hasHeader('Range')) {
-            $headers['Range'] = $request->header('Range');
-        }
-
         Log::debug('Streaming network content', [
             'network_id' => $network->id,
             'network_name' => $network->name,
@@ -118,66 +104,22 @@ class NetworkStreamController extends Controller
             'container' => $container,
         ]);
 
-        // Make a HEAD request to get headers first
-        try {
-            $headResponse = Http::withHeaders($headers)
-                ->timeout(10)
-                ->head($fullUrl);
+        // Register the real Emby/Jellyfin URL with the m3u-proxy service and redirect the
+        // client there. The proxy fetches the media server directly (never through PHP curl),
+        // so the API token never touches this app's PHP-FPM workers for the stream duration
+        // and never reaches the client either, since the client only ever sees the proxy URL.
+        $proxyUrl = app(M3uProxyService::class)->createDirectStreamUrl(
+            url: $fullUrl,
+            headers: [['header' => 'X-Emby-Token', 'value' => $integration->api_key]],
+            format: 'raw',
+            metadata: [
+                'type' => 'network',
+                'network_id' => (string) $network->id,
+                'programme_id' => (string) $programme->id,
+            ],
+        );
 
-            $responseHeaders = [
-                'Content-Type' => $contentType,
-                'Accept-Ranges' => 'bytes',
-                'Cache-Control' => 'no-cache, no-store, must-revalidate',
-                'Pragma' => 'no-cache',
-                'Expires' => '0',
-                'X-Network-Name' => $network->name,
-                'X-Programme-Title' => $programme->title ?? 'Unknown',
-            ];
-
-            // Forward content-length if available
-            if ($headResponse->hasHeader('Content-Length')) {
-                $responseHeaders['Content-Length'] = $headResponse->header('Content-Length');
-            }
-
-            // Forward content-range for partial content
-            if ($headResponse->hasHeader('Content-Range')) {
-                $responseHeaders['Content-Range'] = $headResponse->header('Content-Range');
-            }
-
-            $statusCode = $request->hasHeader('Range') && $headResponse->status() === 206 ? 206 : 200;
-
-        } catch (\Exception $e) {
-            Log::warning('Failed to get stream headers', [
-                'network_id' => $network->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            $responseHeaders = [
-                'Content-Type' => $contentType,
-                'Accept-Ranges' => 'bytes',
-            ];
-            $statusCode = 200;
-        }
-
-        // Stream the response using curl
-        return new StreamedResponse(function () use ($fullUrl, $headers) {
-            $ch = curl_init($fullUrl);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, array_map(
-                fn ($k, $v) => "{$k}: {$v}",
-                array_keys($headers),
-                array_values($headers)
-            ));
-            curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
-                echo $data;
-                flush();
-
-                return strlen($data);
-            });
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 0); // No timeout for streaming
-            curl_exec($ch);
-            curl_close($ch);
-        }, $statusCode, $responseHeaders);
+        return redirect($proxyUrl);
     }
 
     /**
@@ -283,23 +225,5 @@ class NetworkStreamController extends Controller
         }
 
         return null;
-    }
-
-    /**
-     * Get the appropriate content type for a container format.
-     */
-    protected function getContentTypeForContainer(string $container): string
-    {
-        return match (strtolower($container)) {
-            'mp4', 'm4v' => 'video/mp4',
-            'mkv' => 'video/x-matroska',
-            'avi' => 'video/x-msvideo',
-            'webm' => 'video/webm',
-            'mov' => 'video/quicktime',
-            'ts', 'm2ts' => 'video/mp2t',
-            'wmv' => 'video/x-ms-wmv',
-            'flv' => 'video/x-flv',
-            default => 'application/octet-stream',
-        };
     }
 }

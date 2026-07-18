@@ -7,6 +7,7 @@ use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
+use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
@@ -1218,6 +1219,17 @@ class M3uProxyService
         // Get any custom headers for the current playlist
         $headers = $playlist->custom_headers ?? [];
 
+        // Media-server-backed channels (Plex/Emby/Jellyfin/WebDAV) store our own API-key-hiding
+        // proxy URL (e.g. /media-server/{id}/stream/{item}.{ext}) as their channel URL, since that
+        // URL is also handed directly to external clients when the proxy is disabled. When we ARE
+        // going through the proxy, resolve it to the real upstream URL here (server-side, never
+        // exposed to the client) so the Python proxy fetches Plex/Emby/WebDAV directly instead of
+        // looping back through this app's PHP-FPM curl relay for the full duration of playback.
+        if ($resolved = $this->resolveMediaServerUpstreamUrl($primaryUrl)) {
+            $primaryUrl = $resolved['url'];
+            $headers = array_merge($headers, $resolved['headers']);
+        }
+
         // See if channel has any failovers
         // Return bool if using resolver, else array of failover URLs (legacy mode)
         $failovers = $this->usingResolver()
@@ -1227,8 +1239,9 @@ class M3uProxyService
                 ->map(function ($ch) use ($playlist, $selectedProfile) {
                     // Use the selected profile as context if available
                     $urlContext = $selectedProfile ?? $playlist;
+                    $url = PlaylistUrlService::getChannelUrl($ch, $urlContext);
 
-                    return PlaylistUrlService::getChannelUrl($ch, $urlContext);
+                    return $this->resolveMediaServerUpstreamUrl($url)['url'] ?? $url;
                 })
                 ->filter()
                 ->values()
@@ -2228,6 +2241,27 @@ class M3uProxyService
     }
 
     /**
+     * Register an arbitrary, already-resolved upstream URL with the proxy and return the
+     * public URL a client should be redirected to. For callers outside the playlist/channel
+     * system (e.g. NetworkStreamController) that already have a real, fetchable source URL
+     * plus any auth headers it needs, and just want the proxy to relay bytes instead of
+     * doing it themselves with PHP-side curl.
+     *
+     * @param  array<int, array{header: string, value: string}>  $headers
+     */
+    public function createDirectStreamUrl(
+        string $url,
+        array $headers = [],
+        ?string $userAgent = null,
+        string $format = 'raw',
+        array $metadata = [],
+    ): string {
+        $streamId = $this->createStream($url, false, $userAgent, $headers, $metadata);
+
+        return $this->buildProxyUrl($streamId, $format);
+    }
+
+    /**
      * Create a transcoded stream via the m3u-proxy transcoding API
      *
      * @param  string  $url  The stream URL to transcode
@@ -2379,6 +2413,70 @@ class M3uProxyService
     {
         // Transcode route is the same logic as direct now
         return $this->buildProxyUrl($streamId, $format, $username);
+    }
+
+    /**
+     * If the given URL points at one of this app's own API-key-hiding media-server proxy
+     * routes (MediaServerProxyController's `/media-server/*` or `/webdav-media/*`), resolve
+     * it to the real upstream URL (and any auth headers it needs) so the m3u-proxy service
+     * fetches Plex/Emby/Jellyfin/WebDAV directly instead of looping back through this app's
+     * PHP curl relay for the full duration of playback. Never expose the resolved URL to an
+     * external client — it's only safe to use here because the proxy's fetch is server-side.
+     * Local media has no HTTP source and is intentionally left unresolved.
+     *
+     * @return array{url: string, headers: array<int, array{header: string, value: string}>}|null
+     */
+    protected function resolveMediaServerUpstreamUrl(?string $url): ?array
+    {
+        if (empty($url)) {
+            return null;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH) ?? '';
+
+        if (preg_match('#/media-server/(\d+)/stream/([^/.]+)\.([a-zA-Z0-9]+)$#', $path, $matches)) {
+            $integration = MediaServerIntegration::find((int) $matches[1]);
+            if (! $integration || ! $integration->enabled) {
+                return null;
+            }
+
+            $directUrl = MediaServerService::make($integration)->getDirectStreamUrl(request(), $matches[2], $matches[3]);
+
+            return empty($directUrl) ? null : ['url' => $directUrl, 'headers' => []];
+        }
+
+        if (preg_match('#/webdav-media/(\d+)/stream/([^/]+)$#', $path, $matches)) {
+            $integration = MediaServerIntegration::find((int) $matches[1]);
+            if (! $integration || ! $integration->enabled || $integration->type !== 'webdav') {
+                return null;
+            }
+
+            $filePath = base64_decode($matches[2]);
+            if (! $filePath) {
+                return null;
+            }
+
+            $protocol = $integration->ssl ? 'https' : 'http';
+            $baseUrl = "{$protocol}://{$integration->host}";
+            if ($integration->port && ! in_array((int) $integration->port, [80, 443], true)) {
+                $baseUrl .= ":{$integration->port}";
+            }
+
+            $encodedPath = implode('/', array_map('rawurlencode', explode('/', $filePath)));
+            $fileUrl = rtrim($baseUrl, '/').'/'.ltrim($encodedPath, '/');
+
+            $headers = [];
+            if ($integration->webdav_username && $integration->webdav_password) {
+                $headers[] = [
+                    'header' => 'Authorization',
+                    'value' => 'Basic '.base64_encode("{$integration->webdav_username}:{$integration->webdav_password}"),
+                ];
+            }
+
+            return ['url' => $fileUrl, 'headers' => $headers];
+        }
+
+        return null;
     }
 
     /**
