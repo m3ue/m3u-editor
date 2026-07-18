@@ -7,6 +7,7 @@ use App\Models\Epg;
 use App\Models\EpgChannel;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 
@@ -890,9 +891,10 @@ class SimilaritySearchService
         $existingIds = collect($scoredCandidates)->pluck('epg_channel_id')->all();
         $callsignPrefix = $callsign.'-%';
         $identityExpression = $this->candidateIdentityExpression(DB::connection()->getConfig('driver'));
-        $matchingQuery = $epg->channels()->getQuery();
+        $matchingQuery = DB::table((new EpgChannel)->getTable())
+            ->where('epg_id', $epg->id);
         $matchingIds = $matchingQuery
-            ->where(function (Builder $query) use ($callsign, $callsignPrefix): void {
+            ->where(function (QueryBuilder $query) use ($callsign, $callsignPrefix): void {
                 $query->whereRaw('TRIM(LOWER(channel_id)) = ?', [$callsign])
                     ->orWhereRaw('TRIM(LOWER(channel_id)) LIKE ?', [$callsignPrefix])
                     ->orWhereRaw('TRIM(LOWER(name)) = ?', [$callsign])
@@ -1031,10 +1033,11 @@ class SimilaritySearchService
         }
 
         $identityExpression = $this->candidateIdentityExpression($driver);
-        $matchingQuery = $epg->channels()->getQuery();
+        $matchingQuery = DB::table((new EpgChannel)->getTable())
+            ->where('epg_id', $epg->id);
 
         return $this->exactNormalizedNameCandidateIds[$cacheKey] = $matchingQuery
-            ->where(function (Builder $query) use ($compactNormalizedName, $driver): void {
+            ->where(function (QueryBuilder $query) use ($compactNormalizedName, $driver): void {
                 foreach (['channel_id', 'name', 'display_name'] as $column) {
                     $query->orWhereRaw(
                         $this->compactNormalizedNameExpression($column, $driver).' = ?',
