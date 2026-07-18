@@ -985,6 +985,15 @@ class PlexService implements MediaServer
 
             $tracks = ['audio' => [], 'subtitle' => []];
             $typeMap = [2 => 'audio', 3 => 'subtitle'];
+            // Tracks the type-relative position FFmpeg itself would assign via
+            // `0:a:N`/`0:s:N` — incremented for every embedded stream of that type,
+            // including ones we don't offer as a pick (e.g. a bitmap subtitle). FFmpeg
+            // addresses raw container stream slots regardless of codec, so a bitmap
+            // stream sitting between two text subtitle streams still occupies a slot;
+            // excluding it from this counter (as an earlier version did) desynced every
+            // later text stream's stored position from what FFmpeg actually sees,
+            // silently selecting the wrong subtitle track.
+            $positionByType = ['audio' => 0, 'subtitle' => 0];
 
             foreach ($streams as $stream) {
                 $type = $typeMap[(int) ($stream['streamType'] ?? 0)] ?? null;
@@ -995,8 +1004,43 @@ class PlexService implements MediaServer
                 $language = $stream['language'] ?? $stream['languageCode'] ?? null;
                 $label = $stream['extendedDisplayTitle'] ?? $stream['displayTitle'] ?? $stream['title'] ?? ($language ?? 'Unknown');
 
+                // External streams (a sidecar subtitle file sitting next to the video,
+                // not muxed into it — Plex labels these "(... External)" in its own
+                // extendedDisplayTitle, confirmed against a real server) can never be
+                // reached via FFmpeg's `-map 0:s:{N}?` type-relative addressing when
+                // opening the raw file directly — that only sees streams actually
+                // embedded in the container, so these never occupy one of its position
+                // slots either. Plex flags this with a 'key' attribute pointing at the
+                // external file; fall back to the label text since that's the only
+                // signal confirmed against real Plex API output.
+                if (! empty($stream['key']) || str_contains(strtolower($label), 'external')) {
+                    continue;
+                }
+
+                // Position among embedded streams of this same type seen so far
+                // (0-indexed) — matches FFmpeg's own `0:a:N`/`0:s:N` type-relative
+                // addressing when opening this file directly. Plex's 'id' is a
+                // database-wide stream identifier with no relationship to FFmpeg's
+                // numbering, so it's only usable server-side (Server mode's
+                // PreferredAudioTrack resolution).
+                $position = $positionByType[$type]++;
+
+                // Bitmap subtitle formats (PGS/VobSub/DVD — common on Blu-ray rips) can't
+                // be converted to WebVTT, FFmpeg's default HLS subtitle codec (text-to-text
+                // or bitmap-to-bitmap only). Mapping one for Direct/Local's embedded
+                // subtitle output crashes FFmpeg outright ("Subtitle encoding currently
+                // only possible from text to text or bitmap to bitmap") rather than
+                // degrading gracefully — confirmed against a real broadcast. Plex has no
+                // Emby-style IsTextSubtitleStream flag, so this allowlists known text
+                // codec names instead of trying to denylist every bitmap format. Excluded
+                // from the offered list (after claiming its position slot above), not
+                // from the counting itself.
+                if ($type === 'subtitle' && ! in_array(strtolower((string) ($stream['codec'] ?? '')), ['srt', 'subrip', 'ass', 'ssa', 'webvtt', 'text'], true)) {
+                    continue;
+                }
+
                 $tracks[$type][] = [
-                    'index' => (int) ($stream['id'] ?? 0),
+                    'index' => "{$position}:".((int) ($stream['id'] ?? 0)),
                     'label' => $label,
                     'language' => $language,
                 ];

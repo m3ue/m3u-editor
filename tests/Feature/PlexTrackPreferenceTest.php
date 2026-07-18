@@ -43,6 +43,7 @@ function fakePlexMetadataWithStreams(): void
                                     'streamType' => 3,
                                     'languageCode' => 'eng',
                                     'displayTitle' => 'English Forced',
+                                    'codec' => 'srt',
                                 ],
                             ],
                         ]],
@@ -157,11 +158,166 @@ it('getAvailableTracks lists real audio and subtitle streams for the picker UI',
 
     $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
 
+    // 'index' is a composite "{type_relative_position}:{plex_stream_id}" — position
+    // 0/1 among audio streams specifically (not Plex's database-wide stream ID
+    // 101/102, which appears after the colon and is meaningless to FFmpeg directly).
     expect($tracks['audio'])->toHaveCount(2)
         ->and($tracks['subtitle'])->toHaveCount(1)
-        ->and(collect($tracks['audio'])->pluck('index')->all())->toBe([101, 102])
-        ->and($tracks['subtitle'][0]['index'])->toBe(201)
+        ->and(collect($tracks['audio'])->pluck('index')->all())->toBe(['0:101', '1:102'])
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:201')
         ->and($tracks['subtitle'][0]['language'])->toBe('eng');
+});
+
+it('excludes external subtitle streams from getAvailableTracks (unaddressable via raw-file -map)', function () {
+    // The real field bug, reproduced exactly: Plex listed a genuinely embedded
+    // "English (SRT)" track alongside two external sidecar files it itself labels
+    // "(SRT External)" in extendedDisplayTitle. External streams can never be
+    // reached via FFmpeg's `-map 0:s:{N}?` type-relative addressing when opening
+    // the raw file directly, so they must be excluded from both the offered
+    // options and the position numbering — otherwise a picked "position" silently
+    // maps to nothing once translated to a raw ffmpeg map.
+    Http::fake([
+        'http://plex.local:32400/library/metadata/item-1' => Http::response([
+            'MediaContainer' => [
+                'Metadata' => [[
+                    'Media' => [[
+                        'Part' => [[
+                            'key' => '/library/parts/file.ts',
+                            'Stream' => [
+                                [
+                                    'id' => 301,
+                                    'streamType' => 3,
+                                    'languageCode' => 'unk',
+                                    'extendedDisplayTitle' => 'Unknown (SRT External)',
+                                    'key' => '/library/streams/301',
+                                ],
+                                [
+                                    'id' => 302,
+                                    'streamType' => 3,
+                                    'languageCode' => 'eng',
+                                    'extendedDisplayTitle' => 'English (SRT)',
+                                    'codec' => 'srt',
+                                ],
+                                [
+                                    'id' => 303,
+                                    'streamType' => 3,
+                                    'languageCode' => 'unk',
+                                    'extendedDisplayTitle' => 'Unknown (SRT External)',
+                                    'key' => '/library/streams/303',
+                                    'codec' => 'srt',
+                                ],
+                            ],
+                        ]],
+                    ]],
+                ]],
+            ],
+        ], 200),
+    ]);
+
+    $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['subtitle'])->toHaveCount(1)
+        ->and($tracks['subtitle'][0]['label'])->toBe('English (SRT)')
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:302');
+});
+
+it('excludes bitmap-format subtitle streams from getAvailableTracks (cannot convert to WebVTT)', function () {
+    // The real field bug: FFmpeg crashes outright (exit code 234) when mapping a
+    // PGS/VobSub bitmap subtitle stream for HLS output, since its default WebVTT
+    // encoder only supports text-to-text conversion. Plex has no equivalent of
+    // Emby's IsTextSubtitleStream flag, so PlexService allowlists known text
+    // codec names instead — a stream with an unrecognized/bitmap codec must be
+    // excluded from the picker, but still occupy a real container stream slot
+    // (see the dedicated renumbering test below).
+    Http::fake([
+        'http://plex.local:32400/library/metadata/item-1' => Http::response([
+            'MediaContainer' => [
+                'Metadata' => [[
+                    'Media' => [[
+                        'Part' => [[
+                            'key' => '/library/parts/file.ts',
+                            'Stream' => [
+                                [
+                                    'id' => 401,
+                                    'streamType' => 3,
+                                    'languageCode' => 'eng',
+                                    'extendedDisplayTitle' => 'English (SRT)',
+                                    'codec' => 'srt',
+                                ],
+                                [
+                                    'id' => 402,
+                                    'streamType' => 3,
+                                    'languageCode' => 'spa',
+                                    'extendedDisplayTitle' => 'Spanish (PGS)',
+                                    'codec' => 'pgssub',
+                                ],
+                            ],
+                        ]],
+                    ]],
+                ]],
+            ],
+        ], 200),
+    ]);
+
+    $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['subtitle'])->toHaveCount(1)
+        ->and($tracks['subtitle'][0]['label'])->toBe('English (SRT)')
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:401');
+});
+
+it('keeps subtitle positions aligned with FFmpeg container addressing when a bitmap stream is skipped', function () {
+    // The exact reported bug: a bitmap (PGS) subtitle stream sitting BETWEEN two
+    // real text subtitle streams was previously skipped before incrementing the
+    // position counter, so the second text stream was stored at position "1"
+    // when FFmpeg's own `0:s:N` addressing (which counts every embedded stream,
+    // including the bitmap one) actually sees it at position "2" — silently
+    // selecting the wrong subtitle track when an operator picked the
+    // visually-second-listed option.
+    Http::fake([
+        'http://plex.local:32400/library/metadata/item-1' => Http::response([
+            'MediaContainer' => [
+                'Metadata' => [[
+                    'Media' => [[
+                        'Part' => [[
+                            'key' => '/library/parts/file.ts',
+                            'Stream' => [
+                                [
+                                    'id' => 501,
+                                    'streamType' => 3,
+                                    'languageCode' => 'eng',
+                                    'extendedDisplayTitle' => 'English (SRT)',
+                                    'codec' => 'srt',
+                                ],
+                                [
+                                    'id' => 502,
+                                    'streamType' => 3,
+                                    'languageCode' => 'spa',
+                                    'extendedDisplayTitle' => 'Spanish (PGS)',
+                                    'codec' => 'pgssub',
+                                ],
+                                [
+                                    'id' => 503,
+                                    'streamType' => 3,
+                                    'languageCode' => 'fre',
+                                    'extendedDisplayTitle' => 'French (SRT)',
+                                    'codec' => 'srt',
+                                ],
+                            ],
+                        ]],
+                    ]],
+                ]],
+            ],
+        ], 200),
+    ]);
+
+    $tracks = makePlexTrackPreferenceService()->getAvailableTracks('item-1');
+
+    expect($tracks['subtitle'])->toHaveCount(2)
+        ->and($tracks['subtitle'][0]['index'])->toBe('0:501')
+        // French claims position 2 (not 1) — the bitmap stream at position 1
+        // still occupies a real container slot in FFmpeg's own numbering.
+        ->and($tracks['subtitle'][1]['index'])->toBe('2:503');
 });
 
 it('getAvailableTracks returns empty arrays when the metadata request fails', function () {

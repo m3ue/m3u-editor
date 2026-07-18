@@ -210,8 +210,10 @@ Route::get('/network/{network}/{segment}.ts', [NetworkHlsController::class, 'seg
     ->name('network.hls.segment')
     ->where('segment', 'live[0-9]+');
 // Video/subtitle variant sub-playlists and their .ts/.vtt segments, used only
-// when a network has subtitles enabled (proxy emits a master playlist instead
-// of a flat live.m3u8).
+// when a network has subtitles enabled (NetworkHlsController::playlist()
+// synthesizes a master playlist referencing these — FFmpeg itself never emits
+// one, it just auto-derives the live_vtt.m3u8 WebVTT sub-playlist alongside the
+// flat video live.m3u8).
 Route::get('/network/{network}/hls-variant/{filename}', [NetworkHlsController::class, 'variant'])
     ->name('network.hls.variant')
     ->where('filename', 'live[^/]*\.(?:ts|vtt|m3u8)');

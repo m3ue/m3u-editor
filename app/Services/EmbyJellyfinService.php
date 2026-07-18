@@ -815,11 +815,34 @@ class EmbyJellyfinService implements MediaServer
                 fn (array $s): bool => ($s['Type'] ?? '') === 'Subtitle' && ($s['IsTextSubtitleStream'] ?? false)
             ));
 
+            // A per-item override resolves (see NetworkBroadcastService::resolveTrackPreference)
+            // to a numeric type-relative position — the same "Nth embedded subtitle stream,
+            // counting bitmap ones too" position getAvailableTracks() reports — not a language
+            // code, even though this parameter carries the network-level default's language when
+            // no per-item override exists. Resolve that position the same way getAvailableTracks()
+            // does before falling back to language matching, otherwise a numeric position like
+            // "1" never matches any Language field and silently falls through to the first
+            // stream regardless of what was actually picked.
+            $stream = null;
+            if ($preferredLanguage !== null && trim($preferredLanguage) !== '' && ctype_digit(trim($preferredLanguage))) {
+                $targetPosition = (int) trim($preferredLanguage);
+                $position = 0;
+                foreach ($streams as $candidate) {
+                    if (($candidate['Type'] ?? '') !== 'Subtitle' || ($candidate['IsExternal'] ?? false)) {
+                        continue;
+                    }
+                    if ($position === $targetPosition && ($candidate['IsTextSubtitleStream'] ?? false)) {
+                        $stream = $candidate;
+                        break;
+                    }
+                    $position++;
+                }
+            }
+
             // Prefer the stream matching the requested language; fall back to the first
             // text stream when nothing matches (or no preference was given) so subtitles
             // are still offered instead of silently disabled.
-            $stream = null;
-            if ($preferredLanguage !== null && trim($preferredLanguage) !== '') {
+            if ($stream === null && $preferredLanguage !== null && trim($preferredLanguage) !== '') {
                 $normalized = strtolower(trim($preferredLanguage));
                 foreach ($textStreams as $candidate) {
                     if (strtolower((string) ($candidate['Language'] ?? '')) === $normalized) {
@@ -874,6 +897,15 @@ class EmbyJellyfinService implements MediaServer
 
             $streams = $item['MediaStreams'] ?? [];
             $tracks = ['audio' => [], 'subtitle' => []];
+            // Tracks the type-relative position FFmpeg itself would assign via
+            // `0:a:N`/`0:s:N` — incremented for every embedded stream of that type,
+            // including ones we don't offer as a pick (e.g. a bitmap subtitle). FFmpeg
+            // addresses raw container stream slots regardless of codec, so a bitmap
+            // stream sitting between two text subtitle streams still occupies a slot;
+            // skipping it from this counter (as an earlier version did) desynced every
+            // later text stream's stored position from what FFmpeg actually sees,
+            // silently selecting the wrong subtitle track.
+            $positionByType = ['audio' => 0, 'subtitle' => 0];
 
             foreach ($streams as $stream) {
                 $type = strtolower((string) ($stream['Type'] ?? ''));
@@ -881,11 +913,35 @@ class EmbyJellyfinService implements MediaServer
                     continue;
                 }
 
+                // External streams (a sidecar subtitle/audio file sitting next to the
+                // video, not muxed into it) can never be reached via FFmpeg's
+                // `-map 0:s:{N}?`/`-map 0:a:{N}?` type-relative addressing when opening
+                // the raw file directly — that only sees streams actually embedded in
+                // the container, so these never occupy one of its position slots either.
+                if ($stream['IsExternal'] ?? false) {
+                    continue;
+                }
+
+                $position = $positionByType[$type]++;
+
+                // Bitmap subtitle formats (PGS/VobSub — common on Blu-ray rips) can't
+                // be converted to WebVTT, FFmpeg's default HLS subtitle codec (text-to-text
+                // or bitmap-to-bitmap only). Mapping one for Direct/Local's embedded
+                // subtitle output crashes FFmpeg outright ("Subtitle encoding currently
+                // only possible from text to text or bitmap to bitmap") rather than
+                // degrading gracefully — confirmed against a real broadcast. Same
+                // IsTextSubtitleStream check getSubtitleUrl() already uses. Excluded from
+                // the offered list (after claiming its position slot above), not from
+                // the counting itself.
+                if ($type === 'subtitle' && ! ($stream['IsTextSubtitleStream'] ?? false)) {
+                    continue;
+                }
+
                 $language = $stream['Language'] ?? null;
                 $label = $stream['DisplayTitle'] ?? $stream['Title'] ?? ($language ?? 'Unknown');
 
                 $tracks[$type][] = [
-                    'index' => (int) $stream['Index'],
+                    'index' => "{$position}:{$stream['Index']}",
                     'label' => $label,
                     'language' => $language,
                 ];

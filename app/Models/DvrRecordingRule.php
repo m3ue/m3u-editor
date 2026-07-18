@@ -56,7 +56,10 @@ class DvrRecordingRule extends Model
         });
 
         static::created(function (self $rule): void {
-            if ($rule->enabled && in_array($rule->type, [DvrRuleType::Series, DvrRuleType::Manual], true)) {
+            // Immediate scheduling matters for every rule type now that the per-minute
+            // tick no longer matches EPG data (see DvrSchedulerService::tick()) — Once
+            // and Manual rules would otherwise sit unscheduled until the next DvrDeepScan.
+            if ($rule->enabled) {
                 app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);
             }
         });
@@ -80,10 +83,10 @@ class DvrRecordingRule extends Model
                 $rule->series_mode = DvrSeriesMode::All;
             }
 
-            // Detect enabled transition false → true for series/manual rules and trigger immediate scheduling
+            // Detect enabled transition false → true and trigger immediate scheduling
+            // for every rule type — see the comment in the `created` hook above.
             if (
                 $rule->enabled
-                && in_array($rule->type, [DvrRuleType::Series, DvrRuleType::Manual], true)
                 && $rule->getOriginal('enabled') === false
             ) {
                 app(DvrSchedulerService::class)->scheduleRuleImmediately($rule);
