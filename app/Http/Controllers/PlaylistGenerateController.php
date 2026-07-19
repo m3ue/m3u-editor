@@ -683,6 +683,7 @@ class PlaylistGenerateController extends Controller
 
         // Return the HDHR device info
         $uuid = $playlist->uuid;
+        $xtreamStatus = $playlist->xtream_status;
         $tunerCount = (int) $playlist->streams === 0
             ? ($xtreamStatus['user_info']['max_connections'] ?? $playlist->streams ?? 1)
             : $playlist->streams;

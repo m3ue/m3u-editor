@@ -43,6 +43,15 @@ class MergedPlaylist extends Model
         'disable_m3u_xtream_format' => 'boolean',
     ];
 
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array
+     */
+    protected $attributes = [
+        'streams' => 0,
+    ];
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

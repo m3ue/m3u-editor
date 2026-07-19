@@ -89,6 +89,15 @@ class Playlist extends Model
         'auto_retry_503_last_at' => 'datetime',
     ];
 
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array
+     */
+    protected $attributes = [
+        'streams' => 0,
+    ];
+
     public function getFolderPathAttribute(): string
     {
         return "playlist/{$this->uuid}";

@@ -48,6 +48,15 @@ class CustomPlaylist extends Model
         'processing_config' => 'array',
     ];
 
+    /**
+     * The model's default values for attributes.
+     *
+     * @var array
+     */
+    protected $attributes = [
+        'streams' => 0,
+    ];
+
     public function enabledProcessingRules(): SupportCollection
     {
         return collect($this->processing_config ?? [])
