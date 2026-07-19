@@ -146,6 +146,34 @@ class SimilaritySearchService
     }
 
     /**
+     * Extract the matcher-relevant fields from an EpgMap's persisted settings.
+     *
+     * Centralizes the settings→parameter mapping so a channel gets identical
+     * candidates and automatic-match decisions from the mapping job and the
+     * Copilot preview tool for the same EpgMap, instead of the tool silently
+     * using its own hardcoded defaults.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array{
+     *     remove_quality_indicators: bool,
+     *     similarity_threshold: int,
+     *     fuzzy_max_distance: int,
+     *     exact_match_distance: int,
+     *     quality_indicators: array<int, string>|null,
+     * }
+     */
+    public function matcherOptionsFromSettings(array $settings): array
+    {
+        return [
+            'remove_quality_indicators' => $settings['remove_quality_indicators'] ?? false,
+            'similarity_threshold' => $settings['similarity_threshold'] ?? 70,
+            'fuzzy_max_distance' => $settings['fuzzy_max_distance'] ?? 25,
+            'exact_match_distance' => $settings['exact_match_distance'] ?? 8,
+            'quality_indicators' => $settings['quality_indicators'] ?? null,
+        ];
+    }
+
+    /**
      * Sanitizes UTF-8 encoding in strings to prevent PostgreSQL errors.
      */
     private function sanitizeUtf8(?string $value): ?string
