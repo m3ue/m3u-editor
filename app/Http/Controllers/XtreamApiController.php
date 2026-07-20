@@ -2953,7 +2953,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
         }
 
-        $channel = Channel::find($channelId);
+        $channel = $playlist->channels()->where('channels.id', $channelId)->first();
         if (! $channel) {
             return response()->json(['error' => 'Channel not found'], 404);
         }
@@ -2995,6 +2995,11 @@ class XtreamApiController extends Controller
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        $channel = $playlist->channels()->where('channels.id', $channelId)->first();
+        if (! $channel) {
+            return response()->json(['error' => 'Channel not found'], 404);
         }
 
         $matchMode = DvrMatchMode::tryFrom($request->input('match_mode', 'contains')) ?? DvrMatchMode::Contains;

@@ -134,3 +134,66 @@ it('rejects scheduling when DVR is not enabled for the playlist', function () {
 
     expect(DvrRecordingRule::count())->toBe(0);
 });
+
+it('rejects scheduling a channel that belongs to a different playlist', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $otherChannel = Channel::factory()
+        ->for($otherPlaylist)
+        ->for($this->group)
+        ->create(['enabled' => true, 'title_custom' => 'Other Playlist Channel']);
+
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $otherChannel->id,
+        'title' => 'Evening News',
+        'start_time' => now()->addHour()->toIso8601String(),
+        'end_time' => now()->addHours(2)->toIso8601String(),
+    ]);
+
+    $response->assertStatus(404)
+        ->assertJson(['error' => 'Channel not found']);
+
+    expect(DvrRecordingRule::count())->toBe(0);
+});
+
+function createDvrSeriesRuleUrl(string $username, string $password): string
+{
+    return route('xtream.api.player').'?'.http_build_query([
+        'username' => $username,
+        'password' => $password,
+        'action' => 'create_dvr_series_rule',
+    ]);
+}
+
+it('creates a Series DvrRecordingRule from the Xtream create_dvr_series_rule action', function () {
+    $response = $this->postJson(createDvrSeriesRuleUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Breaking News',
+    ]);
+
+    $response->assertOk()
+        ->assertJson(['success' => true])
+        ->assertJsonStructure(['success', 'rule_id']);
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+    expect($rule)->not->toBeNull();
+    expect($rule->type)->toBe(DvrRuleType::Series);
+    expect($rule->channel_id)->toBe($this->channel->id);
+});
+
+it('rejects a series rule for a channel that belongs to a different playlist', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $otherChannel = Channel::factory()
+        ->for($otherPlaylist)
+        ->for($this->group)
+        ->create(['enabled' => true, 'title_custom' => 'Other Playlist Channel']);
+
+    $response = $this->postJson(createDvrSeriesRuleUrl($this->username, $this->password), [
+        'channel_id' => (string) $otherChannel->id,
+        'title' => 'Breaking News',
+    ]);
+
+    $response->assertStatus(404)
+        ->assertJson(['error' => 'Channel not found']);
+
+    expect(DvrRecordingRule::count())->toBe(0);
+});
