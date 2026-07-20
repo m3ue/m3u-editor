@@ -5,6 +5,7 @@ namespace App\Filament\Resources\MergedPlaylists\Pages;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Services\EpgCacheService;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 
@@ -15,6 +16,9 @@ class EditMergedPlaylist extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            ViewAction::make()
+                ->label(__('View Playlist'))
+                ->icon('heroicon-m-eye'),
             DeleteAction::make(),
         ];
     }
