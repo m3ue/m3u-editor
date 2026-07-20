@@ -543,6 +543,11 @@ class AppServiceProvider extends ServiceProvider
                     Storage::disk('local')->delete($playlist->uploads);
                 }
 
+                // Delete DVR recordings through Eloquent (not just the FK cascade) so each
+                // recording's deleting hook runs and cleans up its file on the DVR disk —
+                // a raw DB cascade would remove the rows but leave the files orphaned.
+                $playlist->dvrSetting?->recordings->each->delete();
+
                 // Delete associated viewers (watch progress cascades via FK)
                 PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
@@ -617,6 +622,11 @@ class AppServiceProvider extends ServiceProvider
                 // Remove short URLs
                 $mergedPlaylist->removeShortUrls();
 
+                // Delete DVR recordings through Eloquent so each recording's deleting hook
+                // runs and cleans up its file on the DVR disk (a raw DB cascade would
+                // remove the rows but leave the files orphaned).
+                $mergedPlaylist->dvrSetting?->recordings->each->delete();
+
                 // Delete associated viewers (watch progress cascades via FK)
                 PlaylistViewer::where('viewerable_type', $mergedPlaylist->getMorphClass())
                     ->where('viewerable_id', $mergedPlaylist->id)
@@ -661,6 +671,11 @@ class AppServiceProvider extends ServiceProvider
             CustomPlaylist::deleting(function (CustomPlaylist $customPlaylist) {
                 // Remove short URLs
                 $customPlaylist->removeShortUrls();
+
+                // Delete DVR recordings through Eloquent so each recording's deleting hook
+                // runs and cleans up its file on the DVR disk (a raw DB cascade would
+                // remove the rows but leave the files orphaned).
+                $customPlaylist->dvrSetting?->recordings->each->delete();
 
                 // Cleanup tags
                 Tag::query()
