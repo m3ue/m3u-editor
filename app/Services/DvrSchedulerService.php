@@ -15,6 +15,7 @@ use App\Models\DvrSetting;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Support\SeriesKey;
+use Closure;
 use Exception;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -25,7 +26,8 @@ use Illuminate\Support\Facades\Log;
  *
  * Used by:
  *   - DvrSchedulerTick (every minute) — trigger/stop of due recordings
- *   - DvrDeepScan (daily) — match all rules against EPG with `initial_lookahead_days` window
+ *   - DvrDeepScan (dispatched after each EPG cache regen, scoped to the playlists
+ *     that consume that EPG) — match rules against EPG with `initial_lookahead_days` window
  *   - DvrRecordingRule model — scheduleRuleImmediately() on rule create / re-enable
  *
  * Responsibilities:
@@ -89,18 +91,70 @@ class DvrSchedulerService
      * Match all enabled rules against upcoming programmes and create SCHEDULED rows.
      *
      * Called by:
-     *   - DvrDeepScan scheduled job (daily, with the `initial_lookahead_days` window)
      *   - DvrRecordingRule::scheduleRuleImmediately() (on rule create / re-enable)
      *
      * @param  int  $lookaheadMinutes  How many minutes ahead to search
      */
     public function matchAndSchedule(int $lookaheadMinutes): void
     {
-        $rules = DvrRecordingRule::enabled()
+        $this->runMatchAndSchedule($lookaheadMinutes, fn (Builder $query): Builder => $query);
+    }
+
+    /**
+     * Match enabled rules owned by the given Playlist/CustomPlaylist/MergedPlaylist
+     * scope against upcoming programmes. Used by DvrDeepScan when dispatched after
+     * an EPG cache regen, scoped to just the playlists that consume that EPG —
+     * rescanning every enabled rule on every regen would waste work on playlists
+     * whose EPG data hasn't changed.
+     *
+     * @param  array<int, int>  $playlistIds
+     * @param  array<int, int>  $customPlaylistIds
+     * @param  array<int, int>  $mergedPlaylistIds
+     */
+    public function matchAndScheduleForOwners(
+        int $lookaheadMinutes,
+        array $playlistIds = [],
+        array $customPlaylistIds = [],
+        array $mergedPlaylistIds = [],
+    ): void {
+        if (empty($playlistIds) && empty($customPlaylistIds) && empty($mergedPlaylistIds)) {
+            return;
+        }
+
+        $this->runMatchAndSchedule(
+            $lookaheadMinutes,
+            fn (Builder $query): Builder => $query->whereHas(
+                'dvrSetting',
+                function (Builder $q) use ($playlistIds, $customPlaylistIds, $mergedPlaylistIds): void {
+                    $q->where(function (Builder $q) use ($playlistIds, $customPlaylistIds, $mergedPlaylistIds): void {
+                        if (! empty($playlistIds)) {
+                            $q->orWhereIn('playlist_id', $playlistIds);
+                        }
+                        if (! empty($customPlaylistIds)) {
+                            $q->orWhereIn('custom_playlist_id', $customPlaylistIds);
+                        }
+                        if (! empty($mergedPlaylistIds)) {
+                            $q->orWhereIn('merged_playlist_id', $mergedPlaylistIds);
+                        }
+                    });
+                }
+            )
+        );
+    }
+
+    /**
+     * Shared rule-matching loop for matchAndSchedule() and matchAndScheduleForOwners().
+     *
+     * @param  Closure(Builder): Builder  $scopeQuery
+     */
+    private function runMatchAndSchedule(int $lookaheadMinutes, Closure $scopeQuery): void
+    {
+        $query = DvrRecordingRule::enabled()
             ->with(['dvrSetting.playlist', 'channel.epgChannel', 'sourceChannel.epgChannel', 'epgChannel'])
             ->orderByDesc('priority')
-            ->orderBy('id')
-            ->get();
+            ->orderBy('id');
+
+        $rules = $scopeQuery($query)->get();
 
         if ($rules->isEmpty()) {
             return;

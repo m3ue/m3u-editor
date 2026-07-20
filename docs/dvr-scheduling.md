@@ -6,40 +6,52 @@ content.
 
 ---
 
-## 1. The Tick Loop and the Daily Deep Scan
+## 1. The Tick Loop and the Scoped Deep Scan
 
-Scheduling is split across two recurring jobs:
+Scheduling is split across two jobs:
 
 - **`DvrSchedulerTick`** — every minute. Only triggers/stops already-`Scheduled`
   recordings; it does **not** query the EPG or match rules.
-- **`DvrDeepScan`** — daily (default 03:00, `dvr.deep_scan_hour`). Matches all
-  enabled rules against the EPG using the full `initial_lookahead_days`
-  window (default 14 days) and creates `Scheduled` rows.
+- **`DvrDeepScan`** — dispatched by `GenerateEpgCache` after every successful
+  EPG cache regen (i.e. every EPG sync), scoped to just the
+  Playlists/CustomPlaylists/MergedPlaylists that consume that EPG. Matches
+  enabled rules owned by those playlists against the EPG using the full
+  `initial_lookahead_days` window (default 14 days) and creates `Scheduled`
+  rows.
 
-This split exists because rule matching is EPG-query-heavy and only needs to
-run often enough to catch new EPG data (XMLTV/Schedules Direct imports),
-while trigger/stop needs minute precision to start and stop recordings on
-time. Running the expensive match step every minute was wasteful; running it
-only once a day keeps the per-minute tick cheap while still catching new EPG
-data within 24h.
+There used to be a fixed daily cron (`dvr.deep_scan_hour`, default 03:00) that
+rescanned *every* enabled rule regardless of whether its EPG had changed. That
+was replaced with an on-regen, scoped dispatch: `populateDvrProgrammes()`
+already refreshes `epg_programmes` on every cache regen, so rescanning rules
+right after — limited to the playlists actually affected — catches new EPG
+data immediately instead of waiting up to 24h, without wasting work on
+playlists whose EPG didn't change. `DvrDeepScan` still supports an unscoped
+full rescan (`dispatch(new DvrDeepScan)`, no arguments) for manual/ad-hoc use.
 
-- Schedule registration: `routes/console.php`
+- Dispatch: `app/Jobs/GenerateEpgCache.php` → `dispatchDvrRescan()`, called
+  after `EpgCacheService::cacheEpgData()` succeeds.
+- Tick registration: `routes/console.php`
   ```php
   Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
-  Schedule::job(new DvrDeepScan)->dailyAt(sprintf('%02d:00', $deepScanHour))->withoutOverlapping();
   ```
 - Jobs: `app/Jobs/DvrSchedulerTick.php`, `app/Jobs/DvrDeepScan.php`
-  - Both implement `ShouldBeUnique` — only one instance of each can be
-    queued/running at a time.
+  - Both implement `ShouldBeUnique`. `DvrDeepScan::uniqueId()` is scoped to
+    its playlist/custom-playlist/merged-playlist arguments, so scoped scans
+    for different playlists (e.g. two EPGs syncing concurrently) don't block
+    each other — only identically-scoped dispatches dedupe.
   - Both dispatched onto the `dvr` queue (handled by the `dvr-queue` Horizon
     supervisor).
   - `DvrSchedulerTick`: `tries = 1`, `timeout = 120s`.
   - `DvrDeepScan`: `tries = 1`, `timeout = 600s`.
 - Service: `app/Services/DvrSchedulerService.php`
   - `tick()` — trigger/stop only, called by `DvrSchedulerTick` every minute.
-  - `matchAndSchedule(int $lookaheadMinutes)` — match rules → create
-    `Scheduled` rows, called by `DvrDeepScan` (daily) and internally by
-    `scheduleRuleImmediately()` (see below).
+  - `matchAndSchedule(int $lookaheadMinutes)` — match *all* enabled rules,
+    used by `scheduleRuleImmediately()` (see below) and unscoped `DvrDeepScan`
+    dispatches.
+  - `matchAndScheduleForOwners(int $lookaheadMinutes, array $playlistIds, array $customPlaylistIds, array $mergedPlaylistIds)`
+    — match only rules owned via a `DvrSetting` on one of the given
+    playlists/custom playlists/merged playlists. Used by scoped `DvrDeepScan`
+    dispatches.
 
 `DvrSchedulerTick::tick()` does two things in order:
 
@@ -85,15 +97,15 @@ Configured via `config/dvr.php`:
 
 ```php
 'initial_lookahead_days' => env('DVR_INITIAL_LOOKAHEAD_DAYS', 14),
-'deep_scan_hour' => env('DVR_DEEP_SCAN_HOUR', 3),
 ```
 
-Every matching pass — whether it's the daily `DvrDeepScan` or the immediate
-`scheduleRuleImmediately()` call on rule create/re-enable — uses the same
-**now → now + `initial_lookahead_days` days** window (default 14 days).
-There is no separate short-window "tick lookahead" anymore: matching either
-happens immediately (rule create/re-enable) or once a day (`DvrDeepScan`),
-never on a short interval, since the per-minute tick doesn't match at all.
+Every matching pass — whether it's a `DvrDeepScan` (scoped, on every EPG
+regen) or the immediate `scheduleRuleImmediately()` call on rule
+create/re-enable — uses the same **now → now + `initial_lookahead_days` days**
+window (default 14 days). There is no separate short-window "tick lookahead":
+matching either happens immediately (rule create/re-enable) or on the next
+EPG regen for the affected playlists (`DvrDeepScan`), never on a short
+interval, since the per-minute tick doesn't match at all.
 
 > Once and Manual rules **bypass** the lookahead check entirely because the
 > user explicitly chose the air-time — they schedule as soon as the rule
@@ -194,10 +206,12 @@ permanently locked out.
 
 #### Why this is race-safe
 
-- `DvrDeepScan implements ShouldBeUnique` — only one deep scan runs at a
-  time. `scheduleRuleImmediately()` (rule create/re-enable) runs synchronously
-  in the request that saves the rule, so it can in principle race with a
-  concurrent `DvrDeepScan` run.
+- `DvrDeepScan implements ShouldBeUnique`, scoped per playlist/custom
+  playlist/merged playlist set — two scoped scans for the *same* owners can't
+  run concurrently, but scans for different playlists (e.g. two EPGs syncing
+  at once) can. `scheduleRuleImmediately()` (rule create/re-enable) runs
+  synchronously in the request that saves the rule, so it can in principle
+  race with a concurrent `DvrDeepScan` run.
 - The `exists` + `create` pair is wrapped in `DB::transaction()` so the read
   and the write happen atomically regardless of which path triggered it —
   this is what actually prevents a duplicate row, not job uniqueness alone.

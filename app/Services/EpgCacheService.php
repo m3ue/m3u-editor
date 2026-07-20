@@ -8,7 +8,6 @@ use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
 use App\Models\DvrSetting;
 use App\Models\Epg;
-use App\Models\EpgMap;
 use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -1516,20 +1515,38 @@ class EpgCacheService
      */
     public function populateDvrProgrammes(Epg $epg): void
     {
-        // Find all DVR-enabled playlists whose EpgMap references this EPG
-        $playlistIds = DvrSetting::where('enabled', true)
-            ->pluck('playlist_id');
+        // Resolve every Playlist/CustomPlaylist/MergedPlaylist that has channels
+        // mapped to this EPG, then check whether any of them has an enabled DVR
+        // setting. Covers all three DvrSetting owner types (a plain playlist_id
+        // lookup would miss DVR settings owned by a CustomPlaylist or MergedPlaylist).
+        $playlistIds = [];
+        $customPlaylistIds = [];
+        $mergedPlaylistIds = [];
 
-        if ($playlistIds->isEmpty()) {
-            return;
+        foreach ($epg->getAllPlaylists() as $consumer) {
+            match (true) {
+                $consumer instanceof Playlist => $playlistIds[] = $consumer->id,
+                $consumer instanceof CustomPlaylist => $customPlaylistIds[] = $consumer->id,
+                $consumer instanceof MergedPlaylist => $mergedPlaylistIds[] = $consumer->id,
+                default => null,
+            };
         }
 
-        // Check at least one of those playlists is mapped to this EPG
-        $hasMapping = EpgMap::whereIn('playlist_id', $playlistIds)
-            ->where('epg_id', $epg->id)
+        $hasDvrSetting = DvrSetting::where('enabled', true)
+            ->where(function ($query) use ($playlistIds, $customPlaylistIds, $mergedPlaylistIds): void {
+                if (! empty($playlistIds)) {
+                    $query->orWhereIn('playlist_id', $playlistIds);
+                }
+                if (! empty($customPlaylistIds)) {
+                    $query->orWhereIn('custom_playlist_id', $customPlaylistIds);
+                }
+                if (! empty($mergedPlaylistIds)) {
+                    $query->orWhereIn('merged_playlist_id', $mergedPlaylistIds);
+                }
+            })
             ->exists();
 
-        if (! $hasMapping) {
+        if (! $hasDvrSetting) {
             return;
         }
 

@@ -3,12 +3,17 @@
 namespace App\Jobs;
 
 use App\Enums\Status;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Plugins\PluginHookDispatcher;
 use App\Services\EpgCacheService;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -80,11 +85,15 @@ class GenerateEpgCache implements ShouldQueue
                 'processing_phase' => null,
             ]);
 
+            $playlists = $epg->getAllPlaylists();
+
             // Clear playlist EPG cache files AFTER new cache is generated
             // This ensures users can still get cached EPG files during regeneration
-            foreach ($epg->getAllPlaylists() as $playlist) {
+            foreach ($playlists as $playlist) {
                 EpgCacheService::clearPlaylistEpgCacheFile($playlist);
             }
+
+            $this->dispatchDvrRescan($playlists);
 
             if ($this->notify) {
                 $msg = 'Cache generated successfully in '.round($duration, 2).' seconds';
@@ -98,7 +107,7 @@ class GenerateEpgCache implements ShouldQueue
 
             app(PluginHookDispatcher::class)->dispatch('epg.cache.generated', [
                 'epg_id' => $epg->id,
-                'playlist_ids' => $epg->getAllPlaylists()->pluck('id')->all(),
+                'playlist_ids' => $playlists->pluck('id')->all(),
                 'user_id' => $epg->user_id,
             ], [
                 'user_id' => $epg->user_id,
@@ -120,6 +129,40 @@ class GenerateEpgCache implements ShouldQueue
                 ->broadcast($epg->user)
                 ->sendToDatabase($epg->user);
         }
+    }
+
+    /**
+     * Dispatch a DVR deep scan scoped to the playlists that consume this EPG, so
+     * existing DVR rules get rescanned against the freshly-cached programme data.
+     * Replaces the old daily unscoped DvrDeepScan cron — this runs on every EPG
+     * sync instead, scoped to just the affected playlists.
+     *
+     * @param  SupportCollection<int, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias>  $playlists
+     */
+    private function dispatchDvrRescan(SupportCollection $playlists): void
+    {
+        if (! config('proxy.proxy_integration_enabled', true) || ! config('dvr.dvr_enabled', true)) {
+            return;
+        }
+
+        $playlistIds = [];
+        $customPlaylistIds = [];
+        $mergedPlaylistIds = [];
+
+        foreach ($playlists as $playlist) {
+            match (true) {
+                $playlist instanceof Playlist => $playlistIds[] = $playlist->id,
+                $playlist instanceof CustomPlaylist => $customPlaylistIds[] = $playlist->id,
+                $playlist instanceof MergedPlaylist => $mergedPlaylistIds[] = $playlist->id,
+                default => null,
+            };
+        }
+
+        if (empty($playlistIds) && empty($customPlaylistIds) && empty($mergedPlaylistIds)) {
+            return;
+        }
+
+        dispatch(new DvrDeepScan($playlistIds, $customPlaylistIds, $mergedPlaylistIds));
     }
 
     /**

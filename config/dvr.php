@@ -30,19 +30,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | DVR — Deep scan schedule
-    |--------------------------------------------------------------------------
-    |
-    | Hour of the day (0-23) at which the daily DvrDeepScan job runs. The job
-    | matches all enabled rules against the EPG with the `initial_lookahead_days`
-    | window so new EPG data added between scans gets scheduled.
-    |
-    */
-
-    'deep_scan_hour' => (int) env('DVR_DEEP_SCAN_HOUR', 3),
-
-    /*
-    |--------------------------------------------------------------------------
     | DVR — Initial schedule scan
     |--------------------------------------------------------------------------
     |

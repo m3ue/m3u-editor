@@ -1,6 +1,5 @@
 <?php
 
-use App\Jobs\DvrDeepScan;
 use App\Jobs\DvrRetentionCleanup;
 use App\Jobs\DvrSchedulerTick;
 use Illuminate\Support\Facades\Schedule;
@@ -96,13 +95,6 @@ if (config('proxy.proxy_integration_enabled', true)) {
     if (config('dvr.dvr_enabled', true)) {
         // DVR scheduler tick — every minute, trigger and stop scheduled recordings
         Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
-
-        // DVR deep scan — daily, match all rules against the EPG with the
-        // `initial_lookahead_days` window so new EPG data gets scheduled.
-        $deepScanHour = max(0, min(23, (int) config('dvr.deep_scan_hour', 3)));
-        Schedule::job(new DvrDeepScan)
-            ->dailyAt(sprintf('%02d:00', $deepScanHour))
-            ->withoutOverlapping();
 
         // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
         Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
