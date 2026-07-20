@@ -491,9 +491,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ])->columnSpanFull(),
                 ]),
 
-            Schemas\Components\Fieldset::make(__('Proxy Options'))
+            Schemas\Components\Fieldset::make(__('Streaming Output'))
                 ->columns(2)
-                ->hidden(fn () => ! auth()->user()->canUseProxy())
                 ->schema([
                     Forms\Components\Toggle::make('enable_proxy')
                         ->label(__('Enable Stream Proxy'))
@@ -502,7 +501,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     Forms\Components\Toggle::make('enable_logo_proxy')
                         ->label(__('Enable Logo Proxy'))
                         ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
@@ -510,7 +510,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     Forms\Components\TextInput::make('streams')
                         ->label(__('HDHR/Xtream API Streams'))
                         ->helperText(__('Number of streams available for HDHR and Xtream API service (if using).'))

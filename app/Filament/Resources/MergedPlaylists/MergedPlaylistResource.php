@@ -358,7 +358,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->collapsed($creating)
                 ->columns(2)
-                ->hidden(fn () => ! auth()->user()->canUseProxy())
                 ->schema([
                     Toggle::make('enable_proxy')
                         ->label(__('Enable Stream Proxy'))
@@ -367,7 +366,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     Toggle::make('enable_logo_proxy')
                         ->label(__('Enable Logo Proxy'))
                         ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
@@ -375,7 +375,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     TextInput::make('streams')
                         ->label(__('HDHR/Xtream API Streams'))
                         ->helperText(__('Number of streams available for HDHR and Xtream API service (if using).'))
