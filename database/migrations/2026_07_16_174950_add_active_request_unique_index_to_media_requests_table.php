@@ -10,20 +10,37 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement(
-            'UPDATE media_requests SET status = ?, reviewed_at = ? WHERE id IN ('
-            .'SELECT id FROM ('
-            .'SELECT id, ROW_NUMBER() OVER ('
-            .'PARTITION BY playlist_auth_id, arr_integration_id, external_id, request_type'
-            .' ORDER BY CASE WHEN status = ? THEN 0 ELSE 1 END, requested_at DESC, id'
-            .') AS rn'
-            .' FROM media_requests WHERE status IN (?, ?)'
-            .' AND playlist_auth_id IS NOT NULL AND external_id IS NOT NULL'
-            .') ranked WHERE rn > 1'
-            .')',
-            ['rejected', now()->toDateTimeString(), 'approved', 'pending', 'approved']
-        );
+        // Keep at most one active (pending/approved) request per
+        // playlist_auth_id + arr_integration_id + external_id + request_type,
+        // preferring approved over pending, then the most recent. Everything
+        // else in a duplicate group is rejected so the unique index below
+        // can be created without violating existing data.
+        DB::table('media_requests')
+            ->whereIn('status', ['pending', 'approved'])
+            ->whereNotNull('playlist_auth_id')
+            ->whereNotNull('external_id')
+            ->orderByDesc('requested_at')
+            ->orderBy('id')
+            ->get(['id', 'playlist_auth_id', 'arr_integration_id', 'external_id', 'request_type', 'status'])
+            ->groupBy(fn ($row) => implode(':', [
+                $row->playlist_auth_id,
+                $row->arr_integration_id,
+                $row->external_id,
+                $row->request_type,
+            ]))
+            ->each(function ($group) {
+                $keep = $group->sortByDesc(fn ($row) => $row->status === 'approved')->first();
 
+                $staleIds = $group->reject(fn ($row) => $row->id === $keep->id)->pluck('id');
+                if ($staleIds->isNotEmpty()) {
+                    DB::table('media_requests')
+                        ->whereIn('id', $staleIds)
+                        ->update(['status' => 'rejected', 'reviewed_at' => now()]);
+                }
+            });
+
+        // No Schema Builder support for partial/filtered unique indexes;
+        // this syntax is identical on the two supported drivers (sqlite, pgsql).
         DB::statement(
             'CREATE UNIQUE INDEX media_requests_active_unique'
             .' ON media_requests (playlist_auth_id, arr_integration_id, external_id, request_type)'
