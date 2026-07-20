@@ -11,7 +11,7 @@ use App\Models\PlaylistAuth;
 use App\Services\Arr\ArrService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -138,33 +138,22 @@ class ContentRequestService
             return ['ok' => false, 'code' => 'invalid_integration', 'error' => 'The selected integration is not available.'];
         }
 
-        try {
-            $mediaRequest = DB::transaction(fn (): MediaRequest => MediaRequest::create([
-                'playlist_auth_id' => $playlistAuth->id,
-                'arr_integration_id' => $integration->id,
-                'title' => 'Pending lookup',
-                'external_id' => (string) $externalId,
-                'request_type' => $type,
-                'payload' => [],
-                'status' => 'pending',
-                'requested_at' => now(),
-            ]));
-        } catch (QueryException $e) {
-            $message = $e->getMessage();
-            if (str_contains($message, 'UNIQUE constraint failed')
-                || str_contains($message, 'SQLSTATE[23505')) {
-                return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
-            }
+        $alreadyRequested = MediaRequest::query()
+            ->where('playlist_auth_id', $playlistAuth->id)
+            ->where('arr_integration_id', $integration->id)
+            ->where('external_id', (string) $externalId)
+            ->where('request_type', $type)
+            ->whereIn('status', ['pending', 'approved'])
+            ->exists();
 
-            throw $e;
+        if ($alreadyRequested) {
+            return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
         }
 
         $service = ArrService::make($integration);
 
         try {
             if ($service->checkExists($externalId)['exists']) {
-                $mediaRequest->delete();
-
                 return ['ok' => false, 'code' => 'already_available', 'error' => 'This title is already available.'];
             }
 
@@ -174,8 +163,6 @@ class ContentRequestService
                 fn (array $result): bool => (int) ($result[$externalKey] ?? 0) === $externalId,
             );
         } catch (Throwable $throwable) {
-            $mediaRequest->delete();
-
             Log::warning('Content request lookup failed', [
                 'integration_id' => $integration->id,
                 'error' => $throwable->getMessage(),
@@ -185,8 +172,6 @@ class ContentRequestService
         }
 
         if (! $item) {
-            $mediaRequest->delete();
-
             return ['ok' => false, 'code' => 'not_found', 'error' => 'The requested title was not found.'];
         }
 
@@ -207,8 +192,6 @@ class ContentRequestService
                 ->all();
 
             if (array_diff($selectedSeasons, $availableSeasons) !== []) {
-                $mediaRequest->delete();
-
                 return ['ok' => false, 'code' => 'invalid_seasons', 'error' => 'One or more selected seasons are unavailable.'];
             }
 
@@ -221,12 +204,14 @@ class ContentRequestService
                 ->all();
         }
 
-        $mediaRequest->update([
-            'title' => $item['title'] ?? 'Unknown',
-            'payload' => $payload,
-        ]);
+        $title = $item['title'] ?? 'Unknown';
 
         if (! $playlistAuth->auto_approve_requests) {
+            $mediaRequest = $this->createMediaRequest($playlistAuth, $integration, $type, $externalId, $title, $payload, 'pending');
+            if (! $mediaRequest) {
+                return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
+            }
+
             return [
                 'ok' => true,
                 'status' => 'pending_approval',
@@ -236,8 +221,6 @@ class ContentRequestService
 
         $result = $service->add($payload);
         if (! ($result['ok'] ?? false)) {
-            $mediaRequest->delete();
-
             return [
                 'ok' => false,
                 'code' => 'submission_failed',
@@ -245,16 +228,59 @@ class ContentRequestService
             ];
         }
 
-        $mediaRequest->update([
-            'status' => 'approved',
-            'reviewed_at' => now(),
-        ]);
+        $mediaRequest = $this->createMediaRequest(
+            $playlistAuth,
+            $integration,
+            $type,
+            $externalId,
+            $title,
+            $payload,
+            'approved',
+            reviewedAt: now(),
+        );
+        if (! $mediaRequest) {
+            return ['ok' => false, 'code' => 'already_requested', 'error' => 'This title has already been requested.'];
+        }
 
         return [
             'ok' => true,
             'status' => 'approved',
-            'request' => $this->formatRequest($mediaRequest->fresh()),
+            'request' => $this->formatRequest($mediaRequest),
         ];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function createMediaRequest(
+        PlaylistAuth $playlistAuth,
+        ArrIntegration $integration,
+        string $type,
+        int $externalId,
+        string $title,
+        array $payload,
+        string $status,
+        ?Carbon $reviewedAt = null,
+    ): ?MediaRequest {
+        try {
+            return MediaRequest::create([
+                'playlist_auth_id' => $playlistAuth->id,
+                'arr_integration_id' => $integration->id,
+                'title' => $title,
+                'external_id' => (string) $externalId,
+                'request_type' => $type,
+                'payload' => $payload,
+                'status' => $status,
+                'requested_at' => now(),
+                'reviewed_at' => $reviewedAt,
+            ]);
+        } catch (QueryException $e) {
+            $message = $e->getMessage();
+            if (str_contains($message, 'UNIQUE constraint failed')
+                || str_contains($message, 'SQLSTATE[23505')) {
+                return null;
+            }
+
+            throw $e;
+        }
     }
 
     /** @return array{requests: array<int, array<string, mixed>>, total: int} */
