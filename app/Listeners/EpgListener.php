@@ -53,12 +53,21 @@ class EpgListener
 
     private function handleEpgDeleted(EpgDeleted $event)
     {
+        $epg = $event->epg;
+
         // Handle EPG deleted event
-        $event->epg->postProcesses()->where([
+        $epg->postProcesses()->where([
             ['event', 'deleted'],
             ['enabled', true],
-        ])->get()->each(function ($postProcess) use ($event) {
-            dispatch(new RunPostProcess($postProcess, $event->epg));
+        ])->get()->each(function ($postProcess) use ($epg) {
+            dispatch(new RunPostProcess($postProcess, $epg));
         });
+
+        // Remove all post-processes associated with the deleted EPG
+        // Above, we run the post-processes for the "deleted" event, but we also want to remove all post-processes for this EPG to avoid orphaned records.
+        $epg->postProcesses()->detach();
+
+        // Remove all epg maps
+        $epg->epgMaps()->delete();
     }
 }
