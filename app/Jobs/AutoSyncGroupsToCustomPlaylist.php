@@ -208,7 +208,7 @@ class AutoSyncGroupsToCustomPlaylist implements ShouldQueue
 
         $notification->broadcast($user)->sendToDatabase($user);
 
-        if ($playlist->hasEnabledProcessingRules()) {
+        if ($playlist->hasEnabledProcessingRules() || $playlist->auto_merge_channels_enabled) {
             SyncCompleted::dispatch($playlist, 'custom_playlist');
         }
     }

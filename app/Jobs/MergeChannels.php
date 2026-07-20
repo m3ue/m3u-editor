@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\ChannelFailover;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
@@ -64,6 +65,12 @@ class MergeChannels implements ShouldQueue
     protected array $existingFailoverMasterIds = [];
 
     /**
+     * Cached uuid of the scoped custom playlist (used as the tag type for
+     * custom group filtering).
+     */
+    protected ?string $customPlaylistUuid = null;
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -82,6 +89,8 @@ class MergeChannels implements ShouldQueue
         public string $contentType = 'live',
         public string $mergeKey = 'stream_id',
         public bool $scrubberAwareMasterSelection = false,
+        public ?int $customPlaylistId = null,
+        public ?array $customGroupNames = null,
     ) {
         $this->contentType = in_array($this->contentType, ['live', 'vod'], true) ? $this->contentType : 'live';
         $this->mergeKey = in_array($this->mergeKey, ['stream_id', 'tmdb_id'], true) ? $this->mergeKey : 'stream_id';
@@ -149,6 +158,7 @@ class MergeChannels implements ShouldQueue
 
         $this->applyContentTypeScope($allChannelsQuery);
         $this->applyMergeKeyPresenceScope($allChannelsQuery);
+        $this->applyCustomPlaylistScope($allChannelsQuery);
 
         $allChannels = $allChannelsQuery
             ->when($this->groupId, function ($query) {
@@ -187,6 +197,40 @@ class MergeChannels implements ShouldQueue
         $deactivatedCount += $regexResults['deactivated'];
 
         $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * Restrict a channel candidate query to the scoped custom playlist and,
+     * optionally, its selected custom groups (issue #1103). Custom playlist
+     * groups are tags whose type is the custom playlist's uuid.
+     */
+    protected function applyCustomPlaylistScope($query): void
+    {
+        if (! $this->customPlaylistId) {
+            return;
+        }
+
+        $query->whereHas('customPlaylists', function ($q) {
+            $q->where('custom_playlists.id', $this->customPlaylistId);
+        });
+
+        $groupNames = collect($this->customGroupNames ?? [])->filter()->values();
+        if ($groupNames->isEmpty() || $groupNames->contains('all')) {
+            return;
+        }
+
+        $tagType = $this->customPlaylistUuid ??= CustomPlaylist::find($this->customPlaylistId)?->uuid;
+        if (! $tagType) {
+            return;
+        }
+
+        $query->where(function ($q) use ($groupNames, $tagType): void {
+            foreach ($groupNames as $groupName) {
+                $q->orWhereHas('tags', function ($tagQuery) use ($groupName, $tagType): void {
+                    $tagQuery->where('type', $tagType)->where('name->en', $groupName);
+                });
+            }
+        });
     }
 
     /**
@@ -319,6 +363,7 @@ class MergeChannels implements ShouldQueue
         ])->whereIn('playlist_id', $playlistIds);
 
         $this->applyContentTypeScope($channelsQuery);
+        $this->applyCustomPlaylistScope($channelsQuery);
 
         $channels = $channelsQuery
             ->where(function ($query) {
@@ -362,6 +407,12 @@ class MergeChannels implements ShouldQueue
         $patterns = $this->regexPatterns ?? [];
 
         if (empty($patterns)) {
+            // Custom playlist merges carry their own config — never fall back to the
+            // primary source playlist's regex patterns.
+            if ($this->customPlaylistId) {
+                return ['processed' => 0, 'deactivated' => 0];
+            }
+
             // If patterns not set directly, check if playlist has auto_merge_config with regex_patterns
             $playlist = Playlist::find($this->playlistId);
             if ($playlist) {
@@ -390,6 +441,7 @@ class MergeChannels implements ShouldQueue
             ->whereIn('playlist_id', $playlistIds);
 
         $this->applyContentTypeScope($regexChannelsQuery);
+        $this->applyCustomPlaylistScope($regexChannelsQuery);
 
         $regexChannelsQuery
             ->when($this->groupId, fn ($q) => $q->where('group_id', $this->groupId))
