@@ -27,14 +27,14 @@ trait HasBrowseShowsFiltersForm
             ->placeholder(__('— Any —'))
             ->searchable()
             ->getSearchResultsUsing(function (string $search): array {
-                $playlistId = $this->getCachedDvrSetting()?->playlist_id;
-                if (! $playlistId) {
+                $subquery = $this->getCachedDvrSetting()?->ownerChannelsSubquery();
+                if (! $subquery) {
                     return [];
                 }
 
                 $searchLower = mb_strtolower($search);
 
-                $query = Channel::where('playlist_id', $playlistId);
+                $query = Channel::whereIn('id', $subquery);
                 if (! $this->shouldIncludeDisabledChannels()) {
                     $query->where('enabled', true);
                 }
@@ -66,14 +66,23 @@ trait HasBrowseShowsFiltersForm
             ->label(__('Group'))
             ->placeholder(__('— Any —'))
             ->searchable()
-            ->options(fn (): array => Group::where('playlist_id', $this->getCachedDvrSetting()?->playlist_id ?? 0)
-                ->where([
-                    ['name', '!=', ''],
-                    ['name', '!=', null],
-                ])
-                ->orderBy('name')
-                ->pluck('name', 'id')
-                ->all());
+            ->options(function (): array {
+                $dvrSetting = $this->getCachedDvrSetting();
+                if (! $dvrSetting) {
+                    return [];
+                }
+
+                $groupIdsSubquery = $dvrSetting->ownerChannelsSubquery('channels.group_id')->whereNotNull('channels.group_id')->distinct();
+
+                return Group::whereIn('id', $groupIdsSubquery)
+                    ->where([
+                        ['name', '!=', ''],
+                        ['name', '!=', null],
+                    ])
+                    ->orderBy('name')
+                    ->pluck('name', 'id')
+                    ->all();
+            });
     }
 
     protected function keywordFilterField(): TextInput
@@ -185,10 +194,10 @@ trait HasBrowseShowsFiltersForm
             ])
             ->getSearchResultsUsing(function (string $search): array {
                 $searchLower = mb_strtolower($search);
-                $playlistId = $this->getCachedDvrSetting()?->playlist_id;
+                $subquery = $this->getCachedDvrSetting()?->ownerChannelsSubquery();
 
-                $channelResults = $playlistId
-                    ? Channel::where('playlist_id', $playlistId)
+                $channelResults = $subquery
+                    ? Channel::whereIn('id', $subquery)
                         ->where(fn (Builder $q) => $q
                             ->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
                             ->orWhereRaw('LOWER(title_custom) LIKE ?', ["%{$searchLower}%"])

@@ -138,13 +138,17 @@ trait HasDvrMatchedAirings
             return $stringId ? [$stringId] : [];
         }
 
-        $playlistId = $rule->dvrSetting->playlist_id;
-        $channelQuery = Channel::where('playlist_id', $playlistId)
-            ->whereNotNull('epg_channel_id')
+        $channelQuery = $rule->dvrSetting->ownerChannels();
+
+        if (! $channelQuery) {
+            return [];
+        }
+
+        $channelQuery->whereNotNull('channels.epg_channel_id')
             ->with('epgChannel');
 
         if (! $includeDisabled) {
-            $channelQuery->where('enabled', true);
+            $channelQuery->where('channels.enabled', true);
         }
 
         return $channelQuery->get()

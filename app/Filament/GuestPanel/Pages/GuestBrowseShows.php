@@ -192,12 +192,11 @@ class GuestBrowseShows extends Page
         }
 
         $dvrSetting = $this->getCachedDvrSetting();
-        $playlistId = $dvrSetting?->playlist_id;
-        if (! $playlistId) {
+        if (! $dvrSetting) {
             return;
         }
 
-        $channels = Channel::where('playlist_id', $playlistId)
+        $channels = Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
             ->select(['id', 'title', 'title_custom', 'name', 'name_custom']);
         if (! $this->shouldIncludeDisabledChannels()) {
             $channels->where('enabled', true);
@@ -341,7 +340,7 @@ class GuestBrowseShows extends Page
         if ($programme->epg_channel_id) {
             $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
             if ($epgChannelPk) {
-                $channel = Channel::where('playlist_id', $dvrSetting->playlist_id)
+                $channel = Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
                     ->where('epg_channel_id', $epgChannelPk)
                     ->first();
             }
@@ -591,8 +590,9 @@ class GuestBrowseShows extends Page
             });
         }
 
-        if ($dvrSetting?->playlist_id) {
-            $epgChannelIds = $this->resolveEpgChannelScope($dvrSetting->playlist_id);
+        $subquery = $dvrSetting?->ownerChannelsSubquery();
+        if ($subquery) {
+            $epgChannelIds = $this->resolveEpgChannelScope($subquery);
 
             if ($epgChannelIds !== null) {
                 $query->whereIn('epg_channel_id', $epgChannelIds);
@@ -815,14 +815,15 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * Resolve the set of XMLTV channel IDs in scope for the given playlist.
+     * Resolve the set of XMLTV channel IDs in scope for the given channels.
      *
      * Uses SQL joins (same as the authenticated BrowseShows) to avoid loading
      * every Channel model into PHP memory.
      *
+     * @param  Builder  $channelsSubquery  Subquery selecting channels.id, scoped to the owner
      * @return list<string>|null
      */
-    private function resolveEpgChannelScope(int $playlistId): ?array
+    private function resolveEpgChannelScope(Builder $channelsSubquery): ?array
     {
         $includeDisabled = $this->shouldIncludeDisabledChannels();
 
@@ -841,7 +842,7 @@ class GuestBrowseShows extends Page
 
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-            ->where('channels.playlist_id', $playlistId)
+            ->whereIn('channels.id', clone $channelsSubquery)
             ->whereNotNull('channels.epg_channel_id');
 
         if (! $includeDisabled) {
@@ -849,7 +850,7 @@ class GuestBrowseShows extends Page
         }
 
         $streamIdBase = DB::table('channels')
-            ->where('channels.playlist_id', $playlistId)
+            ->whereIn('channels.id', clone $channelsSubquery)
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
 
@@ -887,8 +888,8 @@ class GuestBrowseShows extends Page
      */
     private function resolveSourceChannel(string $title): array
     {
-        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
-        if (! $playlistId) {
+        $subquery = $this->getCachedDvrSetting()?->ownerChannelsSubquery();
+        if (! $subquery) {
             return [null, null];
         }
 
@@ -906,7 +907,7 @@ class GuestBrowseShows extends Page
             return [null, null];
         }
 
-        $channel = Channel::where('playlist_id', $playlistId)
+        $channel = Channel::whereIn('id', $subquery)
             ->where('epg_channel_id', $epgChannelPk)
             ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
 

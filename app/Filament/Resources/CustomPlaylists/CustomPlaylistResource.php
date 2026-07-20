@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Models\PlaylistAuth;
@@ -833,6 +834,12 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->icon('heroicon-m-arrow-up-right')
                                 ->columns(2)
                                 ->schema($outputScheme),
+
+                            ...array_filter([
+                                DvrRequestsAiostreamsTabs::dvrTab(),
+                                DvrRequestsAiostreamsTabs::requestsTab(),
+                                DvrRequestsAiostreamsTabs::aiostreamsTab(),
+                            ]),
                         ]),
                 ]),
         ];

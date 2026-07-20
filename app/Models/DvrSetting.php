@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrSeriesMode;
+use App\Traits\HasPolymorphicPlaylistOwner;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class DvrSetting extends Model
 {
     use HasFactory;
+    use HasPolymorphicPlaylistOwner;
 
     /**
      * @return array<string, string>
@@ -19,6 +21,9 @@ class DvrSetting extends Model
     protected function casts(): array
     {
         return [
+            'playlist_id' => 'integer',
+            'custom_playlist_id' => 'integer',
+            'merged_playlist_id' => 'integer',
             'enabled' => 'boolean',
             'use_proxy' => 'boolean',
             'max_concurrent_recordings' => 'integer',
@@ -34,11 +39,6 @@ class DvrSetting extends Model
             'default_series_keep_last' => 'integer',
             'include_disabled_channels' => 'boolean',
         ];
-    }
-
-    public function playlist(): BelongsTo
-    {
-        return $this->belongsTo(Playlist::class);
     }
 
     public function user(): BelongsTo

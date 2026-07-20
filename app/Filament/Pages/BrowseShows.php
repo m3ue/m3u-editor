@@ -144,10 +144,10 @@ class BrowseShows extends Page
                         ->label(__('DVR Setting (Playlist)'))
                         ->placeholder(__('No DVR settings configured'))
                         ->searchable()
-                        ->options(fn () => DvrSetting::with('playlist')
+                        ->options(fn () => DvrSetting::with(['playlist', 'customPlaylist', 'mergedPlaylist'])
                             ->where('user_id', Auth::id())
                             ->get()
-                            ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->playlist?->name ?? "DVR #{$s->id}"])
+                            ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->owner()?->name ?? "DVR #{$s->id}"])
                             ->all())
                         ->live()
                         ->afterStateUpdated(function (Set $set): void {
@@ -163,16 +163,28 @@ class BrowseShows extends Page
                     $this->descriptionKeywordFilterField(),
 
                     $this->groupFilterField()
-                        ->options(fn (Get $get): array => ($dvrSettingId = $get('dvr_setting_id'))
-                            ? Group::where('playlist_id', DvrSetting::find($dvrSettingId)?->playlist_id ?? 0)
+                        ->options(function (Get $get): array {
+                            $dvrSettingId = $get('dvr_setting_id');
+                            if (! $dvrSettingId) {
+                                return [];
+                            }
+
+                            $dvrSetting = DvrSetting::find($dvrSettingId);
+                            if (! $dvrSetting) {
+                                return [];
+                            }
+
+                            $groupIdsSubquery = $dvrSetting->ownerChannelsSubquery('channels.group_id')->whereNotNull('channels.group_id')->distinct();
+
+                            return Group::whereIn('id', $groupIdsSubquery)
                                 ->where([
                                     ['name', '!=', ''],
                                     ['name', '!=', null],
                                 ])
                                 ->orderBy('name')
                                 ->pluck('name', 'id')
-                                ->all()
-                            : [])
+                                ->all();
+                        })
                         ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id')),
 
                     $this->channelFilterField()
@@ -202,12 +214,12 @@ class BrowseShows extends Page
             return;
         }
 
-        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
-        if (! $playlistId) {
+        $dvrSetting = $this->getCachedDvrSetting();
+        if (! $dvrSetting) {
             return;
         }
 
-        $channels = Channel::where('playlist_id', $playlistId)
+        $channels = Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
             ->select(['id', 'title', 'title_custom', 'name', 'name_custom']);
         if (! $this->shouldIncludeDisabledChannels()) {
             $channels->where('enabled', true);
@@ -492,8 +504,8 @@ class BrowseShows extends Page
      */
     private function resolveSourceChannel(string $title): array
     {
-        $playlistId = $this->getCachedDvrSetting()?->playlist_id;
-        if (! $playlistId) {
+        $subquery = $this->getCachedDvrSetting()?->ownerChannelsSubquery();
+        if (! $subquery) {
             return [null, null];
         }
 
@@ -511,7 +523,7 @@ class BrowseShows extends Page
             return [null, null];
         }
 
-        $channel = Channel::where('playlist_id', $playlistId)
+        $channel = Channel::whereIn('id', $subquery)
             ->where('epg_channel_id', $epgChannelPk)
             ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
 
@@ -691,12 +703,12 @@ class BrowseShows extends Page
             });
         }
 
-        $playlistId = $this->dvr_setting_id
-            ? $this->getCachedDvrSetting()?->playlist_id
+        $subquery = $this->dvr_setting_id
+            ? $this->getCachedDvrSetting()?->ownerChannelsSubquery()
             : null;
 
-        if ($playlistId) {
-            $epgChannelIds = $this->resolveEpgChannelScope($playlistId);
+        if ($subquery) {
+            $epgChannelIds = $this->resolveEpgChannelScope($subquery);
 
             if ($epgChannelIds !== null) {
                 $query->whereIn('epg_channel_id', $epgChannelIds);
@@ -923,7 +935,7 @@ class BrowseShows extends Page
     }
 
     /**
-     * Resolve the set of XMLTV channel IDs that are in scope for the given playlist.
+     * Resolve the set of XMLTV channel IDs that are in scope for the given channels.
      *
      * Matches via two paths so that both EPG-channel-mapped channels and tvg-id
      * (stream_id) channels return results:
@@ -934,9 +946,10 @@ class BrowseShows extends Page
      * filtering should be applied — all programmes are fair game). Returns an empty
      * array when a channel/group filter is active but nothing matched (0 results).
      *
+     * @param  Builder  $channelsSubquery  Subquery selecting channels.id, scoped to the owner
      * @return list<string>|null
      */
-    private function resolveEpgChannelScope(int $playlistId): ?array
+    private function resolveEpgChannelScope(Builder $channelsSubquery): ?array
     {
         $includeDisabled = $this->shouldIncludeDisabledChannels();
 
@@ -955,7 +968,7 @@ class BrowseShows extends Page
 
         $epgMapBase = DB::table('channels')
             ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-            ->where('channels.playlist_id', $playlistId)
+            ->whereIn('channels.id', clone $channelsSubquery)
             ->whereNotNull('channels.epg_channel_id');
 
         if (! $includeDisabled) {
@@ -963,7 +976,7 @@ class BrowseShows extends Page
         }
 
         $streamIdBase = DB::table('channels')
-            ->where('channels.playlist_id', $playlistId)
+            ->whereIn('channels.id', clone $channelsSubquery)
             ->whereNotNull('channels.stream_id')
             ->where('channels.stream_id', '!=', '');
 

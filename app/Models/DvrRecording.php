@@ -293,7 +293,7 @@ class DvrRecording extends Model
      */
     public function getFloatingPlayerAttributes(): array
     {
-        $playlist = $this->dvrSetting?->playlist;
+        $playlist = $this->dvrSetting?->owner();
         $username = $this->user->name;
         $format = $this->status === DvrRecordingStatus::Completed
             ? ($this->dvrSetting?->dvr_output_format ?? 'mp4')

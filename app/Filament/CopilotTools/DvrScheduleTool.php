@@ -625,10 +625,10 @@ class DvrScheduleTool extends BaseTool
         };
 
         if ($channelId !== null) {
-            $channel = Channel::where('id', $channelId)
-                ->where('user_id', auth()->id())
-                ->where('playlist_id', $dvrSetting->playlist_id)
-                ->first();
+            $subquery = $dvrSetting->ownerChannelsSubquery();
+            $channel = $subquery
+                ? Channel::where('id', $channelId)->where('user_id', auth()->id())->whereIn('id', $subquery)->first()
+                : null;
 
             if (! $channel) {
                 return "Channel #{$channelId} not found, does not belong to you, or is not in the DVR setting's playlist.";
@@ -765,7 +765,7 @@ class DvrScheduleTool extends BaseTool
     private function listDvrSettings(): string
     {
         $settings = DvrSetting::where('user_id', auth()->id())
-            ->with('playlist')
+            ->with(['playlist', 'customPlaylist', 'mergedPlaylist'])
             ->get();
 
         if ($settings->isEmpty()) {
@@ -775,7 +775,7 @@ class DvrScheduleTool extends BaseTool
         $lines = ['Available DVR settings:', ''];
 
         foreach ($settings as $setting) {
-            $playlistName = $setting->playlist?->name ?? "DVR Setting #{$setting->id}";
+            $playlistName = $setting->owner()?->name ?? "DVR Setting #{$setting->id}";
             $lines[] = "  #{$setting->id} {$playlistName}";
         }
 

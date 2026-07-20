@@ -3,7 +3,9 @@
 namespace App\Filament\GuestPanel\Pages\Concerns;
 
 use App\Facades\PlaylistFacade;
+use App\Models\CustomPlaylist;
 use App\Models\DvrSetting;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
@@ -29,20 +31,20 @@ trait HasGuestDvr
     }
 
     /**
-     * Resolve the DvrSetting for the current guest's assigned playlist.
-     * Only regular Playlists (and PlaylistAliases backed by one) have DVR support.
+     * Resolve the DvrSetting for the current guest's assigned playlist
+     * (Playlist, CustomPlaylist, MergedPlaylist, or an alias of one of those).
      */
     public static function getDvrSetting(): ?DvrSetting
     {
         $uuid = static::getCurrentUuid();
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
 
-        if ($playlist instanceof Playlist) {
+        if ($playlist instanceof Playlist || $playlist instanceof CustomPlaylist || $playlist instanceof MergedPlaylist) {
             return $playlist->dvrSetting;
         }
 
-        if ($playlist instanceof PlaylistAlias && $playlist->playlist_id) {
-            return $playlist->playlist?->dvrSetting;
+        if ($playlist instanceof PlaylistAlias) {
+            return $playlist->getEffectivePlaylist()?->dvrSetting;
         }
 
         return null;

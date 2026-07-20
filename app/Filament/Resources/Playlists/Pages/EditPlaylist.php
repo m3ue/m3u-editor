@@ -2,20 +2,19 @@
 
 namespace App\Filament\Resources\Playlists\Pages;
 
-use App\Enums\DvrSeriesMode;
+use App\Filament\Concerns\HasDvrAndRequestFormHooks;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Networks\NetworkResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Playlists\Widgets\ImportProgress;
-use App\Models\DvrSetting;
 use App\Models\Playlist;
-use App\Models\PlaylistRequestSetting;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
 
 class EditPlaylist extends EditRecord
 {
     // use EditRecord\Concerns\HasWizard;
+    use HasDvrAndRequestFormHooks;
 
     protected static string $resource = PlaylistResource::class;
 
@@ -73,7 +72,7 @@ class EditPlaylist extends EditRecord
     }
 
     /**
-     * Populate dvr_ prefixed fields from the dvrSetting HasOne relationship.
+     * Populate dvr_/request_ prefixed fields from their owned relations.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -82,95 +81,29 @@ class EditPlaylist extends EditRecord
     {
         /** @var Playlist $record */
         $record = $this->getRecord();
-        $dvr = $record->dvrSetting;
 
-        if ($dvr) {
-            $data['dvr_enabled'] = $dvr->enabled;
-            $data['dvr_output_format'] = $dvr->dvr_output_format ?? 'ts';
-            $data['dvr_max_concurrent_recordings'] = $dvr->max_concurrent_recordings;
-            $data['dvr_default_start_early_seconds'] = $dvr->default_start_early_seconds;
-            $data['dvr_default_end_late_seconds'] = $dvr->default_end_late_seconds;
-            $data['dvr_retention_days'] = $dvr->retention_days;
-            $data['dvr_global_disk_quota_gb'] = $dvr->global_disk_quota_gb;
-            $data['dvr_enable_metadata_enrichment'] = $dvr->enable_metadata_enrichment;
-            $data['dvr_generate_nfo_files'] = $dvr->generate_nfo_files;
-            $data['dvr_enable_comskip'] = $dvr->enable_comskip;
-            $data['dvr_include_disabled_channels'] = $dvr->include_disabled_channels;
-            $data['dvr_default_series_mode'] = $dvr->default_series_mode?->value ?? DvrSeriesMode::UniqueSe->value;
-            $data['dvr_default_series_keep_last'] = $dvr->default_series_keep_last;
-        } else {
-            $data['dvr_enabled'] = false;
-            $data['dvr_output_format'] = 'ts';
-            $data['dvr_enable_metadata_enrichment'] = true;
-            $data['dvr_generate_nfo_files'] = false;
-            $data['dvr_enable_comskip'] = false;
-            $data['dvr_include_disabled_channels'] = false;
-            $data['dvr_default_series_mode'] = DvrSeriesMode::UniqueSe->value;
-            $data['dvr_default_series_keep_last'] = null;
-        }
-
-        $data['request_enabled'] = $record->requestSetting?->enabled ?? false;
-
-        return $data;
+        return $this->fillDvrAndRequestFormData($data, $record);
     }
 
     /**
-     * Strip dvr_ prefixed fields so Filament doesn't try to save them to the playlists table.
+     * Strip dvr_/request_ prefixed fields so Filament doesn't try to save them to the playlists table.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        foreach (array_keys($data) as $key) {
-            if (str_starts_with($key, 'dvr_') || str_starts_with($key, 'request_')) {
-                unset($data[$key]);
-            }
-        }
-
-        return $data;
+        return $this->stripDvrAndRequestFormData($data);
     }
 
     /**
-     * Save dvr_ and request_ prefixed fields back to their respective HasOne relationships.
+     * Save dvr_/request_ prefixed fields back to their respective owned relations.
      */
     protected function afterSave(): void
     {
         /** @var Playlist $record */
         $record = $this->getRecord();
-        $data = $this->form->getRawState();
 
-        if (isset($data['dvr_enabled'])) {
-            DvrSetting::updateOrCreate(
-                ['playlist_id' => $record->id],
-                [
-                    'user_id' => $record->user_id,
-                    'enabled' => $data['dvr_enabled'] ?? false,
-                    'use_proxy' => true,
-                    'dvr_output_format' => $data['dvr_output_format'] ?? 'ts',
-                    'max_concurrent_recordings' => $data['dvr_max_concurrent_recordings'] ?? 2,
-                    'default_start_early_seconds' => $data['dvr_default_start_early_seconds'] ?? 30,
-                    'default_end_late_seconds' => $data['dvr_default_end_late_seconds'] ?? 60,
-                    'retention_days' => $data['dvr_retention_days'] ?? 0,
-                    'global_disk_quota_gb' => $data['dvr_global_disk_quota_gb'] ?? 0,
-                    'enable_metadata_enrichment' => $data['dvr_enable_metadata_enrichment'] ?? true,
-                    'generate_nfo_files' => $data['dvr_generate_nfo_files'] ?? false,
-                    'enable_comskip' => $data['dvr_enable_comskip'] ?? false,
-                    'include_disabled_channels' => $data['dvr_include_disabled_channels'] ?? false,
-                    'default_series_mode' => $data['dvr_default_series_mode'] ?? DvrSeriesMode::UniqueSe->value,
-                    'default_series_keep_last' => ($data['dvr_default_series_keep_last'] > 0) ? $data['dvr_default_series_keep_last'] : null,
-                ]
-            );
-        }
-
-        if (isset($data['request_enabled'])) {
-            PlaylistRequestSetting::updateOrCreate(
-                ['playlist_id' => $record->id],
-                [
-                    'user_id' => $record->user_id,
-                    'enabled' => $data['request_enabled'] ?? false,
-                ]
-            );
-        }
+        $this->saveDvrAndRequestFormData($record, $this->form->getRawState());
     }
 }
