@@ -358,9 +358,12 @@ class NetworkContentRelationManager extends RelationManager
                 'preferred_subtitle_track' => $record->preferred_subtitle_track,
             ])
             ->action(function (array $data, NetworkContent $record): void {
+                // The subtitle Select is conditionally ->visible() based on whether this
+                // item has any subtitle tracks; Filament omits hidden fields from $data
+                // entirely, so this key may not exist at all (not just be empty/null).
                 $record->update([
-                    'preferred_audio_track' => $data['preferred_audio_track'] ?: null,
-                    'preferred_subtitle_track' => $data['preferred_subtitle_track'] ?: null,
+                    'preferred_audio_track' => ($data['preferred_audio_track'] ?? null) ?: null,
+                    'preferred_subtitle_track' => ($data['preferred_subtitle_track'] ?? null) ?: null,
                 ]);
 
                 Notification::make()
