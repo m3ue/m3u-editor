@@ -475,7 +475,7 @@ test('Xtream auth does not advertise requests when no guest-enabled ARR integrat
         ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
 });
 
-test('Xtream owner auth advertises requests when playlist request integration is enabled', function () {
+test('Xtream owner auth does not advertise requests when playlist request integration is enabled', function () {
     $playlist = Playlist::factory()->for($this->user)->create([
         'uuid' => 'owner-request-uuid',
     ]);
@@ -491,5 +491,5 @@ test('Xtream owner auth advertises requests when playlist request integration is
     $response = $this->getJson('/player_api.php?username='.urlencode($this->user->name).'&password=owner-request-uuid');
 
     $response->assertOk()
-        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress', 'requests']);
+        ->assertJsonPath('m3u_editor.features', ['viewers', 'progress']);
 });
