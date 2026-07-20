@@ -100,12 +100,24 @@ class PlaylistListener
 
     private function handlePlaylistDeleted(PlaylistDeleted $event)
     {
+        $playlist = $event->playlist;
+
         // Handle playlist deleted event
-        $event->playlist->postProcesses()->where([
+        $playlist->postProcesses()->where([
             ['event', 'deleted'],
             ['enabled', true],
-        ])->get()->each(function ($postProcess) use ($event) {
-            dispatch(new RunPostProcess($postProcess, $event->playlist));
+        ])->get()->each(function ($postProcess) use ($playlist) {
+            dispatch(new RunPostProcess($postProcess, $playlist));
         });
+
+        // Detach playlist auths
+        $playlist->playlistAuths()->detach();
+
+        // Remove all post-processes associated with the deleted playlist
+        // Above, we run the post-processes for the "deleted" event, but we also want to remove all post-processes for this playlist to avoid orphaned records.
+        $playlist->postProcesses()->detach();
+
+        // Remove all playlist maps
+        $playlist->epgMaps()->delete();
     }
 }

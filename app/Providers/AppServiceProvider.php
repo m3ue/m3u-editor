@@ -543,19 +543,17 @@ class AppServiceProvider extends ServiceProvider
                     Storage::disk('local')->delete($playlist->uploads);
                 }
 
-                // Delete cached EPG files
-                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
-
-                // Remove short URLs and detach playlist auths
-                $playlist->removeShortUrls();
-                $playlist->playlistAuths()->detach();
-                event(new PlaylistDeleted($playlist));
-                $playlist->postProcesses()->detach();
-
                 // Delete associated viewers (watch progress cascades via FK)
                 PlaylistViewer::where('viewerable_type', $playlist->getMorphClass())
                     ->where('viewerable_id', $playlist->id)
                     ->delete();
+
+                // Remove short URLs
+                $playlist->removeShortUrls();
+
+                // Delete cached EPG files
+                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+                event(new PlaylistDeleted($playlist));
 
                 return $playlist;
             });
@@ -587,7 +585,6 @@ class AppServiceProvider extends ServiceProvider
                     Storage::disk('local')->delete($epg->uploads);
                 }
                 event(new EpgDeleted($epg));
-                $epg->postProcesses()->detach();
 
                 return $epg;
             });
@@ -664,6 +661,7 @@ class AppServiceProvider extends ServiceProvider
             CustomPlaylist::deleting(function (CustomPlaylist $customPlaylist) {
                 // Remove short URLs
                 $customPlaylist->removeShortUrls();
+
                 // Cleanup tags
                 Tag::query()
                     ->where('type', $customPlaylist->uuid)
