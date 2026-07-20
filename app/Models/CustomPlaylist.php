@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Collection as SupportCollection;
@@ -46,6 +47,7 @@ class CustomPlaylist extends Model
         'id_channel_by' => PlaylistChannelId::class,
         'disable_m3u_xtream_format' => 'boolean',
         'processing_config' => 'array',
+        'aiostreams_integration_id' => 'integer',
     ];
 
     public function enabledProcessingRules(): SupportCollection
@@ -68,6 +70,24 @@ class CustomPlaylist extends Model
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);
+    }
+
+    /**
+     * The AIOStreams integration that this custom playlist is permitted to access.
+     */
+    public function aiostreamsIntegration(): BelongsTo
+    {
+        return $this->belongsTo(MediaServerIntegration::class, 'aiostreams_integration_id');
+    }
+
+    public function dvrSetting(): HasOne
+    {
+        return $this->hasOne(DvrSetting::class);
+    }
+
+    public function requestSetting(): HasOne
+    {
+        return $this->hasOne(PlaylistRequestSetting::class);
     }
 
     public function vodStreamProfile(): BelongsTo

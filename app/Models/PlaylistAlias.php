@@ -289,6 +289,30 @@ class PlaylistAlias extends Model
     }
 
     /**
+     * Inherit the DVR setting from the effective playlist (Playlist or CustomPlaylist).
+     */
+    public function getDvrSettingAttribute()
+    {
+        return $this->getEffectivePlaylist()?->dvrSetting;
+    }
+
+    /**
+     * Inherit the content-request setting from the effective playlist (Playlist or CustomPlaylist).
+     */
+    public function getRequestSettingAttribute()
+    {
+        return $this->getEffectivePlaylist()?->requestSetting;
+    }
+
+    /**
+     * Inherit the AIOStreams integration from the effective playlist (Playlist or CustomPlaylist).
+     */
+    public function getAiostreamsIntegrationAttribute()
+    {
+        return $this->getEffectivePlaylist()?->aiostreamsIntegration;
+    }
+
+    /**
      * Get groups through the effective playlist
      */
     public function groups()

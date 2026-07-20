@@ -133,7 +133,9 @@ class DvrRecordingResource extends Resource
                                         ->label(__('Current Step'))
                                         ->hidden(fn (DvrRecording $record): bool => ! $record->post_processing_step),
                                     TextEntry::make('channel.title')->label(__('Channel')),
-                                    TextEntry::make('dvrSetting.playlist.name')->label(__('Playlist')),
+                                    TextEntry::make('dvr_owner_name')
+                                        ->label(__('Playlist'))
+                                        ->state(fn (DvrRecording $record): ?string => $record->dvrSetting?->owner()?->name),
                                     TextEntry::make('season')
                                         ->label(__('Season'))
                                         ->hidden(fn (DvrRecording $record): bool => $record->season === null),
@@ -220,9 +222,9 @@ class DvrRecordingResource extends Resource
                     ->label(__('Channel'))
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('dvrSetting.playlist.name')
+                TextColumn::make('dvr_owner_name')
                     ->label(__('Playlist'))
-                    ->sortable()
+                    ->state(fn (DvrRecording $record): ?string => $record->dvrSetting?->owner()?->name)
                     ->toggleable(),
                 TextColumn::make('scheduled_start')
                     ->since()
@@ -272,7 +274,7 @@ class DvrRecordingResource extends Resource
                         ->visible(fn (DvrRecording $record): bool => in_array($record->status, [
                             DvrRecordingStatus::Recording,
                             DvrRecordingStatus::Completed,
-                        ]) && $record->dvrSetting?->playlist)
+                        ]) && $record->dvrSetting?->owner())
                         ->action(function (DvrRecording $record, $livewire): void {
                             $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
                         }),

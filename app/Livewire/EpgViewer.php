@@ -8,11 +8,12 @@ use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecordingRule;
-use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Services\EpgCacheService;
 use Carbon\Carbon;
@@ -239,9 +240,12 @@ class EpgViewer extends Component implements HasActions, HasForms
             return;
         }
 
-        /** @var Playlist $playlist */
+        /** @var Playlist|CustomPlaylist|MergedPlaylist $playlist */
         $playlist = $this->record;
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+        $dvrSetting = $playlist->dvrSetting;
+        if ($dvrSetting && ! $dvrSetting->enabled) {
+            $dvrSetting = null;
+        }
 
         if (! $dvrSetting) {
             Notification::make()

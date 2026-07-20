@@ -86,8 +86,11 @@ class DvrRecorderService
             throw new Exception("Recording {$recording->id} has no stream_url — cannot start");
         }
 
-        // Check if there's an existing stream for this channel to piggyback off
-        $playlistUuid = $recording->dvrSetting?->playlist?->uuid;
+        // Check if there's an existing stream for this channel to piggyback off.
+        // Use the channel's own real source playlist (not the DvrSetting's owner,
+        // which may be a Custom/Merged playlist spanning multiple real playlists)
+        // since that's what the proxy actually keys active streams by.
+        $playlistUuid = $channel?->getEffectivePlaylist()?->uuid;
         if ($channel && $playlistUuid) {
             $activeStreamId = $this->proxy->getActiveStreamIdForChannel($channel->id, $playlistUuid);
             if ($activeStreamId) {

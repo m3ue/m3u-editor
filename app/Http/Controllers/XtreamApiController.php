@@ -16,7 +16,6 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
-use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -25,7 +24,6 @@ use App\Models\NetworkProgramme;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
-use App\Models\PlaylistRequestSetting;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\StreamProfile;
@@ -57,6 +55,15 @@ class XtreamApiController extends Controller
         'request_history',
         'request_status',
         'request_dismiss',
+    ];
+
+    private const DVR_ACTIONS = [
+        'get_dvr_recordings',
+        'get_dvr_recording',
+        'schedule_dvr',
+        'create_dvr_series_rule',
+        'cancel_dvr_recording',
+        'delete_dvr_recording',
     ];
 
     /**
@@ -1972,18 +1979,20 @@ class XtreamApiController extends Controller
             return $this->requestStatus($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'request_dismiss') {
             return $this->dismissRequest($request, $playlist, $authMethod, $playlistAuth);
-        } elseif ($action === 'get_dvr_recordings') {
-            return $this->getDvrRecordings($request, $playlist, $username, $password);
-        } elseif ($action === 'get_dvr_recording') {
-            return $this->getDvrRecording($request, $playlist, $username, $password);
-        } elseif ($action === 'schedule_dvr') {
-            return $this->scheduleDvr($request, $playlist);
-        } elseif ($action === 'create_dvr_series_rule') {
-            return $this->createDvrSeriesRule($request, $playlist);
-        } elseif ($action === 'cancel_dvr_recording') {
-            return $this->cancelDvrRecording($request, $playlist);
-        } elseif ($action === 'delete_dvr_recording') {
-            return $this->deleteDvrRecording($request, $playlist);
+        } elseif (in_array($action, self::DVR_ACTIONS, true)) {
+            $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
+            if (! $dvrPlaylist) {
+                return response()->json(['error' => 'DVR access denied'], 403);
+            }
+
+            return match ($action) {
+                'get_dvr_recordings' => $this->getDvrRecordings($request, $dvrPlaylist, $username, $password),
+                'get_dvr_recording' => $this->getDvrRecording($request, $dvrPlaylist, $username, $password),
+                'schedule_dvr' => $this->scheduleDvr($request, $dvrPlaylist),
+                'create_dvr_series_rule' => $this->createDvrSeriesRule($request, $dvrPlaylist),
+                'cancel_dvr_recording' => $this->cancelDvrRecording($request, $dvrPlaylist),
+                'delete_dvr_recording' => $this->deleteDvrRecording($request, $dvrPlaylist),
+            };
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
@@ -2666,16 +2675,30 @@ class XtreamApiController extends Controller
             }
         }
 
-        $effectivePlaylist = $playlist instanceof PlaylistAlias
-            ? $playlist->getEffectivePlaylist()
-            : $playlist;
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
-        if (! $effectivePlaylist instanceof Playlist) {
+        if (! $effectivePlaylist) {
             return false;
         }
 
         return $effectivePlaylist->aiostreams_integration_id !== null
             && optional($effectivePlaylist->aiostreamsIntegration)->enabled;
+    }
+
+    /**
+     * Unwrap a PlaylistAlias to its effective playlist; otherwise return the
+     * playlist as-is if it's one of the three playlist types that carry their
+     * own DVR/Requests/AIOStreams settings.
+     */
+    private function resolveEffectivePlaylist($playlist): Playlist|CustomPlaylist|MergedPlaylist|null
+    {
+        $effective = $playlist instanceof PlaylistAlias
+            ? $playlist->getEffectivePlaylist()
+            : $playlist;
+
+        return $effective instanceof Playlist || $effective instanceof CustomPlaylist || $effective instanceof MergedPlaylist
+            ? $effective
+            : null;
     }
 
     /**
@@ -2707,11 +2730,9 @@ class XtreamApiController extends Controller
             ];
         }
 
-        $effectivePlaylist = $playlist instanceof PlaylistAlias
-            ? $playlist->getEffectivePlaylist()
-            : $playlist;
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
-        if (! $effectivePlaylist instanceof Playlist) {
+        if (! $effectivePlaylist) {
             return [];
         }
 
@@ -2763,10 +2784,7 @@ class XtreamApiController extends Controller
             return false;
         }
 
-        $hasEnabledDvr = DvrSetting::where('playlist_id', $dvrPlaylist->id)
-            ->where('enabled', true)
-            ->exists();
-        if (! $hasEnabledDvr) {
+        if (! $dvrPlaylist->dvrSetting?->enabled) {
             return false;
         }
 
@@ -2777,19 +2795,9 @@ class XtreamApiController extends Controller
         return (bool) $playlistAuth?->dvr_enabled;
     }
 
-    private function resolveDvrPlaylist($playlist): ?Playlist
+    private function resolveDvrPlaylist($playlist): Playlist|CustomPlaylist|MergedPlaylist|null
     {
-        if ($playlist instanceof Playlist) {
-            return $playlist;
-        }
-
-        if ($playlist instanceof PlaylistAlias) {
-            $effective = $playlist->getEffectivePlaylist();
-
-            return $effective instanceof Playlist ? $effective : null;
-        }
-
-        return null;
+        return $this->resolveEffectivePlaylist($playlist);
     }
 
     /**
@@ -2878,7 +2886,7 @@ class XtreamApiController extends Controller
      */
     private function getDvrRecordings(Request $request, $playlist, string $username, string $password): \Illuminate\Http\JsonResponse
     {
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+        $dvrSetting = $playlist->dvrSetting;
 
         if (! $dvrSetting) {
             return response()->json([]);
@@ -2915,7 +2923,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+        $dvrSetting = $playlist->dvrSetting;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
@@ -2947,7 +2955,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'channel_id, title, start_time, and end_time are required'], 400);
         }
 
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+        $dvrSetting = $playlist->dvrSetting?->enabled ? $playlist->dvrSetting : null;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
@@ -2991,7 +2999,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'channel_id and title are required'], 400);
         }
 
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->where('enabled', true)->first();
+        $dvrSetting = $playlist->dvrSetting?->enabled ? $playlist->dvrSetting : null;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
@@ -3035,7 +3043,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+        $dvrSetting = $playlist->dvrSetting;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
@@ -3066,7 +3074,7 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = DvrSetting::where('playlist_id', $playlist->id)->first();
+        $dvrSetting = $playlist->dvrSetting;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
@@ -3152,17 +3160,13 @@ class XtreamApiController extends Controller
             return false;
         }
 
-        $effectivePlaylist = $playlist instanceof PlaylistAlias
-            ? $playlist->getEffectivePlaylist()
-            : $playlist;
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
-        if (! $effectivePlaylist instanceof Playlist) {
+        if (! $effectivePlaylist) {
             return false;
         }
 
-        if (! PlaylistRequestSetting::where('playlist_id', $effectivePlaylist->id)
-            ->where('enabled', true)
-            ->exists()) {
+        if (! $effectivePlaylist->requestSetting?->enabled) {
             return false;
         }
 
@@ -3478,16 +3482,12 @@ class XtreamApiController extends Controller
         mixed $playlist,
         string $authMethod,
         ?PlaylistAuth $playlistAuth,
-    ): ?Playlist {
+    ): Playlist|CustomPlaylist|MergedPlaylist|null {
         if (! $this->requestsFeatureEnabled($playlist, $authMethod, $playlistAuth)) {
             return null;
         }
 
-        $effectivePlaylist = $playlist instanceof PlaylistAlias
-            ? $playlist->getEffectivePlaylist()
-            : $playlist;
-
-        return $effectivePlaylist instanceof Playlist ? $effectivePlaylist : null;
+        return $this->resolveEffectivePlaylist($playlist);
     }
 
     /**

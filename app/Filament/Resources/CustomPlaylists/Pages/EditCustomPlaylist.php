@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\CustomPlaylists\Pages;
 
+use App\Filament\Concerns\HasDvrAndRequestFormHooks;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Models\CustomPlaylist;
 use App\Services\EpgCacheService;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ViewAction;
@@ -11,7 +13,45 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditCustomPlaylist extends EditRecord
 {
+    use HasDvrAndRequestFormHooks;
+
     protected static string $resource = CustomPlaylistResource::class;
+
+    /**
+     * Populate dvr_/request_ prefixed fields from their owned relations.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        /** @var CustomPlaylist $record */
+        $record = $this->getRecord();
+
+        return $this->fillDvrAndRequestFormData($data, $record);
+    }
+
+    /**
+     * Strip dvr_/request_ prefixed fields so Filament doesn't try to save them to the custom_playlists table.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        return $this->stripDvrAndRequestFormData($data);
+    }
+
+    /**
+     * Save dvr_/request_ prefixed fields back to their respective owned relations.
+     */
+    protected function afterSave(): void
+    {
+        /** @var CustomPlaylist $record */
+        $record = $this->getRecord();
+
+        $this->saveDvrAndRequestFormData($record, $this->form->getRawState());
+    }
 
     protected function getHeaderActions(): array
     {

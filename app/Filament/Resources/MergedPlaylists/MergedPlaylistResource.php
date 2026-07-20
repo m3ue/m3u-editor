@@ -8,6 +8,7 @@ use App\Filament\Resources\MergedPlaylistResource\Pages;
 use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
+use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Forms\Components\PlaylistEpgUrl;
 use App\Forms\Components\PlaylistM3uUrl;
 use App\Forms\Components\XtreamApiInfo;
@@ -662,6 +663,12 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 ->columns(2)
                                 ->icon('heroicon-m-arrow-up-right')
                                 ->schema($outputScheme),
+
+                            ...array_filter([
+                                DvrRequestsAiostreamsTabs::dvrTab(),
+                                DvrRequestsAiostreamsTabs::requestsTab(),
+                                DvrRequestsAiostreamsTabs::aiostreamsTab(),
+                            ]),
                         ]),
                 ]),
         ];

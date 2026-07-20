@@ -118,7 +118,7 @@ class GuestDvrRuleResource extends Resource
     private static function formComponents(): array
     {
         $dvrSetting = static::getDvrSetting();
-        $playlistId = $dvrSetting?->playlist_id;
+        $channelsSubquery = $dvrSetting?->ownerChannelsSubquery();
 
         return [
             Toggle::make('enabled')
@@ -158,9 +158,9 @@ class GuestDvrRuleResource extends Resource
 
             Select::make('channel_id')
                 ->label(__('Channel'))
-                ->options(fn (?DvrRecordingRule $record) => $playlistId
+                ->options(fn (?DvrRecordingRule $record) => $channelsSubquery
                     ? Channel::query()
-                        ->where('playlist_id', $playlistId)
+                        ->whereIn('id', $channelsSubquery)
                         ->orderBy('title')
                         ->pluck('title', 'id')
                         ->when($record !== null, fn ($col) => $col->prepend(__('From Original Source'), 0))

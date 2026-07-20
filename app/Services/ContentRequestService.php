@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Livewire\ArrQueueMonitor;
 use App\Models\ArrIntegration;
 use App\Models\ArrQueueEvent;
+use App\Models\CustomPlaylist;
 use App\Models\MediaRequest;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Services\Arr\ArrService;
@@ -18,7 +20,7 @@ use Throwable;
 class ContentRequestService
 {
     /** @return Collection<int, ArrIntegration> */
-    public function integrations(Playlist $playlist): Collection
+    public function integrations(Playlist|CustomPlaylist|MergedPlaylist $playlist): Collection
     {
         return ArrIntegration::query()
             ->where('user_id', $playlist->user_id)
@@ -29,7 +31,7 @@ class ContentRequestService
     }
 
     /** @return array<int, string> */
-    public function contentTypes(Playlist $playlist): array
+    public function contentTypes(Playlist|CustomPlaylist|MergedPlaylist $playlist): array
     {
         $integrationTypes = $this->integrations($playlist)
             ->pluck('type')
@@ -50,7 +52,7 @@ class ContentRequestService
      *     unavailable_providers: int
      * }
      */
-    public function search(Playlist $playlist, string $term, ?string $type = null): array
+    public function search(Playlist|CustomPlaylist|MergedPlaylist $playlist, string $term, ?string $type = null): array
     {
         $results = [];
         $searchedProviders = 0;
@@ -124,7 +126,7 @@ class ContentRequestService
      * @return array{ok: bool, code?: string, error?: string, status?: string, request?: array<string, mixed>}
      */
     public function submit(
-        Playlist $playlist,
+        Playlist|CustomPlaylist|MergedPlaylist $playlist,
         PlaylistAuth $playlistAuth,
         string $type,
         int $integrationId,

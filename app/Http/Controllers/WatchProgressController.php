@@ -183,10 +183,13 @@ class WatchProgressController extends Controller
     {
         $playlistId = match ($contentType) {
             'episode' => Episode::where('id', $streamId)->value('playlist_id'),
+            // Use the recording's own channel's real source playlist rather than the
+            // DvrSetting's owner, which may be a Custom/Merged playlist with no single
+            // real Playlist id to record progress against.
             'dvr_recording' => DvrRecording::where('id', $streamId)
-                ->with('dvrSetting.playlist')
+                ->with('channel.playlist')
                 ->first()
-                ?->dvrSetting
+                ?->channel
                 ?->playlist
                 ?->id,
             default => Channel::where('id', $streamId)->value('playlist_id'),

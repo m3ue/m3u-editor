@@ -245,11 +245,16 @@ class DvrSchedulerService
             return $stringId ? [$stringId] : [];
         }
 
-        // 3. No explicit channel: scope to all EPG-mapped channels in the playlist
-        $playlistId = $rule->dvrSetting->playlist_id;
+        // 3. No explicit channel: scope to all EPG-mapped channels reachable through
+        // the rule's DVR setting owner (a Playlist, CustomPlaylist, or MergedPlaylist).
+        $channelQuery = $rule->dvrSetting->ownerChannels();
 
-        return Channel::where('playlist_id', $playlistId)
-            ->whereNotNull('epg_channel_id')
+        if (! $channelQuery) {
+            return [];
+        }
+
+        return $channelQuery
+            ->whereNotNull('channels.epg_channel_id')
             ->with('epgChannel')
             ->get()
             ->map(fn (Channel $c) => $c->epgChannel?->channel_id)

@@ -134,7 +134,7 @@ class DvrOverviewTool extends BaseTool
 
         $rules = DvrRecordingRule::where('user_id', $userId)
             ->where('enabled', true)
-            ->with(['channel', 'dvrSetting.playlist', 'recordings'])
+            ->with(['channel', 'dvrSetting.playlist', 'dvrSetting.customPlaylist', 'dvrSetting.mergedPlaylist', 'recordings'])
             ->orderByDesc('priority')
             ->orderBy('id')
             ->limit($limit)
@@ -152,7 +152,7 @@ class DvrOverviewTool extends BaseTool
             $typeLabel = $rule->type->getLabel();
             $recordingCount = $rule->recordings->count();
             $channelName = $rule->channel?->name ?? 'Any channel';
-            $playlistName = $rule->dvrSetting?->playlist?->name ?? "DVR #{$rule->dvr_setting_id}";
+            $playlistName = $rule->dvrSetting?->owner()?->name ?? "DVR #{$rule->dvr_setting_id}";
 
             $line = "#{$rule->id} [{$typeLabel}] ";
 
@@ -190,7 +190,7 @@ class DvrOverviewTool extends BaseTool
         $userId = auth()->id();
 
         $settings = DvrSetting::where('user_id', $userId)
-            ->with('playlist')
+            ->with(['playlist', 'customPlaylist', 'mergedPlaylist'])
             ->get();
 
         $lines = ['DVR Capacity Overview', ''];
@@ -202,7 +202,7 @@ class DvrOverviewTool extends BaseTool
         }
 
         foreach ($settings as $setting) {
-            $name = $setting->playlist?->name ?? "DVR Setting #{$setting->id}";
+            $name = $setting->owner()?->name ?? "DVR Setting #{$setting->id}";
             $lines[] = "--- {$name} ---";
 
             // Concurrent recordings
