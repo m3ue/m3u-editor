@@ -7,12 +7,9 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MergedPlaylistResource\Pages;
 use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
+use App\Filament\Resources\MergedPlaylists\Pages\ViewMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
-use App\Forms\Components\PlaylistEpgUrl;
-use App\Forms\Components\PlaylistM3uUrl;
-use App\Forms\Components\XtreamApiInfo;
-use App\Livewire\MediaFlowProxyUrl;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -26,6 +23,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -34,7 +32,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group as ComponentsGroup;
-use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -165,6 +162,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
                     ->button()->hiddenLabel()->size('sm'),
+                ViewAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -185,6 +184,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
         return [
             'index' => ListMergedPlaylists::route('/'),
             // 'create' => Pages\CreateMergedPlaylist::route('/create'),
+            'view' => ViewMergedPlaylist::route('/{record}'),
             'edit' => EditMergedPlaylist::route('/{record}/edit'),
         ];
     }
@@ -490,17 +490,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ]),
         ];
 
-        $urls = [
-            PlaylistM3uUrl::make('m3u_url')
-                ->label(__('M3U URL'))
-                ->columnSpan(1)
-                ->dehydrated(false), // don't save the value in the database
-            PlaylistEpgUrl::make('epg_url')
-                ->label(__('EPG URL'))
-                ->columnSpan(1)
-                ->dehydrated(false), // don't save the value in the database
-        ];
-
         return [
             Grid::make()
                 ->hiddenOn(['edit']) // hide this field on the edit form
@@ -616,50 +605,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                                 ->dehydrated(false), // Don't save this field directly
                                         ]),
                                 ]),
-                            Tab::make(__('Links'))
-                                ->columns(2)
-                                ->icon('heroicon-m-link')
-                                ->schema([
-                                    Section::make(__('Links'))
-                                        ->compact()
-                                        ->description(__('Manage playlist links and URL options.'))
-                                        ->icon('heroicon-m-link')
-                                        ->columnSpan(2)
-                                        ->columns(2)
-                                        ->schema($urls),
-                                ]),
-                            Tab::make(__('Xtream API'))
-                                ->columns(2)
-                                ->icon('heroicon-m-bolt')
-                                ->schema([
-                                    Section::make(__('Xtream API'))
-                                        ->compact()
-                                        ->description(__('Xtream API connection details.'))
-                                        ->icon('heroicon-m-bolt')
-                                        ->columnSpanFull()
-                                        ->schema([
-                                            XtreamApiInfo::make('xtream_api_info')
-                                                ->label(__('Xtream API Info'))
-                                                ->columnSpan(2)
-                                                ->dehydrated(false), // don't save the value in the database
-                                        ]),
-                                ]),
-
-                            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
-                                Tab::make(__('MediaFlow Proxy'))
-                                    ->icon('heroicon-m-shield-check')
-                                    ->schema([
-                                        Section::make(__('MediaFlow Proxy'))
-                                            ->compact()
-                                            ->description(__('MediaFlow Proxy connection details.'))
-                                            ->icon('heroicon-m-shield-check')
-                                            ->columnSpanFull()
-                                            ->schema([
-                                                Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
-                                            ]),
-                                    ]),
-                            ] : []),
-
                             Tab::make(__('Output'))
                                 ->columns(2)
                                 ->icon('heroicon-m-arrow-up-right')
