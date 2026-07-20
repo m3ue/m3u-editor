@@ -574,7 +574,7 @@ class XtreamApiController extends Controller
             ];
 
             $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
-            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features, $authMethod, $playlistAuth);
+            $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features);
 
             $m3uEditorPayload = [
                 'version' => config('dev.version'),
@@ -2665,24 +2665,24 @@ class XtreamApiController extends Controller
 
     private function hasAIOStreams($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
     {
-        if ($authMethod === 'playlist_auth') {
-            if (! $playlistAuth?->aiostreams_enabled) {
-                return false;
-            }
-            // Auth specifies its own integration directly — no playlist lookup needed.
-            if ($playlistAuth->aiostreams_integration_id !== null) {
-                return (bool) optional($playlistAuth->aiostreamsIntegration)->enabled;
-            }
-        }
-
         $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
         if (! $effectivePlaylist) {
             return false;
         }
 
-        return $effectivePlaylist->aiostreams_integration_id !== null
+        $hasEnabledAiostreams = $effectivePlaylist->aiostreams_integration_id !== null
             && optional($effectivePlaylist->aiostreamsIntegration)->enabled;
+
+        if (! $hasEnabledAiostreams) {
+            return false;
+        }
+
+        if ($authMethod !== 'playlist_auth') {
+            return true;
+        }
+
+        return (bool) $playlistAuth?->aiostreams_enabled;
     }
 
     /**
@@ -2707,27 +2707,10 @@ class XtreamApiController extends Controller
      *
      * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
      */
-    private function resolveAIOStreamsData($playlist, array $features, string $authMethod = '', ?PlaylistAuth $playlistAuth = null): array
+    private function resolveAIOStreamsData($playlist, array $features): array
     {
         if (! in_array('aiostreams', $features)) {
             return [];
-        }
-
-        // Playlist auth with a directly-assigned integration bypasses the playlist lookup.
-        if ($authMethod === 'playlist_auth' && $playlistAuth?->aiostreams_integration_id !== null) {
-            $integration = $playlistAuth->aiostreamsIntegration;
-            if (! $integration || ! $integration->enabled) {
-                return [];
-            }
-
-            return [
-                [
-                    'id' => $integration->id,
-                    'name' => $integration->name,
-                    'logo' => $integration->aiostreams_logo,
-                    'catalogs' => $this->filterAIOStreamsCatalogs($integration),
-                ],
-            ];
         }
 
         $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);

@@ -205,7 +205,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->schema([
                 Toggle::make('dvr_enabled')
                     ->label(__('Enable DVR'))
-                    ->helperText(__('Allow this user to view and schedule recordings via the public playlist viewer.'))
+                    ->helperText(__('Allow this user to view and schedule recordings when the assigned playlist also has DVR enabled.'))
                     ->default(false)
                     ->live()
                     ->columnSpan(2),
@@ -258,15 +258,8 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->collapsible()
             ->collapsed(fn ($record) => ! ($record?->request_enabled));
 
-        $aiostreamsOptions = fn () => MediaServerIntegration::where('user_id', auth()->id())
-            ->where('type', 'aiostreams')
-            ->where('enabled', true)
-            ->orderBy('name')
-            ->pluck('name', 'id')
-            ->toArray();
-
         $aiostreamsSection = Section::make(__('AIOStreams Access'))
-            ->description(__('Grant this user direct access to an AIOStreams on-demand catalog. Use this when the assigned playlist type (merged, custom, etc.) does not carry its own AIOStreams setting.'))
+            ->description(__('Control whether this user can access AIOStreams content from the assigned playlist.'))
             ->compact()
             ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
                 ->where('type', 'aiostreams')
@@ -276,17 +269,9 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->schema([
                 Toggle::make('aiostreams_enabled')
                     ->label(__('Enable AIOStreams'))
-                    ->helperText(__('Allow this user to browse and stream AIOStreams catalogs.'))
+                    ->helperText(__('Allow this user to browse and stream AIOStreams catalogs when the assigned playlist also has AIOStreams enabled.'))
                     ->default(false)
                     ->live()
-                    ->columnSpan(2),
-                Select::make('aiostreams_integration_id')
-                    ->label(__('AIOStreams Integration'))
-                    ->options($aiostreamsOptions)
-                    ->placeholder(__('Inherit from playlist'))
-                    ->nullable()
-                    ->helperText(__('Select which AIOStreams integration this user can access. Leave blank to inherit from the assigned playlist.'))
-                    ->visible(fn ($get) => $get('aiostreams_enabled'))
                     ->columnSpan(2),
             ])
             ->columns(2)
