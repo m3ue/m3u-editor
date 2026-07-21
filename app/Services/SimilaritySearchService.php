@@ -22,6 +22,15 @@ class SimilaritySearchService
 
     private const PREFERRED_REGION_DISTANCE_BONUS = 15;
 
+    /**
+     * Generous pg_trgm inclusion threshold used only to widen the bounded
+     * candidate pool on Postgres (see trigramSearchCondition()). This is not
+     * a match threshold — compareNormalizedValues() still decides confidence
+     * for every candidate that makes it into the pool, regardless of how it
+     * got there.
+     */
+    private const TRGM_CANDIDATE_THRESHOLD = 0.35;
+
     /** @var array<int, string> */
     private const DEFAULT_QUALITY_INDICATORS = [
         'hd',
@@ -112,6 +121,8 @@ class SimilaritySearchService
 
     private bool $removeQualityIndicators = false;
 
+    private bool $trigramThresholdConfigured = false;
+
     /**
      * Apply the map's configured prefix or regex cleanup before any matching strategy runs.
      *
@@ -132,6 +143,34 @@ class SimilaritySearchService
         }
 
         return trim($value);
+    }
+
+    /**
+     * Extract the matcher-relevant fields from an EpgMap's persisted settings.
+     *
+     * Centralizes the settings→parameter mapping so a channel gets identical
+     * candidates and automatic-match decisions from the mapping job and the
+     * Copilot preview tool for the same EpgMap, instead of the tool silently
+     * using its own hardcoded defaults.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array{
+     *     remove_quality_indicators: bool,
+     *     similarity_threshold: int,
+     *     fuzzy_max_distance: int,
+     *     exact_match_distance: int,
+     *     quality_indicators: array<int, string>|null,
+     * }
+     */
+    public function matcherOptionsFromSettings(array $settings): array
+    {
+        return [
+            'remove_quality_indicators' => $settings['remove_quality_indicators'] ?? false,
+            'similarity_threshold' => $settings['similarity_threshold'] ?? 70,
+            'fuzzy_max_distance' => $settings['fuzzy_max_distance'] ?? 25,
+            'exact_match_distance' => $settings['exact_match_distance'] ?? 8,
+            'quality_indicators' => $settings['quality_indicators'] ?? null,
+        ];
     }
 
     /**
@@ -246,6 +285,7 @@ class SimilaritySearchService
                         ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
                         ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
                     $this->addJsonSearchCondition($query, $term);
+                    $this->addTrigramSearchCondition($query, $term);
                 }
             })
             ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names', 'epg_id')
@@ -363,6 +403,7 @@ class SimilaritySearchService
                                 ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
                                 ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
                             $this->addJsonSearchCondition($query, $term);
+                            $this->addTrigramSearchCondition($query, $term);
                         }
                     })
                     ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names', 'epg_id')
@@ -606,6 +647,58 @@ class SimilaritySearchService
     }
 
     /**
+     * Widen the candidate pool on Postgres using pg_trgm similarity(), so
+     * channels without a literal LIKE-able substring match (typos,
+     * transliteration differences) can still surface as a candidate. No-op
+     * on other drivers — the LIKE-based search is unchanged there.
+     */
+    private function addTrigramSearchCondition(Builder $query, string $term): void
+    {
+        [$condition, $bindings] = $this->trigramSearchCondition($term);
+
+        if ($condition === '') {
+            return;
+        }
+
+        $query->orWhereRaw($condition, $bindings);
+    }
+
+    /** @return array{string, list<string>} */
+    private function trigramSearchCondition(string $term): array
+    {
+        if (DB::connection()->getConfig('driver') !== 'pgsql') {
+            return ['', []];
+        }
+
+        $this->ensureTrigramThreshold();
+        $lowerTerm = mb_strtolower($term, 'UTF-8');
+
+        // The `%` operator (not the similarity() function) is what lets
+        // Postgres use the GIN trgm indexes added in the
+        // add_pg_trgm_candidate_index migration - it must match their
+        // LOWER(column) expression exactly, or it falls back to a scan.
+        return [
+            '(LOWER(channel_id) % ? OR LOWER(name) % ? OR LOWER(display_name) % ?)',
+            [$lowerTerm, $lowerTerm, $lowerTerm],
+        ];
+    }
+
+    /**
+     * pg_trgm's `%` operator reads its similarity cutoff from a session GUC
+     * rather than a query argument. Set it once per service instance to the
+     * same generous, candidate-widening threshold used everywhere here.
+     */
+    private function ensureTrigramThreshold(): void
+    {
+        if ($this->trigramThresholdConfigured) {
+            return;
+        }
+
+        DB::statement('SET pg_trgm.similarity_threshold = '.self::TRGM_CANDIDATE_THRESHOLD);
+        $this->trigramThresholdConfigured = true;
+    }
+
+    /**
      * @param  list<string>  $searchTerms
      * @return array{string, list<string>}
      */
@@ -617,8 +710,10 @@ class SimilaritySearchService
         foreach ($searchTerms as $term) {
             $likeTerm = $this->likePattern($term);
             [$jsonCondition, $jsonBindings] = $this->jsonSearchCondition($term);
-            $expressions[] = "CASE WHEN (LOWER(COALESCE(channel_id, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(display_name, '')) LIKE ? ESCAPE '!' OR {$jsonCondition}) THEN 1 ELSE 0 END";
-            array_push($bindings, $likeTerm, $likeTerm, $likeTerm, ...$jsonBindings);
+            [$trgmCondition, $trgmBindings] = $this->trigramSearchCondition($term);
+            $trgmClause = $trgmCondition === '' ? '' : " OR {$trgmCondition}";
+            $expressions[] = "CASE WHEN (LOWER(COALESCE(channel_id, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(display_name, '')) LIKE ? ESCAPE '!' OR {$jsonCondition}{$trgmClause}) THEN 1 ELSE 0 END";
+            array_push($bindings, $likeTerm, $likeTerm, $likeTerm, ...$jsonBindings, ...$trgmBindings);
         }
 
         return [implode(' + ', $expressions), $bindings];

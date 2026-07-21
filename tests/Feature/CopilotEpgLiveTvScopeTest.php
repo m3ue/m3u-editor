@@ -6,6 +6,7 @@ use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\EpgMap;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
@@ -171,6 +172,49 @@ it('reports when all eligible live TV channels in a group are already mapped', f
     ]));
 
     expect($output)->toContain('already mapped');
+});
+
+it('honors the playlist\'s saved EPG map settings instead of hardcoded matcher defaults', function () {
+    $group = copilotEpgGroup('Prefix Group');
+    $channel = copilotEpgChannel($group, 'XX: Sports One');
+    $target = EpgChannel::factory()
+        ->for($this->epg)
+        ->for($this->user)
+        ->create([
+            'name' => 'Sports One',
+            'display_name' => 'Sports One',
+            'channel_id' => 'sports-one',
+        ]);
+
+    // Without a saved EpgMap, the literal "XX:" prefix is not stripped, so
+    // this only surfaces as a fuzzy candidate rather than an automatic match.
+    $withoutSettings = (string) (new EpgChannelMatcherTool)->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+    ]));
+
+    expect($withoutSettings)->not->toContain('EXACT MATCHES')
+        ->toContain("epg_channel_id: {$target->id}");
+
+    // The mapping job would strip "XX: " per this map's saved settings before
+    // scoring; the Copilot tool must use the same settings, not its own
+    // hardcoded defaults, so its preview matches what apply would actually do.
+    EpgMap::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'epg_id' => $this->epg->id,
+        'settings' => ['exclude_prefixes' => ['XX: ']],
+    ]);
+
+    $withSettings = (string) (new EpgChannelMatcherTool)->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+    ]));
+
+    expect($withSettings)->toContain('EXACT MATCHES')
+        ->toContain("epg_channel_id: {$target->id}");
 });
 
 it('applies mappings only to eligible live TV channels', function () {
