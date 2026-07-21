@@ -6,6 +6,7 @@ namespace App\Filament\CopilotTools;
 
 use App\Models\Channel;
 use App\Models\Epg;
+use App\Models\EpgMap;
 use App\Models\Playlist;
 use App\Services\SimilaritySearchService;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
@@ -119,14 +120,34 @@ class EpgChannelMatcherTool extends BaseTool
         $unresolved = [];
         $matcher = app(SimilaritySearchService::class);
 
+        // Use the same EPG Map settings (quality indicator stripping, prefix
+        // exclusion, similarity/fuzzy thresholds) the mapping job would use
+        // for this playlist + EPG pair, so Copilot's preview agrees with what
+        // actually happens on apply instead of matching against hardcoded
+        // defaults.
+        $settings = EpgMap::query()
+            ->where('user_id', auth()->id())
+            ->where('playlist_id', $playlistId)
+            ->where('epg_id', $epgId)
+            ->latest('id')
+            ->value('settings') ?? [];
+        $options = $matcher->matcherOptionsFromSettings($settings);
+
+        $cleanedTitles = [];
+        $cleanedNames = [];
+        foreach ($channels as $channel) {
+            $cleanedTitles[$channel->id] = $matcher->cleanNameForMatching($channel->title_custom ?? $channel->title, $settings);
+            $cleanedNames[$channel->id] = $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings);
+        }
+
         // Preload matching EPG channels once for the whole batch instead of
         // issuing a LIKE scan per channel. Most EPG sources are large enough
         // that N round-trips dominate the request time.
         $unionTerms = $channels->flatMap(
             fn (Channel $channel): array => $matcher->searchTermsFor(
                 channel: $channel,
-                cleanedTitle: $channel->title_custom ?? $channel->title,
-                cleanedName: $channel->name_custom ?? $channel->name,
+                cleanedTitle: $cleanedTitles[$channel->id],
+                cleanedName: $cleanedNames[$channel->id],
             ),
         )->unique()->values()->all();
         $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms);
@@ -135,7 +156,13 @@ class EpgChannelMatcherTool extends BaseTool
             $result = $matcher->findEpgChannelCandidates(
                 channel: $channel,
                 epg: $epg,
-                removeQualityIndicators: true,
+                removeQualityIndicators: $options['remove_quality_indicators'],
+                similarityThreshold: $options['similarity_threshold'],
+                fuzzyMaxDistance: $options['fuzzy_max_distance'],
+                exactMatchDistance: $options['exact_match_distance'],
+                customQualityIndicators: $options['quality_indicators'],
+                cleanedTitle: $cleanedTitles[$channel->id],
+                cleanedName: $cleanedNames[$channel->id],
                 prefetchedCandidates: $prefetched,
             );
             $topCandidate = $result['candidates'][0] ?? null;
