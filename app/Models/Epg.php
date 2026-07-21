@@ -164,8 +164,9 @@ class Epg extends Model
         $query = EpgChannel::whereIn('epg_id', $ids);
 
         if (count($ids) > 1) {
-            $cases = collect($ids)->map(fn ($id, $index) => "WHEN {$id} THEN {$index}")->implode(' ');
-            $query->orderByRaw("CASE epg_id {$cases} END");
+            $cases = collect($ids)->map(fn () => 'WHEN ? THEN ?')->implode(' ');
+            $bindings = collect($ids)->flatMap(fn ($id, $index) => [(int) $id, $index])->all();
+            $query->orderByRaw("CASE epg_id {$cases} END", $bindings);
         }
 
         return $query;
