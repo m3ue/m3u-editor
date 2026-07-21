@@ -74,3 +74,4 @@ compose.services.yaml
 mediaserver.env
 .env.testing
 debug*.md
+.claude/settings.local.json
