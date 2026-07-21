@@ -35,6 +35,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         public int $epg,
         public ?int $playlist = null,
         public ?array $channels = null,
+        public ?array $groups = null,
         public ?bool $force = false,
         public ?bool $recurring = false,
         public ?int $epgMapId = null,
@@ -65,13 +66,33 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         if ($this->epgMapId) {
             // Fetch and update existing map record
             $map = EpgMap::find($this->epgMapId);
-            $map->update([
-                'uuid' => $batchNo,
-                'progress' => 0,
-                'status' => Status::Processing,
-                'processing' => true,
-                'mapped_at' => now(),
-            ]);
+            if (! $map) {
+                Log::error("EPG Map not found for ID: {$this->epgMapId}");
+
+                return;
+            }
+
+            // Atomically claim the map so two overlapping dispatches for the same
+            // recurring map (e.g. a merged EPG rebuild firing while the scheduled
+            // refresh is still processing it) can't both run at once and race on
+            // its progress/status fields.
+            $claimed = EpgMap::where('id', $map->id)
+                ->where('processing', false)
+                ->update([
+                    'uuid' => $batchNo,
+                    'progress' => 0,
+                    'status' => Status::Processing,
+                    'processing' => true,
+                    'mapped_at' => now(),
+                ]);
+
+            if (! $claimed) {
+                Log::info("Skipping EPG map \"{$map->name}\" (ID: {$map->id}) re-fire; a mapping run is already in progress.");
+
+                return;
+            }
+
+            $map->refresh();
 
             // Set force to the existing map override setting if not explicitly set
             $this->force = $map->override;
@@ -79,6 +100,11 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             // Set channels, if set on mapping
             if ($map->channels) {
                 $this->channels = $map->channels;
+            }
+
+            // Set groups, if set on mapping
+            if ($map->group_ids) {
+                $this->groups = $map->group_ids;
             }
         } else {
             $map = EpgMap::create([
@@ -93,6 +119,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 'recurring' => $this->recurring,
                 'settings' => $this->settings,
                 'channels' => $this->channels,
+                'group_ids' => $this->groups,
                 'mapped_at' => now(),
             ]);
         }
@@ -109,6 +136,19 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = Channel::whereIn('id', $this->channels)
+                    ->eligibleForEpgMapping()
+                    ->when(! $this->force, function ($query) {
+                        $query->where('epg_channel_id', null);
+                    });
+            } elseif ($playlist && $this->groups) {
+                $totalChannelCount = $playlist->channels()->whereIn('group_id', $this->groups)->eligibleForEpgMapping()->count();
+                $mappedCount = $playlist->channels()
+                    ->whereIn('group_id', $this->groups)
+                    ->eligibleForEpgMapping()
+                    ->whereNotNull('epg_channel_id')
+                    ->count();
+                $channels = $playlist->channels()
+                    ->whereIn('group_id', $this->groups)
                     ->eligibleForEpgMapping()
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);

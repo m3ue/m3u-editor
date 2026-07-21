@@ -11,6 +11,7 @@ use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
@@ -32,6 +33,7 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -92,6 +94,10 @@ class EpgMapResource extends Resource implements CopilotResource
                 ProgressColumn::make('progress')
                     ->sortable()
                     ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
+                    ->toggleable(),
+                TextColumn::make('group_ids')
+                    ->label(__('Groups'))
+                    ->state(fn (EpgMap $record) => $record->group_ids ? count($record->group_ids) : __('All'))
                     ->toggleable(),
                 TextColumn::make('total_channel_count')
                     ->label(__('Total Channels'))
@@ -277,15 +283,35 @@ class EpgMapResource extends Resource implements CopilotResource
                 ->required()
                 ->label(__('EPG'))
                 ->helperText(__('Select the EPG you would like to map from.'))
-                ->options(Epg::where(['user_id' => Auth::id(), 'is_merged' => false])->get(['name', 'id'])->pluck('name', 'id'))
+                ->options(
+                    Epg::where('user_id', Auth::id())
+                        ->get(['id', 'name', 'is_merged'])
+                        ->groupBy(fn (Epg $epg) => (string) ($epg->is_merged ? __('Merged') : __('Standard')))
+                        ->map(fn ($group) => $group->pluck('name', 'id')->all())
+                        ->all()
+                )
                 ->hidden(! $showEpg)
                 ->searchable(),
             Select::make('playlist_id')
                 ->required()
+                ->live()
+                ->afterStateUpdated(fn (Set $set) => $set('group_ids', []))
                 ->label(__('Playlist'))
                 ->helperText(__('Select the playlist you would like to map to.'))
                 ->options(Playlist::where(['user_id' => Auth::id()])->get(['name', 'id'])->pluck('name', 'id'))
                 ->hidden(! $showPlaylist)
+                ->searchable(),
+            Select::make('group_ids')
+                ->label(__('Groups'))
+                ->multiple()
+                ->helperText(__('Optionally scope this mapping to specific group(s) instead of the entire playlist. Leave empty to include all groups.'))
+                ->options(fn (Get $get) => Group::where([
+                    'type' => 'live',
+                    'user_id' => Auth::id(),
+                    'playlist_id' => $get('playlist_id'),
+                ])->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
+                ->visible(fn (Get $get) => filled($get('playlist_id')))
+                ->columnSpanFull()
                 ->searchable(),
             Grid::make()
                 ->columnSpanFull()
@@ -307,7 +333,7 @@ class EpgMapResource extends Resource implements CopilotResource
                 ->default(false)
                 ->helperText(__('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.')),
             TagsInput::make('settings.exclude_prefixes')
-                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
+                ->label(fn (Get $get) => ! $get('settings.use_regex') ? __('Channel prefixes to remove before matching') : __('Regex patterns to remove before matching'))
                 ->helperText(__('Press [tab] or [return] to add item. Leave empty to disable.'))
                 ->columnSpanFull()
                 ->suggestions([

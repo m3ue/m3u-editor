@@ -196,6 +196,8 @@ return [
         // SimilaritySearchService: $relevanceSql is assembled only from fixed
         // database-driver templates; search terms use escaped ? bindings.
         'b5bc019c1883',
+        // EPG: $cases built from DB-sourced IDs, $bindings are integers — no user input.
+        'f66f91132e96',
 
         // SortService: $direction is always 'ASC'|'DESC' (ternary-validated),
         // $lowerOrderByColumn comes from a match() with explicit safe cases,
