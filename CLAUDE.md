@@ -413,3 +413,20 @@ livewire(ListUsers::class)
   - `$view`: `protected string` (not `protected static string`) on `Page` and `Widget` classes
 
 </laravel-boost-guidelines>
+
+<!--
+The section below is NOT managed by Laravel Boost. `php artisan boost:update` only
+rewrites content inside <laravel-boost-guidelines>...</laravel-boost-guidelines> above
+(see vendor/laravel/boost/src/Install/GuidelineWriter.php), so this survives updates.
+-->
+
+## Pre-PR Checklist (project-specific, not covered by Boost)
+
+Before opening or finalizing a pull request in `m3u-editor`, both of the following are **required**, not optional:
+
+1. **Security scan** — run `composer security:scan` (runs `composer audit`, `npm audit --audit-level=high`, and `php artisan checkpoint:scan`) and resolve or explicitly note any findings in the PR description. Do not open a PR with unaddressed high/critical findings.
+2. **Language files** — if the change adds, removes, or edits any user-facing string (Blade views, Filament labels/notifications, validation messages, mail, etc.), update `lang/en/*.php` and `lang/en.json` accordingly. Then run `php artisan lang:merge-conflicts` before committing — lang files are alphabetically ordered, so any new key is likely to collide with concurrent PRs, and this command resolves and re-sorts them automatically. Run it even if you don't think you have a conflict yet; it's cheap and avoids a rebase headache later.
+
+### Project-specific skills
+
+- `filament-first` (`.claude/skills/filament-first/`) — Filament-first UI rules for Blade views. This used to live under `laravel-best-practices/rules/filament-first.md`, but that directory is fully vendor-templated by Laravel Boost and gets overwritten on `php artisan boost:update`. Any new project-specific conventions should go in their own top-level skill directory under `.claude/skills/`, not inside `laravel-best-practices/`, for the same reason.
