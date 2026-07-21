@@ -95,6 +95,10 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->sortable()
                     ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
+                TextColumn::make('group_ids')
+                    ->label(__('Groups'))
+                    ->state(fn (EpgMap $record) => $record->group_ids ? count($record->group_ids) : __('All'))
+                    ->toggleable(),
                 TextColumn::make('total_channel_count')
                     ->label(__('Total Channels'))
                     ->tooltip(__('Total number of channels available for this mapping.'))
@@ -134,10 +138,6 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->label(__('Last ran'))
                     ->since()
                     ->sortable()
-                    ->toggleable(),
-                TextColumn::make('group_ids')
-                    ->label(__('Groups'))
-                    ->state(fn (EpgMap $record) => $record->group_ids ? count($record->group_ids) : __('All'))
                     ->toggleable(),
             ])
             ->filters([
@@ -311,6 +311,7 @@ class EpgMapResource extends Resource implements CopilotResource
                     'playlist_id' => $get('playlist_id'),
                 ])->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
                 ->visible(fn (Get $get) => filled($get('playlist_id')))
+                ->columnSpanFull()
                 ->searchable(),
             Grid::make()
                 ->columnSpanFull()
