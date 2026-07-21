@@ -35,6 +35,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         public int $epg,
         public ?int $playlist = null,
         public ?array $channels = null,
+        public ?array $groups = null,
         public ?bool $force = false,
         public ?bool $recurring = false,
         public ?int $epgMapId = null,
@@ -80,6 +81,11 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             if ($map->channels) {
                 $this->channels = $map->channels;
             }
+
+            // Set groups, if set on mapping
+            if ($map->group_ids) {
+                $this->groups = $map->group_ids;
+            }
         } else {
             $map = EpgMap::create([
                 'name' => $epg->name.$subtext,
@@ -93,6 +99,7 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                 'recurring' => $this->recurring,
                 'settings' => $this->settings,
                 'channels' => $this->channels,
+                'group_ids' => $this->groups,
                 'mapped_at' => now(),
             ]);
         }
@@ -109,6 +116,19 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
                     ->whereNotNull('epg_channel_id')
                     ->count();
                 $channels = Channel::whereIn('id', $this->channels)
+                    ->eligibleForEpgMapping()
+                    ->when(! $this->force, function ($query) {
+                        $query->where('epg_channel_id', null);
+                    });
+            } elseif ($playlist && $this->groups) {
+                $totalChannelCount = $playlist->channels()->whereIn('group_id', $this->groups)->eligibleForEpgMapping()->count();
+                $mappedCount = $playlist->channels()
+                    ->whereIn('group_id', $this->groups)
+                    ->eligibleForEpgMapping()
+                    ->whereNotNull('epg_channel_id')
+                    ->count();
+                $channels = $playlist->channels()
+                    ->whereIn('group_id', $this->groups)
                     ->eligibleForEpgMapping()
                     ->when(! $this->force, function ($query) {
                         $query->where('epg_channel_id', null);

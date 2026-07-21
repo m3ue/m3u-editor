@@ -11,6 +11,7 @@ use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Epg;
 use App\Models\EpgMap;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
@@ -32,6 +33,7 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -132,6 +134,10 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->label(__('Last ran'))
                     ->since()
                     ->sortable()
+                    ->toggleable(),
+                TextColumn::make('group_ids')
+                    ->label(__('Groups'))
+                    ->state(fn (EpgMap $record) => $record->group_ids ? count($record->group_ids) : __('All'))
                     ->toggleable(),
             ])
             ->filters([
@@ -288,10 +294,23 @@ class EpgMapResource extends Resource implements CopilotResource
                 ->searchable(),
             Select::make('playlist_id')
                 ->required()
+                ->live()
+                ->afterStateUpdated(fn (Set $set) => $set('group_ids', []))
                 ->label(__('Playlist'))
                 ->helperText(__('Select the playlist you would like to map to.'))
                 ->options(Playlist::where(['user_id' => Auth::id()])->get(['name', 'id'])->pluck('name', 'id'))
                 ->hidden(! $showPlaylist)
+                ->searchable(),
+            Select::make('group_ids')
+                ->label(__('Groups'))
+                ->multiple()
+                ->helperText(__('Optionally scope this mapping to specific group(s) instead of the entire playlist. Leave empty to include all groups.'))
+                ->options(fn (Get $get) => Group::where([
+                    'type' => 'live',
+                    'user_id' => Auth::id(),
+                    'playlist_id' => $get('playlist_id'),
+                ])->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
+                ->visible(fn (Get $get) => filled($get('playlist_id')))
                 ->searchable(),
             Grid::make()
                 ->columnSpanFull()
