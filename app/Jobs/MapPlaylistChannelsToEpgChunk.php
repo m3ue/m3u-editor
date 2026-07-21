@@ -107,7 +107,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             if ($prioritizeNameMatch) {
                 // Step 1: Try exact match on name/display_name FIRST (highest priority - most specific)
                 if (! empty($searchTerms)) {
-                    $epgChannel = $epg->channels()
+                    $epgChannel = $epg->matchableChannels()
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
                             foreach ($searchTerms as $term) {
@@ -127,7 +127,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
 
                 // Step 2: Try exact match on channel_id if no name/display_name match
                 if (! $epgChannel && ! empty($searchTerms)) {
-                    $epgChannel = $epg->channels()
+                    $epgChannel = $epg->matchableChannels()
                         ->where('channel_id', '!=', '')
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
@@ -146,7 +146,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             } else {
                 // Original behavior: Try channel_id first, then name/display_name
                 if (! empty($searchTerms)) {
-                    $epgChannel = $epg->channels()
+                    $epgChannel = $epg->matchableChannels()
                         ->where('channel_id', '!=', '')
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
@@ -164,7 +164,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 }
 
                 if (! $epgChannel && ! empty($searchTerms)) {
-                    $epgChannel = $epg->channels()
+                    $epgChannel = $epg->matchableChannels()
                         ->where(function ($query) use ($searchTerms) {
                             $first = true;
                             foreach ($searchTerms as $term) {
@@ -193,7 +193,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 if ($callsign) {
                     $callsignLower = mb_strtolower($callsign, 'UTF-8');
 
-                    $epgChannel = $epg->channels()
+                    $epgChannel = $epg->matchableChannels()
                         ->where(function ($query) use ($callsignLower) {
                             $query->whereRaw('LOWER(channel_id) = ?', [$callsignLower])
                                 ->orWhereRaw('LOWER(channel_id) LIKE ?', [$callsignLower.'-%'])

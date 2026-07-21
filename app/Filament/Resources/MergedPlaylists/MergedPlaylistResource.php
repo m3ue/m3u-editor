@@ -7,11 +7,8 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MergedPlaylistResource\Pages;
 use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
+use App\Filament\Resources\MergedPlaylists\Pages\ViewMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
-use App\Forms\Components\PlaylistEpgUrl;
-use App\Forms\Components\PlaylistM3uUrl;
-use App\Forms\Components\XtreamApiInfo;
-use App\Livewire\MediaFlowProxyUrl;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -25,6 +22,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -33,7 +31,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group as ComponentsGroup;
-use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -164,6 +161,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
                     ->button()->hiddenLabel()->size('sm'),
+                ViewAction::make()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -184,6 +183,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
         return [
             'index' => ListMergedPlaylists::route('/'),
             // 'create' => Pages\CreateMergedPlaylist::route('/create'),
+            'view' => ViewMergedPlaylist::route('/{record}'),
             'edit' => EditMergedPlaylist::route('/{record}/edit'),
         ];
     }
@@ -357,7 +357,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->collapsed($creating)
                 ->columns(2)
-                ->hidden(fn () => ! auth()->user()->canUseProxy())
                 ->schema([
                     Toggle::make('enable_proxy')
                         ->label(__('Enable Stream Proxy'))
@@ -366,7 +365,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     Toggle::make('enable_logo_proxy')
                         ->label(__('Enable Logo Proxy'))
                         ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
@@ -374,7 +374,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->helperText(__('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.'))
                         ->inline(false)
-                        ->default(false),
+                        ->default(false)
+                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
                     TextInput::make('streams')
                         ->label(__('HDHR/Xtream API Streams'))
                         ->helperText(__('Number of streams available for HDHR and Xtream API service (if using).'))
@@ -486,17 +487,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                 ]),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                 ]),
-        ];
-
-        $urls = [
-            PlaylistM3uUrl::make('m3u_url')
-                ->label(__('M3U URL'))
-                ->columnSpan(1)
-                ->dehydrated(false), // don't save the value in the database
-            PlaylistEpgUrl::make('epg_url')
-                ->label(__('EPG URL'))
-                ->columnSpan(1)
-                ->dehydrated(false), // don't save the value in the database
         ];
 
         return [
@@ -614,50 +604,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                                 ->dehydrated(false), // Don't save this field directly
                                         ]),
                                 ]),
-                            Tab::make(__('Links'))
-                                ->columns(2)
-                                ->icon('heroicon-m-link')
-                                ->schema([
-                                    Section::make(__('Links'))
-                                        ->compact()
-                                        ->description(__('Manage playlist links and URL options.'))
-                                        ->icon('heroicon-m-link')
-                                        ->columnSpan(2)
-                                        ->columns(2)
-                                        ->schema($urls),
-                                ]),
-                            Tab::make(__('Xtream API'))
-                                ->columns(2)
-                                ->icon('heroicon-m-bolt')
-                                ->schema([
-                                    Section::make(__('Xtream API'))
-                                        ->compact()
-                                        ->description(__('Xtream API connection details.'))
-                                        ->icon('heroicon-m-bolt')
-                                        ->columnSpanFull()
-                                        ->schema([
-                                            XtreamApiInfo::make('xtream_api_info')
-                                                ->label(__('Xtream API Info'))
-                                                ->columnSpan(2)
-                                                ->dehydrated(false), // don't save the value in the database
-                                        ]),
-                                ]),
-
-                            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
-                                Tab::make(__('MediaFlow Proxy'))
-                                    ->icon('heroicon-m-shield-check')
-                                    ->schema([
-                                        Section::make(__('MediaFlow Proxy'))
-                                            ->compact()
-                                            ->description(__('MediaFlow Proxy connection details.'))
-                                            ->icon('heroicon-m-shield-check')
-                                            ->columnSpanFull()
-                                            ->schema([
-                                                Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
-                                            ]),
-                                    ]),
-                            ] : []),
-
                             Tab::make(__('Output'))
                                 ->columns(2)
                                 ->icon('heroicon-m-arrow-up-right')

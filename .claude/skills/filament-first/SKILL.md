@@ -1,3 +1,10 @@
+---
+name: filament-first
+description: "Project-specific rule for m3u-editor: all UI in Blade views must use Filament v5 components instead of hand-rolled HTML/Alpine equivalents. Apply whenever writing or editing Blade views, Livewire components, badges, icons, buttons, loading spinners, dropdowns, collapsible sections, form inputs, slide-overs, modals, or confirmation dialogs in this project. This is a project convention, not a stock Laravel Boost skill — kept in its own skill directory (not under laravel-best-practices/rules) so `php artisan boost:update` cannot overwrite it."
+metadata:
+  author: m3u-editor
+---
+
 # Filament-First UI Rules
 
 This project uses Filament v5. All UI in Blade views must use Filament components when one exists. Never write hand-rolled HTML equivalents. When in doubt, check `search-docs` for the Filament component.

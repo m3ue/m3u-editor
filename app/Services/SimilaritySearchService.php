@@ -271,10 +271,13 @@ class SimilaritySearchService
             ->all();
 
         if ($unionTerms === []) {
-            return $epg->channels()->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')->get();
+            return $this->dedupeByPriority(
+                $epg,
+                $epg->matchableChannels()->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names', 'epg_id')->get(),
+            );
         }
 
-        return $epg->channels()
+        $candidates = $epg->matchableChannels()
             ->where(function (Builder $query) use ($unionTerms): void {
                 foreach ($unionTerms as $term) {
                     $likeTerm = $this->likePattern($term);
@@ -285,8 +288,33 @@ class SimilaritySearchService
                     $this->addTrigramSearchCondition($query, $term);
                 }
             })
-            ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
+            ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names', 'epg_id')
             ->get();
+
+        return $this->dedupeByPriority($epg, $candidates);
+    }
+
+    /**
+     * When an EPG resolves to multiple matchable source EPGs (i.e. a merged EPG),
+     * results are already priority-ordered by matchableChannels(); drop lower-priority
+     * duplicates of the same channel so a later source can't out-score the master.
+     *
+     * @param  Collection<int, EpgChannel>  $candidates
+     * @return Collection<int, EpgChannel>
+     */
+    private function dedupeByPriority(Epg $epg, Collection $candidates): Collection
+    {
+        $ids = $epg->matchableEpgIds();
+        if (count($ids) <= 1) {
+            return $candidates;
+        }
+
+        $priority = array_flip($ids);
+
+        return $candidates
+            ->sortBy(fn (EpgChannel $channel): int => $priority[$channel->epg_id] ?? PHP_INT_MAX)
+            ->unique(fn (EpgChannel $channel): string => $channel->channel_id ?: $channel->name)
+            ->values();
     }
 
     /**
@@ -365,22 +393,25 @@ class SimilaritySearchService
         } else {
             [$relevanceSql, $relevanceBindings] = $this->candidateRelevanceOrder($searchTerms->all());
 
-            $databaseCandidates = $epg->channels()
-                ->where(function (Builder $query) use ($searchTerms): void {
-                    foreach ($searchTerms as $term) {
-                        $likeTerm = $this->likePattern($term);
-                        $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
-                            ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
-                            ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
-                        $this->addJsonSearchCondition($query, $term);
-                        $this->addTrigramSearchCondition($query, $term);
-                    }
-                })
-                ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names')
-                ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
-                ->orderBy('id')
-                ->limit(self::MAX_DATABASE_CANDIDATES)
-                ->get();
+            $databaseCandidates = $this->dedupeByPriority(
+                $epg,
+                $epg->matchableChannels()
+                    ->where(function (Builder $query) use ($searchTerms): void {
+                        foreach ($searchTerms as $term) {
+                            $likeTerm = $this->likePattern($term);
+                            $query->orWhereRaw("LOWER(channel_id) LIKE ? ESCAPE '!'", [$likeTerm])
+                                ->orWhereRaw("LOWER(name) LIKE ? ESCAPE '!'", [$likeTerm])
+                                ->orWhereRaw("LOWER(display_name) LIKE ? ESCAPE '!'", [$likeTerm]);
+                            $this->addJsonSearchCondition($query, $term);
+                            $this->addTrigramSearchCondition($query, $term);
+                        }
+                    })
+                    ->select('id', 'channel_id', 'name', 'display_name', 'additional_display_names', 'epg_id')
+                    ->orderByRaw("{$relevanceSql} DESC", $relevanceBindings)
+                    ->orderBy('id')
+                    ->limit(self::MAX_DATABASE_CANDIDATES)
+                    ->get(),
+            );
         }
 
         $regionCode = $epg->preferred_local ? mb_strtolower($epg->preferred_local, 'UTF-8') : null;

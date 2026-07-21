@@ -24,6 +24,7 @@ class EpgMap extends Model
         'mapped_count' => 'integer',
         'settings' => 'array',
         'channels' => 'array',
+        'group_ids' => 'array',
         'status' => Status::class,
         'candidates_built_at' => 'datetime',
         'candidates_progress' => 'float',
