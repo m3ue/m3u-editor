@@ -9,6 +9,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 
 class SourceGroupsTable
 {
@@ -71,33 +72,20 @@ class SourceGroupsTable
             ])
             ->filters([
                 TernaryFilter::make('enabled')
-                    ->label(__('Enabled'))
+                    ->label(__('Groups'))
                     ->placeholder(__('All groups'))
-                    ->trueLabel(__('Enabled only'))
-                    ->falseLabel(__('Disabled only'))
+                    ->trueLabel(__('Selected only'))
+                    ->falseLabel(__('Unselected only'))
                     ->queries(
-                        // "Enabled" means the source group has already been imported as a
-                        // Group with enabled=true. Correlate on the same keys used for
-                        // display_name/search above rather than a join, for the same
-                        // reasons: keeps source_groups.* unambiguous and avoids row
-                        // multiplication if a name ever matched more than one Group.
-                        true: fn (Builder $query): Builder => $query->whereExists(
-                            fn ($subQuery) => $subQuery->selectRaw('1')
-                                ->from('groups')
-                                ->whereColumn('groups.name_internal', 'source_groups.name')
-                                ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
-                                ->whereColumn('groups.type', 'source_groups.type')
-                                ->whereNull('groups.deleted_at')
-                                ->where('groups.enabled', true)
+                        true: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: true,
                         ),
-                        false: fn (Builder $query): Builder => $query->whereNotExists(
-                            fn ($subQuery) => $subQuery->selectRaw('1')
-                                ->from('groups')
-                                ->whereColumn('groups.name_internal', 'source_groups.name')
-                                ->whereColumn('groups.playlist_id', 'source_groups.playlist_id')
-                                ->whereColumn('groups.type', 'source_groups.type')
-                                ->whereNull('groups.deleted_at')
-                                ->where('groups.enabled', true)
+                        false: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: false,
                         ),
                         blank: fn (Builder $query): Builder => $query,
                     ),
@@ -115,5 +103,61 @@ class SourceGroupsTable
                     //
                 ]),
             ]);
+    }
+
+    private static function whereSelected(Builder $query, mixed $selectedValues, bool $selected): Builder
+    {
+        [$selectedIds, $selectedNames] = self::selectedIdsAndNames($selectedValues);
+
+        if (empty($selectedIds) && empty($selectedNames)) {
+            return $selected ? $query->whereRaw('1 = 0') : $query;
+        }
+
+        if (! $selected) {
+            return $query
+                ->when($selectedIds, fn (Builder $query): Builder => $query->whereNotIn('source_groups.id', $selectedIds))
+                ->when($selectedNames, fn (Builder $query): Builder => $query->whereNotIn('source_groups.name', $selectedNames));
+        }
+
+        return $query->where(function (Builder $query) use ($selectedIds, $selectedNames): void {
+            if (! empty($selectedIds)) {
+                $query->whereIn('source_groups.id', $selectedIds);
+            }
+
+            if (! empty($selectedNames)) {
+                $method = empty($selectedIds) ? 'whereIn' : 'orWhereIn';
+                $query->{$method}('source_groups.name', $selectedNames);
+            }
+        });
+    }
+
+    /**
+     * @return array{0: list<int>, 1: list<string>}
+     */
+    private static function selectedIdsAndNames(mixed $selectedValues): array
+    {
+        if (! is_array($selectedValues)) {
+            return [[], []];
+        }
+
+        $selectedIds = [];
+        $selectedNames = [];
+
+        foreach ($selectedValues as $value) {
+            if (is_numeric($value)) {
+                $selectedIds[] = (int) $value;
+
+                continue;
+            }
+
+            if (is_string($value) && $value !== '') {
+                $selectedNames[] = $value;
+            }
+        }
+
+        return [
+            array_values(array_unique($selectedIds)),
+            array_values(array_unique($selectedNames)),
+        ];
     }
 }

@@ -33,31 +33,20 @@ class SourceCategoriesTable
             ])
             ->filters([
                 TernaryFilter::make('enabled')
-                    ->label(__('Enabled'))
+                    ->label(__('Categories'))
                     ->placeholder(__('All categories'))
-                    ->trueLabel(__('Enabled only'))
-                    ->falseLabel(__('Disabled only'))
+                    ->trueLabel(__('Selected only'))
+                    ->falseLabel(__('Unselected only'))
                     ->queries(
-                        // "Enabled" means this source category has already been imported as
-                        // a Category with enabled=true. Categories carry no soft-delete
-                        // column, unlike Groups, so there's no deleted_at check here.
-                        // Correlate via source_category_id (the provider-stable ID), which
-                        // is the same key PlaylistAlias::series() uses to resolve a
-                        // SourceCategory back to its imported Category/Series records,
-                        // rather than name matching.
-                        true: fn (Builder $query): Builder => $query->whereExists(
-                            fn ($subQuery) => $subQuery->selectRaw('1')
-                                ->from('categories')
-                                ->whereColumn('categories.source_category_id', 'source_categories.source_category_id')
-                                ->whereColumn('categories.playlist_id', 'source_categories.playlist_id')
-                                ->where('categories.enabled', true)
+                        true: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: true,
                         ),
-                        false: fn (Builder $query): Builder => $query->whereNotExists(
-                            fn ($subQuery) => $subQuery->selectRaw('1')
-                                ->from('categories')
-                                ->whereColumn('categories.source_category_id', 'source_categories.source_category_id')
-                                ->whereColumn('categories.playlist_id', 'source_categories.playlist_id')
-                                ->where('categories.enabled', true)
+                        false: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: false,
                         ),
                         blank: fn (Builder $query): Builder => $query,
                     ),
@@ -75,5 +64,61 @@ class SourceCategoriesTable
                     //
                 ]),
             ]);
+    }
+
+    private static function whereSelected(Builder $query, mixed $selectedValues, bool $selected): Builder
+    {
+        [$selectedIds, $selectedNames] = self::selectedIdsAndNames($selectedValues);
+
+        if (empty($selectedIds) && empty($selectedNames)) {
+            return $selected ? $query->whereRaw('1 = 0') : $query;
+        }
+
+        if (! $selected) {
+            return $query
+                ->when($selectedIds, fn (Builder $query): Builder => $query->whereNotIn('source_categories.id', $selectedIds))
+                ->when($selectedNames, fn (Builder $query): Builder => $query->whereNotIn('source_categories.name', $selectedNames));
+        }
+
+        return $query->where(function (Builder $query) use ($selectedIds, $selectedNames): void {
+            if (! empty($selectedIds)) {
+                $query->whereIn('source_categories.id', $selectedIds);
+            }
+
+            if (! empty($selectedNames)) {
+                $method = empty($selectedIds) ? 'whereIn' : 'orWhereIn';
+                $query->{$method}('source_categories.name', $selectedNames);
+            }
+        });
+    }
+
+    /**
+     * @return array{0: list<int>, 1: list<string>}
+     */
+    private static function selectedIdsAndNames(mixed $selectedValues): array
+    {
+        if (! is_array($selectedValues)) {
+            return [[], []];
+        }
+
+        $selectedIds = [];
+        $selectedNames = [];
+
+        foreach ($selectedValues as $value) {
+            if (is_numeric($value)) {
+                $selectedIds[] = (int) $value;
+
+                continue;
+            }
+
+            if (is_string($value) && $value !== '') {
+                $selectedNames[] = $value;
+            }
+        }
+
+        return [
+            array_values(array_unique($selectedIds)),
+            array_values(array_unique($selectedNames)),
+        ];
     }
 }
