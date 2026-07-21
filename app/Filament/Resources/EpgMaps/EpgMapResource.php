@@ -332,7 +332,7 @@ class EpgMapResource extends Resource implements CopilotResource
                 ->default(false)
                 ->helperText(__('When enabled, channel attributes will be cleaned based on regex pattern instead of prefix before matching.')),
             TagsInput::make('settings.exclude_prefixes')
-                ->label(fn (Get $get) => ! $get('settings.use_regex') ? 'Channel prefixes to remove before matching' : 'Regex patterns to remove before matching')
+                ->label(fn (Get $get) => ! $get('settings.use_regex') ? __('Channel prefixes to remove before matching') : __('Regex patterns to remove before matching'))
                 ->helperText(__('Press [tab] or [return] to add item. Leave empty to disable.'))
                 ->columnSpanFull()
                 ->suggestions([
