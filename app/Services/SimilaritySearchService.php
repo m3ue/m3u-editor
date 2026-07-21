@@ -22,15 +22,6 @@ class SimilaritySearchService
 
     private const PREFERRED_REGION_DISTANCE_BONUS = 15;
 
-    /**
-     * Generous pg_trgm inclusion threshold used only to widen the bounded
-     * candidate pool on Postgres (see trigramSearchCondition()). This is not
-     * a match threshold — compareNormalizedValues() still decides confidence
-     * for every candidate that makes it into the pool, regardless of how it
-     * got there.
-     */
-    private const TRGM_CANDIDATE_THRESHOLD = 0.35;
-
     /** @var array<int, string> */
     private const DEFAULT_QUALITY_INDICATORS = [
         'hd',
@@ -121,7 +112,14 @@ class SimilaritySearchService
 
     private bool $removeQualityIndicators = false;
 
-    private bool $trigramThresholdConfigured = false;
+    /**
+     * Instance-lifetime cache for trigramAvailable() - null means "not yet
+     * checked." Callers (EpgChannelMatcherTool, BuildEpgMapCandidatesJob,
+     * etc.) resolve one instance and reuse it across a whole batch of
+     * channels, so this avoids a pg_extension lookup per search term without
+     * risking a stale answer surviving across separate requests/jobs.
+     */
+    private ?bool $trigramAvailable = null;
 
     /**
      * Apply the map's configured prefix or regex cleanup before any matching strategy runs.
@@ -666,17 +664,21 @@ class SimilaritySearchService
     /** @return array{string, list<string>} */
     private function trigramSearchCondition(string $term): array
     {
-        if (DB::connection()->getConfig('driver') !== 'pgsql') {
+        if (! $this->trigramAvailable()) {
             return ['', []];
         }
 
-        $this->ensureTrigramThreshold();
         $lowerTerm = mb_strtolower($term, 'UTF-8');
 
         // The `%` operator (not the similarity() function) is what lets
-        // Postgres use the GIN trgm indexes added in the
-        // add_pg_trgm_candidate_index migration - it must match their
-        // LOWER(column) expression exactly, or it falls back to a scan.
+        // Postgres use the GIN trgm indexes docker/8.4/db-init.sh creates for
+        // the embedded Postgres image - it must match their LOWER(column)
+        // expression exactly, or it falls back to a scan. `%`'s similarity
+        // cutoff comes from the pg_trgm.similarity_threshold GUC, which this
+        // service intentionally never sets - it's a database-level default
+        // (db-init.sh sets it via ALTER DATABASE for the embedded image; an
+        // externally managed Postgres owns its own default, or falls back to
+        // Postgres's built-in default of 0.3 if nobody configured one).
         return [
             '(LOWER(channel_id) % ? OR LOWER(name) % ? OR LOWER(display_name) % ?)',
             [$lowerTerm, $lowerTerm, $lowerTerm],
@@ -684,18 +686,30 @@ class SimilaritySearchService
     }
 
     /**
-     * pg_trgm's `%` operator reads its similarity cutoff from a session GUC
-     * rather than a query argument. Set it once per service instance to the
-     * same generous, candidate-widening threshold used everywhere here.
+     * Whether pg_trgm is actually installed on this connection - not just
+     * "are we on Postgres." No migration or app code installs it; it's set
+     * up out-of-band (docker/8.4/db-init.sh for the embedded Postgres image,
+     * or manually by whoever administers an external Postgres). Detecting
+     * it at runtime means every deployment gets the best matching this
+     * connection supports without the app assuming or requiring anything -
+     * pg_trgm absent is exactly the same as pre-widening behavior (LIKE-only
+     * candidate search), not an error.
+     *
+     * Cached per instance - see the $trigramAvailable property doc.
      */
-    private function ensureTrigramThreshold(): void
+    private function trigramAvailable(): bool
     {
-        if ($this->trigramThresholdConfigured) {
-            return;
+        if ($this->trigramAvailable !== null) {
+            return $this->trigramAvailable;
         }
 
-        DB::statement('SET pg_trgm.similarity_threshold = '.self::TRGM_CANDIDATE_THRESHOLD);
-        $this->trigramThresholdConfigured = true;
+        if (DB::connection()->getConfig('driver') !== 'pgsql') {
+            return $this->trigramAvailable = false;
+        }
+
+        return $this->trigramAvailable = (bool) DB::table('pg_extension')
+            ->where('extname', 'pg_trgm')
+            ->exists();
     }
 
     /**

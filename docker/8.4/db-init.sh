@@ -66,10 +66,20 @@ EOSQL
     fi
 
     # Create extensions
+    #
+    # TRGM_THRESHOLD tunes pg_trgm's `%` operator, which SimilaritySearchService
+    # uses to widen the EPG candidate pool to typo/transliteration matches with
+    # no shared literal substring. Setting it here via ALTER DATABASE (as the
+    # postgres superuser, before PG_USER's ownership even matters) is what
+    # makes this configurable at all - the app's own DB role can select the
+    # threshold's current session GUC, but cannot ALTER DATABASE ... SET a
+    # pg_trgm-defined parameter itself: Postgres requires either superuser or
+    # an explicit GRANT SET ON PARAMETER for that, even for the database owner.
     su-exec "${WWWUSER}" psql --quiet \
         -U postgres -h localhost -p "${PG_PORT}" -d "${PG_DATABASE}" <<-EOSQL
 CREATE EXTENSION IF NOT EXISTS fuzzystrmatch;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+ALTER DATABASE "${PG_DATABASE}" SET pg_trgm.similarity_threshold = ${TRGM_THRESHOLD};
 EOSQL
 
     echo "[db-init] Postgres role/database configuration complete."
@@ -102,6 +112,32 @@ else
     echo "[db-init] Migrations complete."
 fi
 /usr/bin/php /var/www/html/artisan migrate --database=jobs --force
+
+# Build the EPG candidate-recall trigram indexes now that migrations have
+# created epg_channels (can't do this earlier - the table doesn't exist yet
+# on a fresh install). Embedded Postgres only - an external database is the
+# admin's responsibility per the note above, and SimilaritySearchService
+# detects pg_trgm at runtime, so it degrades to its pre-trigram LIKE-only
+# candidate search if these were never created.
+#
+# CONCURRENTLY avoids taking an exclusive lock on epg_channels while it
+# builds - a plain CREATE INDEX would block any in-flight EPG import job
+# trying to write to that table for the duration of the build. Unlike a
+# Laravel migration (which wraps each migration in a transaction unless it
+# opts out), a bare psql heredoc with no explicit BEGIN already runs each
+# statement outside a transaction block, which CONCURRENTLY requires - no
+# extra opt-out needed here.
+if [ "${POSTGRES_LOCAL_ENABLED}" = "true" ]; then
+    echo "[db-init] Ensuring EPG candidate-recall trigram indexes..."
+    su-exec "${WWWUSER}" psql --quiet \
+        -U postgres -h localhost -p "${PG_PORT}" -d "${PG_DATABASE}" <<-EOSQL
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_channel_id_trgm ON epg_channels USING gin (LOWER(channel_id) gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_name_trgm ON epg_channels USING gin (LOWER(name) gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_display_name_trgm ON epg_channels USING gin (LOWER(display_name) gin_trgm_ops);
+ANALYZE epg_channels;
+EOSQL
+    echo "[db-init] Trigram indexes ready."
+fi
 
 # Reset any stale sync processes left over from a previous run
 echo "[db-init] Resetting sync process..."

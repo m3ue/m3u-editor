@@ -43,6 +43,13 @@ it('widens the candidate pool on Postgres via pg_trgm for typos with no shared l
         test()->markTestSkipped('Requires the pgsql connection (DB_CONNECTION=pgsql) to exercise pg_trgm.');
     }
 
+    // No migration installs pg_trgm anymore - it's provisioned out-of-band
+    // (docker/8.4/db-init.sh for the embedded Postgres image, or manually
+    // for an external one) and SimilaritySearchService detects it at
+    // runtime. The test provisions its own precondition rather than
+    // depending on whatever set up the test database.
+    DB::statement('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
     // Single-word name so the only search term is the whole 9-letter word;
     // a two-letter transposition breaks any literal LIKE substring match,
     // but pg_trgm similarity() still sees the two strings as close.
