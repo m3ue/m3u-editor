@@ -45,6 +45,7 @@ it('persists and restores the group scope on a re-fire that only passes epgMapId
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->epg->user_id,
         'group_ids' => [$this->groupB->id],
+        'processing' => false,
     ]);
 
     (new MapPlaylistChannelsToEpg(
@@ -56,6 +57,28 @@ it('persists and restores the group scope on a re-fire that only passes epgMapId
     $map->refresh();
 
     expect($map->total_channel_count)->toBe(3);
+});
+
+it('skips a re-fire when the map is already being processed, to avoid a racing double-run', function () {
+    $map = EpgMap::factory()->create([
+        'epg_id' => $this->epg->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->epg->user_id,
+        'group_ids' => [$this->groupB->id],
+        'processing' => true,
+        'total_channel_count' => 0,
+    ]);
+
+    (new MapPlaylistChannelsToEpg(
+        epg: $this->epg->id,
+        playlist: $this->playlist->id,
+        epgMapId: $map->id,
+    ))->handle();
+
+    $map->refresh();
+
+    expect($map->total_channel_count)->toBe(0)
+        ->and($map->processing)->toBeTrue();
 });
 
 it('prioritizes explicit channels over group_ids when both are present', function () {

@@ -146,9 +146,9 @@ class Epg extends Model
      */
     public function matchableEpgIds(): array
     {
-        return $this->isMerged()
+        return once(fn () => $this->isMerged()
             ? $this->sourceEpgs()->orderBy('merged_epg_epg.sort_order')->pluck('epgs.id')->all()
-            : [$this->id];
+            : [$this->id]);
     }
 
     /**

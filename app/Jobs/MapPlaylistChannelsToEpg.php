@@ -66,13 +66,33 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
         if ($this->epgMapId) {
             // Fetch and update existing map record
             $map = EpgMap::find($this->epgMapId);
-            $map->update([
-                'uuid' => $batchNo,
-                'progress' => 0,
-                'status' => Status::Processing,
-                'processing' => true,
-                'mapped_at' => now(),
-            ]);
+            if (! $map) {
+                Log::error("EPG Map not found for ID: {$this->epgMapId}");
+
+                return;
+            }
+
+            // Atomically claim the map so two overlapping dispatches for the same
+            // recurring map (e.g. a merged EPG rebuild firing while the scheduled
+            // refresh is still processing it) can't both run at once and race on
+            // its progress/status fields.
+            $claimed = EpgMap::where('id', $map->id)
+                ->where('processing', false)
+                ->update([
+                    'uuid' => $batchNo,
+                    'progress' => 0,
+                    'status' => Status::Processing,
+                    'processing' => true,
+                    'mapped_at' => now(),
+                ]);
+
+            if (! $claimed) {
+                Log::info("Skipping EPG map \"{$map->name}\" (ID: {$map->id}) re-fire; a mapping run is already in progress.");
+
+                return;
+            }
+
+            $map->refresh();
 
             // Set force to the existing map override setting if not explicitly set
             $this->force = $map->override;
