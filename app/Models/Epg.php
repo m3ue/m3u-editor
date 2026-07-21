@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -134,6 +135,40 @@ class Epg extends Model
     public function channels(): HasMany
     {
         return $this->hasMany(EpgChannel::class);
+    }
+
+    /**
+     * Resolve the EPG id(s) whose channels should be matched against for this EPG.
+     * For a merged EPG this expands to its source EPGs, in pivot priority order
+     * (first source wins on duplicate channels); for a standard EPG it's just itself.
+     *
+     * @return array<int, int>
+     */
+    public function matchableEpgIds(): array
+    {
+        return $this->isMerged()
+            ? $this->sourceEpgs()->orderBy('merged_epg_epg.sort_order')->pluck('epgs.id')->all()
+            : [$this->id];
+    }
+
+    /**
+     * Query builder over the EpgChannel rows matchable for this EPG. For a merged
+     * EPG, this expands across source EPGs without duplicating any epg_channels
+     * rows, ordered so the highest-priority source's row is returned first when a
+     * channel_id appears in multiple sources.
+     */
+    public function matchableChannels(): Builder
+    {
+        $ids = $this->matchableEpgIds();
+
+        $query = EpgChannel::whereIn('epg_id', $ids);
+
+        if (count($ids) > 1) {
+            $cases = collect($ids)->map(fn ($id, $index) => "WHEN {$id} THEN {$index}")->implode(' ');
+            $query->orderByRaw("CASE epg_id {$cases} END");
+        }
+
+        return $query;
     }
 
     public function epgMaps(): HasMany

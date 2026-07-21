@@ -486,7 +486,7 @@
     "Column to match": "匹配列",
     "Column to modify": "待修改的列",
     "Column to reset": "待重置的列",
-    "Combine multiple EPGs into one unified XML for external players.": "将多个 EPG 合并为一个统一的 XML 供外部播放器使用。",
+    "Combine multiple EPGs into one unified source for external players or EPG mapping.": "将多个 EPG 合并为一个统一的来源，供外部播放器或 EPG 映射使用。",
     "Common presets": "常用预设",
     "Complete": "完成",
     "Complete cast list": "完整演员名单",

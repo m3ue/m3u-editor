@@ -14,7 +14,7 @@ class ListMergedEpgs extends ListRecords
 
     public function getSubheading(): string|Htmlable|null
     {
-        return __('Combine multiple EPGs into one unified XML for external players.');
+        return __('Combine multiple EPGs into one unified source for external players or EPG mapping.');
     }
 
     protected function getHeaderActions(): array

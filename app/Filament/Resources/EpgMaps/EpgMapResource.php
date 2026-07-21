@@ -277,7 +277,13 @@ class EpgMapResource extends Resource implements CopilotResource
                 ->required()
                 ->label(__('EPG'))
                 ->helperText(__('Select the EPG you would like to map from.'))
-                ->options(Epg::where(['user_id' => Auth::id(), 'is_merged' => false])->get(['name', 'id'])->pluck('name', 'id'))
+                ->options(
+                    Epg::where('user_id', Auth::id())
+                        ->get(['id', 'name', 'is_merged'])
+                        ->groupBy(fn (Epg $epg) => (string) ($epg->is_merged ? __('Merged') : __('Standard')))
+                        ->map(fn ($group) => $group->pluck('name', 'id')->all())
+                        ->all()
+                )
                 ->hidden(! $showEpg)
                 ->searchable(),
             Select::make('playlist_id')

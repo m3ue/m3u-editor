@@ -486,7 +486,7 @@
     "Column to match": "Zu vergleichende Spalte",
     "Column to modify": "Zu ändernde Spalte",
     "Column to reset": "Spalte zum Zurücksetzen",
-    "Combine multiple EPGs into one unified XML for external players.": "Kombinieren Sie mehrere EPGs in einem einheitlichen XML für externe Player.",
+    "Combine multiple EPGs into one unified source for external players or EPG mapping.": "Kombinieren Sie mehrere EPGs zu einer einheitlichen Quelle für externe Player oder die EPG-Zuordnung.",
     "Common presets": "Häufige Voreinstellungen",
     "Complete": "Abgeschlossen",
     "Complete cast list": "Vollständige Besetzungsliste",
