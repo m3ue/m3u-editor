@@ -24,6 +24,10 @@ export PG_DATABASE="${PG_DATABASE:-m3ue}"
 export PG_USER="${PG_USER:-root}"
 export PG_PASSWORD="${PG_PASSWORD:-root}"
 export PG_PORT="${PG_PORT:-5432}" # Default 5432
+# pg_trgm similarity threshold for EPG candidate-recall matching (embedded
+# Postgres only - see docker/8.4/db-init.sh). Lower = more typo-tolerant
+# candidates surface for review, at the cost of a larger candidate pool.
+export TRGM_THRESHOLD="${TRGM_THRESHOLD:-0.35}"
 # Tells supervisord whether to start [program:postgresql] and [program:db-init].
 # Set to "true" below when local embedded Postgres is initialised.
 export POSTGRES_LOCAL_ENABLED="false"
