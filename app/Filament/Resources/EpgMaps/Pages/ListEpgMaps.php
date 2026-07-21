@@ -33,6 +33,7 @@ class ListEpgMaps extends ListRecords
                         ->dispatch(new MapPlaylistChannelsToEpg(
                             epg: (int) $data['epg_id'],
                             playlist: $data['playlist_id'],
+                            groups: $data['group_ids'] ?? null,
                             force: $data['override'],
                             recurring: $data['recurring'],
                             settings: $data['settings'] ?? [],

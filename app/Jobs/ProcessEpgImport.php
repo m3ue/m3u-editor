@@ -621,6 +621,15 @@ class ProcessEpgImport implements ShouldQueue
             ->broadcast($epg->user)
             ->sendToDatabase($epg->user);
 
+        // Re-run any recurring EPG maps now that the merged EPG has been rebuilt
+        $epg->epgMaps()->where('recurring', true)->get()->each(function ($map) {
+            dispatch(new MapPlaylistChannelsToEpg(
+                epg: $map->epg_id,
+                playlist: $map->playlist_id,
+                epgMapId: $map->id,
+            ));
+        });
+
         event(new SyncCompleted($epg));
     }
 
