@@ -13,6 +13,15 @@ return new class extends Migration
     private const TRGM_THRESHOLD = 0.35;
 
     /**
+     * CREATE INDEX CONCURRENTLY cannot run inside a transaction block, and
+     * Laravel wraps Postgres migrations in one by default. Opting out here
+     * is what lets the indexes build without holding an exclusive lock on
+     * epg_channels - a table the Process*Import job chains write to
+     * continuously, so a blocking build would stall live imports on deploy.
+     */
+    public $withinTransaction = false;
+
+    /**
      * Run the migrations.
      */
     public function up(): void
@@ -36,12 +45,17 @@ return new class extends Migration
         DB::statement("ALTER DATABASE \"{$database}\" SET pg_trgm.similarity_threshold = ".self::TRGM_THRESHOLD);
         DB::statement('SET pg_trgm.similarity_threshold = '.self::TRGM_THRESHOLD);
 
-        // Expression indexes must match the LOWER(column) form used by the
-        // `%` operator in SimilaritySearchService::trigramSearchCondition()
-        // exactly, or Postgres falls back to a sequential scan.
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_epg_channels_channel_id_trgm ON epg_channels USING gin (LOWER(channel_id) gin_trgm_ops)');
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_epg_channels_name_trgm ON epg_channels USING gin (LOWER(name) gin_trgm_ops)');
-        DB::statement('CREATE INDEX IF NOT EXISTS idx_epg_channels_display_name_trgm ON epg_channels USING gin (LOWER(display_name) gin_trgm_ops)');
+        // CONCURRENTLY builds the index without holding the AccessExclusiveLock
+        // a plain CREATE INDEX would - reads and writes against epg_channels
+        // (including in-flight EPG imports) keep working while this runs, at
+        // the cost of a slower build and needing to run outside a transaction
+        // (see $withinTransaction above). Expression form must match the
+        // LOWER(column) form used by the `%` operator in
+        // SimilaritySearchService::trigramSearchCondition() exactly, or
+        // Postgres falls back to a sequential scan.
+        DB::statement('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_channel_id_trgm ON epg_channels USING gin (LOWER(channel_id) gin_trgm_ops)');
+        DB::statement('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_name_trgm ON epg_channels USING gin (LOWER(name) gin_trgm_ops)');
+        DB::statement('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_epg_channels_display_name_trgm ON epg_channels USING gin (LOWER(display_name) gin_trgm_ops)');
 
         // Refresh statistics for existing data now that the threshold is set,
         // so the index is usable immediately rather than after the next
@@ -58,9 +72,11 @@ return new class extends Migration
             return;
         }
 
-        DB::statement('DROP INDEX IF EXISTS idx_epg_channels_channel_id_trgm');
-        DB::statement('DROP INDEX IF EXISTS idx_epg_channels_name_trgm');
-        DB::statement('DROP INDEX IF EXISTS idx_epg_channels_display_name_trgm');
+        // DROP INDEX CONCURRENTLY for the same reason CREATE uses it above -
+        // avoids taking a blocking lock on epg_channels while rolling back.
+        DB::statement('DROP INDEX CONCURRENTLY IF EXISTS idx_epg_channels_channel_id_trgm');
+        DB::statement('DROP INDEX CONCURRENTLY IF EXISTS idx_epg_channels_name_trgm');
+        DB::statement('DROP INDEX CONCURRENTLY IF EXISTS idx_epg_channels_display_name_trgm');
 
         $database = DB::getDatabaseName();
         DB::statement("ALTER DATABASE \"{$database}\" RESET pg_trgm.similarity_threshold");
