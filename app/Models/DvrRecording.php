@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
+use App\Events\DvrRecordingStatusEvent;
 use App\Services\ShowMetadataService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -54,7 +55,22 @@ class DvrRecording extends Model
             }
         });
 
+        static::created(function (DvrRecording $recording): void {
+            $recording->broadcastStatus();
+        });
+
+        static::updated(function (DvrRecording $recording): void {
+            if ($recording->wasChanged('status')) {
+                $recording->broadcastStatus();
+            }
+        });
+
         static::deleting(function (DvrRecording $recording): void {
+            // Broadcast first, before any cascade/file cleanup below can fail —
+            // the TV app needs to hear about a deletion regardless of whether
+            // the on-disk cleanup succeeds.
+            $recording->broadcastDeleted();
+
             // Delete the physical file from disk using the storage facade (file_path is relative).
             if ($recording->file_path) {
                 $disk = $recording->dvrSetting?->storage_disk ?: config('dvr.storage_disk', 'local');
@@ -194,6 +210,36 @@ class DvrRecording extends Model
         }
 
         return $channel->logo ?: null;
+    }
+
+    /**
+     * Pushes this recording's current status to the owning playlist's TV app
+     * channel over Reverb, so clients can mark channels as recording live
+     * instead of polling get_dvr_recordings. Silently no-ops when the
+     * dvr setting's owning playlist can't be resolved (e.g. orphaned rows).
+     */
+    public function broadcastStatus(): void
+    {
+        $event = DvrRecordingStatusEvent::fromRecording($this);
+
+        if ($event) {
+            broadcast($event);
+        }
+    }
+
+    /**
+     * Pushes a `deleted` status so the TV app removes this recording from its
+     * local list — the server is the source of truth, and a recording
+     * deleted here (Filament, retention, delete_dvr_recording) has no other
+     * signal that would otherwise tell the client it's gone.
+     */
+    public function broadcastDeleted(): void
+    {
+        $event = DvrRecordingStatusEvent::forDeletion($this);
+
+        if ($event) {
+            broadcast($event);
+        }
     }
 
     public function user(): BelongsTo
