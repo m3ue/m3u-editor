@@ -3665,5 +3665,9 @@
     "your-api-key-here": "在此输入您的 API 密钥",
     "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist": "yt-dlp 格式选择器后跟可选标志。示例：bestvideo+bestaudio/best --no-playlist",
     "—": "—",
-    "— Any —": "- 任何 -"
+    "— Any —": "- 任何 -",
+    "Recording Started": "录制已开始",
+    "Recording Complete": "录制已完成",
+    "Recording Failed": "录制失败",
+    "Recording Cancelled": "录制已取消"
 }

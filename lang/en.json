@@ -3665,5 +3665,9 @@
     "your-api-key-here": "your-api-key-here",
     "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist": "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist",
     "—": "—",
-    "— Any —": "— Any —"
+    "— Any —": "— Any —",
+    "Recording Started": "Recording Started",
+    "Recording Complete": "Recording Complete",
+    "Recording Failed": "Recording Failed",
+    "Recording Cancelled": "Recording Cancelled"
 }

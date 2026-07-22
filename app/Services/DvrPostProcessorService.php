@@ -260,6 +260,8 @@ class DvrPostProcessorService
                 ->broadcast($user)
                 ->sendToDatabase($user);
         }
+
+        $recording->notifyTv(__('Recording Complete'), 'success');
     }
 
     /**
@@ -635,6 +637,8 @@ class DvrPostProcessorService
                 ->broadcast($user)
                 ->sendToDatabase($user);
         }
+
+        $recording->notifyTv(__('Recording Failed'), 'danger');
     }
 
     /**

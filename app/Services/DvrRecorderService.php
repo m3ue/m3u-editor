@@ -138,6 +138,8 @@ class DvrRecorderService
                 ->broadcast($user)
                 ->sendToDatabase($user);
         }
+
+        $recording->notifyTv(__('Recording Started'), 'info');
     }
 
     /**
@@ -194,6 +196,8 @@ class DvrRecorderService
             'error_message' => 'Cancelled by user',
             'user_cancelled' => true,
         ]);
+
+        $recording->notifyTv(__('Recording Cancelled'), 'warning');
 
         // Delete "once" rules when the recording is cancelled — they're one-shot
         $rule = $recording->recordingRule;

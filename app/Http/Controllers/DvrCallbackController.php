@@ -146,6 +146,8 @@ class DvrCallbackController extends Controller
             'error_message' => $errorMessage,
         ]);
 
+        $recording->notifyTv(__('Recording Failed'), 'danger');
+
         Log::error('DVR callback: broadcast failed', [
             'recording_id' => $recording->id,
             'error' => $errorMessage,

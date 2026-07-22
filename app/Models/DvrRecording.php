@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Events\DvrRecordingStatusEvent;
+use App\Notifications\Notification as AppNotification;
 use App\Services\ShowMetadataService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -240,6 +241,28 @@ class DvrRecording extends Model
         if ($event) {
             broadcast($event);
         }
+    }
+
+    /**
+     * Sends a persisted TV notification (Notifications screen, unread badge,
+     * channel-subscription filtering) for a user-facing status change. Only
+     * called for transitions worth surfacing to the user — started, completed,
+     * failed, cancelled — not every status change broadcastStatus() covers
+     * (e.g. post_processing has no user-facing notification).
+     */
+    public function notifyTv(string $title, string $status): void
+    {
+        $playlist = $this->dvrSetting?->owner();
+
+        if (! $playlist) {
+            return;
+        }
+
+        AppNotification::make()
+            ->title($title)
+            ->body($this->title)
+            ->status($status)
+            ->tvBroadcast($playlist, 'dvr');
     }
 
     public function user(): BelongsTo
