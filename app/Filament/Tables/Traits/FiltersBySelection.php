@@ -14,7 +14,7 @@ trait FiltersBySelection
             return $selected ? $query->whereRaw('1 = 0') : $query;
         }
 
-        if (!$selected) {
+        if (! $selected) {
             return $query
                 ->when($selectedIds, fn (Builder $query): Builder => $query->whereNotIn($query->qualifyColumn('id'), $selectedIds))
                 ->when($selectedNames, fn (Builder $query): Builder => $query->whereNotIn($query->qualifyColumn('name'), $selectedNames));
