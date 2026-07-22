@@ -35,10 +35,12 @@ class SourceGroupsTableHarness extends Component implements HasActions, HasForms
 
     public string $groupType = 'live';
 
+    public array $selected = [];
+
     public function table(Table $table): Table
     {
         return SourceGroupsTable::configure(
-            $table->arguments(['playlist_id' => $this->playlistId, 'type' => $this->groupType])
+            $table->arguments(['playlist_id' => $this->playlistId, 'type' => $this->groupType, 'selected' => $this->selected])
         );
     }
 
@@ -66,6 +68,12 @@ function searchGroups(Playlist $playlist, string $term): Testable
 {
     return Livewire::test(SourceGroupsTableHarness::class, ['playlistId' => $playlist->id])
         ->searchTable($term);
+}
+
+function filterGroups(Playlist $playlist, bool $enabled, array $selected = []): Testable
+{
+    return Livewire::test(SourceGroupsTableHarness::class, ['playlistId' => $playlist->id, 'selected' => $selected])
+        ->filterTable('enabled', $enabled);
 }
 
 it('finds a group by a substring at the start of the name', function () {
@@ -127,6 +135,24 @@ it('finds a group by a term that only appears in its custom name', function () {
     searchGroups($this->playlist, 'UK')
         ->assertCanSeeTableRecords([$this->sport])
         ->assertCanNotSeeTableRecords([$this->ent, $this->doc]);
+});
+
+it('filters selected groups by current source group ids', function () {
+    filterGroups($this->playlist, true, [$this->ent->id])
+        ->assertCanSeeTableRecords([$this->ent])
+        ->assertCanNotSeeTableRecords([$this->doc, $this->sport]);
+});
+
+it('filters selected groups by legacy selected names', function () {
+    filterGroups($this->playlist, true, ['Sports'])
+        ->assertCanSeeTableRecords([$this->sport])
+        ->assertCanNotSeeTableRecords([$this->ent, $this->doc]);
+});
+
+it('filters unselected groups by excluding the current selection', function () {
+    filterGroups($this->playlist, false, [$this->ent->id])
+        ->assertCanSeeTableRecords([$this->doc, $this->sport])
+        ->assertCanNotSeeTableRecords([$this->ent]);
 });
 
 it('matches both the custom name and the source name for a renamed group', function () {

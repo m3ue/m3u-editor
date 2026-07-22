@@ -692,6 +692,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableArguments(fn (Get $get): array => [
                                     'playlist_id' => (int) $get('playlist_id'),
                                     'type' => 'live',
+                                    'selected' => $get('group_filter.selected_groups') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -822,6 +823,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableArguments(fn (Get $get): array => [
                                     'playlist_id' => (int) $get('playlist_id'),
                                     'type' => 'vod',
+                                    'selected' => $get('group_filter.selected_vod_groups') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -888,6 +890,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
                                 ->tableArguments(fn (Get $get): array => [
                                     'playlist_id' => (int) $get('playlist_id'),
+                                    'selected' => $get('group_filter.selected_categories') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action

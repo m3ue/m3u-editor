@@ -2,15 +2,19 @@
 
 namespace App\Filament\Tables;
 
+use App\Filament\Tables\Traits\FiltersBySelection;
 use App\Models\Group;
 use App\Models\SourceGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
 class SourceGroupsTable
 {
+    use FiltersBySelection;
+
     public static function configure(Table $table): Table
     {
         return $table
@@ -69,7 +73,24 @@ class SourceGroupsTable
                     ->sortable(),
             ])
             ->filters([
-                //
+                TernaryFilter::make('enabled')
+                    ->label(__('Groups'))
+                    ->placeholder(__('All groups'))
+                    ->trueLabel(__('Selected only'))
+                    ->falseLabel(__('Unselected only'))
+                    ->queries(
+                        true: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: true,
+                        ),
+                        false: fn (Builder $query): Builder => self::whereSelected(
+                            $query,
+                            $table->getArguments()['selected'] ?? [],
+                            selected: false,
+                        ),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
             ])
             ->paginated([15, 25, 50, 100])
             ->defaultPaginationPageOption(15)

@@ -1612,9 +1612,10 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->columnSpan(1)
                                 ->multiple()
                                 ->helperText(__('NOTE: If the list is empty, sync the playlist and check again once complete.'))
-                                ->tableArguments(fn ($record): array => [
+                                ->tableArguments(fn ($record, Get $get): array => [
                                     'playlist_id' => $record?->id,
                                     'type' => 'live',
+                                    'selected' => $get('import_prefs.selected_groups') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -1705,9 +1706,10 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->columnSpan(1)
                                 ->multiple()
                                 ->helperText(__('NOTE: If the list is empty, sync the playlist and check again once complete.'))
-                                ->tableArguments(fn ($record): array => [
+                                ->tableArguments(fn ($record, Get $get): array => [
                                     'playlist_id' => $record?->id,
                                     'type' => 'vod',
+                                    'selected' => $get('import_prefs.selected_vod_groups') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -1798,8 +1800,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->columnSpan(1)
                                 ->multiple()
                                 ->helperText(__('NOTE: If the list is empty, sync the playlist and check again once complete.'))
-                                ->tableArguments(fn ($record): array => [
+                                ->tableArguments(fn ($record, Get $get): array => [
                                     'playlist_id' => $record?->id,
+                                    'selected' => $get('import_prefs.selected_categories') ?? [],
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
