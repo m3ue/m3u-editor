@@ -119,6 +119,41 @@ it('materialises a Scheduled DvrRecording in the same request via the boot event
     expect($recording->scheduled_end->equalTo($rule->manual_end->copy()->addSeconds($rule->end_late_seconds)))->toBeTrue();
 });
 
+it('stores the correct absolute instant when app.timezone is not UTC', function () {
+    // manual_start/manual_end are cast as `datetime`, which Eloquent re-hydrates by
+    // reinterpreting the stored wall-clock in `app.timezone`. The TV client always
+    // sends UTC ISO 8601 timestamps, so a non-UTC app.timezone (a supported,
+    // user-configurable setting — see GeneralSettings::app_timezone) must not shift
+    // the recorded instant. Regression for the schedule appearing hours off in the
+    // admin UI when the server's timezone isn't UTC.
+    config(['app.timezone' => 'America/Denver']);
+    date_default_timezone_set('America/Denver');
+
+    // Mirror the TV client exactly: it always sends `.toUtc().toIso8601String()`,
+    // i.e. a 'Z'-suffixed UTC timestamp, regardless of the server's timezone.
+    $start = now()->utc()->addMinutes(5)->startOfMinute();
+    $end = $start->copy()->addMinutes(30);
+
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Late Show',
+        'start_time' => $start->toIso8601String(),
+        'end_time' => $end->toIso8601String(),
+    ]);
+
+    $response->assertOk();
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+
+    expect($rule->manual_start->equalTo($start))->toBeTrue();
+    expect($rule->manual_end->equalTo($end))->toBeTrue();
+
+    // Re-fetch from a fresh model instance to force the read-side cast round-trip,
+    // not just the in-memory value set during this request.
+    $rule->refresh();
+    expect($rule->manual_start->equalTo($start))->toBeTrue();
+    expect($rule->manual_end->equalTo($end))->toBeTrue();
+});
+
 it('rejects scheduling when DVR is not enabled for the playlist', function () {
     DvrSetting::where('playlist_id', $this->playlist->id)->update(['enabled' => false]);
 

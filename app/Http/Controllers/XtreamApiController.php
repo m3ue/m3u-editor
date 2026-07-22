@@ -2949,6 +2949,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'Channel not found'], 404);
         }
 
+        // manual_start/manual_end are cast as `datetime`, which Eloquent re-hydrates by
+        // reinterpreting the stored wall-clock in `app.timezone` (not UTC) — see the same
+        // compensation in EpgCacheService::cachePeriodProgrammes(). $startTime/$endTime
+        // arrive as UTC ISO 8601 strings from the client, so we must convert them to
+        // app.timezone's wall-clock before Eloquent formats them for storage, or the
+        // round-trip re-read will reconstruct the wrong absolute instant.
+        $appTz = config('app.timezone', 'UTC');
         $rule = DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
@@ -2956,8 +2963,8 @@ class XtreamApiController extends Controller
             'channel_id' => $channelId,
             'series_title' => $title,
             'match_mode' => DvrMatchMode::Exact,
-            'manual_start' => Carbon::parse($startTime),
-            'manual_end' => Carbon::parse($endTime),
+            'manual_start' => Carbon::parse($startTime)->setTimezone($appTz),
+            'manual_end' => Carbon::parse($endTime)->setTimezone($appTz),
             'start_early_seconds' => (int) $request->input('start_early_seconds', $dvrSetting->default_start_early_seconds ?? 0),
             'end_late_seconds' => (int) $request->input('end_late_seconds', $dvrSetting->default_end_late_seconds ?? 0),
             'enabled' => true,
