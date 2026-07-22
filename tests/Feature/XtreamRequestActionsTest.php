@@ -254,14 +254,40 @@ it('searches only enabled guest integrations and returns paginated deduplicated 
     Http::assertSentCount(2);
 });
 
-it('normalizes series seasons for client selection', function () {
+it('forwards runtime, certification, and structured rating for the TV app detail screen', function () {
+    Http::fake([
+        'http://radarr.test/api/v3/movie/lookup*' => Http::response([[
+            'tmdbId' => 348,
+            'title' => 'Alien',
+            'year' => 1979,
+            'runtime' => 117,
+            'certification' => 'R',
+            'ratings' => ['imdb' => ['value' => 8.4, 'votes' => 125227]],
+        ]]),
+        'http://sonarr.test/api/v3/series/lookup*' => Http::response([]),
+    ]);
+
+    $this->getJson(requestActionUrl('request_search', [
+        'query' => 'Alien',
+        'type' => 'movie',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('data.results.0.runtime', 117)
+        ->assertJsonPath('data.results.0.certification', 'R')
+        ->assertJsonPath('data.results.0.rating.value', 8.4)
+        ->assertJsonPath('data.results.0.rating.votes', 125227)
+        ->assertJsonPath('data.results.0.rating.source', 'imdb');
+});
+
+it('normalizes series seasons for client selection with per-season library availability', function () {
     Http::fake([
         'http://sonarr.test/api/v3/series/lookup*' => Http::response([[
             'tvdbId' => 81189,
             'title' => 'Breaking Bad',
             'seasons' => [
-                ['seasonNumber' => 1, 'monitored' => true, 'statistics' => ['episodeCount' => 7]],
+                ['seasonNumber' => 1, 'monitored' => true, 'statistics' => ['episodeCount' => 7, 'episodeFileCount' => 7]],
                 ['seasonNumber' => 0, 'monitored' => false],
+                ['seasonNumber' => 2, 'monitored' => true, 'statistics' => ['episodeCount' => 13, 'episodeFileCount' => 0]],
             ],
         ]]),
     ]);
@@ -271,7 +297,14 @@ it('normalizes series seasons for client selection', function () {
         'type' => 'series',
     ]))
         ->assertOk()
-        ->assertJsonPath('data.results.0.seasons', [0, 1])
+        ->assertJsonPath('data.results.0.seasons.0.season_number', 0)
+        ->assertJsonPath('data.results.0.seasons.0.has_file', false)
+        ->assertJsonPath('data.results.0.seasons.1.season_number', 1)
+        ->assertJsonPath('data.results.0.seasons.1.episode_count', 7)
+        ->assertJsonPath('data.results.0.seasons.1.episode_file_count', 7)
+        ->assertJsonPath('data.results.0.seasons.1.has_file', true)
+        ->assertJsonPath('data.results.0.seasons.2.season_number', 2)
+        ->assertJsonPath('data.results.0.seasons.2.has_file', false)
         ->assertJsonMissingPath('data.results.0.seasons.0.monitored')
         ->assertJsonMissingPath('data.results.0.seasons.0.statistics');
 });

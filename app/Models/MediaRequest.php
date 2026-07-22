@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Events\MediaRequestStatusEvent;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -60,5 +61,20 @@ class MediaRequest extends Model
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
+    }
+
+    /**
+     * Pushes this request's current status to the owning playlist's TV app
+     * channel over Reverb, so clients can update the requests screen live
+     * instead of polling request_status/request_history. Silently no-ops
+     * when the owning playlist can't be resolved (e.g. orphaned rows).
+     */
+    public function broadcastStatus(): void
+    {
+        $event = MediaRequestStatusEvent::fromRequest($this);
+
+        if ($event) {
+            broadcast($event);
+        }
     }
 }

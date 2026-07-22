@@ -100,13 +100,19 @@ class ContentRequestService
                     'fanart' => $item['fanart'] ?? null,
                     'genres' => $item['genres'] ?? [],
                     'rating' => $item['rating'] ?? null,
+                    'runtime' => $item['runtime'] ?? null,
+                    'certification' => $item['certification'] ?? null,
                     'seasons' => $mediaType === 'series'
                         ? collect($item['seasons'] ?? [])
-                            ->pluck('seasonNumber')
-                            ->filter(fn (mixed $season): bool => is_numeric($season) && (int) $season >= 0)
-                            ->map(fn (mixed $season): int => (int) $season)
-                            ->unique()
-                            ->sort()
+                            ->filter(fn (array $season): bool => is_numeric($season['seasonNumber'] ?? null) && (int) $season['seasonNumber'] >= 0)
+                            ->map(fn (array $season): array => [
+                                'season_number' => (int) $season['seasonNumber'],
+                                'episode_count' => $season['statistics']['episodeCount'] ?? null,
+                                'episode_file_count' => $season['statistics']['episodeFileCount'] ?? null,
+                                'has_file' => (int) ($season['statistics']['episodeFileCount'] ?? 0) > 0,
+                            ])
+                            ->unique('season_number')
+                            ->sortBy('season_number')
                             ->values()
                             ->all()
                         : [],
@@ -390,6 +396,7 @@ class ContentRequestService
             $status = 'completed';
             if ($canPersistCompleted) {
                 $mediaRequest->update(['status' => $status]);
+                $mediaRequest->broadcastStatus();
                 $formatted = $this->formatRequest($mediaRequest);
             }
         }

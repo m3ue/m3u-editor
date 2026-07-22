@@ -315,6 +315,7 @@ class ArrQueueMonitor extends Component
                 'reviewed_at' => now(),
                 'reviewed_by_user_id' => auth()->id(),
             ]);
+            $request->broadcastStatus();
 
             Notification::make()
                 ->success()
@@ -359,6 +360,7 @@ class ArrQueueMonitor extends Component
             'reviewed_at' => now(),
             'reviewed_by_user_id' => auth()->id(),
         ]);
+        $request->broadcastStatus();
 
         Notification::make()
             ->warning()
