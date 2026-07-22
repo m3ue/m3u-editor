@@ -21,11 +21,11 @@ trait FiltersBySelection
         }
 
         return $query->where(function (Builder $query) use ($selectedIds, $selectedNames): void {
-            if (!empty($selectedIds)) {
+            if (! empty($selectedIds)) {
                 $query->whereIn($query->qualifyColumn('id'), $selectedIds);
             }
 
-            if (!empty($selectedNames)) {
+            if (! empty($selectedNames)) {
                 $method = empty($selectedIds) ? 'whereIn' : 'orWhereIn';
                 $query->{$method}($query->qualifyColumn('name'), $selectedNames);
             }
@@ -37,7 +37,7 @@ trait FiltersBySelection
      */
     private static function selectedIdsAndNames(mixed $selectedValues): array
     {
-        if (!is_array($selectedValues)) {
+        if (! is_array($selectedValues)) {
             return [[], []];
         }
 
