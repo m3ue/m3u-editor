@@ -882,7 +882,7 @@ class Preferences extends SettingsPage
                             ->schema([
                                 Section::make(__('TV Notification Tester'))
                                     ->description(__('Send a test notification to a playlist target to verify the TV app notification system is connected and working.'))
-                                    ->icon('heroicon-m-device-phone-mobile')
+                                    ->icon('heroicon-m-bell-alert')
                                     ->headerActions([
                                         Action::make('send_tv_notification')
                                             ->label(__('Send Notification'))
@@ -1023,37 +1023,12 @@ class Preferences extends SettingsPage
                                             ->description(__('Use the "Send Notification" button above to dispatch a test TV notification to any playlist target.')),
                                     ]),
 
-                                Section::make(__('Notification Channels'))
-                                    ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable — they appear automatically once a notification arrives on that channel.'))
-                                    ->icon('heroicon-m-tag')
-                                    ->schema([
-                                        Repeater::make('tv_notification_channels')
-                                            ->label(__('Default Notification Channels'))
-                                            ->schema([
-                                                Grid::make()->columns(2)->schema([
-                                                    TextInput::make('name')
-                                                        ->label(__('Channel slug'))
-                                                        ->required()
-                                                        ->regex('/^[a-z0-9_]+$/')
-                                                        ->placeholder(__('dvr_recording_completed'))
-                                                        ->helperText(__('Lowercase letters, numbers, and underscores only.')),
-                                                    TextInput::make('label')
-                                                        ->label(__('Display label'))
-                                                        ->placeholder(__('DVR Recording Completed'))
-                                                        ->helperText(__('Optional — shown in the TV app instead of the raw slug.')),
-                                                ]),
-                                            ])
-                                            ->addActionLabel(__('Add channel'))
-                                            ->reorderable()
-                                            ->columnSpanFull(),
-                                    ]),
-
                                 Section::make(__('Push Notifications (Mobile)'))
-                                    ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed. Uses a shared community relay by default (m3u-push-relay) - no setup required. Not used for Android TV or tvOS - those rely on the connection above.'))
-                                    ->icon('heroicon-m-bell-alert')
+                                    ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed.'))
+                                    ->icon('heroicon-m-device-phone-mobile')
                                     ->headerActions([
                                         Action::make('test_push_relay')
-                                            ->label(__('Send test push'))
+                                            ->label(__('Send Push Notification'))
                                             ->icon('heroicon-o-paper-airplane')
                                             ->color('gray')
                                             ->size('sm')
@@ -1109,8 +1084,33 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Toggle::make('push_relay_enabled')
                                             ->label(__('Enable push relay'))
-                                            ->helperText(__('When enabled, TV notifications are also forwarded to registered mobile devices through the community relay. To point at your own relay instead, set PUSH_RELAY_URL in your .env.'))
+                                            ->helperText(__('When enabled, TV notifications are also forwarded to registered mobile devices through the public relay.'))
                                             ->live(),
+                                    ]),
+
+                                Section::make(__('Notification Channels'))
+                                    ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable — they appear automatically once a notification arrives on that channel.'))
+                                    ->icon('heroicon-m-tag')
+                                    ->schema([
+                                        Repeater::make('tv_notification_channels')
+                                            ->label(__('Default Notification Channels'))
+                                            ->schema([
+                                                Grid::make()->columns(2)->schema([
+                                                    TextInput::make('name')
+                                                        ->label(__('Channel slug'))
+                                                        ->required()
+                                                        ->regex('/^[a-z0-9_]+$/')
+                                                        ->placeholder(__('dvr_recording_completed'))
+                                                        ->helperText(__('Lowercase letters, numbers, and underscores only.')),
+                                                    TextInput::make('label')
+                                                        ->label(__('Display label'))
+                                                        ->placeholder(__('DVR Recording Completed'))
+                                                        ->helperText(__('Optional — shown in the TV app instead of the raw slug.')),
+                                                ]),
+                                            ])
+                                            ->addActionLabel(__('Add channel'))
+                                            ->reorderable()
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
 
