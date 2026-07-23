@@ -292,6 +292,11 @@ class GeneralSettings extends Settings
      */
     public array $tv_notification_channels = [];
 
+    // Mobile push notifications (m3u-push-relay) - on by default, since the
+    // app ships pointed at a working community relay (see config/services.php).
+    // The relay URL itself is config-only (not exposed here) - see PushRelayService.
+    public ?bool $push_relay_enabled = true;
+
     public static function group(): string
     {
         return 'general';

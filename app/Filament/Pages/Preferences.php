@@ -16,6 +16,7 @@ use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PushDeviceToken;
 use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Notifications\Notification as AppNotification;
@@ -25,6 +26,7 @@ use App\Rules\ValidDateFormat;
 use App\Services\DateFormatService;
 use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
+use App\Services\PushRelayService;
 use App\Settings\GeneralSettings;
 use App\Support\CopilotProvider;
 use Cron\CronExpression;
@@ -1044,6 +1046,71 @@ class Preferences extends SettingsPage
                                             ->addActionLabel(__('Add channel'))
                                             ->reorderable()
                                             ->columnSpanFull(),
+                                    ]),
+
+                                Section::make(__('Push Notifications (Mobile)'))
+                                    ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed. Uses a shared community relay by default (m3u-push-relay) - no setup required. Not used for Android TV or tvOS - those rely on the connection above.'))
+                                    ->icon('heroicon-m-bell-alert')
+                                    ->headerActions([
+                                        Action::make('test_push_relay')
+                                            ->label(__('Send test push'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('push_relay_enabled') && app(PushRelayService::class)->isEnabled())
+                                            ->schema([
+                                                Select::make('device_id')
+                                                    ->label(__('Registered device'))
+                                                    ->required()
+                                                    ->searchable()
+                                                    ->options(fn (): array => PushDeviceToken::query()
+                                                        ->latest()
+                                                        ->limit(50)
+                                                        ->get()
+                                                        ->mapWithKeys(fn (PushDeviceToken $d) => [
+                                                            $d->id => "{$d->notifiable?->name} ({$d->platform}, ".$d->last_seen_at?->diffForHumans().')',
+                                                        ])
+                                                        ->all()),
+                                            ])
+                                            ->action(function (array $data): void {
+                                                $device = PushDeviceToken::find($data['device_id']);
+
+                                                if (! $device) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Device not found'))
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    app(PushRelayService::class)->send(
+                                                        $device->token,
+                                                        $device->platform,
+                                                        '[TEST] m3u editor',
+                                                        __('This is a test push notification. Your push relay integration is working correctly.'),
+                                                    );
+
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title(__('Test Push Sent'))
+                                                        ->body(__('Check the device for the test notification.'))
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Failed to Send Push'))
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('push_relay_enabled')
+                                            ->label(__('Enable push relay'))
+                                            ->helperText(__('When enabled, TV notifications are also forwarded to registered mobile devices through the community relay. To point at your own relay instead, set PUSH_RELAY_URL in your .env.'))
+                                            ->live(),
                                     ]),
                             ]),
 

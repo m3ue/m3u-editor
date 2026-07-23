@@ -18,6 +18,23 @@ return [
         'token' => env('POSTMARK_TOKEN'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Push Relay
+    |--------------------------------------------------------------------------
+    |
+    | Community relay for mobile push notifications (m3u-push-relay). Config
+    | only, intentionally not exposed in Settings -> only PUSH_RELAY_URL in
+    | your own .env can change it. The relay takes no shared secret - it ships
+    | in every publicly-distributed copy of this app, so nothing hardcoded
+    | here is actually private anyway. The relay relies on rate limiting
+    | instead (see m3u-push-relay's README).
+    |
+    */
+    'push_relay' => [
+        'url' => env('PUSH_RELAY_URL', 'https://push-relay.sparkison.dev'),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),

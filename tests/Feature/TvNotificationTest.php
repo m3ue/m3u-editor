@@ -1,11 +1,14 @@
 <?php
 
 use App\Events\TvNotificationEvent;
+use App\Jobs\SendPushNotificationRelay;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Models\User;
 use App\Notifications\Notification;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
 
 beforeEach(function () {
@@ -103,6 +106,24 @@ it('standard tvBroadcast broadcasts on both playlist and admin channels', functi
             "private-tv.playlist.{$this->playlist->uuid}",
             "private-tv.playlist-admin.{$this->playlist->uuid}",
         ];
+    });
+});
+
+it('tvBroadcast dispatches SendPushNotificationRelay with the notification payload', function () {
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    Notification::make()
+        ->title('Sync complete')
+        ->body('Your playlist has been synced.')
+        ->success()
+        ->tvBroadcast($this->playlist, 'sync_complete');
+
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $job) {
+        return $job->notifiableType === $this->playlist->getMorphClass()
+            && $job->notifiableId === $this->playlist->id
+            && $job->title === 'Sync complete'
+            && $job->body === 'Your playlist has been synced.';
     });
 });
 
@@ -365,6 +386,56 @@ it('broadcastingAuth returns 403 when playlist scope tries to use admin channel'
         'socket_id' => '123456.78910',
         'channel_name' => "private-tv.playlist-admin.{$this->playlist->uuid}",
     ])->assertForbidden();
+});
+
+// ── POST /api/tv/{username}/{password}/push/subscribe ──────────────────────────
+
+it('push/subscribe registers a new device token for the playlist', function () {
+    $url = route('tv.push.subscribe', ['username' => 'tv_user', 'password' => 'tv_pass']);
+
+    $this->postJson($url, ['token' => 'fcm-token-abc', 'platform' => 'android'])
+        ->assertOk()
+        ->assertJsonPath('ok', true);
+
+    expect(PushDeviceToken::count())->toBe(1);
+
+    $device = PushDeviceToken::first();
+    expect($device->notifiable_type)->toBe($this->playlist->getMorphClass())
+        ->and($device->notifiable_id)->toBe($this->playlist->id)
+        ->and($device->token)->toBe('fcm-token-abc')
+        ->and($device->platform)->toBe('android')
+        ->and($device->last_seen_at)->not->toBeNull();
+});
+
+it('push/subscribe re-registering the same token updates it instead of duplicating', function () {
+    $url = route('tv.push.subscribe', ['username' => 'tv_user', 'password' => 'tv_pass']);
+
+    $this->postJson($url, ['token' => 'fcm-token-abc', 'platform' => 'ios'])->assertOk();
+    $this->postJson($url, ['token' => 'fcm-token-abc', 'platform' => 'ios'])->assertOk();
+
+    expect(PushDeviceToken::count())->toBe(1);
+});
+
+it('push/subscribe rejects an invalid platform', function () {
+    $url = route('tv.push.subscribe', ['username' => 'tv_user', 'password' => 'tv_pass']);
+
+    $this->postJson($url, ['token' => 'fcm-token-abc', 'platform' => 'windows'])
+        ->assertUnprocessable();
+
+    expect(PushDeviceToken::count())->toBe(0);
+});
+
+it('push/subscribe requires a token', function () {
+    $url = route('tv.push.subscribe', ['username' => 'tv_user', 'password' => 'tv_pass']);
+
+    $this->postJson($url, ['platform' => 'ios'])->assertUnprocessable();
+});
+
+it('push/subscribe returns 401 with invalid credentials', function () {
+    $url = route('tv.push.subscribe', ['username' => 'wrong', 'password' => 'wrong']);
+
+    $this->postJson($url, ['token' => 'fcm-token-abc', 'platform' => 'ios'])
+        ->assertUnauthorized();
 });
 
 it('TV endpoints return 401 with invalid credentials', function () {
