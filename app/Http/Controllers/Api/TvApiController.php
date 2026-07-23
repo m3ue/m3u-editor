@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
+use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Model;
@@ -105,6 +106,38 @@ class TvApiController extends Controller
         return response()->json([
             'auth' => config('broadcasting.connections.reverb.key').':'.$sig,
         ]);
+    }
+
+    /**
+     * POST /api/tv/{username}/{password}/push/subscribe
+     *
+     * Registers (or refreshes) a mobile device's FCM push token against the
+     * authenticated playlist, so the push relay job can reach it. Mobile only
+     * (see PushNotificationService in the Flutter client) - TV builds don't call this.
+     */
+    public function registerPushToken(Request $request): JsonResponse
+    {
+        $auth = $this->resolveAuth($request);
+        $playlist = $auth['playlist'];
+
+        $data = $request->validate([
+            'token' => ['required', 'string', 'max:4096'],
+            'platform' => ['required', 'string', 'in:ios,android'],
+        ]);
+
+        PushDeviceToken::updateOrCreate(
+            [
+                'notifiable_type' => $playlist->getMorphClass(),
+                'notifiable_id' => $playlist->id,
+                'token' => $data['token'],
+            ],
+            [
+                'platform' => $data['platform'],
+                'last_seen_at' => now(),
+            ],
+        );
+
+        return response()->json(['ok' => true]);
     }
 
     /**

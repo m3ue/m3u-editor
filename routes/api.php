@@ -98,4 +98,6 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.notifications.read');
     Route::post('broadcasting/auth', [TvApiController::class, 'broadcastingAuth'])
         ->name('tv.broadcasting.auth');
+    Route::post('push/subscribe', [TvApiController::class, 'registerPushToken'])
+        ->name('tv.push.subscribe');
 });
