@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Events\TvNotificationEvent;
+use App\Jobs\SendPushNotificationRelay;
 use App\Models\TvNotification;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification as BaseNotification;
@@ -52,6 +53,13 @@ class Notification extends BaseNotification
             body: $this->getBody() ?? '',
             status: $this->getStatus() ?? 'info',
         ));
+
+        SendPushNotificationRelay::dispatch(
+            $playlist->getMorphClass(),
+            $playlist->id,
+            $this->getTitle() ?? '',
+            $this->getBody(),
+        );
 
         return $this;
     }
