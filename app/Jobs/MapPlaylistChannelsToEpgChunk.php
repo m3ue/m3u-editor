@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Channel;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\EpgMap;
 use App\Models\Job;
 use App\Services\SimilaritySearchService;
@@ -68,6 +69,14 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         $skipMissing = $this->settings['skip_missing'] ?? false;
         $setEpgIcon = $this->settings['set_epg_icon'] ?? false;
         $mappedChannels = [];
+
+        // Channels that fall through to the similarity search (step 4) are
+        // deferred instead of queried immediately - one prefetch below loads
+        // every candidate the whole chunk could need in a single query,
+        // instead of a LIKE/trigram scan per channel (see loadEpgCandidates
+        // doc block). Exact/callsign matches above stay per-channel since
+        // those are cheap indexed lookups.
+        $pendingSimilarity = [];
 
         foreach ($channels->cursor() as $channel) {
             // Get the title and stream id - sanitize UTF-8 immediately
@@ -207,50 +216,68 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 }
             }
 
-            // Step 4: If no exact match, attempt a similarity search (only for channels with significant content)
+            // Step 4: If no exact match, defer to a batched similarity search
+            // (only for channels with significant content). Deferred so the
+            // whole chunk's candidates can be prefetched in one query below,
+            // instead of one LIKE/trigram scan per channel.
             if (! $epgChannel) {
-                // Only run similarity search if the channel name has enough content
                 $channelNameForSearch = trim($title ?: $name);
                 if (strlen($channelNameForSearch) >= 3) {
-                    // Pass the settings to the similarity search
-                    $removeQualityIndicators = $this->settings['remove_quality_indicators'] ?? false;
-                    $similarityThreshold = $this->settings['similarity_threshold'] ?? 70;
-                    $fuzzyMaxDistance = $this->settings['fuzzy_max_distance'] ?? 25;
-                    $exactMatchDistance = $this->settings['exact_match_distance'] ?? 8;
-                    $customQualityIndicators = $this->settings['quality_indicators'] ?? null;
+                    $pendingSimilarity[] = [
+                        'channel' => $channel,
+                        'cleaned_title' => $title,
+                        'cleaned_name' => $name,
+                    ];
 
-                    $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
-                        $channel,
-                        $epg,
-                        $removeQualityIndicators,
-                        $similarityThreshold,
-                        $fuzzyMaxDistance,
-                        $exactMatchDistance,
-                        $customQualityIndicators ?: null,
-                        // Pass the prefix/pattern-cleaned values so the similarity
-                        // search honors the map's exclude settings (issue #1265)
-                        cleanedTitle: $title,
-                        cleanedName: $name,
-                    );
+                    continue;
                 }
             }
 
-            // If EPG channel found, link it to the Playlist channel
+            // If EPG channel found via an exact/callsign match, link it now.
             if ($epgChannel) {
-                if ($setEpgIcon) {
-                    $channel->logo_type = 'epg';
-                }
+                $mappedChannels[] = $this->mappedChannelRow($channel, $epgChannel, $setEpgIcon);
+            }
+        }
 
-                $mappedChannels[] = [
-                    'title' => $this->sanitizeUtf8($channel->title),
-                    'name' => $this->sanitizeUtf8($channel->name),
-                    'group_internal' => $this->sanitizeUtf8($channel->group_internal),
-                    'user_id' => $channel->user_id,
-                    'playlist_id' => $channel->playlist_id,
-                    'source_id' => $channel->source_id,
-                    'epg_channel_id' => $epgChannel->id,
-                    'logo_type' => $channel->logo_type,
-                ];
+        // Resolve every deferred channel against one prefetched candidate
+        // set for the whole chunk, instead of a per-channel DB round-trip.
+        if (! empty($pendingSimilarity)) {
+            $removeQualityIndicators = $this->settings['remove_quality_indicators'] ?? false;
+            $similarityThreshold = $this->settings['similarity_threshold'] ?? 70;
+            $fuzzyMaxDistance = $this->settings['fuzzy_max_distance'] ?? 25;
+            $exactMatchDistance = $this->settings['exact_match_distance'] ?? 8;
+            $customQualityIndicators = $this->settings['quality_indicators'] ?? null;
+
+            $unionTerms = collect($pendingSimilarity)
+                ->flatMap(fn (array $pending): array => $this->similaritySearch->searchTermsFor(
+                    channel: $pending['channel'],
+                    cleanedTitle: $pending['cleaned_title'],
+                    cleanedName: $pending['cleaned_name'],
+                ))
+                ->unique()
+                ->values()
+                ->all();
+            $prefetchedCandidates = $this->similaritySearch->loadEpgCandidates($epg, $unionTerms);
+
+            foreach ($pendingSimilarity as $pending) {
+                $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
+                    $pending['channel'],
+                    $epg,
+                    $removeQualityIndicators,
+                    $similarityThreshold,
+                    $fuzzyMaxDistance,
+                    $exactMatchDistance,
+                    $customQualityIndicators ?: null,
+                    // Pass the prefix/pattern-cleaned values so the similarity
+                    // search honors the map's exclude settings (issue #1265)
+                    cleanedTitle: $pending['cleaned_title'],
+                    cleanedName: $pending['cleaned_name'],
+                    prefetchedCandidates: $prefetchedCandidates,
+                );
+
+                if ($epgChannel) {
+                    $mappedChannels[] = $this->mappedChannelRow($pending['channel'], $epgChannel, $setEpgIcon);
+                }
             }
         }
 
@@ -272,6 +299,29 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Update progress
         $progressIncrement = (count($this->channelIds) / $this->totalChannels) * 95; // Reserve 5% for completion
         $map->update(['progress' => min(99, $map->progress + $progressIncrement)]);
+    }
+
+    /**
+     * Build the row queued for the next mapping stage once a channel resolves to an EPG channel.
+     *
+     * @return array<string, mixed>
+     */
+    protected function mappedChannelRow(Channel $channel, EpgChannel $epgChannel, bool $setEpgIcon): array
+    {
+        if ($setEpgIcon) {
+            $channel->logo_type = 'epg';
+        }
+
+        return [
+            'title' => $this->sanitizeUtf8($channel->title),
+            'name' => $this->sanitizeUtf8($channel->name),
+            'group_internal' => $this->sanitizeUtf8($channel->group_internal),
+            'user_id' => $channel->user_id,
+            'playlist_id' => $channel->playlist_id,
+            'source_id' => $channel->source_id,
+            'epg_channel_id' => $epgChannel->id,
+            'logo_type' => $channel->logo_type,
+        ];
     }
 
     /**

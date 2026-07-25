@@ -80,8 +80,16 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
             ->columns([
                 TextColumn::make('notifiable.user.name')
                     ->label(__('Owner'))
-                    ->searchable()
-                    ->sortable(),
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->orWhereHasMorph(
+                            'notifiable',
+                            [Playlist::class, CustomPlaylist::class, MergedPlaylist::class, PlaylistAlias::class],
+                            fn (Builder $query) => $query->whereHas(
+                                'user',
+                                fn (Builder $query) => $query->whereRaw('lower(name) like ?', ['%'.mb_strtolower($search).'%'])
+                            ),
+                        );
+                    }),
 
                 TextColumn::make('notifiable.name')
                     ->label(__('Playlist'))
