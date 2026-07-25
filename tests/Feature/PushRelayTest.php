@@ -137,6 +137,18 @@ it('keeps a token retryable when the relay reports a transient provider failure'
     expect($device->fresh())->not->toBeNull();
 });
 
+it('keeps a token when the relay reports a generic not found response', function () {
+    mockPushRelaySettings();
+    Http::fake(['push-relay.example.com/*' => Http::response(['detail' => 'Not Found'], 404)]);
+
+    $device = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-valid']);
+
+    (new SendPushNotificationRelay($this->playlist->getMorphClass(), $this->playlist->id, 'Title'))->handle(app(PushRelayService::class));
+
+    Http::assertSentCount(1);
+    expect($device->fresh())->not->toBeNull();
+});
+
 // ── PushDeviceToken pruning ────────────────────────────────────────────────────────
 
 it('prunes devices that have not checked in within the configured window', function () {

@@ -86,14 +86,7 @@ class SendPushNotificationRelay implements ShouldQueue
         $status = $exception->response->status();
         $detail = strtolower((string) data_get($exception->response->json(), 'detail', $exception->response->body()));
 
-        if (in_array($status, [400, 404, 410], true)) {
-            return str_contains($detail, 'token')
-                || str_contains($detail, 'registration')
-                || str_contains($detail, 'not found')
-                || str_contains($detail, 'unregistered');
-        }
-
-        if ($status !== 502) {
+        if ($status !== 502 || ! str_starts_with($detail, 'fcm rejected push:')) {
             return false;
         }
 
