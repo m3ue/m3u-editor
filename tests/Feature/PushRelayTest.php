@@ -109,6 +109,34 @@ it('job continues to remaining devices when one delivery fails', function () {
     Http::assertSentCount(2);
 });
 
+it('deletes a token when the relay reports a provider-confirmed invalid registration', function () {
+    mockPushRelaySettings();
+    Http::fakeSequence()
+        ->push(['detail' => 'FCM rejected push: Requested entity was not found.'], 502)
+        ->push(['sent' => true]);
+
+    $invalid = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-invalid']);
+    $valid = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-valid']);
+
+    (new SendPushNotificationRelay($this->playlist->getMorphClass(), $this->playlist->id, 'Title'))->handle(app(PushRelayService::class));
+
+    Http::assertSentCount(2);
+    expect($invalid->fresh())->toBeNull()
+        ->and($valid->fresh())->not->toBeNull();
+});
+
+it('keeps a token retryable when the relay reports a transient provider failure', function () {
+    mockPushRelaySettings();
+    Http::fake(['push-relay.example.com/*' => Http::response(['detail' => 'FCM upstream timeout'], 502)]);
+
+    $device = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-transient']);
+
+    (new SendPushNotificationRelay($this->playlist->getMorphClass(), $this->playlist->id, 'Title'))->handle(app(PushRelayService::class));
+
+    Http::assertSentCount(1);
+    expect($device->fresh())->not->toBeNull();
+});
+
 // ── PushDeviceToken pruning ────────────────────────────────────────────────────────
 
 it('prunes devices that have not checked in within the configured window', function () {

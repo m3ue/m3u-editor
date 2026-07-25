@@ -10,6 +10,7 @@ use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TvApiController extends Controller
 {
@@ -133,18 +134,36 @@ class TvApiController extends Controller
             'platform' => ['required', 'string', 'in:ios,android'],
         ]);
 
-        PushDeviceToken::updateOrCreate(
-            [
+        DB::transaction(function () use ($auth, $data, $playlist): void {
+            $device = PushDeviceToken::where('token', $data['token'])
+                ->lockForUpdate()
+                ->first();
+
+            if ($device === null) {
+                PushDeviceToken::create([
+                    'notifiable_type' => $playlist->getMorphClass(),
+                    'notifiable_id' => $playlist->id,
+                    'token' => $data['token'],
+                    'platform' => $data['platform'],
+                    'last_seen_at' => now(),
+                    'playlist_auth_id' => $auth['playlistAuthId'],
+                ]);
+
+                return;
+            }
+
+            PushDeviceToken::where('token', $data['token'])
+                ->whereKeyNot($device->getKey())
+                ->delete();
+
+            $device->update([
                 'notifiable_type' => $playlist->getMorphClass(),
                 'notifiable_id' => $playlist->id,
-                'token' => $data['token'],
-            ],
-            [
                 'platform' => $data['platform'],
                 'last_seen_at' => now(),
                 'playlist_auth_id' => $auth['playlistAuthId'],
-            ],
-        );
+            ]);
+        });
 
         return response()->json(['ok' => true]);
     }

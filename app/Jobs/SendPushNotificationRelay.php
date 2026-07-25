@@ -8,6 +8,7 @@ use App\Services\PushRelayService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -67,9 +68,40 @@ class SendPushNotificationRelay implements ShouldQueue
                     $this->pushData(),
                 );
             } catch (Throwable $e) {
+                if ($this->isInvalidTokenFailure($e)) {
+                    $device->delete();
+                }
+
                 Log::warning("Push relay delivery failed for device token {$device->id}: {$e->getMessage()}");
             }
         }
+    }
+
+    private function isInvalidTokenFailure(Throwable $exception): bool
+    {
+        if (! $exception instanceof RequestException || $exception->response === null) {
+            return false;
+        }
+
+        $status = $exception->response->status();
+        $detail = strtolower((string) data_get($exception->response->json(), 'detail', $exception->response->body()));
+
+        if (in_array($status, [400, 404, 410], true)) {
+            return str_contains($detail, 'token')
+                || str_contains($detail, 'registration')
+                || str_contains($detail, 'not found')
+                || str_contains($detail, 'unregistered');
+        }
+
+        if ($status !== 502) {
+            return false;
+        }
+
+        return str_contains($detail, 'baddevicetoken')
+            || str_contains($detail, 'requested entity was not found')
+            || str_contains($detail, 'registration-token-not-registered')
+            || str_contains($detail, 'invalid registration')
+            || str_contains($detail, 'unregistered');
     }
 
     /** @return array<string, mixed>|null */

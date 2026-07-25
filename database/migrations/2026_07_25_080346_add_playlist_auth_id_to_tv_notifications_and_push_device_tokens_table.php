@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -27,6 +28,34 @@ return new class extends Migration
                 ->constrained('playlist_auths')
                 ->cascadeOnDelete();
         });
+
+        DB::table('push_device_tokens')
+            ->select('token')
+            ->groupBy('token')
+            ->havingRaw('COUNT(*) > 1')
+            ->orderBy('token')
+            ->each(function (object $duplicate): void {
+                $keeper = DB::table('push_device_tokens')
+                    ->where('token', $duplicate->token)
+                    ->orderByDesc('last_seen_at')
+                    ->orderByDesc('updated_at')
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($keeper === null) {
+                    return;
+                }
+
+                DB::table('push_device_tokens')
+                    ->where('token', $duplicate->token)
+                    ->where('id', '!=', $keeper->id)
+                    ->delete();
+            });
+
+        Schema::table('push_device_tokens', function (Blueprint $table) {
+            $table->dropUnique('push_device_tokens_notifiable_token_unique');
+            $table->unique('token', 'push_device_tokens_token_unique');
+        });
     }
 
     /**
@@ -40,6 +69,8 @@ return new class extends Migration
         });
 
         Schema::table('push_device_tokens', function (Blueprint $table) {
+            $table->dropUnique('push_device_tokens_token_unique');
+            $table->unique(['notifiable_type', 'notifiable_id', 'token'], 'push_device_tokens_notifiable_token_unique');
             $table->dropForeign(['playlist_auth_id']);
             $table->dropColumn('playlist_auth_id');
         });

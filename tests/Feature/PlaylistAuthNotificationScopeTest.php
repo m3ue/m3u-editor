@@ -4,6 +4,7 @@ use App\Events\PlaylistCreated;
 use App\Events\TvNotificationEvent;
 use App\Jobs\SendPushNotificationRelay;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
@@ -510,6 +511,128 @@ it('push device token can be stored with playlist_auth_id', function () {
 
     expect($found)->not->toBeNull()
         ->and($found->token)->toBe('test-token');
+});
+
+it('transfers one physical push token to the latest credential on another playlist', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $otherAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'username' => 'other-transfer',
+        'password' => 'other-pass',
+        'enabled' => true,
+    ]);
+    $otherAuth->assignTo($otherPlaylist);
+
+    $this->postJson(route('tv.push.subscribe', ['username' => 'guest1', 'password' => 'pass1']), [
+        'token' => 'same-physical-device',
+        'platform' => 'android',
+    ])->assertOk();
+
+    $this->postJson(route('tv.push.subscribe', ['username' => 'other-transfer', 'password' => 'other-pass']), [
+        'token' => 'same-physical-device',
+        'platform' => 'ios',
+    ])->assertOk();
+
+    $token = PushDeviceToken::where('token', 'same-physical-device')->sole();
+    expect(PushDeviceToken::where('token', 'same-physical-device')->count())->toBe(1)
+        ->and($token->notifiable_type)->toBe($otherPlaylist->getMorphClass())
+        ->and($token->notifiable_id)->toBe($otherPlaylist->id)
+        ->and($token->playlist_auth_id)->toBe($otherAuth->id)
+        ->and($token->platform)->toBe('ios');
+
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->twice()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->andReturnUsing(function (string $token) use (&$deliveredTokens): void {
+            $deliveredTokens[] = $token;
+        });
+
+    (new SendPushNotificationRelay(
+        notifiableType: $this->playlist->getMorphClass(),
+        notifiableId: $this->playlist->id,
+        title: 'Former owner',
+        playlistAuthId: $this->auth1->id,
+    ))->handle($relay);
+    (new SendPushNotificationRelay(
+        notifiableType: $otherPlaylist->getMorphClass(),
+        notifiableId: $otherPlaylist->id,
+        title: 'Current owner',
+        playlistAuthId: $otherAuth->id,
+    ))->handle($relay);
+
+    expect($deliveredTokens)->toBe(['same-physical-device']);
+});
+
+it('transfers one physical push token to the latest credential on the same playlist', function () {
+    $this->postJson(route('tv.push.subscribe', ['username' => 'guest1', 'password' => 'pass1']), [
+        'token' => 'same-playlist-device',
+        'platform' => 'android',
+    ])->assertOk();
+
+    $this->postJson(route('tv.push.subscribe', ['username' => 'guest2', 'password' => 'pass2']), [
+        'token' => 'same-playlist-device',
+        'platform' => 'ios',
+    ])->assertOk();
+
+    $token = PushDeviceToken::where('token', 'same-playlist-device')->sole();
+    expect($token->playlist_auth_id)->toBe($this->auth2->id)
+        ->and($token->notifiable_id)->toBe($this->playlist->id)
+        ->and($token->platform)->toBe('ios');
+
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->twice()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->andReturnUsing(function (string $token) use (&$deliveredTokens): void {
+            $deliveredTokens[] = $token;
+        });
+
+    (new SendPushNotificationRelay(
+        notifiableType: $this->playlist->getMorphClass(),
+        notifiableId: $this->playlist->id,
+        title: 'Former same playlist owner',
+        playlistAuthId: $this->auth1->id,
+    ))->handle($relay);
+    (new SendPushNotificationRelay(
+        notifiableType: $this->playlist->getMorphClass(),
+        notifiableId: $this->playlist->id,
+        title: 'Current same playlist owner',
+        playlistAuthId: $this->auth2->id,
+    ))->handle($relay);
+
+    expect($deliveredTokens)->toBe(['same-playlist-device']);
+});
+
+it('keeps push token ownership canonical when registering through an alias credential', function () {
+    $alias = PlaylistAlias::create([
+        'name' => 'Token Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+    ]);
+    $aliasAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'username' => 'token-alias',
+        'password' => 'alias-pass',
+        'enabled' => true,
+    ]);
+    $aliasAuth->assignTo($alias);
+
+    $this->postJson(route('tv.push.subscribe', ['username' => 'guest1', 'password' => 'pass1']), [
+        'token' => 'alias-transfer-device',
+        'platform' => 'android',
+    ])->assertOk();
+    $this->postJson(route('tv.push.subscribe', ['username' => 'token-alias', 'password' => 'alias-pass']), [
+        'token' => 'alias-transfer-device',
+        'platform' => 'ios',
+    ])->assertOk();
+
+    $token = PushDeviceToken::where('token', 'alias-transfer-device')->sole();
+    expect($token->notifiable_type)->toBe($alias->getMorphClass())
+        ->and($token->notifiable_id)->toBe($alias->id)
+        ->and($token->playlist_auth_id)->toBe($aliasAuth->id)
+        ->and(PushDeviceToken::where('token', 'alias-transfer-device')->count())->toBe(1);
 });
 
 // -- Credential lifecycle -------------------------------------------------------------
