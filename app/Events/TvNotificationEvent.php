@@ -2,6 +2,7 @@
 
 namespace App\Events;
 
+use App\Models\PlaylistAuth;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -15,6 +16,7 @@ class TvNotificationEvent implements ShouldBroadcast
     public function __construct(
         public readonly string $id,
         public readonly string $notifiableType,
+        private readonly int|string $notifiableId,
         public readonly string $notifiableUuid,
         public readonly bool $adminOnly,
         public readonly string $channel,
@@ -42,10 +44,16 @@ class TvNotificationEvent implements ShouldBroadcast
             return [new PrivateChannel("tv.{$type}.{$uuid}.{$this->playlistAuthId}")];
         }
 
-        return [
+        $channels = [
             new PrivateChannel("tv.{$type}.{$uuid}"),
             $adminChannel,
         ];
+
+        foreach (PlaylistAuth::query()->entitledToNotificationRecipient($type, $this->notifiableId)->pluck('id') as $playlistAuthId) {
+            $channels[] = new PrivateChannel("tv.{$type}.{$uuid}.{$playlistAuthId}");
+        }
+
+        return $channels;
     }
 
     public function broadcastAs(): string

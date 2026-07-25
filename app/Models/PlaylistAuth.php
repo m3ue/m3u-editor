@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
 use App\Pivots\PlaylistAuthPivot;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -161,6 +162,20 @@ class PlaylistAuth extends Model
     public function assignedPlaylist(): HasOne
     {
         return $this->hasOne(PlaylistAuthPivot::class, 'playlist_auth_id');
+    }
+
+    public function scopeEntitledToNotificationRecipient(Builder $query, string $notifiableType, int|string $notifiableId): Builder
+    {
+        return $query
+            ->where('enabled', true)
+            ->where(function (Builder $query): void {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            ->whereHas('assignedPlaylist', function (Builder $query) use ($notifiableType, $notifiableId): void {
+                $query->where('authenticatable_type', $notifiableType)
+                    ->where('authenticatable_id', $notifiableId);
+            });
     }
 
     /**

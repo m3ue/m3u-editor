@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Services\PushRelayService;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -25,6 +27,7 @@ class SendPushNotificationRelay implements ShouldQueue
         public ?int $playlistAuthId = null,
         public ?string $notificationUuid = null,
         public ?array $data = null,
+        public bool $adminOnly = false,
     ) {}
 
     public function handle(PushRelayService $relay): void
@@ -38,8 +41,18 @@ class SendPushNotificationRelay implements ShouldQueue
 
         if ($this->playlistAuthId !== null) {
             $query->where('playlist_auth_id', $this->playlistAuthId);
-        } else {
+        } elseif ($this->adminOnly) {
             $query->whereNull('playlist_auth_id');
+        } else {
+            $query->where(function (Builder $query): void {
+                $query->whereNull('playlist_auth_id')
+                    ->orWhereIn(
+                        'playlist_auth_id',
+                        PlaylistAuth::query()
+                            ->entitledToNotificationRecipient($this->notifiableType, $this->notifiableId)
+                            ->select('id'),
+                    );
+            });
         }
 
         $devices = $query->get();

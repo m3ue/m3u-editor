@@ -50,6 +50,7 @@ class Notification extends BaseNotification
         broadcast(new TvNotificationEvent(
             id: $record->id,
             notifiableType: $playlist->getMorphClass(),
+            notifiableId: $playlist->getKey(),
             notifiableUuid: $playlist->uuid,
             adminOnly: $adminOnly,
             channel: $channel,
@@ -68,6 +69,7 @@ class Notification extends BaseNotification
             $playlistAuth?->id,
             $record->id,
             $metadata,
+            $adminOnly,
         );
 
         return $this;

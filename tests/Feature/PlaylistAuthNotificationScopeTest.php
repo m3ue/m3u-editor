@@ -9,6 +9,7 @@ use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Models\User;
 use App\Notifications\Notification;
+use App\Services\PushRelayService;
 use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
@@ -149,6 +150,136 @@ it('owner auth sees all notifications regardless of playlist_auth_id', function 
 
 // -- Reverb credential isolation ------------------------------------------------------
 
+it('delivers a global notification to every credential transport on only its playlist', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $otherAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'username' => 'other-guest',
+        'password' => 'other-pass',
+        'enabled' => true,
+    ]);
+    $otherAuth->assignTo($otherPlaylist);
+    $disabledAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => false,
+    ]);
+    $disabledAuth->assignTo($this->playlist);
+    $expiredAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'expires_at' => now()->subMinute(),
+    ]);
+    $expiredAuth->assignTo($this->playlist);
+
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth1->id,
+        'token' => 'device-auth1-global',
+        'platform' => 'android',
+    ]);
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth2->id,
+        'token' => 'device-auth2-global',
+        'platform' => 'ios',
+    ]);
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $otherPlaylist->getMorphClass(),
+        'notifiable_id' => $otherPlaylist->id,
+        'playlist_auth_id' => $otherAuth->id,
+        'token' => 'device-other-global',
+        'platform' => 'android',
+    ]);
+    foreach ([$disabledAuth, $expiredAuth] as $ineligibleAuth) {
+        PushDeviceToken::factory()->create([
+            'notifiable_type' => $this->playlist->getMorphClass(),
+            'notifiable_id' => $this->playlist->id,
+            'playlist_auth_id' => $ineligibleAuth->id,
+            'token' => "device-ineligible-{$ineligibleAuth->id}",
+            'platform' => 'android',
+        ]);
+    }
+
+    $auth1Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest1',
+        'password' => 'pass1',
+    ]))->assertOk()->json('reverb.channel');
+    $auth2Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest2',
+        'password' => 'pass2',
+    ]))->assertOk()->json('reverb.channel');
+    $otherChannel = $this->getJson(route('tv.notifications', [
+        'username' => 'other-guest',
+        'password' => 'other-pass',
+    ]))->assertOk()->json('reverb.channel');
+
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    Notification::make()
+        ->title('Global transport parity')
+        ->danger()
+        ->tvBroadcast($this->playlist, 'general');
+
+    $notification = TvNotification::sole();
+    $event = null;
+    $relayJob = null;
+
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
+        $event = $dispatched;
+
+        return true;
+    });
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$relayJob): bool {
+        $relayJob = $dispatched;
+
+        return true;
+    });
+
+    $channels = collect($event->broadcastOn())->pluck('name');
+
+    expect($notification->playlist_auth_id)->toBeNull()
+        ->and($event->id)->toBe($notification->id)
+        ->and($relayJob->notificationUuid)->toBe($notification->id)
+        ->and($channels)->toContain($auth1Channel, $auth2Channel)
+        ->and($channels)->not->toContain(
+            $otherChannel,
+            "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$disabledAuth->id}",
+            "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$expiredAuth->id}",
+        );
+
+    foreach ([
+        ['username' => 'guest1', 'password' => 'pass1'],
+        ['username' => 'guest2', 'password' => 'pass2'],
+    ] as $credentials) {
+        $this->getJson(route('tv.notifications', $credentials))
+            ->assertOk()
+            ->assertJsonPath('notifications.0.id', $notification->id);
+    }
+
+    $this->getJson(route('tv.notifications', [
+        'username' => 'other-guest',
+        'password' => 'other-pass',
+    ]))
+        ->assertOk()
+        ->assertJsonCount(0, 'notifications');
+
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->twice()
+        ->andReturnUsing(function (string $token, string $platform, string $title, ?string $body, ?array $data) use (&$deliveredTokens): void {
+            $deliveredTokens[$token] = data_get($data, 'notification_id');
+        });
+
+    $relayJob->handle($relay);
+
+    expect($deliveredTokens)->toBe([
+        'device-auth1-global' => $notification->id,
+        'device-auth2-global' => $notification->id,
+    ]);
+});
+
 it('announces a distinct private Reverb channel for each credential on one playlist', function () {
     $auth1Channel = $this->getJson(route('tv.notifications', [
         'username' => 'guest1',
@@ -241,15 +372,21 @@ it('push relay with playlistAuthId only reaches devices for that auth', function
         'token' => 'device-global',
     ]);
 
-    $query = PushDeviceToken::where('notifiable_type', $this->playlist->getMorphClass())
-        ->where('notifiable_id', $this->playlist->id)
-        ->where('playlist_auth_id', $this->auth1->id);
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->with('device-auth1', Mockery::type('string'), 'Targeted', null, null);
 
-    expect($query->count())->toBe(1)
-        ->and($query->first()->token)->toBe('device-auth1');
+    (new SendPushNotificationRelay(
+        notifiableType: $this->playlist->getMorphClass(),
+        notifiableId: $this->playlist->id,
+        title: 'Targeted',
+        playlistAuthId: $this->auth1->id,
+    ))->handle($relay);
 });
 
-it('push relay with null playlistAuthId only reaches global devices', function () {
+it('push relay with null playlistAuthId reaches every entitled and legacy global device', function () {
     PushDeviceToken::factory()->create([
         'notifiable_type' => $this->playlist->getMorphClass(),
         'notifiable_id' => $this->playlist->id,
@@ -264,12 +401,66 @@ it('push relay with null playlistAuthId only reaches global devices', function (
         'token' => 'device-global',
     ]);
 
-    $query = PushDeviceToken::where('notifiable_type', $this->playlist->getMorphClass())
-        ->where('notifiable_id', $this->playlist->id)
-        ->whereNull('playlist_auth_id');
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->twice()
+        ->andReturnUsing(function (string $token) use (&$deliveredTokens): void {
+            $deliveredTokens[] = $token;
+        });
 
-    expect($query->count())->toBe(1)
-        ->and($query->first()->token)->toBe('device-global');
+    (new SendPushNotificationRelay(
+        notifiableType: $this->playlist->getMorphClass(),
+        notifiableId: $this->playlist->id,
+        title: 'Global',
+    ))->handle($relay);
+
+    sort($deliveredTokens);
+
+    expect($deliveredTokens)->toBe(['device-auth1', 'device-global']);
+});
+
+it('does not widen an admin-only notification to credential devices', function () {
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth1->id,
+        'token' => 'device-auth1-admin-only',
+    ]);
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => null,
+        'token' => 'device-admin',
+    ]);
+
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    Notification::make()
+        ->title('Admin only')
+        ->danger()
+        ->tvBroadcast($this->playlist, 'general', true);
+
+    $relayJob = null;
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$relayJob): bool {
+        $relayJob = $dispatched;
+
+        return true;
+    });
+
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->andReturnUsing(function (string $token) use (&$deliveredTokens): void {
+            $deliveredTokens[] = $token;
+        });
+
+    $relayJob->handle($relay);
+
+    expect($deliveredTokens)->toBe(['device-admin']);
 });
 
 it('tvBroadcast with PlaylistAuth dispatches relay with playlistAuthId', function () {

@@ -94,7 +94,7 @@ it('tvBroadcast with adminOnly:true stores admin_only flag and broadcasts only t
     });
 });
 
-it('standard tvBroadcast broadcasts on both playlist and admin channels', function () {
+it('standard tvBroadcast broadcasts on playlist, admin, and entitled credential channels', function () {
     Event::fake([TvNotificationEvent::class]);
 
     Notification::make()->title('News')->info()->tvBroadcast($this->playlist, 'general');
@@ -105,6 +105,7 @@ it('standard tvBroadcast broadcasts on both playlist and admin channels', functi
         return $channels === [
             "private-tv.playlist.{$this->playlist->uuid}",
             "private-tv.playlist-admin.{$this->playlist->uuid}",
+            "private-tv.playlist.{$this->playlist->uuid}.{$this->auth->id}",
         ];
     });
 });

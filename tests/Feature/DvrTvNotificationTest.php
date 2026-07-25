@@ -12,13 +12,17 @@
  */
 
 use App\Events\TvNotificationEvent;
+use App\Jobs\SendPushNotificationRelay;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
+use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Models\User;
+use App\Services\PushRelayService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
@@ -70,6 +74,65 @@ it('persists a TvNotification and dispatches TvNotificationEvent on the dvr chan
             && $event->title === 'Recording Started'
             && $event->notifiableUuid === $this->playlist->uuid
     );
+});
+
+it('delivers a global dvr status notification to every entitled credential transport', function () {
+    $playlistAuths = PlaylistAuth::factory()->count(2)->for($this->user)->create([
+        'enabled' => true,
+    ]);
+
+    foreach ($playlistAuths as $index => $playlistAuth) {
+        $playlistAuth->assignTo($this->playlist);
+        PushDeviceToken::factory()->create([
+            'notifiable_type' => $this->playlist->getMorphClass(),
+            'notifiable_id' => $this->playlist->id,
+            'playlist_auth_id' => $playlistAuth->id,
+            'token' => "dvr-device-{$index}",
+        ]);
+    }
+
+    Event::fake([TvNotificationEvent::class]);
+
+    $this->recording->notifyTv('Recording Started', 'info');
+
+    $notification = TvNotification::sole();
+    $event = null;
+    $relayJob = null;
+
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
+        $event = $dispatched;
+
+        return true;
+    });
+    Queue::assertPushed(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$relayJob): bool {
+        $relayJob = $dispatched;
+
+        return true;
+    });
+
+    $channels = collect($event->broadcastOn())->pluck('name');
+    foreach ($playlistAuths as $playlistAuth) {
+        expect($channels)->toContain("private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}");
+    }
+
+    $notificationIds = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->twice()
+        ->andReturnUsing(function (string $token, string $platform, string $title, ?string $body, ?array $data) use (&$notificationIds): void {
+            $notificationIds[$token] = data_get($data, 'notification_id');
+        });
+
+    $relayJob->handle($relay);
+
+    expect($notification->playlist_auth_id)->toBeNull()
+        ->and($event->id)->toBe($notification->id)
+        ->and($relayJob->notificationUuid)->toBe($notification->id)
+        ->and($notificationIds)->toBe([
+            'dvr-device-0' => $notification->id,
+            'dvr-device-1' => $notification->id,
+        ]);
 });
 
 it('does nothing when the dvr setting has no resolvable owning playlist', function () {
