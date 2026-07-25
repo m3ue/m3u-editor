@@ -46,6 +46,9 @@ class CustomPlaylist extends Model
         'id_channel_by' => PlaylistChannelId::class,
         'disable_m3u_xtream_format' => 'boolean',
         'processing_config' => 'array',
+        'auto_merge_channels_enabled' => 'boolean',
+        'auto_merge_config' => 'array',
+        'auto_merge_deactivate_failover' => 'boolean',
     ];
 
     public function enabledProcessingRules(): SupportCollection
