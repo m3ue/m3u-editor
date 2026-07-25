@@ -5,7 +5,13 @@ namespace App\Services;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Jobs\PostProcessDvrRecording;
+use App\Jobs\SendPushNotificationRelay;
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
+use App\Models\TvNotification;
+use App\Notifications\Notification as AppNotification;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
@@ -28,6 +34,10 @@ class DvrRecorderService
     /**
      * Recover from a crash by marking any stale RECORDING rows as FAILED.
      * Called once on application boot.
+     *
+     * Each stale recording is updated individually so DvrRecordingStatusEvent
+     * fires for the live TV app. One aggregated TvNotification and one
+     * SendPushNotificationRelay are created per effective playlist.
      */
     public function recoverFromCrash(): void
     {
@@ -41,11 +51,38 @@ class DvrRecorderService
             'count' => $stale->count(),
         ]);
 
-        DvrRecording::recording()->update([
-            'status' => DvrRecordingStatus::Failed->value,
-            'error_message' => 'Server restarted during recording',
-            'proxy_network_id' => null,
-        ]);
+        /** @var array<int, list<DvrRecording>> $byPlaylist */
+        $byPlaylist = [];
+
+        foreach ($stale as $recording) {
+            $recording->update([
+                'status' => DvrRecordingStatus::Failed->value,
+                'error_message' => 'Server restarted during recording',
+                'proxy_network_id' => null,
+            ]);
+
+            $playlist = $recording->dvrSetting?->owner();
+            if ($playlist) {
+                $playlistId = $playlist->id;
+                $byPlaylist[$playlistId] ??= ['playlist' => $playlist, 'count' => 0];
+                $byPlaylist[$playlistId]['count']++;
+            }
+        }
+
+        foreach ($byPlaylist as $entry) {
+            /** @var Playlist|CustomPlaylist|MergedPlaylist $playlist */
+            $playlist = $entry['playlist'];
+            $count = $entry['count'];
+            $label = $count === 1
+                ? __('Recording Failed')
+                : __('__:count__ recordings failed', ['count' => $count]);
+
+            AppNotification::make()
+                ->title($label)
+                ->body(__('Server restarted during recording'))
+                ->status('danger')
+                ->tvBroadcast($playlist, 'dvr');
+        }
     }
 
     /**

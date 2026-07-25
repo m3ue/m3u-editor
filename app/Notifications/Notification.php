@@ -4,6 +4,7 @@ namespace App\Notifications;
 
 use App\Events\TvNotificationEvent;
 use App\Jobs\SendPushNotificationRelay;
+use App\Models\PlaylistAuth;
 use App\Models\TvNotification;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification as BaseNotification;
@@ -31,13 +32,14 @@ class Notification extends BaseNotification
         return parent::sendToDatabase($users, $isEventDispatched);
     }
 
-    public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false): static
+    public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false, ?PlaylistAuth $playlistAuth = null): static
     {
         $record = TvNotification::create([
             'notifiable_type' => $playlist->getMorphClass(),
             'notifiable_id' => $playlist->id,
             'channel' => $channel,
             'admin_only' => $adminOnly,
+            'playlist_auth_id' => $playlistAuth?->id,
             'title' => $this->getTitle() ?? '',
             'body' => $this->getBody() ?? '',
             'status' => $this->getStatus() ?? 'info',
@@ -59,6 +61,8 @@ class Notification extends BaseNotification
             $playlist->id,
             $this->getTitle() ?? '',
             $this->getBody(),
+            $playlistAuth?->id,
+            $record->id,
         );
 
         return $this;

@@ -1,4 +1,5 @@
 {
+    "__:count__ recordings failed": "__:count__ recordings failed",
     "\":title\" request has been rejected.": "\":title\" request has been rejected.",
     "#": "#",
     "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\tCOOKIE_NAME\\tCOOKIE_VALUE": "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\tCOOKIE_NAME\\tCOOKIE_VALUE",
@@ -2815,6 +2816,7 @@
     "Reprocess Comskip": "Reprocess Comskip",
     "Request": "Request",
     "Request Approved": "Request Approved",
+    "Request Completed": "Request Completed",
     "Request Content": "Request Content",
     "Request Failed": "Request Failed",
     "Request Movie": "Request Movie",

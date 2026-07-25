@@ -496,6 +496,7 @@ class PlaylistService
 
         $playlist = null;
         $authMethod = 'none';
+        $playlistAuthId = null;
 
         // Method 1: Try to authenticate using PlaylistAuth credentials
         $playlistAuth = PlaylistAuth::where('username', $username)
@@ -515,6 +516,7 @@ class PlaylistService
                     'user',
                 ]);
                 $authMethod = 'playlist_auth';
+                $playlistAuthId = $playlistAuth->id;
             }
         }
 
@@ -609,6 +611,7 @@ class PlaylistService
             $authMethod,
             $username,
             $password,
+            $playlistAuthId,
         ];
     }
 

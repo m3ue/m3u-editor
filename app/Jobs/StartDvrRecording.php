@@ -68,6 +68,8 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
                 'error_message' => $e->getMessage(),
             ]);
 
+            $recording->notifyTv(__('Recording Failed'), 'danger');
+
             if ($user = $recording->user) {
                 Notification::make()
                     ->danger()

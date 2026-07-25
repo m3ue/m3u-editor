@@ -29,6 +29,10 @@ class TvApiController extends Controller
         $query = TvNotification::where('notifiable_type', $playlist->getMorphClass())
             ->where('notifiable_id', $playlist->id)
             ->when(! $auth['isAdmin'], fn ($q) => $q->where('admin_only', 0))
+            ->when($auth['playlistAuthId'] !== null, fn ($q) => $q->where(function ($q2) use ($auth) {
+                $q2->where('playlist_auth_id', $auth['playlistAuthId'])
+                    ->orWhereNull('playlist_auth_id');
+            }))
             ->whereNull('read_at')
             ->latest()
             ->limit(50);
@@ -77,6 +81,10 @@ class TvApiController extends Controller
             ->where('notifiable_type', $playlist->getMorphClass())
             ->where('notifiable_id', $playlist->id)
             ->when(! $auth['isAdmin'], fn ($q) => $q->where('admin_only', 0))
+            ->when(! $auth['isAdmin'] && $auth['playlistAuthId'] !== null, fn ($q) => $q->where(function ($q2) use ($auth) {
+                $q2->where('playlist_auth_id', $auth['playlistAuthId'])
+                    ->orWhereNull('playlist_auth_id');
+            }))
             ->firstOrFail();
 
         $notification->update(['read_at' => now()]);
@@ -134,6 +142,7 @@ class TvApiController extends Controller
             [
                 'platform' => $data['platform'],
                 'last_seen_at' => now(),
+                'playlist_auth_id' => $auth['playlistAuthId'],
             ],
         );
 
@@ -144,7 +153,7 @@ class TvApiController extends Controller
      * Resolve the playlist and auth scope from Xtream credentials in the URL path.
      * Returns playlist model, isAdmin flag, and the expected WebSocket channel name.
      *
-     * @return array{playlist: Model, isAdmin: bool, channel: string}
+     * @return array{playlist: Model, isAdmin: bool, playlistAuthId: ?int, channel: string}
      */
     private function resolveAuth(Request $request): array
     {
@@ -166,6 +175,7 @@ class TvApiController extends Controller
         return [
             'playlist' => $playlist,
             'isAdmin' => $isAdmin,
+            'playlistAuthId' => $result[4] ?? null,
             'channel' => $isAdmin
                 ? "private-tv.{$type}-admin.{$uuid}"
                 : "private-tv.{$type}.{$uuid}",

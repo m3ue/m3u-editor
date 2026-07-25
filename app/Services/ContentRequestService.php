@@ -10,6 +10,7 @@ use App\Models\MediaRequest;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Notifications\Notification as AppNotification;
 use App\Services\Arr\ArrService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
@@ -395,7 +396,7 @@ class ContentRequestService
         if (in_array($status, ['completed', 'imported'], true)) {
             $status = 'completed';
             if ($canPersistCompleted) {
-                $mediaRequest->update(['status' => $status]);
+                $this->completeRequest($mediaRequest);
                 $mediaRequest->broadcastStatus();
                 $formatted = $this->formatRequest($mediaRequest);
             }
@@ -430,6 +431,73 @@ class ContentRequestService
         $mediaRequest->delete();
 
         return ['ok' => true];
+    }
+
+    public function approveRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
+    {
+        if (! $request->isPending()) {
+            return;
+        }
+
+        $previousStatus = $request->status;
+        $request->update([
+            'status' => 'approved',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => $reviewedByUserId,
+        ]);
+
+        if ($previousStatus !== $request->status) {
+            $playlist = $request->playlistAuth?->getAssignedModel();
+            if ($playlist) {
+                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Approved', 'success');
+            }
+        }
+    }
+
+    public function rejectRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
+    {
+        if (! $request->isPending()) {
+            return;
+        }
+
+        $previousStatus = $request->status;
+        $request->update([
+            'status' => 'rejected',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => $reviewedByUserId,
+        ]);
+
+        if ($previousStatus !== $request->status) {
+            $playlist = $request->playlistAuth?->getAssignedModel();
+            if ($playlist) {
+                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Rejected', 'warning');
+            }
+        }
+    }
+
+    public function completeRequest(MediaRequest $request): void
+    {
+        if ($request->status === 'completed') {
+            return;
+        }
+
+        $previousStatus = $request->status;
+        $request->update(['status' => 'completed']);
+
+        if ($previousStatus !== $request->status) {
+            $playlist = $request->playlistAuth?->getAssignedModel();
+            if ($playlist) {
+                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Completed', 'success');
+            }
+        }
+    }
+
+    private function notifyRequester(Playlist|MergedPlaylist|CustomPlaylist $playlist, ?PlaylistAuth $playlistAuth, string $title, string $status): void
+    {
+        AppNotification::make()
+            ->title(__($title))
+            ->status($status)
+            ->tvBroadcast($playlist, 'requests', false, $playlistAuth);
     }
 
     /** @return array<string, mixed> */
