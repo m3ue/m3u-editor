@@ -9,6 +9,7 @@ use App\Models\CustomPlaylist;
 use App\Models\MediaRequest;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Notifications\Notification as AppNotification;
 use App\Services\Arr\ArrService;
@@ -497,7 +498,7 @@ class ContentRequestService
         }
     }
 
-    private function notifyRequester(Playlist|MergedPlaylist|CustomPlaylist $playlist, MediaRequest $request, string $title, string $status): void
+    private function notifyRequester(Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias $playlist, MediaRequest $request, string $title, string $status): void
     {
         AppNotification::make()
             ->title(__($title))

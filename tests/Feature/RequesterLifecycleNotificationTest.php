@@ -22,6 +22,7 @@ use App\Jobs\SendPushNotificationRelay;
 use App\Models\ArrIntegration;
 use App\Models\MediaRequest;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
@@ -29,6 +30,7 @@ use App\Models\User;
 use App\Services\ContentRequestService;
 use App\Services\PushRelayService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
 
@@ -308,4 +310,187 @@ it('notification is scoped to requester not to other auth on same playlist', fun
     $notification = TvNotification::first();
     expect($notification->playlist_auth_id)->toBe($this->auth->id)
         ->and($notification->playlist_auth_id)->not->toBe($auth2->id);
+});
+
+it('keeps an alias-attached requester isolated across every lifecycle transport', function () {
+    $this->withoutMiddleware(ThrottleRequestsWithRedis::class);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Alias Requester',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->admin->id,
+        'playlist_id' => $this->playlist->id,
+    ]);
+    $aliasAuth = PlaylistAuth::factory()->create([
+        'user_id' => $this->admin->id,
+        'username' => 'alias-requester',
+        'password' => 'alias-secret',
+        'enabled' => true,
+        'auto_approve_requests' => false,
+    ]);
+    $aliasAuth->assignTo($alias);
+
+    $this->auth->update([
+        'username' => 'direct-requester',
+        'password' => 'direct-secret',
+        'enabled' => true,
+    ]);
+
+    $directCredentials = [
+        'username' => $this->auth->username,
+        'password' => $this->auth->password,
+    ];
+    $aliasCredentials = [
+        'username' => $aliasAuth->username,
+        'password' => $aliasAuth->password,
+    ];
+
+    $this->postJson(route('tv.push.subscribe', $directCredentials), [
+        'token' => 'direct-device',
+        'platform' => 'android',
+    ])->assertOk();
+    $this->postJson(route('tv.push.subscribe', $aliasCredentials), [
+        'token' => 'alias-device',
+        'platform' => 'ios',
+    ])->assertOk();
+
+    $directChannel = $this->getJson(route('tv.notifications', $directCredentials))
+        ->assertOk()
+        ->json('reverb.channel');
+    $aliasChannel = $this->getJson(route('tv.notifications', $aliasCredentials))
+        ->assertOk()
+        ->json('reverb.channel');
+
+    expect($directChannel)->toBe("private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$this->auth->id}")
+        ->and($aliasChannel)->toBe("private-tv.{$alias->getMorphClass()}.{$alias->uuid}.{$aliasAuth->id}")
+        ->and($aliasChannel)->not->toBe($directChannel);
+
+    $this->postJson(route('tv.broadcasting.auth', $aliasCredentials), [
+        'socket_id' => '123456.78910',
+        'channel_name' => $aliasChannel,
+    ])->assertOk();
+    $this->postJson(route('tv.broadcasting.auth', $directCredentials), [
+        'socket_id' => '123456.78910',
+        'channel_name' => $aliasChannel,
+    ])->assertForbidden();
+
+    $request = makePendingRequest([
+        'playlist_auth_id' => $aliasAuth->id,
+        'title' => 'Alias Only Request',
+        'external_id' => '999001',
+    ]);
+    $service = app(ContentRequestService::class);
+
+    expect($service->status($this->auth, $request->id))->toBeNull()
+        ->and($service->history($this->auth, 1, 10))->toBe([
+            'requests' => [],
+            'total' => 0,
+        ]);
+
+    $service->approveRequest($request);
+
+    $request->refresh();
+    $notification = TvNotification::sole();
+    $statusEvent = null;
+    $notificationEvent = null;
+    $relayJob = null;
+
+    Event::assertDispatched(MediaRequestStatusEvent::class, function (MediaRequestStatusEvent $event) use ($alias, $aliasAuth, $aliasChannel, $request, &$statusEvent): bool {
+        $statusEvent = $event;
+
+        return $event->notifiableType === $alias->getMorphClass()
+            && $event->notifiableUuid === $alias->uuid
+            && $event->playlistAuthId === $aliasAuth->id
+            && $event->id === $request->id
+            && $event->title === $request->title
+            && $event->status === 'approved'
+            && $event->broadcastOn()[0]->name === $aliasChannel;
+    });
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $event) use ($alias, $aliasAuth, $aliasChannel, $request, &$notificationEvent): bool {
+        $notificationEvent = $event;
+
+        return $event->notifiableType === $alias->getMorphClass()
+            && $event->notifiableUuid === $alias->uuid
+            && $event->playlistAuthId === $aliasAuth->id
+            && $event->body === $request->title
+            && data_get($event->metadata, 'request_id') === $request->id
+            && data_get($event->metadata, 'request_title') === $request->title
+            && data_get($event->metadata, 'request_status') === 'approved'
+            && $event->broadcastOn()[0]->name === $aliasChannel;
+    });
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $job) use ($alias, $aliasAuth, $notification, $request, &$relayJob): bool {
+        $relayJob = $job;
+
+        return $job->notifiableType === $alias->getMorphClass()
+            && $job->notifiableId === $alias->id
+            && $job->playlistAuthId === $aliasAuth->id
+            && $job->notificationUuid === $notification->id
+            && $job->body === $request->title
+            && data_get($job->data, 'request_id') === $request->id
+            && data_get($job->data, 'request_title') === $request->title
+            && data_get($job->data, 'request_status') === 'approved';
+    });
+
+    expect($request->status)->toBe('approved')
+        ->and($notification->notifiable_type)->toBe($alias->getMorphClass())
+        ->and($notification->notifiable_id)->toBe($alias->id)
+        ->and($notification->playlist_auth_id)->toBe($aliasAuth->id)
+        ->and($notification->body)->toBe($request->title)
+        ->and(data_get($notification->metadata, 'request_id'))->toBe($request->id)
+        ->and(data_get($notification->metadata, 'request_title'))->toBe($request->title)
+        ->and(data_get($notification->metadata, 'request_status'))->toBe('approved')
+        ->and($notificationEvent->id)->toBe($notification->id)
+        ->and($statusEvent->broadcastOn()[0]->name)->not->toBe($directChannel)
+        ->and($notificationEvent->broadcastOn()[0]->name)->not->toBe($directChannel);
+
+    $this->getJson(route('tv.notifications', $directCredentials))
+        ->assertOk()
+        ->assertJsonCount(0, 'notifications')
+        ->assertJsonMissing(['title' => $request->title])
+        ->assertJsonMissing(['request_id' => $request->id])
+        ->assertJsonMissing(['request_status' => 'approved']);
+    $this->getJson(route('tv.notifications', $aliasCredentials))
+        ->assertOk()
+        ->assertJsonCount(1, 'notifications')
+        ->assertJsonPath('notifications.0.id', $notification->id)
+        ->assertJsonPath('notifications.0.title', 'Request Approved')
+        ->assertJsonPath('notifications.0.body', $request->title)
+        ->assertJsonPath('notifications.0.metadata.request_id', $request->id)
+        ->assertJsonPath('notifications.0.metadata.request_status', 'approved');
+
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->with(
+            'alias-device',
+            'ios',
+            Mockery::type('string'),
+            $request->title,
+            Mockery::on(fn (?array $data): bool => data_get($data, 'notification_id') === $notification->id
+                && data_get($data, 'request_id') === $request->id
+                && data_get($data, 'request_title') === $request->title
+                && data_get($data, 'request_status') === 'approved'),
+        );
+    $relayJob->handle($relay);
+
+    $directToken = PushDeviceToken::where('token', 'direct-device')->sole();
+    $aliasToken = PushDeviceToken::where('token', 'alias-device')->sole();
+    expect($directToken->notifiable_type)->toBe($this->playlist->getMorphClass())
+        ->and($directToken->notifiable_id)->toBe($this->playlist->id)
+        ->and($directToken->playlist_auth_id)->toBe($this->auth->id)
+        ->and($aliasToken->notifiable_type)->toBe($alias->getMorphClass())
+        ->and($aliasToken->notifiable_id)->toBe($alias->id)
+        ->and($aliasToken->playlist_auth_id)->toBe($aliasAuth->id);
+
+    $this->deleteJson(route('tv.push.unsubscribe', $directCredentials), [
+        'token' => $aliasToken->token,
+    ])->assertOk();
+    expect($aliasToken->fresh())->not->toBeNull();
+
+    $this->deleteJson(route('tv.push.unsubscribe', $aliasCredentials), [
+        'token' => $aliasToken->token,
+    ])->assertOk();
+    expect($aliasToken->fresh())->toBeNull()
+        ->and($directToken->fresh())->not->toBeNull();
 });

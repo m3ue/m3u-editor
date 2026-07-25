@@ -68,20 +68,11 @@ class MediaRequestStatusEvent implements ShouldBroadcast
         );
     }
 
-    /**
-     * Mirrors XtreamApiController::resolveEffectivePlaylist(). It unwraps a
-     * PlaylistAlias to its effective playlist so the channel name matches
-     * what the TV client actually subscribed to after login.
-     */
-    private static function resolvePlaylist(MediaRequest $request): Playlist|CustomPlaylist|MergedPlaylist|null
+    private static function resolvePlaylist(MediaRequest $request): Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null
     {
-        $model = $request->playlistAuth?->playlist();
+        $model = $request->playlistAuth?->getAssignedModel();
 
-        if ($model instanceof PlaylistAlias) {
-            $model = $model->getEffectivePlaylist();
-        }
-
-        return $model instanceof Playlist || $model instanceof CustomPlaylist || $model instanceof MergedPlaylist
+        return $model instanceof Playlist || $model instanceof CustomPlaylist || $model instanceof MergedPlaylist || $model instanceof PlaylistAlias
             ? $model
             : null;
     }
