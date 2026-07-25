@@ -435,69 +435,77 @@ class ContentRequestService
 
     public function approveRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
     {
-        if (! $request->isPending()) {
+        $updated = MediaRequest::query()
+            ->whereKey($request->getKey())
+            ->where('status', 'pending')
+            ->update([
+                'status' => 'approved',
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $reviewedByUserId,
+            ]);
+
+        if ($updated !== 1) {
             return;
         }
 
-        $previousStatus = $request->status;
-        $request->update([
-            'status' => 'approved',
-            'reviewed_at' => now(),
-            'reviewed_by_user_id' => $reviewedByUserId,
-        ]);
-
-        if ($previousStatus !== $request->status) {
-            $playlist = $request->playlistAuth?->getAssignedModel();
-            if ($playlist) {
-                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Approved', 'success');
-            }
+        $request->refresh();
+        $playlist = $request->playlistAuth?->getAssignedModel();
+        if ($playlist) {
+            $this->notifyRequester($playlist, $request, 'Request Approved', 'success');
         }
     }
 
     public function rejectRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
     {
-        if (! $request->isPending()) {
+        $updated = MediaRequest::query()
+            ->whereKey($request->getKey())
+            ->where('status', 'pending')
+            ->update([
+                'status' => 'rejected',
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $reviewedByUserId,
+            ]);
+
+        if ($updated !== 1) {
             return;
         }
 
-        $previousStatus = $request->status;
-        $request->update([
-            'status' => 'rejected',
-            'reviewed_at' => now(),
-            'reviewed_by_user_id' => $reviewedByUserId,
-        ]);
-
-        if ($previousStatus !== $request->status) {
-            $playlist = $request->playlistAuth?->getAssignedModel();
-            if ($playlist) {
-                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Rejected', 'warning');
-            }
+        $request->refresh();
+        $playlist = $request->playlistAuth?->getAssignedModel();
+        if ($playlist) {
+            $this->notifyRequester($playlist, $request, 'Request Rejected', 'warning');
         }
     }
 
     public function completeRequest(MediaRequest $request): void
     {
-        if ($request->status === 'completed') {
+        $updated = MediaRequest::query()
+            ->whereKey($request->getKey())
+            ->where('status', 'approved')
+            ->update(['status' => 'completed']);
+
+        if ($updated !== 1) {
             return;
         }
 
-        $previousStatus = $request->status;
-        $request->update(['status' => 'completed']);
-
-        if ($previousStatus !== $request->status) {
-            $playlist = $request->playlistAuth?->getAssignedModel();
-            if ($playlist) {
-                $this->notifyRequester($playlist, $request->playlistAuth, 'Request Completed', 'success');
-            }
+        $request->refresh();
+        $playlist = $request->playlistAuth?->getAssignedModel();
+        if ($playlist) {
+            $this->notifyRequester($playlist, $request, 'Request Completed', 'success');
         }
     }
 
-    private function notifyRequester(Playlist|MergedPlaylist|CustomPlaylist $playlist, ?PlaylistAuth $playlistAuth, string $title, string $status): void
+    private function notifyRequester(Playlist|MergedPlaylist|CustomPlaylist $playlist, MediaRequest $request, string $title, string $status): void
     {
         AppNotification::make()
             ->title(__($title))
+            ->body($request->title)
             ->status($status)
-            ->tvBroadcast($playlist, 'requests', false, $playlistAuth);
+            ->tvBroadcast($playlist, 'requests', false, $request->playlistAuth, [
+                'request_id' => $request->id,
+                'request_title' => $request->title,
+                'request_status' => $request->status,
+            ]);
     }
 
     /** @return array<string, mixed> */

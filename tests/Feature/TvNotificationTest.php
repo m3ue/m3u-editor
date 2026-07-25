@@ -144,7 +144,7 @@ it('GET notifications returns unread notifications for the playlist', function (
         ->assertJsonCount(1, 'notifications')
         ->assertJsonPath('notifications.0.title', 'Hello')
         ->assertJsonPath('is_admin', false)
-        ->assertJsonPath('reverb.channel', "private-tv.playlist.{$this->playlist->uuid}");
+        ->assertJsonPath('reverb.channel', "private-tv.playlist.{$this->playlist->uuid}.{$this->auth->id}");
 });
 
 it('GET notifications filters by channel when channels[] passed', function () {
@@ -343,7 +343,7 @@ it('non-admin cannot mark-read an admin_only notification', function () {
 
 it('broadcastingAuth returns HMAC for playlist scope channel', function () {
     $socketId = '123456.78910';
-    $channelName = "private-tv.playlist.{$this->playlist->uuid}";
+    $channelName = "private-tv.playlist.{$this->playlist->uuid}.{$this->auth->id}";
     $secret = config('broadcasting.connections.reverb.secret');
     $key = config('broadcasting.connections.reverb.key');
 

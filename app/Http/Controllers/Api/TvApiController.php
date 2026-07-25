@@ -149,6 +149,24 @@ class TvApiController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    public function unregisterPushToken(Request $request): JsonResponse
+    {
+        $auth = $this->resolveAuth($request);
+        $playlist = $auth['playlist'];
+        $data = $request->validate([
+            'token' => ['required', 'string', 'max:4096'],
+        ]);
+
+        PushDeviceToken::query()
+            ->where('notifiable_type', $playlist->getMorphClass())
+            ->where('notifiable_id', $playlist->id)
+            ->where('playlist_auth_id', $auth['playlistAuthId'])
+            ->where('token', $data['token'])
+            ->delete();
+
+        return response()->json(['ok' => true]);
+    }
+
     /**
      * Resolve the playlist and auth scope from Xtream credentials in the URL path.
      * Returns playlist model, isAdmin flag, and the expected WebSocket channel name.
@@ -176,9 +194,16 @@ class TvApiController extends Controller
             'playlist' => $playlist,
             'isAdmin' => $isAdmin,
             'playlistAuthId' => $result[4] ?? null,
-            'channel' => $isAdmin
-                ? "private-tv.{$type}-admin.{$uuid}"
-                : "private-tv.{$type}.{$uuid}",
+            'channel' => $this->channelName($type, $uuid, $isAdmin, $result[4] ?? null),
         ];
+    }
+
+    private function channelName(string $type, string $uuid, bool $isAdmin, ?int $playlistAuthId): string
+    {
+        if ($isAdmin) {
+            return "private-tv.{$type}-admin.{$uuid}";
+        }
+
+        return "private-tv.{$type}.{$uuid}".($playlistAuthId === null ? '' : ".{$playlistAuthId}");
     }
 }

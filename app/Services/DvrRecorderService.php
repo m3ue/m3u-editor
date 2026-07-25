@@ -17,7 +17,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
 
 /**
- * DvrRecorderService — Delegates FFmpeg process management to the m3u-proxy.
+ * DvrRecorderService - Delegates FFmpeg process management to the m3u-proxy.
  *
  * Responsibilities:
  * - Start a DVR broadcast on the proxy (via BroadcastManager)
@@ -51,7 +51,7 @@ class DvrRecorderService
             'count' => $stale->count(),
         ]);
 
-        /** @var array<int, list<DvrRecording>> $byPlaylist */
+        /** @var array<string, array{playlist: Playlist|CustomPlaylist|MergedPlaylist, count: int}> $byPlaylist */
         $byPlaylist = [];
 
         foreach ($stale as $recording) {
@@ -63,9 +63,9 @@ class DvrRecorderService
 
             $playlist = $recording->dvrSetting?->owner();
             if ($playlist) {
-                $playlistId = $playlist->id;
-                $byPlaylist[$playlistId] ??= ['playlist' => $playlist, 'count' => 0];
-                $byPlaylist[$playlistId]['count']++;
+                $playlistKey = $playlist->getMorphClass().':'.$playlist->id;
+                $byPlaylist[$playlistKey] ??= ['playlist' => $playlist, 'count' => 0];
+                $byPlaylist[$playlistKey]['count']++;
             }
         }
 
@@ -94,7 +94,7 @@ class DvrRecorderService
     public function start(DvrRecording $recording): void
     {
         if ($recording->status !== DvrRecordingStatus::Scheduled) {
-            Log::warning('DVR start skipped — recording not in SCHEDULED state', [
+            Log::warning('DVR start skipped - recording not in SCHEDULED state', [
                 'recording_id' => $recording->id,
                 'status' => $recording->status->value,
             ]);
@@ -120,7 +120,7 @@ class DvrRecorderService
         }
 
         if (empty($streamUrl)) {
-            throw new Exception("Recording {$recording->id} has no stream_url — cannot start");
+            throw new Exception("Recording {$recording->id} has no stream_url - cannot start");
         }
 
         // Check if there's an existing stream for this channel to piggyback off.
@@ -183,7 +183,7 @@ class DvrRecorderService
      * Stop recording by signalling the proxy to terminate the broadcast.
      *
      * The proxy retains segment files after /stop, so post-processing can fetch
-     * them via HTTP afterward. We do NOT clear proxy_network_id here — the
+     * them via HTTP afterward. We do NOT clear proxy_network_id here - the
      * downloader needs it. It is cleared after successful cleanup in post-processing.
      */
     public function stop(DvrRecording $recording): void
@@ -191,7 +191,7 @@ class DvrRecorderService
         $networkId = $recording->proxy_network_id;
 
         if (! $networkId) {
-            Log::warning('DVR stop: no proxy_network_id on recording — assuming already stopped', [
+            Log::warning('DVR stop: no proxy_network_id on recording - assuming already stopped', [
                 'recording_id' => $recording->id,
             ]);
             $this->finalizeStop($recording);
@@ -210,7 +210,7 @@ class DvrRecorderService
     }
 
     /**
-     * Cancel a recording — stops the proxy broadcast and marks as cancelled.
+     * Cancel a recording - stops the proxy broadcast and marks as cancelled.
      *
      * NOTE: We do NOT cleanup the proxy files here. The callback will fire when
      * FFmpeg actually stops, and post-processing will handle cleanup. This ensures
@@ -222,7 +222,7 @@ class DvrRecorderService
 
         if ($networkId) {
             $this->proxy->stopDvrBroadcast($networkId);
-            // Do NOT cleanup here — let the callback and post-processing handle it
+            // Do NOT cleanup here - let the callback and post-processing handle it
             // so we don't delete segments that are still being written
         }
 
@@ -236,7 +236,7 @@ class DvrRecorderService
 
         $recording->notifyTv(__('Recording Cancelled'), 'warning');
 
-        // Delete "once" rules when the recording is cancelled — they're one-shot
+        // Delete "once" rules when the recording is cancelled - they're one-shot
         $rule = $recording->recordingRule;
         if ($rule && $rule->type === DvrRuleType::Once) {
             $rule->delete();
@@ -256,7 +256,7 @@ class DvrRecorderService
      * successful cleanup at the end of post-processing.
      *
      * The proxy sends a callback (programme_ended/recording_stopped) when FFmpeg
-     * actually stops — that callback is the authoritative signal to dispatch
+     * actually stops - that callback is the authoritative signal to dispatch
      * post-processing. This method's dispatch is a safety net: it only fires
      * after a long delay (60s) in case the callback is never received.
      */

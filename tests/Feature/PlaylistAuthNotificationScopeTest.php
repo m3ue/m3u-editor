@@ -12,6 +12,7 @@ use App\Notifications\Notification;
 use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 
 beforeEach(function () {
     Event::fake([PlaylistCreated::class]);
@@ -146,6 +147,76 @@ it('owner auth sees all notifications regardless of playlist_auth_id', function 
         ->assertJsonCount(2, 'notifications');
 });
 
+// -- Reverb credential isolation ------------------------------------------------------
+
+it('announces a distinct private Reverb channel for each credential on one playlist', function () {
+    $auth1Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest1',
+        'password' => 'pass1',
+    ]))->assertOk()->json('reverb.channel');
+
+    $auth2Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest2',
+        'password' => 'pass2',
+    ]))->assertOk()->json('reverb.channel');
+
+    expect($auth1Channel)->not->toBe($auth2Channel);
+});
+
+it('authorizes only the private Reverb channel announced for the current credential', function () {
+    $auth1Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest1',
+        'password' => 'pass1',
+    ]))->assertOk()->json('reverb.channel');
+
+    $auth2Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest2',
+        'password' => 'pass2',
+    ]))->assertOk()->json('reverb.channel');
+
+    $url = route('tv.broadcasting.auth', [
+        'username' => 'guest1',
+        'password' => 'pass1',
+    ]);
+
+    $this->postJson($url, [
+        'socket_id' => '123456.78910',
+        'channel_name' => $auth1Channel,
+    ])->assertOk();
+
+    $this->postJson($url, [
+        'socket_id' => '123456.78910',
+        'channel_name' => $auth2Channel,
+    ])->assertForbidden();
+});
+
+it('broadcasts a credential-targeted notification only on that credential private channel', function () {
+    $auth1Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest1',
+        'password' => 'pass1',
+    ]))->assertOk()->json('reverb.channel');
+
+    $auth2Channel = $this->getJson(route('tv.notifications', [
+        'username' => 'guest2',
+        'password' => 'pass2',
+    ]))->assertOk()->json('reverb.channel');
+
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    Notification::make()
+        ->title('Auth1 private request')
+        ->success()
+        ->tvBroadcast($this->playlist, 'requests', false, $this->auth1);
+
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $event) use ($auth1Channel, $auth2Channel): bool {
+        $channels = collect($event->broadcastOn())->pluck('name');
+
+        return $channels->contains($auth1Channel)
+            && ! $channels->contains($auth2Channel);
+    });
+});
+
 // -- Push relay isolation -------------------------------------------------------------
 
 it('push relay with playlistAuthId only reaches devices for that auth', function () {
@@ -248,6 +319,85 @@ it('push device token can be stored with playlist_auth_id', function () {
 
     expect($found)->not->toBeNull()
         ->and($found->token)->toBe('test-token');
+});
+
+// -- Credential lifecycle -------------------------------------------------------------
+
+it('deleting a credential removes its private notifications instead of widening them to global scope', function () {
+    $privateNotification = TvNotification::create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'channel' => 'requests',
+        'title' => 'Private request',
+        'body' => null,
+        'status' => 'success',
+        'playlist_auth_id' => $this->auth1->id,
+    ]);
+    $globalNotification = TvNotification::create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'channel' => 'general',
+        'title' => 'Global notification',
+        'body' => null,
+        'status' => 'info',
+        'playlist_auth_id' => null,
+    ]);
+
+    $this->auth1->delete();
+
+    expect(TvNotification::find($privateNotification->id))->toBeNull()
+        ->and(TvNotification::find($globalNotification->id))->not->toBeNull();
+});
+
+it('deleting a credential removes its private push tokens instead of widening them to global scope', function () {
+    $privateToken = PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth1->id,
+        'token' => 'private-device',
+    ]);
+    $globalToken = PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => null,
+        'token' => 'global-device',
+    ]);
+
+    $this->auth1->delete();
+
+    expect(PushDeviceToken::find($privateToken->id))->toBeNull()
+        ->and(PushDeviceToken::find($globalToken->id))->not->toBeNull();
+});
+
+it('registers an authenticated push unsubscribe route', function () {
+    expect(Route::has('tv.push.unsubscribe'))->toBeTrue();
+});
+
+it('unsubscribes only a push token owned by the current credential', function () {
+    $auth1Token = PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth1->id,
+        'token' => 'device-auth1-unsubscribe',
+    ]);
+    $auth2Token = PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth2->id,
+        'token' => 'device-auth2-keep',
+    ]);
+    $url = '/api/tv/guest1/pass1/push/unsubscribe';
+
+    $this->deleteJson($url, ['token' => $auth2Token->token])
+        ->assertOk();
+
+    expect(PushDeviceToken::find($auth2Token->id))->not->toBeNull();
+
+    $this->deleteJson($url, ['token' => $auth1Token->token])
+        ->assertOk();
+
+    expect(PushDeviceToken::find($auth1Token->id))->toBeNull()
+        ->and(PushDeviceToken::find($auth2Token->id))->not->toBeNull();
 });
 
 // -- Mark-read scoping ---------------------------------------------------------------

@@ -29,6 +29,7 @@ class TvNotification extends Model
         return [
             'read_at' => 'datetime',
             'admin_only' => 'boolean',
+            'metadata' => 'array',
         ];
     }
 

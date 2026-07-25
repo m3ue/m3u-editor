@@ -19,9 +19,11 @@ use App\Enums\DvrRecordingStatus;
 use App\Events\TvNotificationEvent;
 use App\Jobs\SendPushNotificationRelay;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Group;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\TvNotification;
 use App\Models\User;
@@ -158,6 +160,52 @@ it('maintains cross-playlist isolation on crash recovery', function () {
         ->and($n1->notifiable_id)->not->toBe($n2->notifiable_id);
 
     Bus::assertDispatched(SendPushNotificationRelay::class, 2);
+});
+
+it('keeps colliding numeric IDs separate across every playlist owner type', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create([
+        'id' => $this->playlist->id,
+    ]);
+    $mergedPlaylist = MergedPlaylist::factory()->for($this->user)->create([
+        'id' => $this->playlist->id,
+    ]);
+    $owners = collect([$this->playlist, $customPlaylist, $mergedPlaylist]);
+
+    $owners->each(function (Playlist|CustomPlaylist|MergedPlaylist $owner): void {
+        $setting = $owner->is($this->playlist)
+            ? $this->dvrSetting
+            : DvrSetting::factory()->enabled()->for($this->user)->create(
+                DvrSetting::ownerAttributes($owner),
+            );
+
+        DvrRecording::factory()
+            ->for($this->user)
+            ->for($setting)
+            ->create([
+                'status' => DvrRecordingStatus::Recording,
+                'title' => class_basename($owner).' Recording',
+            ]);
+    });
+
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    app(DvrRecorderService::class)->recoverFromCrash();
+
+    $expectedRecipients = $owners
+        ->map(fn (Playlist|CustomPlaylist|MergedPlaylist $owner): string => $owner->getMorphClass().':'.$owner->id)
+        ->sort()
+        ->values()
+        ->all();
+    $actualRecipients = TvNotification::query()
+        ->get()
+        ->map(fn (TvNotification $notification): string => $notification->notifiable_type.':'.$notification->notifiable_id)
+        ->sort()
+        ->values()
+        ->all();
+
+    expect($actualRecipients)->toBe($expectedRecipients);
+    Bus::assertDispatched(SendPushNotificationRelay::class, 3);
 });
 
 it('does not create notifications when there are no stale recordings', function () {

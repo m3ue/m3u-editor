@@ -16,6 +16,14 @@ class PlaylistAuth extends Model
 {
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::deleting(function (PlaylistAuth $playlistAuth): void {
+            TvNotification::where('playlist_auth_id', $playlistAuth->id)->delete();
+            PushDeviceToken::where('playlist_auth_id', $playlistAuth->id)->delete();
+        });
+    }
+
     /**
      * The attributes that should be cast to native types.
      *

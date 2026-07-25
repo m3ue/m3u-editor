@@ -16,7 +16,8 @@ return new class extends Migration
                 ->nullable()
                 ->after('channel')
                 ->constrained('playlist_auths')
-                ->nullOnDelete();
+                ->cascadeOnDelete();
+            $table->json('metadata')->nullable()->after('playlist_auth_id');
         });
 
         Schema::table('push_device_tokens', function (Blueprint $table) {
@@ -24,7 +25,7 @@ return new class extends Migration
                 ->nullable()
                 ->after('notifiable_id')
                 ->constrained('playlist_auths')
-                ->nullOnDelete();
+                ->cascadeOnDelete();
         });
     }
 
@@ -35,7 +36,7 @@ return new class extends Migration
     {
         Schema::table('tv_notifications', function (Blueprint $table) {
             $table->dropForeign(['playlist_auth_id']);
-            $table->dropColumn('playlist_auth_id');
+            $table->dropColumn(['playlist_auth_id', 'metadata']);
         });
 
         Schema::table('push_device_tokens', function (Blueprint $table) {

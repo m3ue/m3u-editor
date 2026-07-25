@@ -22,9 +22,11 @@ use App\Models\ArrIntegration;
 use App\Models\MediaRequest;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Models\User;
 use App\Services\ContentRequestService;
+use App\Services\PushRelayService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
@@ -184,6 +186,96 @@ it('duplicate completion does not create a second notification', function () {
     $request->refresh();
     $service->completeRequest($request);
     expect(TvNotification::count())->toBe(1);
+});
+
+it('creates exactly one requester notification when stale model instances retry :transition', function (string $transition, string $initialStatus) {
+    $request = makePendingRequest(['status' => $initialStatus]);
+    $firstAttempt = MediaRequest::query()->findOrFail($request->id);
+    $staleRetry = MediaRequest::query()->findOrFail($request->id);
+    $service = app(ContentRequestService::class);
+
+    $service->{$transition}($firstAttempt);
+    $service->{$transition}($staleRetry);
+
+    expect(TvNotification::count())->toBe(1);
+    Event::assertDispatched(TvNotificationEvent::class, 1);
+    Bus::assertDispatched(SendPushNotificationRelay::class, 1);
+})->with([
+    'approval' => ['approveRequest', 'pending'],
+    'rejection' => ['rejectRequest', 'pending'],
+    'completion' => ['completeRequest', 'approved'],
+]);
+
+// -- Cross-transport request identity ------------------------------------------------
+
+it('persists and broadcasts request metadata with the canonical notification UUID', function () {
+    $request = makePendingRequest(['title' => 'Severance']);
+    $event = null;
+
+    app(ContentRequestService::class)->approveRequest($request);
+
+    $notification = TvNotification::sole();
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
+        $event = $dispatched;
+
+        return true;
+    });
+
+    $storedMetadata = $notification->metadata ?? $notification->data;
+    $eventPayload = method_exists($event, 'broadcastWith')
+        ? $event->broadcastWith()
+        : get_object_vars($event);
+    $eventMetadata = $eventPayload['metadata'] ?? $eventPayload['data'] ?? null;
+
+    expect($notification->body)->toContain($request->title)
+        ->and(data_get($storedMetadata, 'request_id'))->toBe($request->id)
+        ->and(data_get($storedMetadata, 'request_title'))->toBe($request->title)
+        ->and(data_get($storedMetadata, 'request_status'))->toBe('approved')
+        ->and($event->id)->toBe($notification->id)
+        ->and($event->body)->toContain($request->title)
+        ->and(data_get($eventMetadata, 'request_id'))->toBe($request->id)
+        ->and(data_get($eventMetadata, 'request_title'))->toBe($request->title)
+        ->and(data_get($eventMetadata, 'request_status'))->toBe('approved');
+});
+
+it('relays request metadata with the same canonical notification UUID', function () {
+    $request = makePendingRequest(['title' => 'Slow Horses']);
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'playlist_auth_id' => $this->auth->id,
+        'token' => 'requester-device',
+        'platform' => 'android',
+    ]);
+    $job = null;
+
+    app(ContentRequestService::class)->approveRequest($request);
+
+    $notification = TvNotification::sole();
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$job): bool {
+        $job = $dispatched;
+
+        return true;
+    });
+
+    expect($job->notificationUuid)->toBe($notification->id);
+
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->with(
+            'requester-device',
+            'android',
+            Mockery::type('string'),
+            Mockery::on(fn (?string $body): bool => str_contains($body ?? '', $request->title)),
+            Mockery::on(fn (?array $data): bool => data_get($data, 'notification_id') === $notification->id
+                && (string) data_get($data, 'request_id') === (string) $request->id
+                && data_get($data, 'request_title') === $request->title
+                && data_get($data, 'request_status') === 'approved'),
+        );
+
+    $job->handle($relay);
 });
 
 // -- No notification for pending status ------------------------------------------------

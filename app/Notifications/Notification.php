@@ -32,7 +32,8 @@ class Notification extends BaseNotification
         return parent::sendToDatabase($users, $isEventDispatched);
     }
 
-    public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false, ?PlaylistAuth $playlistAuth = null): static
+    /** @param array<string, mixed>|null $metadata */
+    public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false, ?PlaylistAuth $playlistAuth = null, ?array $metadata = null): static
     {
         $record = TvNotification::create([
             'notifiable_type' => $playlist->getMorphClass(),
@@ -43,6 +44,7 @@ class Notification extends BaseNotification
             'title' => $this->getTitle() ?? '',
             'body' => $this->getBody() ?? '',
             'status' => $this->getStatus() ?? 'info',
+            'metadata' => $metadata,
         ]);
 
         broadcast(new TvNotificationEvent(
@@ -54,6 +56,8 @@ class Notification extends BaseNotification
             title: $this->getTitle() ?? '',
             body: $this->getBody() ?? '',
             status: $this->getStatus() ?? 'info',
+            playlistAuthId: $playlistAuth?->id,
+            metadata: $metadata,
         ));
 
         SendPushNotificationRelay::dispatch(
@@ -63,6 +67,7 @@ class Notification extends BaseNotification
             $this->getBody(),
             $playlistAuth?->id,
             $record->id,
+            $metadata,
         );
 
         return $this;

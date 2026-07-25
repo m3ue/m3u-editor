@@ -21,6 +21,8 @@ class TvNotificationEvent implements ShouldBroadcast
         public readonly string $title,
         public readonly string $body,
         public readonly string $status,
+        public readonly ?int $playlistAuthId = null,
+        public readonly ?array $metadata = null,
     ) {}
 
     /**
@@ -34,6 +36,10 @@ class TvNotificationEvent implements ShouldBroadcast
 
         if ($this->adminOnly) {
             return [$adminChannel];
+        }
+
+        if ($this->playlistAuthId !== null) {
+            return [new PrivateChannel("tv.{$type}.{$uuid}.{$this->playlistAuthId}")];
         }
 
         return [

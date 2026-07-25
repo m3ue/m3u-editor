@@ -82,14 +82,14 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
 });
 
 /*
- * DVR callback — called by the m3u-proxy when a recording completes or fails.
+ * DVR callback - called by the m3u-proxy when a recording completes or fails.
  * Must live in api.php (not web.php) to avoid CSRF verification.
  */
 Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
     ->name('dvr.callback');
 
 /*
- * TV app API routes (authenticated via Xtream credentials in URL path — no Sanctum)
+ * TV app API routes (authenticated via Xtream credentials in URL path - no Sanctum)
  */
 Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(function () {
     Route::get('notifications', [TvApiController::class, 'notifications'])
@@ -100,4 +100,6 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.broadcasting.auth');
     Route::post('push/subscribe', [TvApiController::class, 'registerPushToken'])
         ->name('tv.push.subscribe');
+    Route::delete('push/unsubscribe', [TvApiController::class, 'unregisterPushToken'])
+        ->name('tv.push.unsubscribe');
 });

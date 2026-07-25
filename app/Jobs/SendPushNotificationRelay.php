@@ -24,6 +24,7 @@ class SendPushNotificationRelay implements ShouldQueue
         public ?string $body = null,
         public ?int $playlistAuthId = null,
         public ?string $notificationUuid = null,
+        public ?array $data = null,
     ) {}
 
     public function handle(PushRelayService $relay): void
@@ -50,11 +51,23 @@ class SendPushNotificationRelay implements ShouldQueue
                     $device->platform,
                     $this->title,
                     $this->body,
-                    $this->notificationUuid ? ['notification_id' => $this->notificationUuid] : null,
+                    $this->pushData(),
                 );
             } catch (Throwable $e) {
                 Log::warning("Push relay delivery failed for device token {$device->id}: {$e->getMessage()}");
             }
         }
+    }
+
+    /** @return array<string, mixed>|null */
+    private function pushData(): ?array
+    {
+        $data = $this->data ?? [];
+
+        if ($this->notificationUuid !== null) {
+            $data['notification_id'] = $this->notificationUuid;
+        }
+
+        return $data === [] ? null : $data;
     }
 }
