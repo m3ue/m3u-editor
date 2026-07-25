@@ -9,13 +9,20 @@
  */
 
 use App\Events\MediaRequestStatusEvent;
+use App\Events\PlaylistCreated;
+use App\Events\TvNotificationEvent;
+use App\Jobs\SendPushNotificationRelay;
 use App\Livewire\ArrQueueMonitor;
 use App\Models\ArrIntegration;
+use App\Models\ArrQueueEvent;
 use App\Models\MediaRequest;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use App\Services\ContentRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
@@ -24,16 +31,23 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Http::preventStrayRequests();
+    Event::fake([PlaylistCreated::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
     $this->adminUser = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($this->adminUser);
     $this->playlist = Playlist::factory()->for($this->adminUser)->create();
     $this->integration = ArrIntegration::factory()->sonarr()->create([
         'user_id' => $this->adminUser->id,
+        'enabled' => true,
+        'guest_enabled' => true,
         'quality_profile_id' => 1,
         'root_folder_path' => '/tv',
     ]);
     $this->auth = PlaylistAuth::factory()->create([
         'user_id' => $this->adminUser->id,
+        'username' => 'requester-one',
+        'password' => 'secret-one',
+        'enabled' => true,
         'auto_approve_requests' => false,
     ]);
     $this->auth->assignTo($this->playlist);
@@ -68,7 +82,7 @@ it('broadcasts when a request is approved', function () {
         '*/api/v3/queue*' => Http::response(['records' => []], 200),
         '*/api/v3/series*' => Http::response(['id' => 1, 'title' => 'The Bear'], 201),
     ]);
-    Event::fake([MediaRequestStatusEvent::class]);
+    Event::fake([MediaRequestStatusEvent::class, TvNotificationEvent::class]);
 
     Livewire::test(ArrQueueMonitor::class)->call('approveRequest', $mediaRequest->id);
 
@@ -87,7 +101,7 @@ it('broadcasts when a request is rejected', function () {
     $mediaRequest = makeMediaRequest(['title' => 'Bad Show', 'request_type' => 'movie', 'external_id' => '111']);
 
     Http::fake(['*/api/v3/queue*' => Http::response(['records' => []], 200)]);
-    Event::fake([MediaRequestStatusEvent::class]);
+    Event::fake([MediaRequestStatusEvent::class, TvNotificationEvent::class]);
 
     Livewire::test(ArrQueueMonitor::class)->call('rejectRequest', $mediaRequest->id);
 
@@ -110,17 +124,88 @@ it('does not broadcast when the owning playlist auth has no assigned playlist', 
     expect($event)->toBeNull();
 });
 
-it('broadcasts on the private channel scoped to the playlist uuid', function () {
-    $mediaRequest = makeMediaRequest();
+it('broadcasts requests only on the controller-announced channel for their credential', function () {
+    $this->withoutMiddleware(ThrottleRequestsWithRedis::class);
+    $otherAuth = PlaylistAuth::factory()->create([
+        'user_id' => $this->adminUser->id,
+        'username' => 'requester-two',
+        'password' => 'secret-two',
+        'enabled' => true,
+        'auto_approve_requests' => false,
+    ]);
+    $otherAuth->assignTo($this->playlist);
 
-    $event = MediaRequestStatusEvent::fromRequest($mediaRequest->fresh());
-    $channels = $event->broadcastOn();
+    $firstChannel = $this->getJson(route('tv.notifications', [
+        'username' => $this->auth->username,
+        'password' => $this->auth->password,
+    ]))->assertOk()->json('reverb.channel');
+    $secondChannel = $this->getJson(route('tv.notifications', [
+        'username' => $otherAuth->username,
+        'password' => $otherAuth->password,
+    ]))->assertOk()->json('reverb.channel');
 
-    expect($channels)->toHaveCount(1);
-    expect($channels[0]->name)->toBe(
-        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}"
-    );
-    expect($event->broadcastAs())->toBe('request.status');
+    $firstEvent = MediaRequestStatusEvent::fromRequest(makeMediaRequest()->fresh());
+    $secondEvent = MediaRequestStatusEvent::fromRequest(makeMediaRequest([
+        'playlist_auth_id' => $otherAuth->id,
+    ])->fresh());
+
+    expect($firstEvent->broadcastOn())->toHaveCount(1)
+        ->and($firstEvent->broadcastOn()[0]->name)->toBe($firstChannel)
+        ->and($secondEvent->broadcastOn())->toHaveCount(1)
+        ->and($secondEvent->broadcastOn()[0]->name)->toBe($secondChannel)
+        ->and($firstChannel)->not->toBe($secondChannel)
+        ->and($firstEvent->broadcastAs())->toBe('request.status');
+});
+
+it('broadcasts exactly one requester-scoped status event when stale models retry :transition', function (string $transition, string $initialStatus, string $expectedStatus) {
+    $mediaRequest = makeMediaRequest(['status' => $initialStatus]);
+    $firstAttempt = MediaRequest::query()->findOrFail($mediaRequest->id);
+    $staleRetry = MediaRequest::query()->findOrFail($mediaRequest->id);
+    Event::fake([MediaRequestStatusEvent::class, TvNotificationEvent::class]);
+    $service = app(ContentRequestService::class);
+
+    $service->{$transition}($firstAttempt);
+    $service->{$transition}($staleRetry);
+
+    Event::assertDispatched(MediaRequestStatusEvent::class, 1);
+    Event::assertDispatched(MediaRequestStatusEvent::class, function (MediaRequestStatusEvent $event) use ($mediaRequest, $expectedStatus): bool {
+        $channels = $event->broadcastOn();
+
+        return $event->id === $mediaRequest->id
+            && $event->status === $expectedStatus
+            && count($channels) === 1
+            && $channels[0]->name === "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$this->auth->id}";
+    });
+})->with([
+    'approval' => ['approveRequest', 'pending', 'approved'],
+    'rejection' => ['rejectRequest', 'pending', 'rejected'],
+    'completion' => ['completeRequest', 'approved', 'completed'],
+]);
+
+it('broadcasts completion only once when status polling repeats', function () {
+    $mediaRequest = makeMediaRequest(['status' => 'approved']);
+    ArrQueueEvent::create([
+        'arr_integration_id' => $this->integration->id,
+        'user_id' => $this->adminUser->id,
+        'external_id' => $mediaRequest->external_id,
+        'title' => $mediaRequest->title,
+        'event_type' => 'Download',
+        'status' => 'imported',
+        'quality' => 'WEB-1080p',
+        'size' => 100,
+        'progress' => 100,
+        'last_event_at' => now(),
+    ]);
+    Http::fake(['*/api/v3/queue*' => Http::response(['records' => []])]);
+    Event::fake([MediaRequestStatusEvent::class, TvNotificationEvent::class]);
+    $service = app(ContentRequestService::class);
+
+    $firstPoll = $service->status($this->auth, $mediaRequest->id);
+    $secondPoll = $service->status($this->auth, $mediaRequest->id);
+
+    expect($firstPoll['status'])->toBe('completed')
+        ->and($secondPoll['status'])->toBe('completed');
+    Event::assertDispatched(MediaRequestStatusEvent::class, 1);
 });
 
 it('serializes the wire payload with snake_case keys matching formatRequest() on the server / MediaRequestSummary on the client', function () {

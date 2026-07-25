@@ -397,7 +397,6 @@ class ContentRequestService
             $status = 'completed';
             if ($canPersistCompleted) {
                 $this->completeRequest($mediaRequest);
-                $mediaRequest->broadcastStatus();
                 $formatted = $this->formatRequest($mediaRequest);
             }
         }
@@ -449,6 +448,7 @@ class ContentRequestService
         }
 
         $request->refresh();
+        $request->broadcastStatus();
         $playlist = $request->playlistAuth?->getAssignedModel();
         if ($playlist) {
             $this->notifyRequester($playlist, $request, 'Request Approved', 'success');
@@ -471,6 +471,7 @@ class ContentRequestService
         }
 
         $request->refresh();
+        $request->broadcastStatus();
         $playlist = $request->playlistAuth?->getAssignedModel();
         if ($playlist) {
             $this->notifyRequester($playlist, $request, 'Request Rejected', 'warning');
@@ -489,6 +490,7 @@ class ContentRequestService
         }
 
         $request->refresh();
+        $request->broadcastStatus();
         $playlist = $request->playlistAuth?->getAssignedModel();
         if ($playlist) {
             $this->notifyRequester($playlist, $request, 'Request Completed', 'success');

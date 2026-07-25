@@ -14,13 +14,12 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Pushed to the TV app's playlist channel whenever a MediaRequest's status
- * changes (approved, rejected, completed), so clients can update the
+ * Pushed to the requesting credential's TV channel whenever a MediaRequest's
+ * status changes (approved, rejected, completed), so clients can update the
  * requests screen live instead of polling request_status/request_history.
  *
- * Reuses the same `tv.{type}.{uuid}` channel as TvNotificationEvent/
- * DvrRecordingStatusEvent — the TV app is already subscribed to it after
- * login, so no new subscription or broadcasting/auth change is needed.
+ * Uses the same `tv.{type}.{uuid}.{playlistAuthId}` channel announced by
+ * TvApiController after login.
  */
 class MediaRequestStatusEvent implements ShouldBroadcast
 {
@@ -29,6 +28,7 @@ class MediaRequestStatusEvent implements ShouldBroadcast
     public function __construct(
         public readonly string $notifiableType,
         public readonly string $notifiableUuid,
+        public readonly int $playlistAuthId,
         public readonly int $id,
         public readonly string $status,
         public readonly string $type,
@@ -53,6 +53,7 @@ class MediaRequestStatusEvent implements ShouldBroadcast
         return new self(
             notifiableType: $playlist->getMorphClass(),
             notifiableUuid: $playlist->uuid,
+            playlistAuthId: $request->playlist_auth_id,
             id: $request->id,
             status: $request->status === 'pending' ? 'pending_approval' : $request->status,
             type: $request->request_type,
@@ -68,7 +69,7 @@ class MediaRequestStatusEvent implements ShouldBroadcast
     }
 
     /**
-     * Mirrors XtreamApiController::resolveEffectivePlaylist() — unwraps a
+     * Mirrors XtreamApiController::resolveEffectivePlaylist(). It unwraps a
      * PlaylistAlias to its effective playlist so the channel name matches
      * what the TV client actually subscribed to after login.
      */
@@ -90,7 +91,7 @@ class MediaRequestStatusEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
-        return [new PrivateChannel("tv.{$this->notifiableType}.{$this->notifiableUuid}")];
+        return [new PrivateChannel("tv.{$this->notifiableType}.{$this->notifiableUuid}.{$this->playlistAuthId}")];
     }
 
     public function broadcastAs(): string

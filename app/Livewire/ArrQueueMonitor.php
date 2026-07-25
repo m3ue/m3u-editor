@@ -312,7 +312,6 @@ class ArrQueueMonitor extends Component
 
         if ($ok) {
             app(ContentRequestService::class)->approveRequest($request, auth()->id());
-            $request->broadcastStatus();
 
             Notification::make()
                 ->success()
@@ -353,7 +352,6 @@ class ArrQueueMonitor extends Component
         }
 
         app(ContentRequestService::class)->rejectRequest($request, auth()->id());
-        $request->broadcastStatus();
 
         Notification::make()
             ->warning()

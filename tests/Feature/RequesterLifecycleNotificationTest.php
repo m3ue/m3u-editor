@@ -15,6 +15,7 @@
  * scheduled or rule-created DVR, post-processing progress, deletion, retention.
  */
 
+use App\Events\MediaRequestStatusEvent;
 use App\Events\PlaylistCreated;
 use App\Events\TvNotificationEvent;
 use App\Jobs\SendPushNotificationRelay;
@@ -34,7 +35,7 @@ use Illuminate\Support\Facades\Event;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    Event::fake([PlaylistCreated::class, TvNotificationEvent::class]);
+    Event::fake([PlaylistCreated::class, MediaRequestStatusEvent::class, TvNotificationEvent::class]);
     Bus::fake([SendPushNotificationRelay::class]);
 
     $this->admin = User::factory()->create(['permissions' => ['use_integrations']]);
