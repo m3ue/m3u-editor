@@ -67,6 +67,11 @@ class PlaylistAuth extends Model
         return $this->hasMany(DvrRecordingRule::class);
     }
 
+    public function tvNotificationReads(): HasMany
+    {
+        return $this->hasMany(TvNotificationRead::class);
+    }
+
     /**
      * Whether this auth has reached its per-guest concurrent recording cap.
      * Returns false when no cap is configured (null = unlimited).

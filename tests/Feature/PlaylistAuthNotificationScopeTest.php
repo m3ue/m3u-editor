@@ -8,6 +8,7 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
+use App\Models\TvNotificationRead;
 use App\Models\User;
 use App\Notifications\Notification;
 use App\Services\PushRelayService;
@@ -120,7 +121,7 @@ it('playlist auth guest does not see other auth targeted notifications', functio
         ->assertJsonCount(0, 'notifications');
 });
 
-it('owner auth sees all notifications regardless of playlist_auth_id', function () {
+it('owner admin auth sees global notifications but not requester-targeted notifications', function () {
     $admin = User::factory()->admin()->create();
     $this->playlist->update(['user_id' => $admin->id]);
 
@@ -146,7 +147,58 @@ it('owner auth sees all notifications regardless of playlist_auth_id', function 
 
     $this->getJson(route('tv.notifications', ['username' => $admin->name, 'password' => $this->playlist->uuid]))
         ->assertOk()
-        ->assertJsonCount(2, 'notifications');
+        ->assertJsonCount(1, 'notifications')
+        ->assertJsonPath('notifications.0.title', 'Global');
+
+    $this->postJson(route('tv.notifications.read', [
+        'username' => $admin->name,
+        'password' => $this->playlist->uuid,
+        'id' => TvNotification::where('title', 'Auth1 targeted')->value('id'),
+    ]))->assertNotFound();
+
+    $this->postJson(route('tv.notifications.read', [
+        'username' => $admin->name,
+        'password' => $this->playlist->uuid,
+        'id' => TvNotification::where('title', 'Global')->value('id'),
+    ]))->assertOk();
+});
+
+it('owner non-admin auth sees and marks global notifications but not requester-targeted notifications', function () {
+    $targeted = TvNotification::create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'channel' => 'general',
+        'title' => 'Requester targeted',
+        'body' => null,
+        'status' => 'info',
+        'playlist_auth_id' => $this->auth1->id,
+    ]);
+    $global = TvNotification::create([
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'channel' => 'general',
+        'title' => 'Global owner notification',
+        'body' => null,
+        'status' => 'info',
+        'playlist_auth_id' => null,
+    ]);
+    $ownerCredentials = [
+        'username' => $this->user->name,
+        'password' => $this->playlist->uuid,
+    ];
+
+    $this->getJson(route('tv.notifications', $ownerCredentials))
+        ->assertOk()
+        ->assertJsonCount(1, 'notifications')
+        ->assertJsonPath('notifications.0.id', $global->id);
+
+    $this->postJson(route('tv.notifications.read', [...$ownerCredentials, 'id' => $targeted->id]))
+        ->assertNotFound();
+    $this->postJson(route('tv.notifications.read', [...$ownerCredentials, 'id' => $global->id]))
+        ->assertOk();
+
+    expect($targeted->fresh()->read_at)->toBeNull()
+        ->and($global->fresh()->read_at)->not->toBeNull();
 });
 
 // -- Reverb credential isolation ------------------------------------------------------
@@ -755,7 +807,8 @@ it('playlist auth guest can mark-read own-scoped notification', function () {
     ]))->assertOk();
 
     $notification->refresh();
-    expect($notification->read_at)->not->toBeNull();
+    expect($notification->read_at)->not->toBeNull()
+        ->and(TvNotificationRead::whereBelongsTo($notification)->count())->toBe(0);
 });
 
 it('playlist auth guest can mark-read global notification', function () {
@@ -776,5 +829,6 @@ it('playlist auth guest can mark-read global notification', function () {
     ]))->assertOk();
 
     $notification->refresh();
-    expect($notification->read_at)->not->toBeNull();
+    expect($notification->read_at)->toBeNull()
+        ->and(TvNotificationRead::whereBelongsTo($notification)->whereBelongsTo($this->auth1)->count())->toBe(1);
 });
