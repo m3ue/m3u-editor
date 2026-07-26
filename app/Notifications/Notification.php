@@ -11,6 +11,7 @@ use Filament\Notifications\Notification as BaseNotification;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use InvalidArgumentException;
 
 class Notification extends BaseNotification
 {
@@ -35,6 +36,10 @@ class Notification extends BaseNotification
     /** @param array<string, mixed>|null $metadata */
     public function tvBroadcast(Model $playlist, string $channel = 'general', bool $adminOnly = false, ?PlaylistAuth $playlistAuth = null, ?array $metadata = null): static
     {
+        if ($adminOnly && $playlistAuth !== null) {
+            throw new InvalidArgumentException('tvBroadcast cannot target both adminOnly and a specific PlaylistAuth.');
+        }
+
         $record = TvNotification::create([
             'notifiable_type' => $playlist->getMorphClass(),
             'notifiable_id' => $playlist->id,

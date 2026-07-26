@@ -333,6 +333,79 @@ it('delivers a global notification to every credential transport on only its pla
     ]);
 });
 
+it('delivers a global notification on the effective playlist to a guest assigned via a PlaylistAlias', function () {
+    $alias = PlaylistAlias::create([
+        'name' => 'Global Parity Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+    ]);
+    $aliasAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'username' => 'alias-guest',
+        'password' => 'alias-pass',
+        'enabled' => true,
+    ]);
+    $aliasAuth->assignTo($alias);
+
+    PushDeviceToken::factory()->create([
+        'notifiable_type' => $alias->getMorphClass(),
+        'notifiable_id' => $alias->id,
+        'playlist_auth_id' => $aliasAuth->id,
+        'token' => 'device-alias-global',
+    ]);
+
+    $aliasChannel = $this->getJson(route('tv.notifications', [
+        'username' => 'alias-guest',
+        'password' => 'alias-pass',
+    ]))->assertOk()->json('reverb.channel');
+
+    expect($aliasChannel)->toBe("private-tv.{$alias->getMorphClass()}.{$alias->uuid}.{$aliasAuth->id}");
+
+    Event::fake([TvNotificationEvent::class]);
+    Bus::fake([SendPushNotificationRelay::class]);
+
+    Notification::make()
+        ->title('DVR failure on the effective playlist')
+        ->danger()
+        ->tvBroadcast($this->playlist, 'dvr');
+
+    $notification = TvNotification::sole();
+    $event = null;
+    $relayJob = null;
+
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
+        $event = $dispatched;
+
+        return true;
+    });
+    Bus::assertDispatched(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$relayJob): bool {
+        $relayJob = $dispatched;
+
+        return true;
+    });
+
+    $channels = collect($event->broadcastOn())->pluck('name');
+    expect($channels)->toContain($aliasChannel);
+
+    $this->getJson(route('tv.notifications', [
+        'username' => 'alias-guest',
+        'password' => 'alias-pass',
+    ]))->assertOk()->assertJsonPath('notifications.0.id', $notification->id);
+
+    $deliveredTokens = [];
+    $relay = Mockery::mock(PushRelayService::class);
+    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
+    $relay->shouldReceive('send')
+        ->once()
+        ->andReturnUsing(function (string $token) use (&$deliveredTokens): void {
+            $deliveredTokens[] = $token;
+        });
+
+    $relayJob->handle($relay);
+
+    expect($deliveredTokens)->toBe(['device-alias-global']);
+});
+
 it('announces a distinct private Reverb channel for each credential on one playlist', function () {
     $auth1Channel = $this->getJson(route('tv.notifications', [
         'username' => 'guest1',

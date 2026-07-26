@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
+use App\Models\PlaylistAlias;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Settings\GeneralSettings;
@@ -30,9 +31,9 @@ class TvApiController extends Controller
         $auth = $this->resolveAuth($request);
         $playlist = $auth['playlist'];
 
-        $query = TvNotification::where('notifiable_type', $playlist->getMorphClass())
-            ->where('notifiable_id', $playlist->id)
-            ->when(! $auth['isAdmin'], fn (Builder $query) => $query->where('admin_only', false));
+        $query = TvNotification::query();
+        $this->scopeToNotifiable($query, $playlist);
+        $query->when(! $auth['isAdmin'], fn (Builder $query) => $query->where('admin_only', false));
 
         if ($auth['playlistAuthId'] === null) {
             $query->whereNull('playlist_auth_id')
@@ -94,9 +95,10 @@ class TvApiController extends Controller
         $playlist = $auth['playlist'];
         $id = $request->route('id');
 
-        $notification = TvNotification::where('id', $id)
-            ->where('notifiable_type', $playlist->getMorphClass())
-            ->where('notifiable_id', $playlist->id)
+        $query = TvNotification::where('id', $id);
+        $this->scopeToNotifiable($query, $playlist);
+
+        $notification = $query
             ->when(! $auth['isAdmin'], fn (Builder $query) => $query->where('admin_only', false))
             ->when(
                 $auth['playlistAuthId'] === null,
@@ -179,10 +181,6 @@ class TvApiController extends Controller
                 return;
             }
 
-            PushDeviceToken::where('token', $data['token'])
-                ->whereKeyNot($device->getKey())
-                ->delete();
-
             $device->update([
                 'notifiable_type' => $playlist->getMorphClass(),
                 'notifiable_id' => $playlist->id,
@@ -211,6 +209,33 @@ class TvApiController extends Controller
             ->delete();
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * A credential assigned to a PlaylistAlias only ever subscribes to the alias's own
+     * channel, but DVR/global notifications are raised against the alias's *effective*
+     * playlist. So an alias guest must also see (and be able to mark read) global rows
+     * recorded against that effective playlist — never rows targeted at another credential.
+     */
+    private function scopeToNotifiable(Builder $query, Model $playlist): Builder
+    {
+        $effectivePlaylist = $playlist instanceof PlaylistAlias ? $playlist->getEffectivePlaylist() : null;
+
+        return $query->where(function (Builder $query) use ($playlist, $effectivePlaylist): void {
+            $query->where(function (Builder $query) use ($playlist): void {
+                $query->where('notifiable_type', $playlist->getMorphClass())
+                    ->where('notifiable_id', $playlist->id);
+            });
+
+            if ($effectivePlaylist) {
+                $query->orWhere(function (Builder $query) use ($effectivePlaylist): void {
+                    $query->where('notifiable_type', $effectivePlaylist->getMorphClass())
+                        ->where('notifiable_id', $effectivePlaylist->id)
+                        ->whereNull('playlist_auth_id')
+                        ->where('admin_only', false);
+                });
+            }
+        });
     }
 
     /**

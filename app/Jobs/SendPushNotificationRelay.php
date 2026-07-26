@@ -37,22 +37,33 @@ class SendPushNotificationRelay implements ShouldQueue
             return;
         }
 
-        $query = PushDeviceToken::where('notifiable_type', $this->notifiableType)
-            ->where('notifiable_id', $this->notifiableId);
-
         if ($this->playlistAuthId !== null) {
-            $query->where('playlist_auth_id', $this->playlistAuthId);
+            $query = PushDeviceToken::where('notifiable_type', $this->notifiableType)
+                ->where('notifiable_id', $this->notifiableId)
+                ->where('playlist_auth_id', $this->playlistAuthId);
         } elseif ($this->adminOnly) {
-            $query->whereNull('playlist_auth_id');
+            $query = PushDeviceToken::where('notifiable_type', $this->notifiableType)
+                ->where('notifiable_id', $this->notifiableId)
+                ->whereNull('playlist_auth_id');
         } else {
-            $query->where(function (Builder $query): void {
-                $query->whereNull('playlist_auth_id')
-                    ->orWhereIn(
-                        'playlist_auth_id',
-                        PlaylistAuth::query()
-                            ->entitledToNotificationRecipient($this->notifiableType, $this->notifiableId)
-                            ->select('id'),
-                    );
+            // Entitled auths may be assigned to a PlaylistAlias wrapping this model, whose
+            // devices are stored under the alias's own notifiable_type/id — so once we know
+            // the entitled playlist_auth_ids, filter by those directly rather than re-anchoring
+            // to this broadcast's notifiable_type/id.
+            $entitledAuthIds = PlaylistAuth::query()
+                ->entitledToNotificationRecipient($this->notifiableType, $this->notifiableId)
+                ->pluck('id');
+
+            $query = PushDeviceToken::where(function (Builder $query) use ($entitledAuthIds): void {
+                $query->where(function (Builder $query): void {
+                    $query->where('notifiable_type', $this->notifiableType)
+                        ->where('notifiable_id', $this->notifiableId)
+                        ->whereNull('playlist_auth_id');
+                });
+
+                if ($entitledAuthIds->isNotEmpty()) {
+                    $query->orWhereIn('playlist_auth_id', $entitledAuthIds);
+                }
             });
         }
 

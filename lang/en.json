@@ -1,5 +1,4 @@
 {
-    "__:count__ recordings failed": "__:count__ recordings failed",
     "\":title\" request has been rejected.": "\":title\" request has been rejected.",
     "#": "#",
     "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\tCOOKIE_NAME\\tCOOKIE_VALUE": "# Netscape HTTP Cookie File\\n.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\tCOOKIE_NAME\\tCOOKIE_VALUE",
@@ -556,6 +555,7 @@
     ":channel mapped.": ":channel mapped.",
     ":count candidate built.|:count candidates built.": ":count candidate built.|:count candidates built.",
     ":count episode(s) were reactivated.": ":count episode(s) were reactivated.",
+    ":count recordings failed": ":count recordings failed",
     ":images images": ":images images",
     ":name installed": ":name installed",
     ":name updated": ":name updated",

@@ -435,56 +435,42 @@ class ContentRequestService
 
     public function approveRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
     {
-        $updated = MediaRequest::query()
-            ->whereKey($request->getKey())
-            ->where('status', 'pending')
-            ->update([
-                'status' => 'approved',
-                'reviewed_at' => now(),
-                'reviewed_by_user_id' => $reviewedByUserId,
-            ]);
-
-        if ($updated !== 1) {
-            return;
-        }
-
-        $request->refresh();
-        $request->broadcastStatus();
-        $playlist = $request->playlistAuth?->getAssignedModel();
-        if ($playlist) {
-            $this->notifyRequester($playlist, $request, 'Request Approved', 'success');
-        }
+        $this->transitionRequest($request, 'pending', [
+            'status' => 'approved',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => $reviewedByUserId,
+        ], 'Request Approved', 'success');
     }
 
     public function rejectRequest(MediaRequest $request, ?int $reviewedByUserId = null): void
     {
-        $updated = MediaRequest::query()
-            ->whereKey($request->getKey())
-            ->where('status', 'pending')
-            ->update([
-                'status' => 'rejected',
-                'reviewed_at' => now(),
-                'reviewed_by_user_id' => $reviewedByUserId,
-            ]);
-
-        if ($updated !== 1) {
-            return;
-        }
-
-        $request->refresh();
-        $request->broadcastStatus();
-        $playlist = $request->playlistAuth?->getAssignedModel();
-        if ($playlist) {
-            $this->notifyRequester($playlist, $request, 'Request Rejected', 'warning');
-        }
+        $this->transitionRequest($request, 'pending', [
+            'status' => 'rejected',
+            'reviewed_at' => now(),
+            'reviewed_by_user_id' => $reviewedByUserId,
+        ], 'Request Rejected', 'warning');
     }
 
     public function completeRequest(MediaRequest $request): void
     {
+        $this->transitionRequest($request, 'approved', [
+            'status' => 'completed',
+        ], 'Request Completed', 'success');
+    }
+
+    /**
+     * Guarded status transition shared by approve/reject/complete: only the request that wins
+     * the conditional update (i.e. is still in $fromStatus) broadcasts and notifies, so stale
+     * retries and repeated polling can never mint a second event for the same transition.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function transitionRequest(MediaRequest $request, string $fromStatus, array $attributes, string $notificationTitle, string $notificationStatus): void
+    {
         $updated = MediaRequest::query()
             ->whereKey($request->getKey())
-            ->where('status', 'approved')
-            ->update(['status' => 'completed']);
+            ->where('status', $fromStatus)
+            ->update($attributes);
 
         if ($updated !== 1) {
             return;
@@ -494,7 +480,7 @@ class ContentRequestService
         $request->broadcastStatus();
         $playlist = $request->playlistAuth?->getAssignedModel();
         if ($playlist) {
-            $this->notifyRequester($playlist, $request, 'Request Completed', 'success');
+            $this->notifyRequester($playlist, $request, $notificationTitle, $notificationStatus);
         }
     }
 

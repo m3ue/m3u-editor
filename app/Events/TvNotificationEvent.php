@@ -49,8 +49,25 @@ class TvNotificationEvent implements ShouldBroadcast
             $adminChannel,
         ];
 
-        foreach (PlaylistAuth::query()->entitledToNotificationRecipient($type, $this->notifiableId)->pluck('id') as $playlistAuthId) {
-            $channels[] = new PrivateChannel("tv.{$type}.{$uuid}.{$playlistAuthId}");
+        // An entitled auth may be assigned directly to this model, or to a PlaylistAlias
+        // wrapping it — in the latter case it only ever subscribed to its alias's own
+        // channel, so the channel must be built from whichever model the auth is actually
+        // assigned to, not from this broadcast's own $type/$uuid.
+        $entitled = PlaylistAuth::query()
+            ->entitledToNotificationRecipient($type, $this->notifiableId)
+            ->with('assignedPlaylist.authenticatable')
+            ->get();
+
+        foreach ($entitled as $playlistAuth) {
+            $authenticatable = $playlistAuth->assignedPlaylist?->authenticatable;
+
+            if (! $authenticatable) {
+                continue;
+            }
+
+            $channels[] = new PrivateChannel(
+                "tv.{$authenticatable->getMorphClass()}.{$authenticatable->uuid}.{$playlistAuth->id}"
+            );
         }
 
         return $channels;

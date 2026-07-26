@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -169,17 +170,43 @@ class PlaylistAuth extends Model
         return $this->hasOne(PlaylistAuthPivot::class, 'playlist_auth_id');
     }
 
+    /**
+     * Entitled credentials for a broadcast fired on ($notifiableType, $notifiableId) include
+     * both directly-assigned auths and auths assigned to a PlaylistAlias whose effective
+     * playlist is the same model — a DVR/global notification is raised against the
+     * underlying Playlist/CustomPlaylist, but an alias-assigned guest never subscribes to
+     * that model's own channel, only to their alias's.
+     */
     public function scopeEntitledToNotificationRecipient(Builder $query, string $notifiableType, int|string $notifiableId): Builder
     {
+        $aliasColumn = match ($notifiableType) {
+            Relation::getMorphAlias(Playlist::class) => 'playlist_id',
+            Relation::getMorphAlias(CustomPlaylist::class) => 'custom_playlist_id',
+            default => null,
+        };
+
+        $aliasIds = $aliasColumn !== null
+            ? PlaylistAlias::query()->where($aliasColumn, $notifiableId)->pluck('id')
+            : collect();
+
         return $query
             ->where('enabled', true)
             ->where(function (Builder $query): void {
                 $query->whereNull('expires_at')
                     ->orWhere('expires_at', '>', now());
             })
-            ->whereHas('assignedPlaylist', function (Builder $query) use ($notifiableType, $notifiableId): void {
-                $query->where('authenticatable_type', $notifiableType)
-                    ->where('authenticatable_id', $notifiableId);
+            ->whereHas('assignedPlaylist', function (Builder $query) use ($notifiableType, $notifiableId, $aliasIds): void {
+                $query->where(function (Builder $query) use ($notifiableType, $notifiableId): void {
+                    $query->where('authenticatable_type', $notifiableType)
+                        ->where('authenticatable_id', $notifiableId);
+                });
+
+                if ($aliasIds->isNotEmpty()) {
+                    $query->orWhere(function (Builder $query) use ($aliasIds): void {
+                        $query->where('authenticatable_type', Relation::getMorphAlias(PlaylistAlias::class))
+                            ->whereIn('authenticatable_id', $aliasIds);
+                    });
+                }
             });
     }
 

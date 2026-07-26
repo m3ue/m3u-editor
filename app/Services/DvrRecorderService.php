@@ -41,7 +41,9 @@ class DvrRecorderService
      */
     public function recoverFromCrash(): void
     {
-        $stale = DvrRecording::recording()->get();
+        $stale = DvrRecording::recording()
+            ->with('dvrSetting.playlist', 'dvrSetting.customPlaylist', 'dvrSetting.mergedPlaylist')
+            ->get();
 
         if ($stale->isEmpty()) {
             return;
@@ -75,7 +77,7 @@ class DvrRecorderService
             $count = $entry['count'];
             $label = $count === 1
                 ? __('Recording Failed')
-                : __('__:count__ recordings failed', ['count' => $count]);
+                : __(':count recordings failed', ['count' => $count]);
 
             AppNotification::make()
                 ->title($label)
