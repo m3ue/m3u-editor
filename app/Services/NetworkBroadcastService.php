@@ -279,7 +279,6 @@ class NetworkBroadcastService
             // so the next tick will retry. Don't clear the request flag.
             Log::info('Broadcast start deferred due to transient proxy failure (will retry)', [
                 'network_id' => $network->id,
-                'network_name' => $network->name,
             ]);
         } else {
             // Permanent failure - clear broadcast_requested so it doesn't stay stuck on "Starting"
@@ -404,7 +403,8 @@ class NetworkBroadcastService
             } catch (\Exception $e) {
                 Log::warning('Failed to compute #range= byte offset for rewritten-static URL', [
                     'network_id' => $network->id,
-                    'exception' => $e->getMessage(),
+                    'exception_class' => $e::class,
+                    'exception_code' => $e->getCode(),
                 ]);
             }
         }
@@ -550,20 +550,17 @@ class NetworkBroadcastService
         } catch (\Exception $e) {
             Log::warning('Failed to attach provider-specific headers for broadcast', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
 
         Log::info('Starting broadcast via proxy', [
             'network_id' => $network->id,
             'network_uuid' => $network->uuid,
-            'payload' => array_merge($payload, ['stream_url' => '***']), // Hide URL in logs
-        ]);
-
-        // Debug: log the unmasked stream URL at debug level so we can diagnose start failures
-        Log::debug('Broadcast stream URL (debug only)', [
-            'network_id' => $network->id,
-            'stream_url' => $streamUrl,
+            'programme_id' => $programme->id,
+            'seek_seconds' => $seekPosition,
+            'duration_seconds' => $remainingDuration,
         ]);
 
         // Extract the Plex transcode session ID from the stream URL upfront.
@@ -590,35 +587,33 @@ class NetworkBroadcastService
                     'broadcast_transcode_session_id' => $transcodeSessionId,
                 ]);
 
-                $logMessage = "🟢 BROADCAST STARTED VIA PROXY: {$network->name}";
+                $logMessage = 'Broadcast started via proxy';
                 $logData = [
                     'network_id' => $network->id,
                     'uuid' => $network->uuid,
                     'ffmpeg_pid' => $data['ffmpeg_pid'] ?? null,
                     'status' => $data['status'] ?? 'unknown',
-                    'transcode_session_id' => $transcodeSessionId,
                 ];
 
                 // Add recovery message if this was a boot recovery restart
                 if ($network->broadcast_boot_recovery_until && now()->lt($network->broadcast_boot_recovery_until)) {
-                    $logMessage = "🟢 BROADCAST RECOVERED VIA PROXY: {$network->name}";
+                    $logMessage = 'Broadcast recovered via proxy';
                     $logData['recovery'] = 'boot_recovery';
 
                     // Also log a prominent recovery message that will show in console
-                    Log::info("🎉 BROADCAST RECOVERY COMPLETE: {$network->name} is back online after container restart");
+                    Log::info('Broadcast recovery complete', ['network_id' => $network->id]);
 
                     // Direct console output to ensure it shows up in container logs
-                    echo "🎉 [RECOVERY] {$network->name} is now broadcasting again after container restart\n";
+                    echo "[RECOVERY] Network {$network->id} is now broadcasting again after container restart\n";
                 }
 
                 Log::info($logMessage, $logData);
 
-                Log::info("🟢 BROADCAST STARTED VIA PROXY: {$network->name}", [
+                Log::info('Broadcast started via proxy', [
                     'network_id' => $network->id,
                     'uuid' => $network->uuid,
                     'ffmpeg_pid' => $data['ffmpeg_pid'] ?? null,
                     'status' => $data['status'] ?? 'unknown',
-                    'transcode_session_id' => $transcodeSessionId,
                 ]);
 
                 return true;
@@ -628,7 +623,6 @@ class NetworkBroadcastService
             Log::error('Proxy returned error when starting broadcast', [
                 'network_id' => $network->id,
                 'status' => $response->status(),
-                'error' => $errorMessage,
             ]);
 
             $network->update([
@@ -654,7 +648,6 @@ class NetworkBroadcastService
                     'network_id' => $network->id,
                     'status' => $response->status(),
                     'grace_period_until' => $network->broadcast_boot_recovery_until->toIso8601String(),
-                    'reuse_session_id' => $transcodeSessionId,
                 ]);
 
                 return null;
@@ -673,7 +666,8 @@ class NetworkBroadcastService
             // Return null so the caller knows to retry on the next tick
             Log::warning('Failed to connect to proxy for broadcast (transient, will retry)', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
 
             // Persist the session ID so the next retry reuses it instead of creating
@@ -742,7 +736,7 @@ class NetworkBroadcastService
                 $data = $response->json();
                 $finalSegment = $data['final_segment_number'] ?? 0;
 
-                Log::info("🔴 BROADCAST STOPPED VIA PROXY: {$network->name}", [
+                Log::info('Broadcast stopped via proxy', [
                     'network_id' => $network->id,
                     'uuid' => $network->uuid,
                     'final_segment' => $finalSegment,
@@ -751,7 +745,8 @@ class NetworkBroadcastService
         } catch (\Exception $e) {
             Log::warning('Failed to stop broadcast via proxy (may already be stopped)', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
 
@@ -793,7 +788,8 @@ class NetworkBroadcastService
         } catch (\Exception $e) {
             Log::warning('Failed to cleanup broadcast files via proxy', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
 
@@ -837,7 +833,8 @@ class NetworkBroadcastService
             // Connection error - assume not running
             Log::debug('Could not check broadcast status via proxy', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
 
             return false;
@@ -1078,8 +1075,8 @@ class NetworkBroadcastService
         } catch (\Exception $e) {
             Log::warning('Failed to stop Plex transcode session during cleanup', [
                 'network_id' => $network->id,
-                'session_id' => $sessionId,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
     }
@@ -1127,14 +1124,13 @@ class NetworkBroadcastService
             if ($stopped) {
                 Log::info('Stopped orphaned Plex transcode session after failed start', [
                     'network_id' => $network->id,
-                    'session_id' => $sessionId,
                 ]);
             }
         } catch (\Exception $e) {
             Log::debug('Could not stop orphaned Plex transcode session (may not exist)', [
                 'network_id' => $network->id,
-                'session_id' => $sessionId,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
     }
@@ -1298,9 +1294,7 @@ class NetworkBroadcastService
 
             Log::info('🔄 BROADCAST RECOVERY: Restarting broadcast via proxy', [
                 'network_id' => $network->id,
-                'network_name' => $network->name,
                 'programme_id' => $programme->id,
-                'programme_title' => $programme->title,
             ]);
 
             $success = $this->startRequested($network);
@@ -1310,7 +1304,7 @@ class NetworkBroadcastService
 
             // Direct console output for recovery success
             if ($success && ! app()->runningUnitTests()) {
-                echo "🔄 [TICK RECOVERY] {$network->name} broadcast restarted successfully\n";
+                echo "[TICK RECOVERY] Network {$network->id} broadcast restarted successfully\n";
             }
 
             return $result;
@@ -1404,7 +1398,8 @@ class NetworkBroadcastService
             } catch (\Exception $e) {
                 Log::debug('BOOT RECOVERY: Could not stop broadcast via proxy (expected if not running)', [
                     'network_id' => $net->id,
-                    'exception' => $e->getMessage(),
+                    'exception_class' => $e::class,
+                    'exception_code' => $e->getCode(),
                 ]);
             }
 
@@ -1415,7 +1410,8 @@ class NetworkBroadcastService
             } catch (\Exception $e) {
                 Log::debug('BOOT RECOVERY: Could not cleanup broadcast files via proxy', [
                     'network_id' => $net->id,
-                    'exception' => $e->getMessage(),
+                    'exception_class' => $e::class,
+                    'exception_code' => $e->getCode(),
                 ]);
             }
 
@@ -1604,7 +1600,8 @@ class NetworkBroadcastService
         } catch (\Exception $e) {
             Log::warning('computeNextStreamConfig: failed to attach provider headers', [
                 'network_id' => $network->id,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
 

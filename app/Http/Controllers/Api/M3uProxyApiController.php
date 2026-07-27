@@ -290,7 +290,15 @@ class M3uProxyApiController extends Controller
 
             return response()->json($result);
         } catch (Exception $e) {
-            Log::error('Error resolving failover: '.$e->getMessage(), $request->all());
+            Log::error('Error resolving failover', [
+                'channel_id' => $channelId ?? null,
+                'playlist_uuid' => $playlistUuid ?? null,
+                'failover_index' => $failoverCount ?? null,
+                'status_code' => $statusCode ?? null,
+                'trace_id' => $request->input('trace_id', $request->header('X-Request-ID')),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
 
             return response()->json([
                 'next_url' => null,
@@ -313,7 +321,14 @@ class M3uProxyApiController extends Controller
         Log::info('Received m3u-proxy webhook', [
             'event_type' => $eventType,
             'stream_id' => $streamId,
-            'data' => $data,
+            'type' => $data['type'] ?? $metadata['type'] ?? null,
+            'channel_id' => $data['channel_id'] ?? $metadata['channel_id'] ?? $metadata['id'] ?? null,
+            'episode_id' => $data['episode_id'] ?? $metadata['episode_id'] ?? null,
+            'playlist_uuid' => $data['playlist_uuid'] ?? $metadata['playlist_uuid'] ?? null,
+            'profile_id' => $metadata['profile_id'] ?? null,
+            'provider_profile_id' => $metadata['provider_profile_id'] ?? null,
+            'status' => $data['status'] ?? null,
+            'trace_id' => $data['trace_id'] ?? $request->header('X-Request-ID'),
         ]);
 
         // Handle profile connection tracking if provider_profile_id is present
@@ -347,7 +362,12 @@ class M3uProxyApiController extends Controller
             // We might also want to invalidate specific channel caches?
         }
 
-        Log::info('Cache invalidated for m3u-proxy event', $data);
+        Log::info('Cache invalidated for m3u-proxy event', [
+            'type' => $data['type'] ?? null,
+            'id' => $data['id'] ?? null,
+            'playlist_uuid' => $data['playlist_uuid'] ?? null,
+            'trace_id' => $data['trace_id'] ?? null,
+        ]);
     }
 
     /**
@@ -388,7 +408,8 @@ class M3uProxyApiController extends Controller
                 'profile_id' => $profileId,
                 'stream_id' => $streamId,
                 'event_type' => $eventType,
-                'exception' => $e->getMessage(),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
         }
     }
@@ -421,7 +442,13 @@ class M3uProxyApiController extends Controller
         Log::info('Received broadcast callback from proxy', [
             'network_id' => $networkId,
             'event' => $event,
-            'data' => $data,
+            'status' => $data['status'] ?? null,
+            'exit_code' => $data['exit_code'] ?? null,
+            'error_type' => $data['error_type'] ?? null,
+            'final_segment_number' => $data['final_segment_number'] ?? null,
+            'duration_streamed' => $data['duration_streamed'] ?? null,
+            'auto_transitioned' => $data['auto_transitioned'] ?? null,
+            'trace_id' => $data['trace_id'] ?? $request->header('X-Request-ID'),
         ]);
 
         if (! $networkId) {
@@ -463,7 +490,9 @@ class M3uProxyApiController extends Controller
             Log::error('Error handling broadcast callback', [
                 'network_id' => $networkId,
                 'event' => $event,
-                'exception' => $e->getMessage(),
+                'trace_id' => $data['trace_id'] ?? $request->header('X-Request-ID'),
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
 
             return response()->json(['error' => $e->getMessage()], 500);
@@ -488,7 +517,6 @@ class M3uProxyApiController extends Controller
 
         Log::info('Programme completed via proxy', [
             'network_id' => $network->id,
-            'network_name' => $network->name,
             'final_segment' => $finalSegment,
             'duration_streamed' => $durationStreamed,
             'auto_transitioned' => $autoTransitioned,
@@ -532,7 +560,6 @@ class M3uProxyApiController extends Controller
                 'network_id' => $network->id,
                 'new_pid' => $newPid,
                 'next_programme_id' => $nextProgramme?->id,
-                'next_programme_title' => $nextProgramme?->title,
             ]);
 
             return;
@@ -565,7 +592,6 @@ class M3uProxyApiController extends Controller
                 Log::info('Starting next programme via proxy', [
                     'network_id' => $network->id,
                     'programme_id' => $nextProgramme->id,
-                    'programme_title' => $nextProgramme->title,
                 ]);
 
                 $service->start($network);
@@ -616,8 +642,6 @@ class M3uProxyApiController extends Controller
 
         Log::warning('Broadcast failed via proxy', [
             'network_id' => $network->id,
-            'network_name' => $network->name,
-            'error' => $error,
             'exit_code' => $exitCode,
             'fatal' => $isFatal,
             'final_segment' => $finalSegment,
@@ -698,7 +722,6 @@ class M3uProxyApiController extends Controller
             Log::error('Broadcast failed with fatal exit code — stopping retries', [
                 'network_id' => $network->id,
                 'exit_code' => $exitCode,
-                'error' => $error,
             ]);
 
             $network->update([
@@ -824,7 +847,12 @@ class M3uProxyApiController extends Controller
         try {
             M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
         } catch (Exception $e) {
-            Log::warning("Failed to stop player stream ({$type}:{$id}): ".$e->getMessage());
+            Log::warning('Failed to stop player stream', [
+                'type' => $type,
+                'id' => $id,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
         }
 
         return response()->noContent();

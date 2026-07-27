@@ -1,7 +1,7 @@
 <?php
 
+use App\Logging\AddAnonymizingProcessor;
 use App\Logging\AlertsHandler;
-use App\Logging\AnonymizingProcessor;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -62,17 +62,19 @@ return [
 
         'stdout' => [
             'driver' => 'monolog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => env('LOG_LEVEL', 'info'),
             'handler' => StreamHandler::class,
             'formatter' => env('LOG_STDERR_FORMATTER'),
             'with' => [
                 'stream' => 'php://stdout',
             ],
-            'processors' => [AnonymizingProcessor::class, PsrLogMessageProcessor::class],
+            'processors' => [PsrLogMessageProcessor::class],
         ],
 
         'single' => [
             'driver' => 'single',
+            'tap' => [AddAnonymizingProcessor::class],
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'error'),
             'replace_placeholders' => true,
@@ -80,15 +82,16 @@ return [
 
         'daily' => [
             'driver' => 'daily',
+            'tap' => [AddAnonymizingProcessor::class],
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'error'),
             'days' => env('LOG_DAILY_DAYS', 3),
             'replace_placeholders' => true,
-            'processors' => [AnonymizingProcessor::class],
         ],
 
         'slack' => [
             'driver' => 'slack',
+            'tap' => [AddAnonymizingProcessor::class],
             'url' => env('LOG_SLACK_WEBHOOK_URL'),
             'username' => env('LOG_SLACK_USERNAME', 'Laravel Log'),
             'emoji' => env('LOG_SLACK_EMOJI', ':boom:'),
@@ -98,6 +101,7 @@ return [
 
         'papertrail' => [
             'driver' => 'monolog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => env('LOG_LEVEL', 'error'),
             'handler' => env('LOG_PAPERTRAIL_HANDLER', SyslogUdpHandler::class),
             'handler_with' => [
@@ -110,6 +114,7 @@ return [
 
         'stderr' => [
             'driver' => 'monolog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => env('LOG_LEVEL', 'error'),
             'handler' => StreamHandler::class,
             'formatter' => env('LOG_STDERR_FORMATTER'),
@@ -121,6 +126,7 @@ return [
 
         'syslog' => [
             'driver' => 'syslog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => env('LOG_LEVEL', 'error'),
             'facility' => env('LOG_SYSLOG_FACILITY', LOG_USER),
             'replace_placeholders' => true,
@@ -128,6 +134,7 @@ return [
 
         'errorlog' => [
             'driver' => 'errorlog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => env('LOG_LEVEL', 'error'),
             'replace_placeholders' => true,
         ],
@@ -143,15 +150,16 @@ return [
 
         'ffmpeg' => [
             'driver' => 'daily',
+            'tap' => [AddAnonymizingProcessor::class],
             'path' => storage_path('logs/ffmpeg.log'),
             'level' => 'debug', // env('LOG_LEVEL', 'error'),
             'days' => env('LOG_DAILY_DAYS', 3),
-            'processors' => [AnonymizingProcessor::class],
         ],
 
         // Forwards error-level+ entries to Discord/Slack when configured in Settings.
         'alerts' => [
             'driver' => 'monolog',
+            'tap' => [AddAnonymizingProcessor::class],
             'level' => 'error',
             'handler' => AlertsHandler::class,
         ],

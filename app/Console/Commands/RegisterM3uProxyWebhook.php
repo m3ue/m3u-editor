@@ -48,7 +48,7 @@ class RegisterM3uProxyWebhook extends Command
             return self::SUCCESS;
         }
 
-        $this->info("Webhook URL: {$webhookUrl}");
+        $this->info('Webhook URL configured.');
 
         try {
             $apiBaseUrl = $service->getApiBaseUrl();
@@ -101,21 +101,21 @@ class RegisterM3uProxyWebhook extends Command
                 $this->info('✅ Webhook registered successfully!');
 
                 Log::info('M3U Proxy webhook registered', [
-                    'webhook_url' => $webhookUrl,
                     'events' => $payload['events'],
+                    'status_code' => $response->status(),
                 ]);
 
                 return self::SUCCESS;
             }
 
-            $this->error('❌ Failed to register webhook: '.$response->body());
+            $this->error('❌ Failed to register webhook (HTTP '.$response->status().').');
 
             return self::FAILURE;
         } catch (\Exception $e) {
-            $this->error('❌ Error registering webhook: '.$e->getMessage());
+            $this->error('❌ Error registering webhook.');
             Log::error('Failed to register m3u-proxy webhook', [
-                'error' => $e->getMessage(),
-                'webhook_url' => $webhookUrl,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
             ]);
 
             return self::FAILURE;
