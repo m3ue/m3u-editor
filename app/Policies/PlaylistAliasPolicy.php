@@ -20,8 +20,7 @@ class PlaylistAliasPolicy
      */
     public function view(User $user, PlaylistAlias $playlistAlias): bool
     {
-        // PlaylistAlias doesn't have direct user_id, check through playlist relationship
-        return $user->isAdmin() || $user->id === $playlistAlias->playlist->user_id;
+        return $this->owns($user, $playlistAlias);
     }
 
     /**
@@ -37,7 +36,7 @@ class PlaylistAliasPolicy
      */
     public function update(User $user, PlaylistAlias $playlistAlias): bool
     {
-        return $user->isAdmin() || $user->id === $playlistAlias->playlist->user_id;
+        return $this->owns($user, $playlistAlias);
     }
 
     /**
@@ -45,7 +44,7 @@ class PlaylistAliasPolicy
      */
     public function delete(User $user, PlaylistAlias $playlistAlias): bool
     {
-        return $user->isAdmin() || $user->id === $playlistAlias->playlist->user_id;
+        return $this->owns($user, $playlistAlias);
     }
 
     /**
@@ -53,7 +52,7 @@ class PlaylistAliasPolicy
      */
     public function restore(User $user, PlaylistAlias $playlistAlias): bool
     {
-        return $user->isAdmin() || $user->id === $playlistAlias->playlist->user_id;
+        return $this->owns($user, $playlistAlias);
     }
 
     /**
@@ -61,6 +60,15 @@ class PlaylistAliasPolicy
      */
     public function forceDelete(User $user, PlaylistAlias $playlistAlias): bool
     {
-        return $user->isAdmin() || $user->id === $playlistAlias->playlist->user_id;
+        return $this->owns($user, $playlistAlias);
+    }
+
+    /**
+     * PlaylistAlias doesn't have direct user_id, check through the source playlist, which
+     * may be either a standard or a custom playlist.
+     */
+    private function owns(User $user, PlaylistAlias $playlistAlias): bool
+    {
+        return $user->isAdmin() || $user->id === $playlistAlias->getEffectivePlaylist()?->user_id;
     }
 }
