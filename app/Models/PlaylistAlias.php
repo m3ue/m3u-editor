@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Cache;
+use Spatie\Tags\Tag;
 
 class PlaylistAlias extends Model
 {
@@ -22,6 +23,9 @@ class PlaylistAlias extends Model
 
     /** @var array<int>|null Memoised source_category_id list for the series() filter. */
     public ?array $resolvedCategoryIds = null;
+
+    /** @var array<string, array<string, int>> Memoised custom playlist tag name => id maps, keyed by tag type. */
+    private array $resolvedCustomTagIds = [];
 
     protected $casts = [
         'xtream_config' => 'array',
@@ -361,8 +365,30 @@ class PlaylistAlias extends Model
     public function channels(): BelongsToMany|HasManyThrough
     {
         if ($this->custom_playlist_id) {
-            return $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id')
+            $relation = $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id')
                 ->withPivot(['channel_number']);
+
+            // Custom playlists group their channels with per-playlist tags rather than
+            // provider groups, so the filter is matched against the tag the channel carries
+            // (or its provider group name when untagged, which is what the client is shown).
+            $liveGroups = $this->getAllowedLiveGroupNames();
+            $vodGroups = $this->getAllowedVodGroupNames();
+
+            if (! empty($liveGroups)) {
+                $relation->where(function ($query) use ($liveGroups): void {
+                    $query->where('channels.is_vod', true)
+                        ->orWhere(fn ($query) => $this->constrainChannelsToCustomGroups($query, $liveGroups));
+                });
+            }
+
+            if (! empty($vodGroups)) {
+                $relation->where(function ($query) use ($vodGroups): void {
+                    $query->where('channels.is_vod', false)
+                        ->orWhere(fn ($query) => $this->constrainChannelsToCustomGroups($query, $vodGroups));
+                });
+            }
+
+            return $relation;
         }
 
         $relation = $this->hasManyThrough(
@@ -423,7 +449,14 @@ class PlaylistAlias extends Model
     public function series(): BelongsToMany|HasManyThrough
     {
         if ($this->custom_playlist_id) {
-            return $this->belongsToMany(Series::class, 'series_custom_playlist', 'custom_playlist_id', 'series_id', 'custom_playlist_id', 'id');
+            $relation = $this->belongsToMany(Series::class, 'series_custom_playlist', 'custom_playlist_id', 'series_id', 'custom_playlist_id', 'id');
+
+            $allowedCategoryNames = $this->getAllowedCategoryNames();
+            if (! empty($allowedCategoryNames)) {
+                $relation->where(fn ($query) => $this->constrainSeriesToCustomCategories($query, $allowedCategoryNames));
+            }
+
+            return $relation;
         }
 
         $relation = $this->hasManyThrough(
@@ -448,6 +481,114 @@ class PlaylistAlias extends Model
         }
 
         return $relation;
+    }
+
+    /**
+     * Restrict a channels query to the channels whose effective custom playlist group is
+     * allowed: the custom group tag assigned to the channel, or — for channels with no such
+     * tag — the provider group name they fall back to in the M3U and Xtream output.
+     *
+     * Public so the guest panel and Xtream API can reuse the exact same matching rules
+     * against queries that are not built from the channels() relationship.
+     *
+     * @param  array<string>  $allowedNames
+     */
+    public function constrainChannelsToCustomGroups($query, array $allowedNames): void
+    {
+        $tagType = $this->customPlaylistTagType();
+        $tagIds = $this->resolveCustomTagIds($tagType, $allowedNames);
+
+        $query->whereExists(function ($query) use ($tagIds): void {
+            $query->selectRaw('1')
+                ->from('taggables')
+                ->whereColumn('taggables.taggable_id', 'channels.id')
+                ->where('taggables.taggable_type', Channel::class)
+                ->whereIn('taggables.tag_id', $tagIds);
+        })->orWhere(function ($query) use ($allowedNames, $tagType): void {
+            $query->whereNotExists(function ($query) use ($tagType): void {
+                $query->selectRaw('1')
+                    ->from('taggables')
+                    ->join('tags', 'tags.id', '=', 'taggables.tag_id')
+                    ->whereColumn('taggables.taggable_id', 'channels.id')
+                    ->where('taggables.taggable_type', Channel::class)
+                    ->where('tags.type', $tagType);
+            })->whereIn('channels.group', $allowedNames);
+        });
+    }
+
+    /**
+     * Restrict a series query to the series whose effective custom playlist category is
+     * allowed, using the same tag-then-provider-category fallback as the channel filter.
+     *
+     * @param  array<string>  $allowedNames
+     */
+    public function constrainSeriesToCustomCategories($query, array $allowedNames): void
+    {
+        $tagType = $this->customPlaylistTagType().'-category';
+        $tagIds = $this->resolveCustomTagIds($tagType, $allowedNames);
+
+        $query->whereExists(function ($query) use ($tagIds): void {
+            $query->selectRaw('1')
+                ->from('taggables')
+                ->whereColumn('taggables.taggable_id', 'series.id')
+                ->where('taggables.taggable_type', Series::class)
+                ->whereIn('taggables.tag_id', $tagIds);
+        })->orWhere(function ($query) use ($allowedNames, $tagType): void {
+            $query->whereNotExists(function ($query) use ($tagType): void {
+                $query->selectRaw('1')
+                    ->from('taggables')
+                    ->join('tags', 'tags.id', '=', 'taggables.tag_id')
+                    ->whereColumn('taggables.taggable_id', 'series.id')
+                    ->where('taggables.taggable_type', Series::class)
+                    ->where('tags.type', $tagType);
+            })->whereExists(function ($query) use ($allowedNames): void {
+                $query->selectRaw('1')
+                    ->from('categories')
+                    ->whereColumn('categories.id', 'series.category_id')
+                    ->whereIn('categories.name', $allowedNames);
+            });
+        });
+    }
+
+    /**
+     * The Spatie tag type that scopes group tags to this alias's custom playlist.
+     */
+    private function customPlaylistTagType(): ?string
+    {
+        if (! $this->custom_playlist_id) {
+            return null;
+        }
+
+        if (! $this->relationLoaded('customPlaylist')) {
+            $this->load('customPlaylist');
+        }
+
+        return $this->customPlaylist?->uuid;
+    }
+
+    /**
+     * Resolve tag display names to tag IDs.
+     *
+     * Tag names are translatable JSON, so they are matched in PHP rather than in SQL to
+     * keep the lookup locale-aware and portable across the supported database drivers. The
+     * name => id map for a tag type is memoised because the filter is applied per query.
+     *
+     * @param  array<string>  $names
+     * @return array<int>
+     */
+    private function resolveCustomTagIds(?string $tagType, array $names): array
+    {
+        if (! $tagType) {
+            return [];
+        }
+
+        $this->resolvedCustomTagIds[$tagType] ??= Tag::where('type', $tagType)
+            ->select(['id', 'name'])
+            ->get()
+            ->mapWithKeys(fn (Tag $tag): array => [(string) $tag->getAttributeValue('name') => $tag->id])
+            ->all();
+
+        return array_values(array_intersect_key($this->resolvedCustomTagIds[$tagType], array_flip($names)));
     }
 
     public function enabled_channels(): BelongsToMany|HasManyThrough

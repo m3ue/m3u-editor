@@ -107,12 +107,20 @@ class SeriesResource extends Resource
 
             // Alias backed by a custom playlist
             if ($playlist->custom_playlist_id) {
-                return parent::getEloquentQuery()
+                $query = parent::getEloquentQuery()
                     ->with('customPlaylists')
                     ->whereHas('customPlaylists', function ($query) use ($playlist) {
                         $query->where('custom_playlists.id', $playlist->custom_playlist_id);
                     })
                     ->where('enabled', true);
+
+                // Apply series category filter if configured on the alias
+                $allowedCategoryNames = $playlist->getAllowedCategoryNames();
+                if (! empty($allowedCategoryNames)) {
+                    $query->where(fn ($query) => $playlist->constrainSeriesToCustomCategories($query, $allowedCategoryNames));
+                }
+
+                return $query;
             }
         }
 

@@ -7,6 +7,8 @@ use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Tables\CustomPlaylistCategoriesTable;
+use App\Filament\Tables\CustomPlaylistGroupsTable;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
 use App\Models\CustomPlaylist;
@@ -337,6 +339,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 $set('custom_playlist_id', null);
                                 $set('group', null);
                                 $set('group_id', null);
+                                self::resetGroupFilter($set);
                                 // Reset to single-provider config when switching to standard playlist
                                 self::initializeXtreamConfigForPlaylist($set, $state);
                             }
@@ -357,6 +360,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 $set('playlist_id', null);
                                 $set('group', null);
                                 $set('group_id', null);
+                                self::resetGroupFilter($set);
                                 // Initialize multi-provider config when switching to custom playlist
                                 self::initializeXtreamConfigForCustomPlaylist($set, $state);
                             }
@@ -679,14 +683,21 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
             Schemas\Components\Fieldset::make(__('Channel Filter (optional)'))
                 ->columnSpanFull()
-                ->hidden(fn (Get $get): bool => ! $get('playlist_id'))
+                ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id'))
                 ->schema([
+                    Forms\Components\Placeholder::make('custom_playlist_filter_note')
+                        ->label(__('What you can select'))
+                        ->columnSpanFull()
+                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                        ->content(__('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
+
                     Schemas\Components\Fieldset::make(__('Live channel groups'))
                         ->schema([
                             ModalTableSelect::make('group_filter.selected_groups')
                                 ->tableConfiguration(SourceGroupsTable::class)
                                 ->label(__('Allowed live groups'))
                                 ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
                                 ->multiple()
                                 ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
                                 ->tableArguments(fn (Get $get): array => [
@@ -721,12 +732,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     return SourceGroup::displayLabelsForIds($playlistId, 'live', $values);
                                 })
                                 ->afterStateHydrated(function ($component, $state, $record): void {
-                                    if (! is_array($state) || empty($state)) {
+                                    // Hidden components are still hydrated, so bail out for aliases of a
+                                    // custom playlist — their selection is names from the custom playlist's
+                                    // groups, which the Select below owns and no SourceGroup would match.
+                                    if (! $record?->playlist_id || ! is_array($state) || empty($state)) {
                                         return;
                                     }
                                     // Stored as names — convert to IDs for the select component
                                     if (is_string($state[0] ?? null)) {
-                                        $ids = SourceGroup::where('playlist_id', $record?->playlist_id)
+                                        $ids = SourceGroup::where('playlist_id', $record->playlist_id)
                                             ->where('type', 'live')
                                             ->whereIn('name', $state)
                                             ->pluck('id')
@@ -760,11 +774,47 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     $set('group_filter.live_group_order', self::buildLiveGroupSortItems($currentOrder, $selectedNames, $playlistId));
                                 }),
 
+                            // Custom playlist equivalent. Its records are keyed by name, which is
+                            // exactly what group_filter stores, so no id/name translation is needed.
+                            ModalTableSelect::make('group_filter.selected_groups')
+                                ->tableConfiguration(CustomPlaylistGroupsTable::class)
+                                ->label(__('Allowed live groups'))
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                ->multiple()
+                                ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                    'type' => 'live',
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select live groups'))
+                                        ->modalHeading(__('Search live groups'))
+                                        ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_custom_live_groups')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(fn (Set $set) => $set('group_filter.selected_groups', []))
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+
                             Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
                                 ->label(__('Sort groups in custom order'))
                                 ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
                                 ->default(false)
                                 ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
                                 ->live()
                                 ->afterStateUpdated(function ($state, Get $get, Set $set): void {
                                     if (! $state) {
@@ -782,7 +832,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Forms\Components\Repeater::make('group_filter.live_group_order')
                                 ->hiddenLabel()
                                 ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
+                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id') && (bool) $get('group_filter.sort_live_groups_custom'))
                                 ->dehydrated(true)
                                 ->table([
                                     Forms\Components\Repeater\TableColumn::make(__('Group Name')),
@@ -817,6 +867,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableConfiguration(SourceGroupsTable::class)
                                 ->label(__('Allowed VOD groups'))
                                 ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
                                 ->multiple()
                                 ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
                                 ->tableArguments(fn (Get $get): array => [
@@ -848,11 +899,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     return SourceGroup::displayLabelsForIds($playlistId, 'vod', $values);
                                 })
                                 ->afterStateHydrated(function ($component, $state, $record): void {
-                                    if (! is_array($state) || empty($state)) {
+                                    if (! $record?->playlist_id || ! is_array($state) || empty($state)) {
                                         return;
                                     }
                                     if (is_string($state[0] ?? null)) {
-                                        $ids = SourceGroup::where('playlist_id', $record?->playlist_id)
+                                        $ids = SourceGroup::where('playlist_id', $record->playlist_id)
                                             ->where('type', 'vod')
                                             ->whereIn('name', $state)
                                             ->pluck('id')
@@ -876,6 +927,39 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                         ->values()
                                         ->toArray();
                                 }),
+
+                            ModalTableSelect::make('group_filter.selected_vod_groups')
+                                ->tableConfiguration(CustomPlaylistGroupsTable::class)
+                                ->label(__('Allowed VOD groups'))
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                ->multiple()
+                                ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                    'type' => 'vod',
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select VOD groups'))
+                                        ->modalHeading(__('Search VOD groups'))
+                                        ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_custom_vod_groups')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
                         ]),
 
                     Schemas\Components\Fieldset::make(__('Series categories'))
@@ -884,6 +968,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableConfiguration(SourceCategoriesTable::class)
                                 ->label(__('Allowed series categories'))
                                 ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
                                 ->multiple()
                                 ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
                                 ->tableArguments(fn (Get $get): array => [
@@ -921,11 +1006,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                         ->toArray();
                                 })
                                 ->afterStateHydrated(function ($component, $state, $record): void {
-                                    if (! is_array($state) || empty($state)) {
+                                    if (! $record?->playlist_id || ! is_array($state) || empty($state)) {
                                         return;
                                     }
                                     if (is_string($state[0] ?? null)) {
-                                        $ids = SourceCategory::where('playlist_id', $record?->playlist_id)
+                                        $ids = SourceCategory::where('playlist_id', $record->playlist_id)
                                             ->whereIn('name', $state)
                                             ->pluck('id')
                                             ->unique()
@@ -947,9 +1032,54 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                         ->values()
                                         ->toArray();
                                 }),
+
+                            ModalTableSelect::make('group_filter.selected_categories')
+                                ->tableConfiguration(CustomPlaylistCategoriesTable::class)
+                                ->label(__('Allowed series categories'))
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                ->multiple()
+                                ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                ->tableArguments(fn (Get $get): array => [
+                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                ])
+                                ->selectAction(
+                                    fn (Action $action) => $action
+                                        ->label(__('Select series categories'))
+                                        ->modalHeading(__('Search series categories'))
+                                        ->modalDescription(__('Includes categories you created in this custom playlist and the original source playlist categories.'))
+                                        ->modalSubmitActionLabel(__('Confirm selection'))
+                                        ->button(),
+                                )
+                                ->hintAction(
+                                    Action::make('clear_custom_categories')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
+                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
                         ]),
                 ]),
         ];
+    }
+
+    /**
+     * Clear any channel filter selection when the alias is pointed at a different playlist,
+     * since the previously selected group and category names no longer exist there.
+     */
+    protected static function resetGroupFilter(Set $set): void
+    {
+        $set('group_filter.selected_groups', []);
+        $set('group_filter.selected_vod_groups', []);
+        $set('group_filter.selected_categories', []);
+        $set('group_filter.sort_live_groups_custom', false);
+        $set('group_filter.live_group_order', []);
     }
 
     /**

@@ -118,13 +118,21 @@ class VodResource extends Resource
 
             // Alias backed by a custom playlist
             if ($playlist->custom_playlist_id) {
-                return parent::getEloquentQuery()
+                $query = parent::getEloquentQuery()
                     ->with(['epgChannel', 'customPlaylists'])
                     ->whereHas('customPlaylists', function ($query) use ($playlist) {
                         $query->where('custom_playlists.id', $playlist->custom_playlist_id);
                     })
                     ->where('enabled', true)
                     ->where('is_vod', true);
+
+                // Apply VOD group filter if configured on the alias
+                $allowedVodGroups = $playlist->getAllowedVodGroupNames();
+                if (! empty($allowedVodGroups)) {
+                    $query->where(fn ($query) => $playlist->constrainChannelsToCustomGroups($query, $allowedVodGroups));
+                }
+
+                return $query;
             }
         }
 

@@ -476,11 +476,16 @@ class XtreamApiController extends Controller
         // Resolve alias group filter — only needed for the categories list endpoints.
         // Channel/series stream queries are filtered automatically via the PlaylistAlias
         // channels() / series() relationships, so no per-query wiring is required there.
-        $aliasLiveGroupFilter = ($playlist instanceof PlaylistAlias && $playlist->playlist_id)
+        // For standard playlists these are provider group names matched against
+        // group_internal; for custom playlists they are the displayed category names.
+        $aliasLiveGroupFilter = $playlist instanceof PlaylistAlias
             ? $playlist->getAllowedLiveGroupNames()
             : [];
-        $aliasVodGroupFilter = ($playlist instanceof PlaylistAlias && $playlist->playlist_id)
+        $aliasVodGroupFilter = $playlist instanceof PlaylistAlias
             ? $playlist->getAllowedVodGroupNames()
+            : [];
+        $aliasCategoryFilter = $playlist instanceof PlaylistAlias
+            ? $playlist->getAllowedCategoryNames()
             : [];
 
         $baseUrl = ProxyFacade::getBaseUrl();
@@ -1264,6 +1269,10 @@ class XtreamApiController extends Controller
 
                     return $cat;
                 }, $liveCategories);
+
+                // Custom playlist categories are the displayed tag/group names, so the alias
+                // filter is applied to the built list rather than to the underlying queries.
+                $liveCategories = self::filterCategoriesByName($liveCategories, $aliasLiveGroupFilter);
             } else {
                 // For regular Playlist and MergedPlaylist, use the groups() relationship
                 $groups = $playlist->groups()
@@ -1374,6 +1383,8 @@ class XtreamApiController extends Controller
 
                     return $cat;
                 }, $vodCategories);
+
+                $vodCategories = self::filterCategoriesByName($vodCategories, $aliasVodGroupFilter);
             } else {
                 // For regular Playlist and MergedPlaylist, use the groups() relationship
                 $vodGroups = $playlist->groups()
@@ -1483,6 +1494,8 @@ class XtreamApiController extends Controller
 
                     return $cat;
                 }, $seriesCategories);
+
+                $seriesCategories = self::filterCategoriesByName($seriesCategories, $aliasCategoryFilter);
             } else {
                 // Get categories from series only — the series() relationship on PlaylistAlias
                 // automatically applies any alias category filter, so no extra scoping needed.
@@ -2062,6 +2075,25 @@ class XtreamApiController extends Controller
         return app()->call(EpgGenerateController::class, [
             'uuid' => $playlist->uuid,
         ]);
+    }
+
+    /**
+     * Restrict a built category list to the names allowed by an alias's channel filter.
+     *
+     * @param  array<int, array<string, mixed>>  $categories
+     * @param  array<string>  $allowedNames  An empty list means no restriction.
+     * @return array<int, array<string, mixed>>
+     */
+    private static function filterCategoriesByName(array $categories, array $allowedNames): array
+    {
+        if (empty($allowedNames)) {
+            return $categories;
+        }
+
+        return array_values(array_filter(
+            $categories,
+            fn (array $category): bool => in_array($category['category_name'], $allowedNames, true)
+        ));
     }
 
     /**
