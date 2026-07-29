@@ -266,6 +266,11 @@ return [
         // string with only ? placeholders — no interpolated user input.
         '8a7c4d000066',
         '21366c44e0ab',
+        // PR #1344 (custom playlist alias group order) inserted a block above this call,
+        // splitting it out of its previous fluent chain into `$query->orderByRaw(...)` on
+        // its own line. Same call, same hardcoded-SQL/bound-placeholder guarantee — the
+        // finding text changed enough to produce a new hash.
+        'f90188eb168b',
 
         // VodContentSearchTool: $genreExpr comes from jsonExtract() which
         // interpolates a hardcoded column name ('genre') only; $like comes
