@@ -15,6 +15,7 @@
 use App\Filament\Resources\PlaylistAliases\Pages\CreatePlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Tables\CustomPlaylistGroupsTable;
+use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -359,6 +360,124 @@ describe('CustomPlaylist filter option lists', function () {
     });
 });
 
+// ── Custom live group ordering ───────────────────────────────────────────────
+
+describe('getChannelQuery custom playlist live group ordering', function () {
+    it('orders groups by the alias custom order, overriding tag order', function () {
+        // Tag order_column would otherwise put News (created first) before Sports.
+        $news = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'CNN']);
+        $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'ESPN']);
+        tagChannels($this->customPlaylist, 'News', [$news]);
+        tagChannels($this->customPlaylist, 'Sports', [$sports]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+            'selected_groups' => ['News', 'Sports'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports', 'News'],
+        ]);
+
+        $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
+
+        expect($ids)->toBe([$sports->id, $news->id]);
+    });
+
+    it('ignores the custom order when the toggle is off', function () {
+        $news = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'CNN']);
+        $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'ESPN']);
+        tagChannels($this->customPlaylist, 'News', [$news]);
+        tagChannels($this->customPlaylist, 'Sports', [$sports]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+            'selected_groups' => ['News', 'Sports'],
+            'sort_live_groups_custom' => false,
+            'live_group_order' => ['Sports', 'News'],
+        ]);
+
+        $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
+
+        expect($ids)->toBe([$news->id, $sports->id]);
+    });
+
+    it('ranks untagged channels by the provider group name they fall back to', function () {
+        $tagged = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'ESPN']);
+        tagChannels($this->customPlaylist, 'Sports', [$tagged]);
+        $untagged = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, [
+            'title' => 'CNN',
+            'group' => 'News',
+        ]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['News', 'Sports'],
+        ]);
+
+        $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
+
+        expect($ids)->toBe([$untagged->id, $tagged->id]);
+    });
+
+    it('places groups outside the custom order after the ordered ones', function () {
+        $news = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'CNN']);
+        $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'ESPN']);
+        $comedy = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'Comedy Central']);
+        tagChannels($this->customPlaylist, 'News', [$news]);
+        tagChannels($this->customPlaylist, 'Sports', [$sports]);
+        tagChannels($this->customPlaylist, 'Comedy', [$comedy]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports'],
+        ]);
+
+        $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
+
+        // Sports first; the rest keep their tag ordering behind it.
+        expect($ids[0])->toBe($sports->id)
+            ->and(array_slice($ids, 1))->toBe([$news->id, $comedy->id]);
+    });
+
+    it('labels M3U groups with the custom tag rather than the provider group', function () {
+        // getChannelQuery already resolved custom_group_name for an alias, but the writer
+        // only applied it when $type === 'custom', so an alias emitted the provider group
+        // while the Xtream API for the same alias reported the tag.
+        $channel = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, [
+            'title' => 'ESPN',
+            'group' => 'Provider Sports',
+        ]);
+        tagChannels($this->customPlaylist, 'My Sports', [$channel]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist);
+
+        $content = $this->get("/{$alias->uuid}/playlist.m3u")->assertOk()->streamedContent();
+
+        expect($content)->toContain('group-title="My Sports"')
+            ->and($content)->not->toContain('group-title="Provider Sports"');
+    });
+
+    it('emits M3U group-titles in the alias custom order', function () {
+        $news = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'CNN']);
+        $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist, ['title' => 'ESPN']);
+        tagChannels($this->customPlaylist, 'News', [$news]);
+        tagChannels($this->customPlaylist, 'Sports', [$sports]);
+
+        $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports', 'News'],
+        ]);
+
+        $response = $this->get("/{$alias->uuid}/playlist.m3u");
+        $response->assertOk();
+
+        $content = $response->streamedContent();
+        $sportsPos = strpos($content, 'group-title="Sports"');
+        $newsPos = strpos($content, 'group-title="News"');
+
+        expect($sportsPos)->not->toBeFalse()
+            ->and($newsPos)->not->toBeFalse()
+            ->and($sportsPos)->toBeLessThan($newsPos);
+    });
+});
+
 // ── Xtream API category listings ─────────────────────────────────────────────
 
 describe('Xtream API categories for a filtered custom playlist alias', function () {
@@ -549,6 +668,46 @@ it('renders an empty picker table when the custom playlist cannot be resolved', 
         'tableArguments' => ['custom_playlist_id' => 0, 'type' => 'live'],
         'state' => [],
     ])->assertSuccessful();
+});
+
+it('saves a custom group order from the alias edit form for a custom playlist', function () {
+    $this->actingAs($this->user);
+
+    $news = addCustomChannel($this->user, $this->playlist, $this->customPlaylist);
+    $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist);
+    tagChannels($this->customPlaylist, 'News', [$news]);
+    tagChannels($this->customPlaylist, 'Sports', [$sports]);
+
+    $alias = makeCustomAlias($this->user, $this->customPlaylist, [
+        'selected_groups' => ['News', 'Sports'],
+    ], [
+        'xtream_config' => [[
+            'url' => 'http://example.com:8080',
+            'username' => 'alias-user',
+            'password' => 'alias-pass',
+        ]],
+    ]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSuccessful()
+        ->fillForm([
+            'group_filter' => [
+                'selected_groups' => ['News', 'Sports'],
+                'sort_live_groups_custom' => true,
+            ],
+        ])
+        // Replace the auto-seeded order outright — this is what dragging a row does.
+        ->set('data.group_filter.live_group_order', [
+            'a' => ['name' => 'Sports', 'label' => 'Sports'],
+            'b' => ['name' => 'News', 'label' => 'News'],
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $alias->refresh();
+
+    expect($alias->hasCustomLiveGroupSort())->toBeTrue()
+        ->and($alias->getLiveGroupSortOrder())->toBe(['Sports', 'News']);
 });
 
 it('keeps an existing custom playlist filter when the edit form is saved untouched', function () {

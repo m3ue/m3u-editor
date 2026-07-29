@@ -807,14 +807,21 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                         ->modalSubmitActionLabel(__('Clear'))
                                 )
                                 ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
-                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values))
+                                ->live()
+                                ->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                    // Custom playlist selections are already names, so no
+                                    // playlist id is needed to resolve them.
+                                    $selectedNames = self::liveGroupSortSelectedNames(is_array($state) ? $state : [], null);
+                                    $currentOrder = self::liveGroupSortNames($get('group_filter.live_group_order'));
+                                    $set('group_filter.live_group_order', self::buildLiveGroupSortItems($currentOrder, $selectedNames, null));
+                                }),
 
                             Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
                                 ->label(__('Sort groups in custom order'))
                                 ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
                                 ->default(false)
                                 ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
                                 ->live()
                                 ->afterStateUpdated(function ($state, Get $get, Set $set): void {
                                     if (! $state) {
@@ -832,7 +839,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Forms\Components\Repeater::make('group_filter.live_group_order')
                                 ->hiddenLabel()
                                 ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('playlist_id') && (bool) $get('group_filter.sort_live_groups_custom'))
+                                ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
                                 ->dehydrated(true)
                                 ->table([
                                     Forms\Components\Repeater\TableColumn::make(__('Group Name')),
