@@ -143,7 +143,7 @@ class PlaylistGenerateController extends Controller
                     if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
                         $channelNo = ++$channelNumber;
                     }
-                    if ($type === 'custom') {
+                    if ($isCustomContext) {
                         // We selected the custom tag name as `custom_group_name` when building the query
                         // It's a JSON field with translations, so decode and extract the 'en' locale
                         if (! empty($channel->custom_group_name)) {
@@ -754,8 +754,37 @@ class PlaylistGenerateController extends Controller
                 ->selectRaw(
                     '(SELECT t.name FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1) as custom_group_name',
                     [Channel::class, $playlistUuid]
-                )
-                ->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
+                );
+
+            // Per-alias custom live group ordering (optional), ranked by the group the
+            // client is actually shown: the channel's custom tag, or the provider group
+            // name it falls back to when untagged. Groups outside the saved order (and
+            // VOD groups) fall through to the playlist's own ordering below.
+            if ($playlist instanceof PlaylistAlias && $playlist->hasCustomLiveGroupSort()) {
+                $order = array_values($playlist->getLiveGroupSortOrder());
+                $grammar = $playlist->getConnection()->getQueryGrammar();
+
+                // Tag names are translatable JSON, so let the grammar emit the driver's
+                // own extraction (json_extract on SQLite, ->> on PostgreSQL).
+                $effectiveGroupName = sprintf(
+                    'COALESCE((SELECT %s FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ? ORDER BY t.order_column ASC LIMIT 1), %s)',
+                    $grammar->wrap('t.name->en'),
+                    $grammar->wrap('channels.group'),
+                );
+
+                $whenClauses = [];
+                foreach ($order as $index => $groupName) {
+                    $whenClauses[] = "WHEN ? THEN {$index}";
+                }
+                $elseValue = count($order);
+
+                $query->orderByRaw(
+                    "CASE {$effectiveGroupName} ".implode(' ', $whenClauses)." ELSE {$elseValue} END",
+                    array_merge([Channel::class, $playlistUuid], $order)
+                );
+            }
+
+            $query->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
                 ->orderByRaw('COALESCE(channel_custom_playlist.sort, channels.sort)')
                 ->orderByRaw('COALESCE(channel_custom_playlist.channel_number, channels.channel)')
                 ->orderBy('channels.title');
