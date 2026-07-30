@@ -379,13 +379,18 @@ class DvrSchedulerService
                 return;
             }
 
-            // Manual recordings have no canonical "title" until we resolve from the
-            // channel below — derive series_key from the channel display name when
-            // available, falling back to a per-rule key so dedup is at least scoped.
+            // Manual rules scheduled via the Xtream API (schedule_dvr) always carry the
+            // real programme title in series_title — the TV app only creates these when
+            // recording a specific, known EPG entry (see XtreamApiController::scheduleDvr()).
+            // The Filament admin form has no series_title field for Manual rules (a bare
+            // channel + time window, no known show), so only fall back to the channel's
+            // display name when it's genuinely absent. Getting this wrong means the
+            // recording's title — and everything keyed off it, including TMDB/TVMaze
+            // metadata matching and series-based retention grouping — silently uses the
+            // channel/station name instead of the actual show.
             $channel = $rule->channel;
-            $title = $channel
-                ? ($channel->title_custom ?? $channel->title ?? 'Manual Recording')
-                : 'Manual Recording';
+            $title = $rule->series_title
+                ?: ($channel ? ($channel->title_custom ?? $channel->title ?? 'Manual Recording') : 'Manual Recording');
             $seriesKey = SeriesKey::for($setting->id, $title) ?? "setting:{$setting->id}|rule:{$rule->id}";
             $normalizedTitle = SeriesKey::normalize($title) ?: null;
 

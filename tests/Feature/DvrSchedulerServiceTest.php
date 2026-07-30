@@ -31,6 +31,7 @@ use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\User;
 use App\Services\DvrSchedulerService;
+use App\Support\SeriesKey;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 
@@ -265,6 +266,57 @@ it('creates a scheduled recording for a manual rule within the lookahead window'
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->title)
         ->toBe('Manual Recording');
+});
+
+it('uses the channel display name when a manual rule has no series_title', function () {
+    $channel = Channel::factory()
+        ->for($this->setting->playlist)
+        ->create(['title_custom' => 'News 24']);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($channel, 'channel')
+        ->create([
+            'type' => DvrRuleType::Manual,
+            'series_title' => null,
+            'manual_start' => now()->addMinutes(10),
+            'manual_end' => now()->addMinutes(70),
+        ]);
+
+    $this->service->matchAndSchedule(30);
+
+    $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->first();
+    expect($recording->title)->toBe('News 24');
+});
+
+it('uses the rule\'s series_title (the real programme title) over the channel name for a manual rule', function () {
+    // Regression: XtreamApiController::scheduleDvr() (used by the TV app when
+    // recording a specific EPG entry) always stores the real programme title on
+    // series_title. Before this fix, the scheduler ignored it and derived the
+    // recording's title from the channel/station name instead — breaking TMDB/
+    // TVMaze metadata matching (DvrMetadataEnricherService searches by title)
+    // and series-based retention grouping, both keyed off the wrong name.
+    $channel = Channel::factory()
+        ->for($this->setting->playlist)
+        ->create(['title_custom' => 'ABC NETWORK']);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($channel, 'channel')
+        ->create([
+            'type' => DvrRuleType::Manual,
+            'series_title' => 'Breaking Bad',
+            'manual_start' => now()->addMinutes(10),
+            'manual_end' => now()->addMinutes(70),
+        ]);
+
+    $this->service->matchAndSchedule(30);
+
+    $recording = DvrRecording::where('dvr_recording_rule_id', $rule->id)->first();
+    expect($recording->title)->toBe('Breaking Bad');
+    expect($recording->series_key)->toBe(SeriesKey::for($this->setting->id, 'Breaking Bad'));
 });
 
 it('creates a scheduled recording for a manual rule more than 30 minutes in the future', function () {

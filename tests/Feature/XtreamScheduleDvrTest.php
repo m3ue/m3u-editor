@@ -115,6 +115,11 @@ it('materialises a Scheduled DvrRecording in the same request via the boot event
     expect($recording)->not->toBeNull('Manual rule should immediately produce a DvrRecording row');
     expect($recording->status)->toBe(DvrRecordingStatus::Scheduled);
     expect($recording->channel_id)->toBe($this->channel->id);
+    // Regression: the recording's title must be the real programme title the TV
+    // app supplied ("Late Show"), not the channel/station name — the scheduler
+    // used to ignore the rule's series_title here, which broke TMDB/TVMaze
+    // metadata matching and series-based retention grouping.
+    expect($recording->title)->toBe('Late Show');
     expect($recording->scheduled_start->equalTo($rule->manual_start->copy()->subSeconds($rule->start_early_seconds)))->toBeTrue();
     expect($recording->scheduled_end->equalTo($rule->manual_end->copy()->addSeconds($rule->end_late_seconds)))->toBeTrue();
 });
