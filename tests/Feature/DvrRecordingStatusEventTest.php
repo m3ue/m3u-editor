@@ -13,6 +13,7 @@ use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -110,7 +111,7 @@ it('broadcasts a deleted status when the recording is removed', function () {
     );
 });
 
-it('broadcasts on the private channel scoped to the playlist uuid', function () {
+it('broadcasts on the owner and admin channels scoped to the playlist uuid', function () {
     $recording = DvrRecording::factory()
         ->for($this->user)
         ->for($this->dvrSetting)
@@ -119,13 +120,38 @@ it('broadcasts on the private channel scoped to the playlist uuid', function () 
     $recording->save();
 
     $event = DvrRecordingStatusEvent::fromRecording($recording->fresh());
-    $channels = $event->broadcastOn();
+    $channels = collect($event->broadcastOn())->pluck('name');
 
-    expect($channels)->toHaveCount(1);
-    expect($channels[0]->name)->toBe(
-        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}"
+    expect($channels)->toHaveCount(2);
+    expect($channels)->toContain(
+        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}",
+        "private-tv.{$this->playlist->getMorphClass()}-admin.{$this->playlist->uuid}",
     );
     expect($event->broadcastAs())->toBe('dvr.status');
+});
+
+it('also broadcasts on every entitled PlaylistAuth channel, not just the owner channel', function () {
+    // Regression: a TV session logged in via PlaylistAuth credentials (rather
+    // than owner_auth) subscribes only to its own `tv.{type}.{uuid}.{authId}`
+    // channel — never the bare owner channel. Before this fix, dvr.status
+    // pushes only went to the owner channel, so such sessions never saw the
+    // EPG "recording" dot or DVR status label update from the push alone.
+    $playlistAuth = PlaylistAuth::factory()->for($this->user)->create(['enabled' => true]);
+    $playlistAuth->assignTo($this->playlist);
+
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->for($this->channel)
+        ->make(['status' => DvrRecordingStatus::Scheduled]);
+    $recording->save();
+
+    $event = DvrRecordingStatusEvent::fromRecording($recording->fresh());
+    $channels = collect($event->broadcastOn())->pluck('name');
+
+    expect($channels)->toContain(
+        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}"
+    );
 });
 
 it('serializes the wire payload with snake_case keys matching DvrRecording.fromXtream on the client', function () {

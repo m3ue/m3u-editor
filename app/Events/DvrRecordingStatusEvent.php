@@ -2,6 +2,7 @@
 
 namespace App\Events;
 
+use App\Events\Concerns\BroadcastsToEntitledTvChannels;
 use App\Models\DvrRecording;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
@@ -14,16 +15,19 @@ use Illuminate\Queue\SerializesModels;
  * changes (scheduled, recording, completed, failed, cancelled), so clients
  * can mark channels as recording live instead of polling get_dvr_recordings.
  *
- * Reuses the same `tv.{type}.{uuid}` channel as TvNotificationEvent — the TV
- * app is already subscribed to it after login, so no new subscription or
- * broadcasting/auth change is needed.
+ * Broadcasts on the same channel set as TvNotificationEvent's default (null
+ * playlistAuthId) branch — the owner/admin channels plus one channel per
+ * entitled PlaylistAuth/alias — since a TV session logged in via PlaylistAuth
+ * credentials subscribes only to its own `tv.{type}.{uuid}.{authId}` channel,
+ * not the bare owner channel.
  */
 class DvrRecordingStatusEvent implements ShouldBroadcast
 {
-    use Dispatchable, InteractsWithSockets, SerializesModels;
+    use BroadcastsToEntitledTvChannels, Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public readonly string $notifiableType,
+        private readonly int|string $notifiableId,
         public readonly string $notifiableUuid,
         public readonly string $uuid,
         public readonly string $status,
@@ -60,6 +64,7 @@ class DvrRecordingStatusEvent implements ShouldBroadcast
 
         return new self(
             notifiableType: $playlist->getMorphClass(),
+            notifiableId: $playlist->getKey(),
             notifiableUuid: $playlist->uuid,
             uuid: $recording->uuid,
             status: $status,
@@ -76,7 +81,7 @@ class DvrRecordingStatusEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
-        return [new PrivateChannel("tv.{$this->notifiableType}.{$this->notifiableUuid}")];
+        return self::entitledTvChannels($this->notifiableType, $this->notifiableId, $this->notifiableUuid);
     }
 
     public function broadcastAs(): string

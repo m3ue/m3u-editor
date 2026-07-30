@@ -2,7 +2,7 @@
 
 namespace App\Events;
 
-use App\Models\PlaylistAuth;
+use App\Events\Concerns\BroadcastsToEntitledTvChannels;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -11,7 +11,7 @@ use Illuminate\Queue\SerializesModels;
 
 class TvNotificationEvent implements ShouldBroadcast
 {
-    use Dispatchable, InteractsWithSockets, SerializesModels;
+    use BroadcastsToEntitledTvChannels, Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public readonly string $id,
@@ -34,43 +34,20 @@ class TvNotificationEvent implements ShouldBroadcast
     {
         $type = $this->notifiableType;
         $uuid = $this->notifiableUuid;
-        $adminChannel = new PrivateChannel("tv.{$type}-admin.{$uuid}");
 
         if ($this->adminOnly) {
-            return [$adminChannel];
+            return [new PrivateChannel("tv.{$type}-admin.{$uuid}")];
         }
 
         if ($this->playlistAuthId !== null) {
             return [new PrivateChannel("tv.{$type}.{$uuid}.{$this->playlistAuthId}")];
         }
 
-        $channels = [
-            new PrivateChannel("tv.{$type}.{$uuid}"),
-            $adminChannel,
-        ];
-
         // An entitled auth may be assigned directly to this model, or to a PlaylistAlias
         // wrapping it — in the latter case it only ever subscribed to its alias's own
         // channel, so the channel must be built from whichever model the auth is actually
         // assigned to, not from this broadcast's own $type/$uuid.
-        $entitled = PlaylistAuth::query()
-            ->entitledToNotificationRecipient($type, $this->notifiableId)
-            ->with('assignedPlaylist.authenticatable')
-            ->get();
-
-        foreach ($entitled as $playlistAuth) {
-            $authenticatable = $playlistAuth->assignedPlaylist?->authenticatable;
-
-            if (! $authenticatable) {
-                continue;
-            }
-
-            $channels[] = new PrivateChannel(
-                "tv.{$authenticatable->getMorphClass()}.{$authenticatable->uuid}.{$playlistAuth->id}"
-            );
-        }
-
-        return $channels;
+        return self::entitledTvChannels($type, $this->notifiableId, $uuid);
     }
 
     public function broadcastAs(): string
