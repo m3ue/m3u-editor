@@ -162,7 +162,12 @@ class DvrRetentionService
      */
     private function enforceRetentionDays(DvrSetting $setting): void
     {
-        $cutoff = now()->subDays($setting->retention_days);
+        // Formatted to match DvrRecording's offset-suffixed $dateFormat
+        // ('Y-m-d H:i:sP') — a bare Carbon here would bind via the query
+        // grammar's offset-less format instead, an exact-text mismatch
+        // against the stored value on SQLite and ambiguous on Postgres if
+        // the session timezone isn't UTC.
+        $cutoff = now()->subDays($setting->retention_days)->format('Y-m-d H:i:sP');
 
         $old = DvrRecording::where('dvr_setting_id', $setting->id)
             ->where('status', DvrRecordingStatus::Completed->value)

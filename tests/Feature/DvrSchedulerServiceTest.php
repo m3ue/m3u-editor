@@ -779,9 +779,13 @@ it('all mode records every programme regardless of prior S/E recordings', functi
 
     $this->service->matchAndSchedule(30);
 
-    // All mode ignores S/E dedup — re-run is recorded
+    // All mode ignores S/E dedup — re-run is recorded.
+    // programme_start is formatted to match DvrRecording's offset-suffixed
+    // $dateFormat ('Y-m-d H:i:sP') — a bare Carbon here would bind via the
+    // query grammar's offset-less format instead, an exact-text mismatch
+    // against the stored value on SQLite.
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
-        ->where('programme_start', $rerun->start_time)
+        ->where('programme_start', $rerun->start_time->format('Y-m-d H:i:sP'))
         ->exists())->toBeTrue();
 });
 

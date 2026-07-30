@@ -19,6 +19,16 @@ class DvrRecordingRule extends Model
     use HasFactory;
 
     /**
+     * Preserve timezone offset when serializing Carbon instances for storage.
+     *
+     * Laravel's default `Y-m-d H:i:s` format discards the timezone, which is
+     * safe for `timestamp without time zone` columns but causes PostgreSQL to
+     * misinterpret local-time values as UTC when writing to `timestamptz`
+     * columns, shifting them by the full UTC offset (e.g. +4h for EDT).
+     */
+    protected $dateFormat = 'Y-m-d H:i:sP';
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

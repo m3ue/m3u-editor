@@ -18,6 +18,7 @@ use App\Support\SeriesKey;
 use Closure;
 use Exception;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -140,6 +141,38 @@ class DvrSchedulerService
                 }
             )
         );
+    }
+
+    /**
+     * Current instant as an explicit-offset string, formatted identically to
+     * DvrRecording/DvrRecordingRule's `$dateFormat` ('Y-m-d H:i:sP').
+     *
+     * Passing a bare Carbon here would go through the query grammar's own
+     * (offset-less) date format when bound — not the model's — so a PG session
+     * whose timezone isn't UTC would misread it, and a plain string comparison
+     * against the model's offset-suffixed stored value would be inconsistent.
+     * Matching the model's format exactly keeps read and write comparisons
+     * unambiguous regardless of DB engine or session timezone.
+     */
+    private function nowUtc(): string
+    {
+        return Carbon::now('UTC')->format('Y-m-d H:i:sP');
+    }
+
+    /**
+     * Format a Carbon instant identically to DvrRecording/DvrRecordingRule's
+     * `$dateFormat` ('Y-m-d H:i:sP'), for ad-hoc `where()` comparisons against
+     * those models' datetime columns (programme_start, manual_start, etc.).
+     *
+     * A raw Carbon passed as a bare where() value is formatted using the query
+     * grammar's own (offset-less) date format when bound, not the model's —
+     * an exact-text mismatch against the offset-suffixed stored value that
+     * silently breaks equality comparisons on SQLite, and is ambiguous on
+     * Postgres if the session timezone isn't UTC.
+     */
+    private function forCompare(\DateTimeInterface $value): string
+    {
+        return Carbon::instance($value)->format('Y-m-d H:i:sP');
     }
 
     /**
@@ -391,7 +424,7 @@ class DvrSchedulerService
 
             // Check dedup — only block active recordings, not Cancelled/Failed.
             $exists = DvrRecording::where('series_key', $seriesKey)
-                ->where('programme_start', $rule->manual_start)
+                ->where('programme_start', $this->forCompare($rule->manual_start))
                 ->whereIn('status', [
                     DvrRecordingStatus::Scheduled,
                     DvrRecordingStatus::Recording,
@@ -483,7 +516,7 @@ class DvrSchedulerService
             $normalizedTitle = SeriesKey::normalize($title) ?: null;
 
             $exists = DvrRecording::where('series_key', $seriesKey)
-                ->where('programme_start', $slotStart)
+                ->where('programme_start', $this->forCompare($slotStart))
                 ->whereIn('status', [
                     DvrRecordingStatus::Scheduled,
                     DvrRecordingStatus::Recording,
@@ -603,7 +636,7 @@ class DvrSchedulerService
                     $q->where('programme_uid', $programmeUid)
                         ->orWhere(function (Builder $q) use ($programme): void {
                             $q->whereNull('programme_uid')
-                                ->where('programme_start', $programme->start_time)
+                                ->where('programme_start', $this->forCompare($programme->start_time))
                                 ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
                         });
                 })
@@ -693,7 +726,7 @@ class DvrSchedulerService
      */
     private function triggerPendingRecordings(): void
     {
-        $now = now();
+        $now = $this->nowUtc();
 
         DvrRecording::scheduled()
             ->where('scheduled_end', '<=', $now)
@@ -751,7 +784,7 @@ class DvrSchedulerService
     private function stopExpiredRecordings(): void
     {
         $expired = DvrRecording::recording()
-            ->where('scheduled_end', '<=', now())
+            ->where('scheduled_end', '<=', $this->nowUtc())
             ->get();
 
         foreach ($expired as $recording) {
@@ -844,13 +877,13 @@ class DvrSchedulerService
                 $q->where('programme_uid', $programmeUid)
                     ->orWhere(function (Builder $q) use ($programme): void {
                         $q->whereNull('programme_uid')
-                            ->where('programme_start', $programme->start_time)
+                            ->where('programme_start', $this->forCompare($programme->start_time))
                             ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
                     });
             })
             ->where('status', DvrRecordingStatus::Failed)
             ->where('user_cancelled', false)
-            ->where('scheduled_end', '>', now())
+            ->where('scheduled_end', '>', $this->nowUtc())
             ->where('attempt_count', '<', $maxAttempts);
 
         if ($seriesKey !== null) {
@@ -914,13 +947,13 @@ class DvrSchedulerService
                 $q->where('programme_uid', $programmeUid)
                     ->orWhere(function (Builder $q) use ($programme): void {
                         $q->whereNull('programme_uid')
-                            ->where('programme_start', $programme->start_time)
+                            ->where('programme_start', $this->forCompare($programme->start_time))
                             ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
                     });
             })
             ->where('status', DvrRecordingStatus::Failed)
             ->where('user_cancelled', false)
-            ->where('scheduled_end', '>', now())
+            ->where('scheduled_end', '>', $this->nowUtc())
             ->where('attempt_count', '>=', $maxAttempts);
 
         $seriesKey = SeriesKey::for($setting->id, $programme->title);
@@ -961,7 +994,7 @@ class DvrSchedulerService
                 $q->where('programme_uid', $programmeUid)
                     ->orWhere(function (Builder $q) use ($programme): void {
                         $q->whereNull('programme_uid')
-                            ->where('programme_start', $programme->start_time)
+                            ->where('programme_start', $this->forCompare($programme->start_time))
                             ->where('epg_programme_data->epg_channel_id', $programme->epg_channel_id);
                     });
             })
