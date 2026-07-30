@@ -3391,7 +3391,15 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * Delete a completed or failed DVR recording.
+     * Delete a completed, failed, cancelled, or post-processing DVR recording.
+     *
+     * PostProcessing is included alongside the terminal statuses because
+     * DvrRecorderService::cancel() now routes a recording that had already
+     * captured footage through post-processing (so a "kept" cancelled
+     * recording ends up Completed/playable) rather than marking it Cancelled
+     * immediately — the TV app's "Delete recording" choice calls cancel then
+     * delete back-to-back, so by the time this runs such a recording is
+     * already in PostProcessing, not Cancelled.
      */
     private function deleteDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
     {
@@ -3409,7 +3417,12 @@ class XtreamApiController extends Controller
 
         $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->where('uuid', $uuid)
-            ->whereIn('status', [DvrRecordingStatus::Completed, DvrRecordingStatus::Failed, DvrRecordingStatus::Cancelled])
+            ->whereIn('status', [
+                DvrRecordingStatus::Completed,
+                DvrRecordingStatus::Failed,
+                DvrRecordingStatus::Cancelled,
+                DvrRecordingStatus::PostProcessing,
+            ])
             ->first();
 
         if (! $recording) {

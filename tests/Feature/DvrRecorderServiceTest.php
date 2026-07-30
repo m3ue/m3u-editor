@@ -7,11 +7,13 @@
  * - Recording uses the raw source URL (url_custom ?? url) — no double-proxying
  * - start() stores proxy_network_id, sets status to Recording, and sends a bell notification
  * - stop() preserves proxy_network_id (downloader needs it) and transitions to PostProcessing
- * - cancel() calls proxy stop AND cleanup (no post-processing for cancelled)
+ * - cancel() on a recording with captured footage routes through post-processing like stop()
+ * - cancel() on a recording with no footage (never started) marks Cancelled immediately
  * - DvrSetting use_proxy defaults to false
  */
 
 use App\Enums\DvrRecordingStatus;
+use App\Jobs\PostProcessDvrRecording;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
@@ -161,7 +163,12 @@ it('calls proxy stop and transitions to PostProcessing while preserving proxy_ne
     expect($fresh->actual_end)->toBeNull();
 });
 
-it('cancel() calls proxy stop but does NOT cleanup (let callback handle it)', function () {
+it('cancel() on a recording with captured footage stops the proxy and routes through post-processing instead of marking Cancelled directly', function () {
+    // "Keep recording" in the TV app: a recording that had already started has real
+    // footage worth keeping, so cancel() preserves it through the same stop() →
+    // post-processing pipeline as a natural completion — it ends up Completed
+    // (playable), not stuck as Cancelled with no file. user_cancelled and
+    // error_message survive as a "stopped early" marker.
     $recording = makeScheduledRecording();
     $networkId = $recording->uuid;
     $recording->update([
@@ -177,8 +184,36 @@ it('cancel() calls proxy stop but does NOT cleanup (let callback handle it)', fu
     app(DvrRecorderService::class)->cancel($recording);
 
     $fresh = $recording->fresh();
+    expect($fresh->status)->toBe(DvrRecordingStatus::PostProcessing);
+    // proxy_network_id is preserved through post-processing — the HLS downloader needs it.
+    expect($fresh->proxy_network_id)->toBe($networkId);
+    expect($fresh->user_cancelled)->toBeTrue();
+    expect($fresh->error_message)->toBe('Cancelled by user');
+    expect($fresh->actual_end)->not->toBeNull();
+
+    Queue::assertPushed(PostProcessDvrRecording::class);
+});
+
+it('cancel() on a recording that never started (no footage) marks it Cancelled immediately with no post-processing', function () {
+    // Scheduled but never started: there's no footage to preserve, so this stays
+    // the original immediate-Cancelled behavior — nothing for the proxy to stop
+    // and nothing for post-processing to do.
+    $recording = makeScheduledRecording();
+    expect($recording->status)->toBe(DvrRecordingStatus::Scheduled);
+    expect($recording->proxy_network_id)->toBeNull();
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldNotReceive('stopDvrBroadcast');
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->cancel($recording);
+
+    $fresh = $recording->fresh();
     expect($fresh->status)->toBe(DvrRecordingStatus::Cancelled);
     expect($fresh->proxy_network_id)->toBeNull();
+    expect($fresh->user_cancelled)->toBeTrue();
+
+    Queue::assertNotPushed(PostProcessDvrRecording::class);
 });
 
 // ── use_proxy default ─────────────────────────────────────────────────────────
