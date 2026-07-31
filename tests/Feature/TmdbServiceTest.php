@@ -132,6 +132,14 @@ it('preserves title words while stripping standalone quality tokens from TV seri
 })->with([
     'SD inside title' => ['Wednesday HD', 'Wednesday'],
     'HD inside title' => ['Mehdi SD', 'Mehdi'],
+    'quality at beginning with slash' => ['HD/Title', 'Title'],
+    'quality in middle with slashes' => ['Title/HD/Other', 'Title Other'],
+    'parenthesized quality at end' => ['Title (HD)', 'Title'],
+    'quality at beginning with whitespace' => ['HD Title', 'Title'],
+    'quality in middle with repeated whitespace' => ['Title   SD   Other', 'Title Other'],
+    'quality at end with hyphen' => ['Title-HD', 'Title'],
+    'quality with punctuation delimiters' => ['Title, HD: Other', 'Title Other'],
+    'only quality tokens' => ['HD / SD - 4K', ''],
 ]);
 
 it('prefers an exact full localized TV title after simplifying the API query', function () {
@@ -162,6 +170,35 @@ it('prefers an exact full localized TV title after simplifying the API query', f
 
     expect($result)->not->toBeNull()
         ->and($result['tmdb_id'])->toBe(34356);
+});
+
+it('ranks an exact normalized full TV title above a more popular typo', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 1,
+                    'name' => 'Tron - Der Aufstand',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 1.0,
+                ],
+                [
+                    'id' => 2,
+                    'name' => 'Tron - Der Aufstande',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 100.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('Tron - Der Aufstand', 2012);
+
+    expect([$result['tmdb_id'], $result['confidence']])->toBe([1, 100]);
 });
 
 it('handles no results gracefully', function () {

@@ -1197,6 +1197,7 @@ class TmdbService
                 $this->calculateSimilarity($normalizedSearch, $normalizedResult),
                 $this->calculateSimilarity($normalizedFullSearch, $normalizedResult),
             );
+            $isExactFullTitleMatch = $normalizedFullSearch === $normalizedResult;
 
             // Check if search matches original title/name exactly (for localized content)
             $originalField = isset($result['original_name']) ? 'original_name' : 'original_title';
@@ -1210,6 +1211,7 @@ class TmdbService
                 // Exact match on original title/name should be 100% confidence
                 if ($normalizedSearch === $normalizedOriginal || $normalizedFullSearch === $normalizedOriginal) {
                     $similarity = 100;
+                    $isExactFullTitleMatch = $isExactFullTitleMatch || $normalizedFullSearch === $normalizedOriginal;
                 } else {
                     $similarity = max($similarity, $originalSimilarity);
                 }
@@ -1234,8 +1236,9 @@ class TmdbService
 
             // Popularity bonus (TMDB returns more popular results first)
             $popularityBonus = isset($result['popularity']) ? min(10, $result['popularity'] / 10) : 0;
+            $exactFullTitleBonus = $isExactFullTitleMatch ? 10 : 0;
 
-            $totalScore = $similarity + $yearScore + $popularityBonus;
+            $totalScore = $similarity + $yearScore + $popularityBonus + $exactFullTitleBonus;
 
             if ($totalScore > $bestScore) {
                 $bestScore = $totalScore;
@@ -1386,7 +1389,7 @@ class TmdbService
 
         // Remove standalone quality tokens anywhere in the title.
         // Token delimiters prevent short markers such as HD and SD from corrupting words like Wednesday.
-        $title = preg_replace('/(?:^|[\s\/-]+)(4K\s*[\/-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)(?=$|[\s\/-])/i', ' ', $title);
+        $title = preg_replace('/(?:^|[\s\p{P}]+|(?<=[\s\p{P}]))(4K\s*[\/-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)(?:[\s\p{P}]+|$)/iu', ' ', $title);
 
         // Remove release group tags at end of title: "-LAMA", "-YTS", "-SPARKS", etc.
         // Also handles patterns like "5 1-LAMA" (residual metadata after year/quality removal)
