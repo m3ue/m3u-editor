@@ -9,6 +9,8 @@
  * - stop() preserves proxy_network_id (downloader needs it) and transitions to PostProcessing
  * - cancel() on a recording with captured footage routes through post-processing like stop()
  * - cancel() on a recording with no footage (never started) marks Cancelled immediately
+ * - releaseProxyResources() cleans up the proxy when proxy_network_id is still set (used by
+ *   delete_dvr_recording so a recording deleted before post-processing runs isn't orphaned)
  * - DvrSetting use_proxy defaults to false
  */
 
@@ -214,6 +216,36 @@ it('cancel() on a recording that never started (no footage) marks it Cancelled i
     expect($fresh->user_cancelled)->toBeTrue();
 
     Queue::assertNotPushed(PostProcessDvrRecording::class);
+});
+
+// ── releaseProxyResources() ───────────────────────────────────────────────────
+
+it('releaseProxyResources() cleans up the proxy broadcast when proxy_network_id is still set', function () {
+    $recording = makeScheduledRecording();
+    $recording->update([
+        'status' => DvrRecordingStatus::PostProcessing,
+        'proxy_network_id' => 'test-network-id',
+    ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('cleanupDvrBroadcast')->once()->with('test-network-id')->andReturn(true);
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->releaseProxyResources($recording->fresh());
+});
+
+it('releaseProxyResources() is a no-op once proxy_network_id has already been cleared', function () {
+    $recording = makeScheduledRecording();
+    $recording->update([
+        'status' => DvrRecordingStatus::Completed,
+        'proxy_network_id' => null,
+    ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldNotReceive('cleanupDvrBroadcast');
+    app()->instance(M3uProxyService::class, $proxy);
+
+    app(DvrRecorderService::class)->releaseProxyResources($recording->fresh());
 });
 
 // ── use_proxy default ─────────────────────────────────────────────────────────

@@ -17,6 +17,10 @@
  *      delete call arrives.
  *   4. delete_dvr_recording still rejects Scheduled/Recording (nothing has told
  *      the proxy to stop yet).
+ *   5. delete_dvr_recording releases the proxy broadcast itself when deleting a
+ *      PostProcessing recording — PostProcessDvrRecording (which normally owns
+ *      that cleanup) hasn't had a chance to run yet in the cancel-then-delete
+ *      flow, so without this the proxy-side segment files would be orphaned.
  */
 
 use App\Enums\DvrRecordingStatus;
@@ -28,6 +32,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use App\Services\DvrPostProcessorService;
 use App\Services\M3uProxyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -141,6 +146,72 @@ it('deletes a PostProcessing recording — the state a cancelled in-progress rec
 
     $response->assertOk()->assertJson(['success' => true]);
     expect(DvrRecording::find($recording->id))->toBeNull();
+});
+
+it('releases the proxy broadcast when deleting a PostProcessing recording that still holds a proxy_network_id', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($this->channel)
+        ->create([
+            'status' => DvrRecordingStatus::PostProcessing,
+            'proxy_network_id' => 'test-network-id',
+            'user_cancelled' => true,
+        ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldNotReceive('stopDvrBroadcast');
+    $proxy->shouldReceive('cleanupDvrBroadcast')->once()->with('test-network-id')->andReturn(true);
+    app()->instance(M3uProxyService::class, $proxy);
+
+    $response = $this->postJson(
+        xtreamActionUrl($this->username, $this->password, 'delete_dvr_recording'),
+        ['recording_id' => $recording->uuid]
+    );
+
+    $response->assertOk()->assertJson(['success' => true]);
+    expect(DvrRecording::find($recording->id))->toBeNull();
+});
+
+it('reproduces the TV app "Delete recording" flow — cancel then immediate delete releases the proxy broadcast exactly once, before PostProcessDvrRecording ever runs', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($this->channel)
+        ->create([
+            'status' => DvrRecordingStatus::Recording,
+            'proxy_network_id' => 'test-network-id',
+        ]);
+
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('stopDvrBroadcast')->once()->with('test-network-id')->andReturn(true);
+    $proxy->shouldReceive('cleanupDvrBroadcast')->once()->with('test-network-id')->andReturn(true);
+    app()->instance(M3uProxyService::class, $proxy);
+
+    // AppShell._cancelAndDeleteRecording: cancel_dvr_recording immediately
+    // followed by delete_dvr_recording, well before the queue worker could
+    // ever pick up the delayed/callback-triggered post-processing job.
+    $this->postJson(
+        xtreamActionUrl($this->username, $this->password, 'cancel_dvr_recording'),
+        ['recording_id' => $recording->uuid]
+    )->assertOk();
+
+    $this->postJson(
+        xtreamActionUrl($this->username, $this->password, 'delete_dvr_recording'),
+        ['recording_id' => $recording->uuid]
+    )->assertOk()->assertJson(['success' => true]);
+
+    expect(DvrRecording::find($recording->id))->toBeNull();
+
+    // The safety-net job was queued by cancel()'s finalizeStop() but the row is
+    // already gone. Running it now must be a graceful no-op — in particular it
+    // must NOT call cleanupDvrBroadcast() again (the ->once() expectation above
+    // would fail the test if it did).
+    Queue::assertPushed(
+        PostProcessDvrRecording::class,
+        fn (PostProcessDvrRecording $job) => $job->recordingId === $recording->id
+    );
+    (new PostProcessDvrRecording($recording->id))->handle(app(DvrPostProcessorService::class));
 });
 
 it('rejects deleting a Scheduled or Recording recording — nothing has told the proxy to stop yet', function (DvrRecordingStatus $status) {

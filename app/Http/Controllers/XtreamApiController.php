@@ -3400,6 +3400,11 @@ class XtreamApiController extends Controller
      * immediately — the TV app's "Delete recording" choice calls cancel then
      * delete back-to-back, so by the time this runs such a recording is
      * already in PostProcessing, not Cancelled.
+     *
+     * A PostProcessing recording deleted this way almost always still has its
+     * proxy_network_id set - the post-processing job that would normally free
+     * those resources hasn't had a chance to run yet. releaseProxyResources()
+     * frees them here instead of leaving them orphaned on the proxy.
      */
     private function deleteDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
     {
@@ -3428,6 +3433,8 @@ class XtreamApiController extends Controller
         if (! $recording) {
             return response()->json(['error' => 'Recording not found or not deletable'], 404);
         }
+
+        app(DvrRecorderService::class)->releaseProxyResources($recording);
 
         $recording->delete();
 

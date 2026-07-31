@@ -276,6 +276,26 @@ class DvrRecorderService
     }
 
     /**
+     * Release a recording's proxy-side broadcast/segment files without running
+     * post-processing.
+     *
+     * PostProcessDvrRecording normally owns this cleanup (see
+     * DvrPostProcessorService), but that job may never get the chance to run
+     * on a recording that's about to be deleted - e.g. the TV app's "Delete
+     * recording" choice calls cancel_dvr_recording then delete_dvr_recording
+     * back-to-back, well before the (delayed/callback-triggered) job executes.
+     * Call this before deleting a recording that still has a proxy_network_id
+     * so those resources aren't leaked. Safe to call on a recording the job
+     * already cleaned up - proxy_network_id will already be null by then.
+     */
+    public function releaseProxyResources(DvrRecording $recording): void
+    {
+        if ($recording->proxy_network_id) {
+            $this->proxy->cleanupDvrBroadcast($recording->proxy_network_id);
+        }
+    }
+
+    /**
      * Transition a stopped recording to POST_PROCESSING and dispatch the concat job.
      *
      * proxy_network_id is intentionally preserved through post-processing so the
