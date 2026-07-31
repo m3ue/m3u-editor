@@ -6,6 +6,7 @@ use App\Http\Middleware\ProxyRateLimitMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -39,5 +40,15 @@ return Application::configure(basePath: dirname(__DIR__))
             ->throttleWithRedis();
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // The Xtream Codes API endpoints (player_api.php, get.php) are consumed
+        // by TV/IPTV clients that parse every response as JSON regardless of
+        // the request's Accept header. Force JSON rendering for any uncaught
+        // exception on these routes instead of Laravel's default HTML error
+        // page, which those clients can't parse.
+        $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e) {
+            return in_array($request->route()?->getName(), [
+                'xtream.api.player',
+                'xtream.api.get',
+            ], true);
+        });
     })->create();

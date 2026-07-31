@@ -85,7 +85,13 @@ class DvrSchedulerService
         $lookaheadDays = (int) config('dvr.initial_lookahead_days', 14);
         $lookaheadMinutes = $lookaheadDays * 24 * 60;
 
-        $this->matchRule($rule, $lookaheadMinutes);
+        try {
+            $this->matchRule($rule, $lookaheadMinutes);
+        } catch (Exception $e) {
+            Log::error("DVR: Failed to match rule {$rule->id} immediately: {$e->getMessage()}", [
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**

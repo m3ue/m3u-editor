@@ -71,7 +71,13 @@ class DvrRecording extends Model
             // Broadcast first, before any cascade/file cleanup below can fail —
             // the TV app needs to hear about a deletion regardless of whether
             // the on-disk cleanup succeeds.
-            $recording->broadcastDeleted();
+            try {
+                $recording->broadcastDeleted();
+            } catch (\Throwable $e) {
+                Log::warning("DvrRecording deleting hook: could not broadcast deletion: {$e->getMessage()}", [
+                    'recording_id' => $recording->id,
+                ]);
+            }
 
             // Delete the physical file from disk using the storage facade (file_path is relative).
             if ($recording->file_path) {
@@ -100,19 +106,25 @@ class DvrRecording extends Model
             // Cascade to VOD channel and episode inside a transaction so both nulls + deletes
             // are atomic. The dvr_recording_id is nulled first so the Channel/Episode deleting
             // hooks don't attempt to re-delete this recording (re-entrance guard).
-            DB::transaction(function () use ($recording): void {
-                if ($vodChannel = $recording->vodChannel) {
-                    $vodChannel->dvr_recording_id = null;
-                    $vodChannel->save();
-                    $vodChannel->delete();
-                }
+            try {
+                DB::transaction(function () use ($recording): void {
+                    if ($vodChannel = $recording->vodChannel) {
+                        $vodChannel->dvr_recording_id = null;
+                        $vodChannel->save();
+                        $vodChannel->delete();
+                    }
 
-                if ($vodEpisode = $recording->vodEpisode) {
-                    $vodEpisode->dvr_recording_id = null;
-                    $vodEpisode->save();
-                    $vodEpisode->delete();
-                }
-            });
+                    if ($vodEpisode = $recording->vodEpisode) {
+                        $vodEpisode->dvr_recording_id = null;
+                        $vodEpisode->save();
+                        $vodEpisode->delete();
+                    }
+                });
+            } catch (\Throwable $e) {
+                Log::warning("DvrRecording deleting hook: could not cascade-delete VOD channel/episode: {$e->getMessage()}", [
+                    'recording_id' => $recording->id,
+                ]);
+            }
 
             // Cascade to the recording rule that produced this recording.
             // - Once / Manual rules: always remove (one-shot).

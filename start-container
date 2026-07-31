@@ -4,6 +4,32 @@
 export PUID="${PUID:-1000}" # NOT CURRENTLY USED...
 export PGID="${PGID:-1000}" # NOT CURRENTLY USED...
 
+# Load previously-generated secrets from the persistent config volume before
+# any "generate if unset" checks below run. Without this, REDIS_PASSWORD,
+# M3U_PROXY_TOKEN, REVERB_APP_ID, and REVERB_APP_SECRET are regenerated fresh
+# on every container boot (since docker-compose doesn't set them and the
+# `[ -z ... ]` checks further down have no way to see the persisted .env file,
+# which isn't read/symlinked until much later in this script). A container
+# that's merely restarted (not recreated) picks up a brand new Reverb secret
+# every time, while any already-running or cached client session still signs
+# broadcast-auth requests against the old one — silent private-channel
+# subscription failures ("Connection is unauthorized") with no client-visible
+# error, since the client just stops receiving push events instead of
+# throwing. Read-only grep here; the persisted file itself isn't modified.
+_early_config_dir="/var/www/config"
+_early_env_file="${_early_config_dir}/env"
+if [ -f "${_early_env_file}" ]; then
+    for _persisted_key in REDIS_PASSWORD M3U_PROXY_TOKEN REVERB_APP_ID REVERB_APP_SECRET; do
+        if [ -z "${!_persisted_key}" ]; then
+            _persisted_value=$(grep -E "^${_persisted_key}=" "${_early_env_file}" | tail -1 | cut -d '=' -f2-)
+            if [ -n "${_persisted_value}" ]; then
+                export "${_persisted_key}=${_persisted_value}"
+            fi
+        fi
+    done
+fi
+unset _early_config_dir _early_env_file _persisted_key _persisted_value
+
 # Set Redis server host, port and password
 export REDIS_ENABLED="${REDIS_ENABLED:-true}"
 export REDIS_HOST="${REDIS_HOST:-localhost}"
