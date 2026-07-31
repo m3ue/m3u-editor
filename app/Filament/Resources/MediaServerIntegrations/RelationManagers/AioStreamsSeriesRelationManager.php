@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations\RelationManagers;
 
 use App\Filament\Resources\Series\SeriesResource;
+use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Series;
 use Filament\Actions\Action;
@@ -119,9 +120,12 @@ class AioStreamsSeriesRelationManager extends RelationManager
                     ->icon('heroicon-o-arrow-path')
                     ->color('gray')
                     ->action(function (Series $record) {
-                        $count = self::rescanSeriesEpisodes($record);
+                        $episodeIds = self::rescanSeriesEpisodes($record);
 
-                        Notification::make()->success()->title(__(':count episode(s) rescanning, check back shortly', ['count' => $count]))->send();
+                        NotifyAioStreamsResolutionComplete::dispatch([], $episodeIds, $record->user_id, $record->name)
+                            ->delay(now()->addSeconds(15));
+
+                        Notification::make()->success()->title(__(':count episode(s) rescanning, check back shortly', ['count' => count($episodeIds)]))->send();
                     })
                     ->button()
                     ->hiddenLabel()
@@ -134,9 +138,12 @@ class AioStreamsSeriesRelationManager extends RelationManager
                     ->color('gray')
                     ->deselectRecordsAfterCompletion()
                     ->action(function (Collection $records) {
-                        $count = $records->sum(fn (Series $record) => self::rescanSeriesEpisodes($record));
+                        $episodeIds = $records->flatMap(fn (Series $record) => self::rescanSeriesEpisodes($record))->all();
 
-                        Notification::make()->success()->title(__(':count episode(s) rescanning, check back shortly', ['count' => $count]))->send();
+                        NotifyAioStreamsResolutionComplete::dispatch([], $episodeIds, $records->first()?->user_id, __('Series rescan'))
+                            ->delay(now()->addSeconds(15));
+
+                        Notification::make()->success()->title(__(':count episode(s) rescanning, check back shortly', ['count' => count($episodeIds)]))->send();
                     }),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
@@ -147,8 +154,10 @@ class AioStreamsSeriesRelationManager extends RelationManager
     /**
      * Re-resolve every already-aired episode of the series (skips episodes still
      * awaiting their air date, which have never resolved and aren't playable yet).
+     *
+     * @return array<int> The IDs of the episodes that were queued for resolution.
      */
-    private static function rescanSeriesEpisodes(Series $record): int
+    private static function rescanSeriesEpisodes(Series $record): array
     {
         $episodes = $record->episodes()->where('aio_resolution_status', '!=', 'scheduled')->get();
 
@@ -157,6 +166,6 @@ class AioStreamsSeriesRelationManager extends RelationManager
             ResolveAioStreamsEpisode::dispatch($episode->id);
         }
 
-        return $episodes->count();
+        return $episodes->pluck('id')->all();
     }
 }

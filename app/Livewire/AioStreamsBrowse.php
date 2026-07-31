@@ -2,10 +2,12 @@
 
 namespace App\Livewire;
 
+use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -698,6 +700,8 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         ]);
 
         ResolveAioStreamsChannel::dispatch($channel->id);
+        NotifyAioStreamsResolutionComplete::dispatch([$channel->id], [], $integration->user_id, $channel->title ?? $channel->name)
+            ->delay(now()->addSeconds(15));
 
         Notification::make()->success()->title(__('Added — resolving stream, check back shortly'))->send();
     }
@@ -746,10 +750,17 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
 
         $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
 
-        if (! $this->createAioEpisode($series, $season, $episode)) {
+        $episodeRow = $this->createAioEpisode($series, $season, $episode);
+
+        if (! $episodeRow) {
             Notification::make()->warning()->title(__('Episode already added'))->send();
 
             return;
+        }
+
+        if ($episodeRow->enabled) {
+            NotifyAioStreamsResolutionComplete::dispatch([], [$episodeRow->id], $integration->user_id, $series->name)
+                ->delay(now()->addSeconds(15));
         }
 
         Notification::make()->success()->title(__('Episode added — resolving stream, check back shortly'))->send();
@@ -813,18 +824,29 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
 
         $added = 0;
         $skipped = 0;
+        $dispatchedIds = [];
 
         foreach (array_keys($this->selectedEpisodes) as $key) {
             [$season, $episode] = array_map('intval', explode(':', $key));
 
-            if ($this->createAioEpisode($series, $season, $episode)) {
+            $episodeRow = $this->createAioEpisode($series, $season, $episode);
+
+            if ($episodeRow) {
                 $added++;
+                if ($episodeRow->enabled) {
+                    $dispatchedIds[] = $episodeRow->id;
+                }
             } else {
                 $skipped++;
             }
         }
 
         $this->selectedEpisodes = [];
+
+        if (! empty($dispatchedIds)) {
+            NotifyAioStreamsResolutionComplete::dispatch([], $dispatchedIds, $integration->user_id, $series->name)
+                ->delay(now()->addSeconds(15));
+        }
 
         $message = trans_choice(':count episode added — resolving streams, check back shortly|:count episodes added — resolving streams, check back shortly', $added, ['count' => $added]);
         if ($skipped > 0) {
@@ -840,15 +862,15 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
 
     /**
      * Create the custom Episode (+ Season, on demand) row for one episode of
-     * the given series and dispatch its stream resolution job. Returns false
+     * the given series and dispatch its stream resolution job. Returns null
      * without doing anything if the episode was already added.
      */
-    private function createAioEpisode(Series $series, int $season, int $episode): bool
+    private function createAioEpisode(Series $series, int $season, int $episode): ?Episode
     {
         $aioItemId = "{$this->detailId}:{$season}:{$episode}";
 
         if ($series->episodes()->where('aio_item_id', $aioItemId)->exists()) {
-            return false;
+            return null;
         }
 
         // Stremio meta doesn't expose per-season posters, so fall back to the
@@ -924,7 +946,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             ResolveAioStreamsEpisode::dispatch($episodeRow->id);
         }
 
-        return true;
+        return $episodeRow;
     }
 
     private function findOrCreateAioSeries(MediaServerIntegration $integration, string $itemId, array $meta): Series

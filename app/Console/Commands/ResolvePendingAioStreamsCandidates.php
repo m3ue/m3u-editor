@@ -2,11 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Channel;
 use App\Models\Episode;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 
 /**
  * Low-frequency sweep for AIOStreams-backed content that has never
@@ -65,6 +67,32 @@ class ResolvePendingAioStreamsCandidates extends Command
             ResolveAioStreamsEpisode::dispatch($episode->id);
         }
 
+        $this->notifyByUser($channels, $episodes);
+
         $this->info("Resolving {$channels->count()} channels and {$episodes->count()} episodes.");
+    }
+
+    /**
+     * Group the resolved channels/episodes by owner and queue one summary
+     * notification per affected user, rather than one per item.
+     *
+     * @param  Collection<int, Channel>  $channels
+     * @param  Collection<int, Episode>  $episodes
+     */
+    private function notifyByUser($channels, $episodes): void
+    {
+        $channelIdsByUser = $channels->groupBy('user_id')->map(fn ($group) => $group->pluck('id')->all());
+        $episodeIdsByUser = $episodes->groupBy('user_id')->map(fn ($group) => $group->pluck('id')->all());
+
+        $userIds = $channelIdsByUser->keys()->merge($episodeIdsByUser->keys())->unique();
+
+        foreach ($userIds as $userId) {
+            NotifyAioStreamsResolutionComplete::dispatch(
+                $channelIdsByUser->get($userId, []),
+                $episodeIdsByUser->get($userId, []),
+                $userId,
+                __('Scheduled resync'),
+            )->delay(now()->addSeconds(15));
+        }
     }
 }

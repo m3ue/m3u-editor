@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\MediaServerIntegrations\RelationManagers;
 
 use App\Filament\Resources\Vods\VodResource;
+use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Models\Channel;
 use Filament\Actions\Action;
@@ -115,6 +116,8 @@ class AioStreamsMoviesRelationManager extends RelationManager
                     ->action(function (Channel $record) {
                         $record->update(['aio_resolution_status' => 'pending']);
                         ResolveAioStreamsChannel::dispatch($record->id);
+                        NotifyAioStreamsResolutionComplete::dispatch([$record->id], [], $record->user_id, $record->title_custom ?? $record->title ?? $record->name)
+                            ->delay(now()->addSeconds(15));
 
                         Notification::make()->success()->title(__('Rescanning stream, check back shortly'))->send();
                     })
@@ -133,6 +136,13 @@ class AioStreamsMoviesRelationManager extends RelationManager
                             $record->update(['aio_resolution_status' => 'pending']);
                             ResolveAioStreamsChannel::dispatch($record->id);
                         });
+
+                        NotifyAioStreamsResolutionComplete::dispatch(
+                            $records->pluck('id')->all(),
+                            [],
+                            $records->first()?->user_id,
+                            __('Movie rescan'),
+                        )->delay(now()->addSeconds(15));
 
                         Notification::make()->success()->title(__(':count movie(s) rescanning, check back shortly', ['count' => $records->count()]))->send();
                     }),
