@@ -68,17 +68,17 @@ it('prefers an exact full movie title over the simplified API query', function (
         'https://api.themoviedb.org/3/search/movie*' => Http::response([
             'results' => [
                 [
-                    'id' => 438631,
-                    'title' => 'Dune',
-                    'original_title' => 'Dune',
-                    'release_date' => '2021-09-15',
+                    'id' => 999999,
+                    'title' => 'Duneland',
+                    'original_title' => 'Duneland',
+                    'release_date' => '2015-01-01',
                     'popularity' => 100.0,
                 ],
                 [
-                    'id' => 693134,
-                    'title' => 'Dune - Part Two',
-                    'original_title' => 'Dune: Part Two',
-                    'release_date' => '2024-02-27',
+                    'id' => 841,
+                    'title' => 'Dune - Der Wüstenplanet',
+                    'original_title' => 'Desert Planet',
+                    'release_date' => '1984-12-14',
                     'popularity' => 10.0,
                 ],
             ],
@@ -87,10 +87,10 @@ it('prefers an exact full movie title over the simplified API query', function (
     ]);
 
     $service = new TmdbService($this->settings);
-    $result = $service->searchMovie('Dune - Part Two');
+    $result = $service->searchMovie('Dune - Der Wüstenplanet');
 
     expect($result)->not->toBeNull()
-        ->and($result['tmdb_id'])->toBe(693134);
+        ->and($result['tmdb_id'])->toBe(841);
 });
 
 it('can search for a TV series and return TMDB and TVDB IDs', function () {
@@ -120,16 +120,19 @@ it('can search for a TV series and return TMDB and TVDB IDs', function () {
         ->and($result['imdb_id'])->toBe('tt0090390');
 });
 
-it('preserves title words while stripping standalone quality tokens from TV series queries', function () {
+it('preserves title words while stripping standalone quality tokens from TV series queries', function (string $title, string $expectedQuery) {
     Http::fake([
         'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => []], 200),
     ]);
 
     $service = new TmdbService($this->settings);
-    $service->searchTvSeries('Wednesday HD', 2022);
+    $service->searchTvSeries($title, 2022);
 
-    Http::assertSent(fn ($request): bool => ($request->data()['query'] ?? null) === 'Wednesday');
-});
+    Http::assertSent(fn ($request): bool => ($request->data()['query'] ?? null) === $expectedQuery);
+})->with([
+    'SD inside title' => ['Wednesday HD', 'Wednesday'],
+    'HD inside title' => ['Mehdi SD', 'Mehdi'],
+]);
 
 it('prefers an exact full localized TV title after simplifying the API query', function () {
     Http::fake([
