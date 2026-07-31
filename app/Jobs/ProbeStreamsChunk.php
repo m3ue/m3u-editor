@@ -41,8 +41,12 @@ class ProbeStreamsChunk implements ShouldQueue
 
     public function handle(): void
     {
-        $channels = $this->channelIds ? Channel::whereIn('id', $this->channelIds)->eligibleForProbe()->get() : collect();
-        $episodes = $this->episodeIds ? Episode::whereIn('id', $this->episodeIds)->eligibleForProbe()->get() : collect();
+        // notAioManaged() only, not eligibleForProbe(): explicit IDs here can come from a manual
+        // bulk "Probe Streams" action that intentionally bypasses probe_enabled — the automatic/
+        // playlist-driven callers (ProbeStreams) already pre-filter by probe_enabled themselves
+        // before building the ID list. AIOStreams content must never be probed either way.
+        $channels = $this->channelIds ? Channel::whereIn('id', $this->channelIds)->notAioManaged()->get() : collect();
+        $episodes = $this->episodeIds ? Episode::whereIn('id', $this->episodeIds)->notAioManaged()->get() : collect();
 
         $probedCount = 0;
 

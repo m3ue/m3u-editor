@@ -54,10 +54,27 @@ it('excludes AIOStreams-added channels from ProbeChannelStreamsChunk even with e
         'probe_enabled' => true,
     ]);
 
-    $ids = Channel::whereIn('id', [$aioChannel->id, $normalChannel->id])->eligibleForProbe()->pluck('id');
+    // notAioManaged(), not eligibleForProbe(): explicit channelIds are a manual "probe these"
+    // action that intentionally bypasses probe_enabled — see the next test.
+    $ids = Channel::whereIn('id', [$aioChannel->id, $normalChannel->id])->notAioManaged()->pluck('id');
 
     expect($ids)->toHaveCount(1)
         ->and($ids->first())->toBe($normalChannel->id);
+});
+
+it('still lets an explicit channelIds probe include a channel with probing disabled (manual override, not automatic)', function () {
+    $disabledButSelected = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'probe_enabled' => false,
+    ]);
+
+    // The bulk "Probe Streams" action force-probes whatever the user explicitly selected,
+    // regardless of the per-channel probe_enabled toggle — only AIOStreams content is exempt.
+    $ids = Channel::whereIn('id', [$disabledButSelected->id])->notAioManaged()->pluck('id');
+
+    expect($ids)->toHaveCount(1)->and($ids->first())->toBe($disabledButSelected->id);
 });
 
 it('excludes AIOStreams-added channels and episodes from ProbeStreamsChunk even with explicit ids', function () {
@@ -90,8 +107,8 @@ it('excludes AIOStreams-added channels and episodes from ProbeStreamsChunk even 
         'probe_enabled' => true,
     ]);
 
-    $channelIds = Channel::whereIn('id', [$aioChannel->id, $normalChannel->id])->eligibleForProbe()->pluck('id');
-    $episodeIds = Episode::whereIn('id', [$aioEpisode->id, $normalEpisode->id])->eligibleForProbe()->pluck('id');
+    $channelIds = Channel::whereIn('id', [$aioChannel->id, $normalChannel->id])->notAioManaged()->pluck('id');
+    $episodeIds = Episode::whereIn('id', [$aioEpisode->id, $normalEpisode->id])->notAioManaged()->pluck('id');
 
     expect($channelIds)->toHaveCount(1)->and($channelIds->first())->toBe($normalChannel->id)
         ->and($episodeIds)->toHaveCount(1)->and($episodeIds->first())->toBe($normalEpisode->id);
@@ -118,6 +135,24 @@ it('does not chain an AIOStreams-added channel into a probe batch when explicit 
 
     Bus::assertChained([
         fn (ProbeChannelStreamsChunk $job) => $job->channelIds === [$normalChannel->id],
+        ProbeChannelStreamsComplete::class,
+    ]);
+});
+
+it('probes an explicitly-selected channel via ProbeChannelStreams even when probe_enabled is false', function () {
+    Bus::fake();
+
+    $disabledButSelected = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'probe_enabled' => false,
+    ]);
+
+    (new ProbeChannelStreams(channelIds: [$disabledButSelected->id]))->handle();
+
+    Bus::assertChained([
+        fn (ProbeChannelStreamsChunk $job) => $job->channelIds === [$disabledButSelected->id],
         ProbeChannelStreamsComplete::class,
     ]);
 });

@@ -52,13 +52,18 @@ class ProbeChannelStreams implements ShouldQueue
     {
         $start = now();
 
-        $query = Channel::query()->eligibleForProbe();
+        // notAioManaged() only, not eligibleForProbe(): explicit channelIds come from a manual
+        // "probe these specific channels" bulk action that intentionally bypasses probe_enabled
+        // (the per-channel toggle only gates automatic/playlist-driven probing below). AIOStreams
+        // content must never be probed regardless of which path dispatched this job.
+        $query = Channel::query()->notAioManaged();
 
         if ($this->channelIds) {
             $query->whereIn('id', $this->channelIds);
         } elseif ($this->playlistId) {
             $query->where('playlist_id', $this->playlistId)
-                ->where('is_vod', false);
+                ->where('is_vod', false)
+                ->where('probe_enabled', true);
 
             if (! $this->includeDisabled) {
                 $query->where('enabled', true);
