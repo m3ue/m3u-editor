@@ -2,11 +2,12 @@
 
 use App\Enums\DvrRecordingStatus;
 use App\Events\PlaylistCreated;
+use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
 use App\Filament\Resources\DvrRecordings\Pages\ListDvrRecordings;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
-use App\Models\PlaylistAuth;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
@@ -147,7 +148,7 @@ it('admin sees recordings from all users', function () {
     $admin = User::factory()->admin()->create(['permissions' => ['use_dvr']]);
     $this->actingAs($admin);
 
-    $ids = \App\Filament\Resources\DvrRecordings\DvrRecordingResource::getEloquentQuery()->pluck('id');
+    $ids = DvrRecordingResource::getEloquentQuery()->pluck('id');
 
     expect($ids)->toContain($myRecording->id)
         ->toContain($theirRecording->id);
@@ -177,7 +178,7 @@ it('non-admin sees only their own recordings', function () {
             'title' => 'Their Recording',
         ]);
 
-    $ids = \App\Filament\Resources\DvrRecordings\DvrRecordingResource::getEloquentQuery()->pluck('id');
+    $ids = DvrRecordingResource::getEloquentQuery()->pluck('id');
 
     expect($ids)->toContain($myRecording->id)
         ->not()->toContain($theirRecording->id);

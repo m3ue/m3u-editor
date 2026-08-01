@@ -3,12 +3,13 @@
 use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
-use App\Models\PlaylistAuth;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function () {
     config()->set('dvr.dvr_enabled', true);

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PlaylistAuths;
 
 use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
 use App\Filament\Resources\PlaylistAuthResource\Pages;
 use App\Filament\Resources\PlaylistAuthResource\RelationManagers;
 use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
@@ -114,7 +115,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                         if (! $record->dvr_enabled) {
                             return '—';
                         }
-                        $used = \App\Filament\Resources\DvrRecordings\DvrRecordingResource::formatFileSize($record->storage_used_bytes);
+                        $used = DvrRecordingResource::formatFileSize($record->storage_used_bytes);
                         if ($record->dvr_storage_quota_gb === null) {
                             return "{$used} / Unlimited";
                         }
