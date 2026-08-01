@@ -64,6 +64,22 @@ class DvrRecording extends Model
         static::updated(function (DvrRecording $recording): void {
             if ($recording->wasChanged('status')) {
                 $recording->broadcastStatus();
+
+                // Once/Manual rules are one-shot — they will never match another
+                // programme, so there's no reason to wait for the recording row
+                // itself to be deleted before cleaning up the spent rule (unlike
+                // Series rules, which stay alive for future episodes and are only
+                // cleaned up on deletion, see the `deleting` hook below). Without
+                // this, choosing "Keep recording" on an in-progress recording (or
+                // simply letting one finish normally) left the rule enabled and
+                // orphaned in the editor's Rules list forever.
+                if (in_array($recording->status, [
+                    DvrRecordingStatus::Completed,
+                    DvrRecordingStatus::Failed,
+                    DvrRecordingStatus::Cancelled,
+                ], true)) {
+                    self::deleteSpentOneShotRule($recording);
+                }
             }
         });
 
@@ -138,13 +154,7 @@ class DvrRecording extends Model
                     ->exists();
 
                 if ($isOneShot || ! $hasSiblings) {
-                    try {
-                        $rule->delete();
-                    } catch (\Throwable $e) {
-                        Log::warning("DvrRecording deleting hook: could not delete rule {$rule->id}: {$e->getMessage()}", [
-                            'recording_id' => $recording->id,
-                        ]);
-                    }
+                    self::deleteRuleQuietly($rule, $recording, 'deleting hook');
                 }
             }
 
@@ -155,6 +165,35 @@ class DvrRecording extends Model
                 self::pruneEmptyParentDirs($disk, $recording->file_path, 'library');
             }
         });
+    }
+
+    /**
+     * Deletes a spent Once/Manual rule once its one and only recording reaches
+     * a terminal status. Unlike the deletion cascade below, this never touches
+     * Series rules — a completed episode doesn't mean the season is over, and
+     * future sibling recordings for the same rule may not exist yet (they're
+     * matched closer to their air time), so the "no siblings left" heuristic
+     * that's safe on deletion would be wrong here.
+     */
+    private static function deleteSpentOneShotRule(self $recording): void
+    {
+        $rule = $recording->recordingRule;
+        if (! $rule || ! in_array($rule->type, [DvrRuleType::Once, DvrRuleType::Manual], true)) {
+            return;
+        }
+
+        self::deleteRuleQuietly($rule, $recording, 'updated hook');
+    }
+
+    private static function deleteRuleQuietly(DvrRecordingRule $rule, self $recording, string $context): void
+    {
+        try {
+            $rule->delete();
+        } catch (\Throwable $e) {
+            Log::warning("DvrRecording {$context}: could not delete rule {$rule->id}: {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+            ]);
+        }
     }
 
     /**
