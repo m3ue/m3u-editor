@@ -1184,6 +1184,7 @@ class TmdbService
         $normalizedFullSearch = $this->normalizeForComparison($searchTitle);
         $bestMatch = null;
         $bestScore = 0;
+        $bestMatchIsExactFullTitle = false;
         $exactYearMatch = null;
 
         foreach ($results as $result) {
@@ -1236,13 +1237,13 @@ class TmdbService
 
             // Popularity bonus (TMDB returns more popular results first)
             $popularityBonus = isset($result['popularity']) ? min(10, $result['popularity'] / 10) : 0;
-            $exactFullTitleBonus = $isExactFullTitleMatch ? 10 : 0;
+            $totalScore = $similarity + $yearScore + $popularityBonus;
 
-            $totalScore = $similarity + $yearScore + $popularityBonus + $exactFullTitleBonus;
-
-            if ($totalScore > $bestScore) {
+            if ($isExactFullTitleMatch && ! $bestMatchIsExactFullTitle
+                || $isExactFullTitleMatch === $bestMatchIsExactFullTitle && $totalScore > $bestScore) {
                 $bestScore = $totalScore;
                 $bestMatch = $result;
+                $bestMatchIsExactFullTitle = $isExactFullTitleMatch;
                 $bestMatch['_confidence'] = (int) min(100, $similarity);
             }
 
@@ -1381,7 +1382,7 @@ class TmdbService
         $title = preg_replace('/\s*\((?:Multi|Dual(?:\s+Audio)?|Dolby(?:\s*Atmos)?|Vision|DTS(?:-HD)?|TrueHD|Digital|HDR|HDR10\+?|Directors?\s*Cut)\)/i', '', $title);
 
         // Remove brackets with technical info: [4K], [UHD], [DE], etc.
-        $title = preg_replace('/\s*\[[^\]]*\]/i', '', $title);
+        $title = preg_replace('/[\s\/|,.:;_!?-]*\[[^\]]*\][\s\/|,.:;_!?-]*/u', ' ', $title);
 
         // Remove year in parentheses from title (will be used as separate param)
         // Replace with a space to avoid collapsing adjacent words (e.g., "Alarum (2025) Extra" -> "Alarum Extra", not "AlarumExtra")
