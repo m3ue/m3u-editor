@@ -1755,6 +1755,35 @@ class Preferences extends SettingsPage
                                             ]),
                                     ]),
 
+                                Section::make(__('AIOStreams Integration'))
+                                    ->description(__('Tune how aggressively m3u-editor calls your AIOStreams addon instance(s) when browsing catalogs and resolving streams.'))
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-signal')
+                                    ->collapsible()
+                                    ->columns(2)
+                                    ->schema([
+                                        TextInput::make('aiostreams_rate_limit')
+                                            ->label(__('Rate Limit (requests/minute)'))
+                                            ->placeholder(__('20'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(120)
+                                            ->default(20)
+                                            ->hintIcon(
+                                                'heroicon-m-question-mark-circle',
+                                                tooltip: 'Applies to every request m3u-editor makes to an AIOStreams instance (manifest, catalog, stream, and meta lookups combined), per integration. Keep this low if you use a shared/hosted AIOStreams instance you don\'t control the server-side rate limits for — AIOStreams\' own defaults for the addon endpoints it exposes range from ~40 to ~360 requests/minute depending on endpoint, so the default here is still well below the strictest of those.'
+                                            )
+                                            ->helperText(__('Maximum combined AIOStreams requests per minute, per integration. Lower is safer for hosted/shared instances.')),
+                                        TextInput::make('aiostreams_max_failover_candidates')
+                                            ->label(__('Max Failover Candidates'))
+                                            ->placeholder(__('3'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(10)
+                                            ->default(3)
+                                            ->helperText(__('Number of ranked stream candidates to keep per resolved movie/episode (1 primary + failovers). Higher values mean more resilience to dead links but more streams fetched per resolve.')),
+                                    ]),
+
                                 Section::make(__('MediaFlow Proxy'))
                                     ->description(__('Connect MediaFlow Proxy to route your playlists, EPG, and Xtream API through it. Once configured, proxied URLs are auto-generated on each playlist\'s detail page.'))
                                     ->columnSpan('full')

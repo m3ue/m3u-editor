@@ -1391,15 +1391,15 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                 TextColumn::make('channels_count')
                     ->label(__('Movies'))
-                    ->state(fn ($record) => $record->isAioStreams() ? '∞' : ($record->channels_count ?? 0))
-                    ->description(fn ($record): ?string => $record->isAioStreams() ? null : 'Active: '.($record->enabled_channels_count ?? 0))
+                    ->state(fn ($record) => $record->channels_count ?? 0)
+                    ->description(fn ($record): ?string => 'Active: '.($record->enabled_channels_count ?? 0))
                     ->toggleable()
                     ->sortable(),
 
                 TextColumn::make('series_count')
                     ->label(__('Series'))
-                    ->state(fn ($record) => $record->isAioStreams() ? '∞' : ($record->series_count ?? 0))
-                    ->description(fn ($record): ?string => $record->isAioStreams() ? null : 'Active: '.($record->enabled_series_count ?? 0))
+                    ->state(fn ($record) => $record->series_count ?? 0)
+                    ->description(fn ($record): ?string => 'Active: '.($record->enabled_series_count ?? 0))
                     ->toggleable()
                     ->sortable(),
 

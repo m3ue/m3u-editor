@@ -255,9 +255,14 @@ class M3uProxyApiController extends Controller
      *   "current_url": "http://example.com/stream",
      *   "metadata": {
      *      "id": 123,
+     *      "type": "channel",
      *      "playlist_uuid": "abc-def-ghi",
      *   }
      * }
+     *
+     * "type" is "channel" (default, for backward compatibility) or "episode" —
+     * routes to the matching Channel/ChannelFailover or Episode/EpisodeFailover
+     * resolution path on M3uProxyService.
      *
      * @return JsonResponse
      */
@@ -268,20 +273,29 @@ class M3uProxyApiController extends Controller
             $metadata = $request->input('metadata', []);
             $failoverCount = $request->input('current_failover_index', 0);
             $statusCode = $request->input('status_code');
-            $channelId = $metadata['id'] ?? null;
+            $id = $metadata['id'] ?? null;
+            $type = $metadata['type'] ?? 'channel';
             $playlistUuid = $metadata['playlist_uuid'] ?? null;
 
-            if (! ($channelId && $currentUrl)) {
+            if (! ($id && $currentUrl)) {
                 return response()->json([
                     'next_url' => null,
-                    'error' => 'Missing channel_id or current_url',
+                    'error' => 'Missing metadata id or current_url',
                 ], 400);
             }
 
             // Use the M3uProxyService to validate the failover URLs
-            $result = app(M3uProxyService::class)
-                ->resolveFailoverUrl(
-                    $channelId,
+            $service = app(M3uProxyService::class);
+            $result = $type === 'episode'
+                ? $service->resolveEpisodeFailoverUrl(
+                    $id,
+                    $playlistUuid,
+                    $currentUrl,
+                    index: $failoverCount,
+                    statusCode: $statusCode ? (int) $statusCode : null,
+                )
+                : $service->resolveFailoverUrl(
+                    $id,
                     $playlistUuid,
                     $currentUrl,
                     index: $failoverCount,
@@ -291,7 +305,8 @@ class M3uProxyApiController extends Controller
             return response()->json($result);
         } catch (Exception $e) {
             Log::error('Error resolving failover', [
-                'channel_id' => $channelId ?? null,
+                'id' => $id ?? null,
+                'type' => $type ?? null,
                 'playlist_uuid' => $playlistUuid ?? null,
                 'failover_index' => $failoverCount ?? null,
                 'status_code' => $statusCode ?? null,

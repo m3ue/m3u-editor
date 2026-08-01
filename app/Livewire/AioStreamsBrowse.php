@@ -488,6 +488,70 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
     }
 
     /**
+     * Extract IMDb/TMDB ids for a Stremio item onto `Channel`/`Series`' own
+     * `imdb_id`/`tmdb_id` columns — previously never populated for AIOStreams-added
+     * content, even though `getImdbId()`/`getTmdbId()`/`getMovieDbIds()` and
+     * `XtreamApiController::resolveFavoriteCrossReference()` already read them.
+     * AIOStreams (Stremio) item ids are the common source: Cinemeta-backed catalogs
+     * use the bare IMDb id ("tt1234567") as the item id, TMDB-backed catalogs use
+     * "tmdb:12345". Neither is guaranteed by the Stremio protocol, so this falls
+     * back to whatever cross-reference fields the meta object itself provides
+     * (`imdb_id`/`moviedb_id`/`tmdb_id`, or a `links` entry categorized "imdb"/"tmdb"/"moviedb").
+     *
+     * @param  array<string, mixed>  $meta
+     * @return array{imdb: ?string, tmdb: ?int}
+     */
+    private function extractAioMovieDbIds(string $itemId, array $meta): array
+    {
+        $imdbId = null;
+        $tmdbId = null;
+
+        if (preg_match('/^(tt\d+)/', $itemId, $matches)) {
+            $imdbId = $matches[1];
+        } elseif (preg_match('/^tmdb:(\d+)/', $itemId, $matches)) {
+            $tmdbId = (int) $matches[1];
+        }
+
+        $imdbId ??= is_string($meta['imdb_id'] ?? null) ? $meta['imdb_id'] : null;
+        $tmdbId ??= is_numeric($meta['moviedb_id'] ?? $meta['tmdb_id'] ?? null)
+            ? (int) ($meta['moviedb_id'] ?? $meta['tmdb_id'])
+            : null;
+
+        if ((! $imdbId || ! $tmdbId) && ! empty($meta['links']) && is_array($meta['links'])) {
+            foreach ($meta['links'] as $link) {
+                if (! is_array($link)) {
+                    continue;
+                }
+
+                $category = strtolower((string) ($link['category'] ?? ''));
+
+                if (! $imdbId && $category === 'imdb') {
+                    $name = $link['name'] ?? null;
+                    if (is_string($name) && preg_match('/^tt\d+$/', $name)) {
+                        $imdbId = $name;
+                    } elseif (is_string($link['url'] ?? null) && preg_match('/(tt\d+)/', $link['url'], $matches)) {
+                        $imdbId = $matches[1];
+                    }
+                }
+
+                if (! $tmdbId && in_array($category, ['tmdb', 'moviedb'], true)) {
+                    $name = $link['name'] ?? null;
+                    if (is_numeric($name)) {
+                        $tmdbId = (int) $name;
+                    } elseif (is_string($link['url'] ?? null) && preg_match('/(\d+)/', $link['url'], $matches)) {
+                        $tmdbId = (int) $matches[1];
+                    }
+                }
+            }
+        }
+
+        return [
+            'imdb' => $imdbId,
+            'tmdb' => $tmdbId,
+        ];
+    }
+
+    /**
      * An episode with no known release date is treated as already aired — we
      * can't tell otherwise, and AIOStreams addons won't have streams for it
      * either way once it's actually requested.
@@ -673,6 +737,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         $playlist = $integration->getOrCreatePlaylist();
         $meta = $this->detailResult;
         $rating = is_numeric($meta['imdbRating'] ?? null) ? (float) $meta['imdbRating'] : null;
+        $movieDbIds = $this->extractAioMovieDbIds($this->detailId, $meta);
 
         $channel = Channel::create([
             'user_id' => $integration->user_id,
@@ -693,6 +758,8 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             'rating' => $rating,
             'rating_5based' => $rating ? round($rating / 2, 1) : null,
             'info' => $this->buildAioMetaInfo($meta),
+            'imdb_id' => $movieDbIds['imdb'],
+            'tmdb_id' => $movieDbIds['tmdb'],
             'aio_integration_id' => $integration->id,
             'aio_item_id' => $this->detailId,
             'aio_type' => 'movie',
@@ -956,6 +1023,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             ->map(fn ($member) => is_array($member) ? ($member['name'] ?? null) : $member)
             ->filter()
             ->implode(', ');
+        $movieDbIds = $this->extractAioMovieDbIds($itemId, $meta);
 
         return Series::firstOrCreate(
             [
@@ -974,6 +1042,8 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
                 'rating_5based' => is_numeric($meta['imdbRating'] ?? null) ? round(((float) $meta['imdbRating']) / 2, 1) : null,
                 'release_date' => $meta['releaseInfo'] ?? null,
                 'backdrop_path' => ! empty($meta['background']) ? [$meta['background']] : null,
+                'imdb_id' => $movieDbIds['imdb'],
+                'tmdb_id' => $movieDbIds['tmdb'],
                 'user_id' => $integration->user_id,
                 'playlist_id' => $playlist->id,
                 'import_batch_no' => Str::orderedUuid()->toString(),

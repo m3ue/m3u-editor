@@ -32,7 +32,7 @@ class AIOStreamsService implements MediaServer
         $this->integration = $integration;
         $this->baseUrl = $integration->manifest_base_url ?? '';
         $settings = $settings ?? app(GeneralSettings::class);
-        $this->rateLimit = $settings->aiostreams_rate_limit ?? 10;
+        $this->rateLimit = $settings->aiostreams_rate_limit ?? 20;
     }
 
     public static function make(MediaServerIntegration $integration): self

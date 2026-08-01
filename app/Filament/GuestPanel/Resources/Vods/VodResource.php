@@ -161,11 +161,9 @@ class VodResource extends Resource
             ->columns([
                 Tables\Columns\ImageColumn::make('logo')
                     ->label(__('Cover'))
+                    ->width(80)
+                    ->height(120)
                     ->checkFileExistence(false)
-                    ->size('inherit', 'inherit')
-                    ->extraImgAttributes(fn ($record): array => [
-                        'style' => 'width:80px; height:120px;', // VOD channel style
-                    ])
                     ->getStateUsing(fn ($record) => LogoFacade::getChannelLogoUrl($record))
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('info')

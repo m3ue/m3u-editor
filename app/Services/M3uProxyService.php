@@ -6,6 +6,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Jobs\ResolveAioStreamsChannel;
+use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
@@ -22,6 +23,7 @@ use App\Settings\GeneralSettings;
 use Exception;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -2955,11 +2957,6 @@ class M3uProxyService
             $failConditions = $settings->failover_fail_conditions ?? [];
             $failTimeout = $settings->failover_fail_conditions_timeout ?? 5;
 
-            // If a fail condition status code was received, mark the appropriate playlist as invalid
-            if ($failConditionsEnabled && $statusCode && in_array((string) $statusCode, $failConditions, true)) {
-                $this->markPlaylistInvalidForFailover($channelId, $playlistUuid, $index, $statusCode, $failTimeout);
-            }
-
             // Get all failover channels with their relationships
             $failoverChannels = $channel->failoverChannels()
                 ->select([
@@ -2969,6 +2966,11 @@ class M3uProxyService
                     'channels.playlist_id',
                     'channels.custom_playlist_id',
                 ])->get();
+
+            // If a fail condition status code was received, mark the appropriate playlist as invalid
+            if ($failConditionsEnabled && $statusCode && in_array((string) $statusCode, $failConditions, true)) {
+                $this->markPlaylistInvalidForFailover($failoverChannels, $playlistUuid, $index, $statusCode, $failTimeout);
+            }
 
             // Find the first valid failover URL that has capacity
             foreach ($failoverChannels as $idx => $failoverChannel) {
@@ -3072,12 +3074,151 @@ class M3uProxyService
     }
 
     /**
+     * Episode counterpart to resolveFailoverUrl() — same live-failover validation,
+     * scoped to Episode/EpisodeFailover instead of Channel/ChannelFailover.
+     *
+     * @throws Exception when base URL missing or API returns an error
+     */
+    public function resolveEpisodeFailoverUrl(int $episodeId, string $playlistUuid, string $currentUrl, int $index, ?int $statusCode = null): array
+    {
+        try {
+            // Get the original episode to access its failover relationships
+            $episode = Episode::findOrFail($episodeId);
+            $nextUrl = null;
+            // Resolve the original stream context by UUID (Playlist / MergedPlaylist / CustomPlaylist / PlaylistAlias)
+            $contextPlaylist = ! empty($playlistUuid) ? PlaylistFacade::resolvePlaylistByUuid($playlistUuid) : null;
+
+            // Load fail condition settings
+            $settings = app(GeneralSettings::class);
+            $failConditionsEnabled = $settings->failover_fail_conditions_enabled ?? false;
+            $failConditions = $settings->failover_fail_conditions ?? [];
+            $failTimeout = $settings->failover_fail_conditions_timeout ?? 5;
+
+            // Get all failover episodes with their relationships
+            $failoverEpisodes = $episode->failoverEpisodes()
+                ->select([
+                    'episodes.id',
+                    'episodes.url',
+                    'episodes.playlist_id',
+                ])->get();
+
+            // If a fail condition status code was received, mark the appropriate playlist as invalid
+            if ($failConditionsEnabled && $statusCode && in_array((string) $statusCode, $failConditions, true)) {
+                $this->markPlaylistInvalidForFailover($failoverEpisodes, $playlistUuid, $index, $statusCode, $failTimeout);
+            }
+
+            // Find the first valid failover URL that has capacity
+            foreach ($failoverEpisodes as $idx => $failoverEpisode) {
+                $failoverPlaylist = $failoverEpisode->getEffectivePlaylist();
+                if (! $failoverPlaylist) {
+                    continue;
+                }
+
+                // Before proceeding, see if the failover index is less than the desired index
+                if ($idx < $index) {
+                    // If the index is higher than the current loop, chances are it has already been attempted, continue to the next...
+                    Log::debug('Episode already attempted, skipping', [
+                        'episode_id' => $failoverEpisode->id,
+                        'index' => $idx,
+                        'requested_index' => $index,
+                    ]);
+
+                    continue;
+                }
+
+                // Check if this failover's playlist is marked invalid due to fail conditions
+                $invalidExpiresAt = $failConditionsEnabled
+                    ? Redis::hget('playlist_invalid', $failoverPlaylist->uuid)
+                    : null;
+                if ($invalidExpiresAt && now()->timestamp < (int) $invalidExpiresAt) {
+                    Log::debug('Failover playlist marked invalid by fail condition, skipping', [
+                        'playlist_uuid' => $failoverPlaylist->uuid,
+                        'episode_id' => $failoverEpisode->id,
+                    ]);
+
+                    continue;
+                }
+
+                // Get the url
+                $url = PlaylistUrlService::getEpisodeUrl($failoverEpisode, $contextPlaylist ?? $failoverPlaylist);
+
+                // Check if the url is the current URL (skip it)
+                if ($url === $currentUrl) {
+                    Log::debug('Failover URL matches current URL, skipping', [
+                        'playlist_uuid' => $failoverPlaylist->uuid,
+                        'episode_id' => $failoverEpisode->id,
+                    ]);
+
+                    continue;
+                }
+
+                // Check if playlist has capacity limits
+                if ($failoverPlaylist->available_streams === 0) {
+                    // No limits on this playlist, it's viable
+                    $nextUrl = $url;
+
+                    // Break on first url, no need to continue checking Playlist limits
+                    break;
+                }
+
+                // Check if playlist is at capacity
+                $activeStreams = self::getActiveStreamsCountByMetadata('playlist_uuid', $failoverPlaylist->uuid);
+                if ($activeStreams < $failoverPlaylist->available_streams) {
+                    // Still has capacity, it's viable!
+                    $nextUrl = $url;
+
+                    break;
+                }
+
+                // At capacity, skip this URL
+                Log::debug('Failover URL playlist at capacity, skipping', [
+                    'playlist_uuid' => $failoverPlaylist->uuid,
+                    'episode_id' => $failoverEpisode->id,
+                    'active' => $activeStreams,
+                    'limit' => $failoverPlaylist->available_streams,
+                ]);
+            }
+
+            // If the failover chain is exhausted for an AIOStreams-backed episode,
+            // asynchronously re-resolve fresh candidates for the *next* playback
+            // attempt rather than trying to serve a URL synchronously mid-request.
+            if ($nextUrl === null && $episode->is_custom && $episode->aio_item_id) {
+                ResolveAioStreamsEpisode::dispatch($episode->id);
+            }
+
+            // Return the first viable URL as the best option
+            return [
+                'next_url' => $nextUrl,
+            ];
+        } catch (Exception $e) {
+            Log::warning('Error resolving episode failover URL', [
+                'episode_id' => $episodeId,
+                'playlist_uuid' => $playlistUuid,
+                'failover_index' => $index,
+                'status_code' => $statusCode,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
+
+            // Return null so the proxy stops retrying instead of looping on the same URL
+            return [
+                'next_url' => null,
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * Mark the appropriate playlist as invalid based on the failover index.
      *
      * When index <= 0, the original playlist is failing.
-     * When index > 0, a failover channel's playlist is failing — look it up by index.
+     * When index > 0, a failover candidate's playlist is failing — look it up by index
+     * in the already-loaded failover collection (Channel or Episode failover models,
+     * both expose getEffectivePlaylist()).
+     *
+     * @param  Collection<int, Channel|Episode>  $failoverCandidates
      */
-    protected function markPlaylistInvalidForFailover(int $channelId, string $playlistUuid, int $index, int $statusCode, int $timeoutMinutes): void
+    protected function markPlaylistInvalidForFailover(Collection $failoverCandidates, string $playlistUuid, int $index, int $statusCode, int $timeoutMinutes): void
     {
         $expiresAt = now()->addMinutes($timeoutMinutes)->timestamp;
 
@@ -3093,30 +3234,18 @@ class M3uProxyService
             return;
         }
 
-        // A failover channel's playlist is failing — find which one
+        // A failover candidate's playlist is failing — find which one
         try {
-            $channel = Channel::find($channelId);
-            if (! $channel) {
-                return;
-            }
-
-            $failoverChannels = $channel->failoverChannels()
-                ->select([
-                    'channels.id',
-                    'channels.playlist_id',
-                    'channels.custom_playlist_id',
-                ])->get();
-
-            // The previous index (index - 1) is the failover channel that just failed
+            // The previous index (index - 1) is the failover candidate that just failed
             $failedIdx = $index - 1;
-            if ($failedIdx >= 0 && $failedIdx < $failoverChannels->count()) {
-                $failedChannel = $failoverChannels[$failedIdx];
-                $failedPlaylist = $failedChannel->getEffectivePlaylist();
+            if ($failedIdx >= 0 && $failedIdx < $failoverCandidates->count()) {
+                $failedCandidate = $failoverCandidates[$failedIdx];
+                $failedPlaylist = $failedCandidate->getEffectivePlaylist();
                 if ($failedPlaylist) {
                     Redis::hset('playlist_invalid', $failedPlaylist->uuid, $expiresAt);
                     Log::info('Marked failover playlist as invalid due to fail condition', [
                         'playlist_uuid' => $failedPlaylist->uuid,
-                        'channel_id' => $failedChannel->id,
+                        'candidate_id' => $failedCandidate->id,
                         'failover_index' => $failedIdx,
                         'status_code' => $statusCode,
                         'timeout_minutes' => $timeoutMinutes,
@@ -3125,7 +3254,6 @@ class M3uProxyService
             }
         } catch (Exception $e) {
             Log::warning('Error marking failover playlist as invalid', [
-                'channel_id' => $channelId,
                 'failover_index' => $index,
                 'status_code' => $statusCode,
                 'exception_class' => $e::class,

@@ -175,3 +175,63 @@ it('adds a future/unaired episode disabled and scheduled, without resolving it',
 
     Http::assertNotSent(fn ($request) => str_contains($request->url(), '/stream/series/tt4'));
 });
+
+it('populates imdb_id from the item id when adding a movie to the library', function () {
+    Http::fake([
+        '*/meta/movie/tt1.json' => Http::response([
+            'meta' => ['id' => 'tt1', 'name' => 'Test Movie'],
+        ]),
+    ]);
+
+    Livewire::test(AioStreamsBrowse::class, ['integrationId' => $this->integration->id])
+        ->call('openDetail', 'movie', 'tt1')
+        ->call('addMovieToLibrary');
+
+    $channel = Channel::where('aio_item_id', 'tt1')->firstOrFail();
+
+    expect($channel->imdb_id)->toBe('tt1')
+        ->and($channel->tmdb_id)->toBeNull();
+});
+
+it('populates tmdb_id from a tmdb-prefixed item id, falling back to meta cross-reference fields', function () {
+    Http::fake([
+        '*/meta/movie/tmdb:603.json' => Http::response([
+            'meta' => ['id' => 'tmdb:603', 'name' => 'Test Movie', 'imdb_id' => 'tt0133093'],
+        ]),
+        '*/stream/movie/tmdb:603.json' => Http::response(['streams' => []]),
+    ]);
+
+    Livewire::test(AioStreamsBrowse::class, ['integrationId' => $this->integration->id])
+        ->call('openDetail', 'movie', 'tmdb:603')
+        ->call('addMovieToLibrary');
+
+    $channel = Channel::where('aio_item_id', 'tmdb:603')->firstOrFail();
+
+    expect($channel->tmdb_id)->toBe(603)
+        ->and($channel->imdb_id)->toBe('tt0133093');
+});
+
+it('populates imdb_id/tmdb_id from meta links when neither is present in the item id', function () {
+    Http::fake([
+        '*/meta/series/kitsu:1.json' => Http::response([
+            'meta' => [
+                'id' => 'kitsu:1',
+                'name' => 'Test Series',
+                'videos' => [],
+                'links' => [
+                    ['name' => 'tt9999999', 'category' => 'imdb', 'url' => 'https://imdb.com/title/tt9999999'],
+                    ['name' => '12345', 'category' => 'tmdb', 'url' => 'https://themoviedb.org/tv/12345'],
+                ],
+            ],
+        ]),
+    ]);
+
+    Livewire::test(AioStreamsBrowse::class, ['integrationId' => $this->integration->id])
+        ->call('openDetail', 'series', 'kitsu:1')
+        ->call('addSeriesToLibrary');
+
+    $series = Series::where('aio_item_id', 'kitsu:1')->firstOrFail();
+
+    expect($series->imdb_id)->toBe('tt9999999')
+        ->and($series->tmdb_id)->toBe(12345);
+});
