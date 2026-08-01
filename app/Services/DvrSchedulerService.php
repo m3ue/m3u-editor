@@ -386,6 +386,12 @@ class DvrSchedulerService
                 return;
             }
 
+            if ($rule->playlistAuth?->hasReachedConcurrentLimit()) {
+                Log::debug("DVR: Skipping manual recording for rule {$rule->id} — guest at concurrent recording limit");
+
+                return;
+            }
+
             // Manual rules scheduled via the Xtream API (schedule_dvr) always carry the
             // real programme title in series_title — the TV app only creates these when
             // recording a specific, known EPG entry (see XtreamApiController::scheduleDvr()).
@@ -488,6 +494,10 @@ class DvrSchedulerService
                 return;
             }
 
+            if ($rule->playlistAuth?->hasReachedConcurrentLimit()) {
+                return;
+            }
+
             $channel = $rule->channel;
             $title = $channel ? ($channel->title_custom ?? $channel->title ?? 'Recording') : 'Recording';
 
@@ -552,6 +562,12 @@ class DvrSchedulerService
         DB::transaction(function () use ($rule, $setting, $programme): void {
             if ($setting->isAtCapacity()) {
                 Log::debug("DVR: Skipping schedule for rule {$rule->id} — at capacity");
+
+                return;
+            }
+
+            if ($rule->playlistAuth?->hasReachedConcurrentLimit()) {
+                Log::debug("DVR: Skipping schedule for rule {$rule->id} — guest at concurrent recording limit");
 
                 return;
             }
@@ -733,6 +749,7 @@ class DvrSchedulerService
             ->values();
 
         $pendingStartsBySetting = [];
+        $pendingStartsByPlaylistAuth = [];
 
         foreach ($due as $recording) {
             $setting = $recording->dvrSetting;
@@ -750,7 +767,20 @@ class DvrSchedulerService
                 continue;
             }
 
+            $playlistAuth = $recording->playlistAuth;
+            $paExtra = $playlistAuth ? ($pendingStartsByPlaylistAuth[$playlistAuth->id] ?? 0) : 0;
+
+            if ($playlistAuth?->hasReachedConcurrentLimit($paExtra)) {
+                Log::debug("DVR: Skipping trigger for recording {$recording->id} — guest at concurrent recording limit (pending_in_tick={$paExtra})");
+
+                continue;
+            }
+
             $pendingStartsBySetting[$sid] = $extra + 1;
+
+            if ($playlistAuth) {
+                $pendingStartsByPlaylistAuth[$playlistAuth->id] = $paExtra + 1;
+            }
 
             Log::info("DVR: Triggering recording {$recording->id} ({$recording->title})");
             StartDvrRecording::dispatch($recording->id)->onQueue('dvr');

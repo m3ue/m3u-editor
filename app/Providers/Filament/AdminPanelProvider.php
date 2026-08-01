@@ -50,6 +50,7 @@ use App\Filament\Resources\Vods\VodResource;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
+use App\Filament\Widgets\DvrStorageOverviewWidget;
 use App\Filament\Widgets\KoFiWidget;
 use App\Filament\Widgets\M3uTvWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
@@ -300,6 +301,7 @@ class AdminPanelProvider extends PanelProvider
                 KoFiWidget::class,
                 QueueDashboardWidget::class,
                 PluginsOverviewWidget::class,
+                DvrStorageOverviewWidget::class,
                 // DonateCrypto::class,
                 StatsOverview::class,
                 // SharedStreamStatsWidget::class,

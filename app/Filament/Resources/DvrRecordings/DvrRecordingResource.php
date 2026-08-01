@@ -38,6 +38,28 @@ class DvrRecordingResource extends Resource
 {
     use HasUserFiltering;
 
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+
+        if (auth()->check() && ! auth()->user()->isAdmin()) {
+            $query->where('user_id', auth()->id());
+        }
+
+        return $query;
+    }
+
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        $query = parent::getGlobalSearchEloquentQuery();
+
+        if (auth()->check() && ! auth()->user()->isAdmin()) {
+            $query->where('user_id', auth()->id());
+        }
+
+        return $query;
+    }
+
     protected static ?string $model = DvrRecording::class;
 
     protected static string|BackedEnum|null $navigationIcon = null;
@@ -226,6 +248,15 @@ class DvrRecordingResource extends Resource
                     ->label(__('Playlist'))
                     ->state(fn (DvrRecording $record): ?string => $record->dvrSetting?->owner()?->name)
                     ->toggleable(),
+                TextColumn::make('user.name')
+                    ->label(__('Owner'))
+                    ->searchable()
+                    ->sortable()
+                    ->toggleable(),
+                TextColumn::make('playlistAuth.name')
+                    ->label(__('Guest'))
+                    ->toggleable()
+                    ->placeholder('—'),
                 TextColumn::make('scheduled_start')
                     ->since()
                     ->dateTimeTooltip()
@@ -255,6 +286,12 @@ class DvrRecordingResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->options(DvrRecordingStatus::class),
+                SelectFilter::make('user_id')
+                    ->relationship('user', 'name')
+                    ->label(__('Owner')),
+                SelectFilter::make('playlist_auth_id')
+                    ->relationship('playlistAuth', 'name')
+                    ->label(__('Guest')),
                 TernaryFilter::make('has_error')
                     ->label(__('Has Error'))
                     ->attribute('error_message')
@@ -376,7 +413,7 @@ class DvrRecordingResource extends Resource
         ];
     }
 
-    private static function formatFileSize(?int $sizeInBytes): string
+    public static function formatFileSize(?int $sizeInBytes): string
     {
         if (! $sizeInBytes) {
             return '—';
