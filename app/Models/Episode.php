@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
@@ -45,13 +46,33 @@ class Episode extends Model
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
         'probe_enabled' => 'boolean',
+        'is_custom' => 'boolean',
+        'aio_last_resolved_at' => 'datetime',
+        'aio_air_date' => 'datetime',
+        'is_aio_failover_clone' => 'boolean',
     ];
 
     protected static function boot(): void
     {
         parent::boot();
 
+        static::addGlobalScope(new ExcludeAioFailoverClonesScope);
+
         static::deleting(function (Episode $episode): void {
+            // AIOStreams failover candidates are lightweight sibling Episode rows the
+            // global ExcludeAioFailoverClonesScope normally hides — the FK cascade on
+            // episode_failovers.episode_id only removes the pivot row when the PRIMARY
+            // episode is deleted, not the clone row the pivot points at, so without this
+            // they'd become permanently orphaned (invisible, but never cleaned up).
+            if ($episode->is_custom && $episode->aio_item_id && ! $episode->is_aio_failover_clone) {
+                $failoverEpisodeIds = EpisodeFailover::where('episode_id', $episode->id)->pluck('episode_failover_id');
+
+                Episode::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                    ->whereIn('id', $failoverEpisodeIds)
+                    ->where('is_aio_failover_clone', true)
+                    ->delete();
+            }
+
             if (! $episode->dvr_recording_id) {
                 return;
             }
@@ -123,7 +144,11 @@ class Episode extends Model
             'id',
             'id',
             'episode_failover_id'
-        )->orderBy('episode_failovers.sort');
+        )
+            // AIOStreams failover candidates ARE is_aio_failover_clone=true Episode
+            // rows — the whole point of this relationship is to reach them.
+            ->withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+            ->orderBy('episode_failovers.sort');
     }
 
     /**
@@ -148,6 +173,23 @@ class Episode extends Model
     public function scopeForSeason(Builder $query, int $seasonId): Builder
     {
         return $query->where('season_id', $seasonId);
+    }
+
+    /**
+     * AIOStreams-added episodes can't be probed.
+     */
+    public function scopeNotAioManaged(Builder $query): Builder
+    {
+        return $query->whereNull('aio_item_id');
+    }
+
+    /**
+     * Episodes that should actually be probed right now: not AIOStreams-managed, and probing
+     * hasn't been opted out of.
+     */
+    public function scopeEligibleForProbe(Builder $query): Builder
+    {
+        return $query->notAioManaged()->where('probe_enabled', true);
     }
 
     public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array

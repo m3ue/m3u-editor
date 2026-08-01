@@ -189,45 +189,90 @@
                                 @endforeach
                             </div>
                         </div>
+
+                        @if (!$guestMode)
+                            @php
+                                $seasonEpisodeNumbers = collect($detailEpisodesBySeason[$detailSelectedSeason] ?? [])
+                                    ->map(fn (array $v) => (int) ($v['episode'] ?? 0));
+                                $allSeasonSelected = $seasonEpisodeNumbers->isNotEmpty()
+                                    && $seasonEpisodeNumbers->every(fn (int $ep) => isset($selectedEpisodes["{$detailSelectedSeason}:{$ep}"]));
+                            @endphp
+                            <div class="flex items-center justify-between mb-2 px-0.5">
+                                <label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                                    <x-filament::input.checkbox wire:click="toggleSelectAllForSeason({{ $detailSelectedSeason }})"
+                                        :checked="$allSeasonSelected" />
+                                    {{ __('Select all in this season') }}
+                                </label>
+                                <x-filament::button size="xs" wire:click="addSelectedEpisodesToLibrary"
+                                    wire:loading.attr="disabled" wire:target="addSelectedEpisodesToLibrary"
+                                    icon="heroicon-o-plus-circle" :disabled="count($selectedEpisodes) === 0">
+                                    {{ __('Add Selected (:count)', ['count' => count($selectedEpisodes)]) }}
+                                </x-filament::button>
+                            </div>
+                        @endif
+
                         <div wire:loading.class="opacity-50" wire:target="selectSeason"
                             class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
                             @foreach ($detailEpisodesBySeason[$detailSelectedSeason] ?? [] as $episode)
-                                <button type="button"
-                                    wire:click="playStream({{ $detailSelectedSeason }}, {{ (int) ($episode['episode'] ?? 0) }})"
-                                    wire:loading.attr="disabled" wire:target="playStream"
-                                    class="w-full flex items-start gap-3 px-3 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors disabled:opacity-40">
-                                    <div
-                                        class="relative w-28 aspect-video flex-shrink-0 rounded-md overflow-hidden bg-gray-200 dark:bg-gray-700">
-                                        @if (!empty($episode['thumbnail']))
-                                            <img src="{{ $episode['thumbnail'] }}" alt=""
-                                                class="w-full h-full object-cover" loading="lazy">
-                                        @else
-                                            <div class="w-full h-full flex items-center justify-center">
-                                                <x-heroicon-o-tv class="w-6 h-6 text-gray-400 dark:text-gray-500" />
-                                            </div>
-                                        @endif
-                                    </div>
-                                    <div class="flex-1 min-w-0 pt-0.5">
-                                        <p class="text-xs font-semibold text-gray-900 dark:text-gray-100 leading-snug">
-                                            {{ __('E:n', ['n' => $episode['episode'] ?? 0]) }}
-                                            @if (!empty($episode['title']))
-                                                · {{ $episode['title'] }}
+                                @php
+                                    $episodeNum = (int) ($episode['episode'] ?? 0);
+                                    $episodeKey = "{$detailSelectedSeason}:{$episodeNum}";
+                                    $hasAired = \App\Livewire\AioStreamsBrowse::hasEpisodeAired($episode);
+                                @endphp
+                                <div class="w-full flex items-center gap-3 px-3 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+                                    @if (!$guestMode)
+                                        <x-filament::input.checkbox
+                                            wire:click="toggleEpisodeSelected({{ $detailSelectedSeason }}, {{ $episodeNum }})"
+                                            :checked="isset($selectedEpisodes[$episodeKey])"
+                                            class="flex-shrink-0" />
+                                    @endif
+                                    <button type="button"
+                                        wire:click="playStream({{ $detailSelectedSeason }}, {{ $episodeNum }})"
+                                        wire:loading.attr="disabled" wire:target="playStream"
+                                        @disabled(!$hasAired)
+                                        class="flex-1 flex items-start gap-3 text-left disabled:opacity-40 min-w-0">
+                                        <div
+                                            class="relative w-28 aspect-video flex-shrink-0 rounded-md overflow-hidden bg-gray-200 dark:bg-gray-700">
+                                            @if (!empty($episode['thumbnail']))
+                                                <img src="{{ $episode['thumbnail'] }}" alt=""
+                                                    class="w-full h-full object-cover" loading="lazy">
+                                            @else
+                                                <div class="w-full h-full flex items-center justify-center">
+                                                    <x-heroicon-o-tv class="w-6 h-6 text-gray-400 dark:text-gray-500" />
+                                                </div>
                                             @endif
-                                        </p>
-                                        @if (!empty($episode['released']))
-                                            <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                                                {{ \Illuminate\Support\Carbon::parse($episode['released'])->format('M j, Y') }}
+                                        </div>
+                                        <div class="flex-1 min-w-0 pt-0.5">
+                                            <p class="text-xs font-semibold text-gray-900 dark:text-gray-100 leading-snug">
+                                                {{ __('E:n', ['n' => $episode['episode'] ?? 0]) }}
+                                                @if (!empty($episode['title']))
+                                                    · {{ $episode['title'] }}
+                                                @endif
                                             </p>
+                                            @if (!empty($episode['released']))
+                                                <p class="text-[11px] mt-0.5 {{ $hasAired ? 'text-gray-400 dark:text-gray-500' : 'text-warning-600 dark:text-warning-400 font-medium' }}">
+                                                    @if (!$hasAired)
+                                                        {{ __('Airs :date', ['date' => \Illuminate\Support\Carbon::parse($episode['released'])->format('M j, Y')]) }}
+                                                    @else
+                                                        {{ \Illuminate\Support\Carbon::parse($episode['released'])->format('M j, Y') }}
+                                                    @endif
+                                                </p>
+                                            @endif
+                                            @if (!empty($episode['overview']))
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                                    {{ $episode['overview'] }}
+                                                </p>
+                                            @endif
+                                        </div>
+                                        @if ($hasAired)
+                                            <x-filament::icon icon="heroicon-o-play-circle"
+                                                class="w-5 h-5 flex-shrink-0 text-primary-500 mt-0.5" />
+                                        @else
+                                            <x-filament::icon icon="heroicon-o-clock"
+                                                class="w-5 h-5 flex-shrink-0 text-gray-400 dark:text-gray-500 mt-0.5" />
                                         @endif
-                                        @if (!empty($episode['overview']))
-                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                                                {{ $episode['overview'] }}
-                                            </p>
-                                        @endif
-                                    </div>
-                                    <x-filament::icon icon="heroicon-o-play-circle"
-                                        class="w-5 h-5 flex-shrink-0 text-primary-500 mt-0.5" />
-                                </button>
+                                    </button>
+                                </div>
                             @endforeach
                         </div>
                     </div>
@@ -237,10 +282,28 @@
 
         @if (!$isSeries && ! $streamsLoading && ! $streamsFailed && empty($streamChoices))
             <div
-                class="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                class="flex-shrink-0 flex gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
                 <x-filament::button wire:click="playStream" wire:loading.attr="disabled" wire:target="playStream"
-                    icon="heroicon-o-play" class="w-full">
+                    icon="heroicon-o-play" class="flex-1">
                     {{ __('Get Sources') }}
+                </x-filament::button>
+                @if (!$guestMode)
+                    <x-filament::button wire:click="addMovieToLibrary" wire:loading.attr="disabled"
+                        wire:target="addMovieToLibrary" icon="heroicon-o-plus-circle" color="gray"
+                        outlined>
+                        {{ __('Add to Library') }}
+                    </x-filament::button>
+                @endif
+            </div>
+        @endif
+
+        @if ($isSeries && !$guestMode)
+            <div
+                class="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                <x-filament::button wire:click="addSeriesToLibrary" wire:loading.attr="disabled"
+                    wire:target="addSeriesToLibrary" icon="heroicon-o-plus-circle" color="gray" outlined
+                    class="w-full">
+                    {{ __('Add Series to Library') }}
                 </x-filament::button>
             </div>
         @endif

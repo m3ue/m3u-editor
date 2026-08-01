@@ -65,8 +65,10 @@ class SyncTranslations extends Command
 
         $before = count($existing);
 
-        // New keys get identity values; existing keys are preserved unchanged
-        $merged = array_merge($this->newKeys, $existing);
+        // New keys get identity values; existing keys are preserved unchanged.
+        // array_merge() would renumber purely-numeric-string keys (e.g. "9", "10")
+        // instead of treating them as translation keys, corrupting their values.
+        $merged = $existing + $this->newKeys;
         ksort($merged);
         $after = count($merged);
         $addedCount = $after - $before;

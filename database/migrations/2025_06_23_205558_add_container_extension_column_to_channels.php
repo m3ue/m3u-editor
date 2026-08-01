@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Channel;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -25,9 +24,15 @@ return new class extends Migration
         // If the URL does not have a file extension, it will set container_extension to null
         // This migration will process channels in chunks to avoid memory issues with large datasets
         // and will only update channels that have is_vod set to true and container_extension is null.
-        $channels = Channel::where('is_vod', true)
+        // Uses the query builder (not the Channel Eloquent model) — migrations run against
+        // the schema as it existed at that point in history, but an Eloquent model reflects
+        // the CURRENT class definition (including any global scopes added since), which can
+        // reference columns that don't exist yet during a full from-scratch migration replay
+        // (e.g. tests' RefreshDatabase).
+        $channels = DB::table('channels')
+            ->where('is_vod', true)
             ->whereNull('container_extension');
-        foreach ($channels->cursor()->chunk(100) as $chunk) {
+        foreach ($channels->orderBy('id')->cursor()->chunk(100) as $chunk) {
             foreach ($chunk as $channel) {
                 $containerExtension = null;
                 // Extract the file extension from the URL

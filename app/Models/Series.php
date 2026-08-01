@@ -49,6 +49,9 @@ class Series extends Model
         'sync_settings' => 'array',
         'last_metadata_fetch' => 'datetime',
         'last_modified' => 'datetime',
+        'is_custom' => 'boolean',
+        'aio_integration_id' => 'integer',
+        'aio_last_resolved_at' => 'datetime',
     ];
 
     public function user(): BelongsTo
@@ -59,6 +62,11 @@ class Series extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    public function aioIntegration(): BelongsTo
+    {
+        return $this->belongsTo(MediaServerIntegration::class, 'aio_integration_id');
     }
 
     public function category(): BelongsTo
@@ -163,6 +171,11 @@ class Series extends Model
 
     public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true)
     {
+        // AIOStreams-backed series are resolved via ResolveAioStreamsSeries, not Xtream.
+        if ($this->is_custom) {
+            return true;
+        }
+
         // Skip the provider call if data is still fresh (unless a forced refresh is requested).
         $isFresh = ! $refresh && $this->last_metadata_fetch && $this->last_modified
             && $this->last_metadata_fetch >= $this->last_modified

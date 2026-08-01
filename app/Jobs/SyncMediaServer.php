@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Interfaces\MediaServer;
 use App\Models\Category;
@@ -265,42 +264,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
      */
     protected function ensurePlaylist(MediaServerIntegration $integration): Playlist
     {
-        if ($integration->playlist_id && $integration->playlist) {
-            return $integration->playlist;
-        }
-
-        // Determine source type based on integration type
-        $sourceType = match ($integration->type) {
-            'emby' => PlaylistSourceType::Emby,
-            'jellyfin' => PlaylistSourceType::Jellyfin,
-            'plex' => PlaylistSourceType::Plex,
-            'local', 'webdav' => PlaylistSourceType::LocalMedia,
-            'aiostreams' => PlaylistSourceType::AIOStreams,
-            default => PlaylistSourceType::M3u,
-        };
-
-        // Determine URL for reference
-        $url = $integration->usesLocalPathConfig()
-            ? 'local://'.$integration->name
-            : $integration->base_url;
-
-        // Create a new playlist for this integration
-        $playlist = Playlist::createQuietly([
-            'uuid' => Str::orderedUuid()->toString(),
-            'name' => $integration->name,
-            'url' => $url,
-            'user_id' => $integration->user_id,
-            'source_type' => $sourceType,
-            'status' => Status::Processing,
-            'auto_sync' => false, // Sync is managed by the integration, not the playlist
-            'user_agent' => 'M3U-Editor-MediaServer-Sync/1.0', // required value for playlist, set to something meaningful
-            'id_channel_by' => 'stream_id', // Required field for playlist, set to stream_id to ensure consistent channel matching based on source_id
-        ]);
-
-        // Link the playlist to the integration
-        $integration->update(['playlist_id' => $playlist->id]);
-
-        return $playlist;
+        return $integration->getOrCreatePlaylist();
     }
 
     /**
@@ -858,18 +822,21 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         // Remove stale episodes (must be deleted before seasons/series to avoid FK issues)
         if ($integration->import_series) {
             $staleEpisodes = Episode::where('playlist_id', $playlist->id)
+                ->where('is_custom', false)
                 ->where('import_batch_no', '!=', $this->batchNo);
             $this->stats['episodes_removed'] = $staleEpisodes->count();
             $staleEpisodes->delete();
 
             // Remove stale seasons
             $staleSeasons = Season::where('playlist_id', $playlist->id)
+                ->where('is_custom', false)
                 ->where('import_batch_no', '!=', $this->batchNo);
             $this->stats['seasons_removed'] = $staleSeasons->count();
             $staleSeasons->delete();
 
             // Remove stale series
             $staleSeries = Series::where('playlist_id', $playlist->id)
+                ->where('is_custom', false)
                 ->where('import_batch_no', '!=', $this->batchNo);
             $this->stats['series_removed'] = $staleSeries->count();
             $staleSeries->delete();

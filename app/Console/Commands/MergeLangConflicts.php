@@ -97,8 +97,11 @@ class MergeLangConflicts extends Command
 
         // Union both sides; HEAD (current branch) wins for any duplicate key so
         // existing translations aren't overwritten by an older value from the
-        // incoming branch.
-        $merged = array_merge($theirJson, $headJson);
+        // incoming branch. array_merge() would renumber purely-numeric-string
+        // keys (e.g. "9", "10") instead of treating them as translation keys,
+        // corrupting their values — use the array union operator instead, which
+        // preserves all keys as-is.
+        $merged = $headJson + $theirJson;
         ksort($merged);
 
         return json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n";

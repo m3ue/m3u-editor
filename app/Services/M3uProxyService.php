@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\DvrRecordingStatus;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Jobs\ResolveAioStreamsChannel;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
@@ -3039,6 +3040,13 @@ class M3uProxyService
                     'active' => $activeStreams,
                     'limit' => $failoverPlaylist->available_streams,
                 ]);
+            }
+
+            // If the failover chain is exhausted for an AIOStreams-backed channel,
+            // asynchronously re-resolve fresh candidates for the *next* playback
+            // attempt rather than trying to serve a URL synchronously mid-request.
+            if ($nextUrl === null && $channel->aio_integration_id) {
+                ResolveAioStreamsChannel::dispatch($channel->id);
             }
 
             // Return the first viable URL as the best option

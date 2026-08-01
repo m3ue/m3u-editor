@@ -4,8 +4,10 @@ namespace App\Observers;
 
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\DvrRecording;
 use App\Models\Group;
+use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use Illuminate\Support\Facades\DB;
 
 class ChannelObserver
@@ -57,6 +59,20 @@ class ChannelObserver
      */
     public function deleting(Channel $channel): void
     {
+        // AIOStreams failover candidates are lightweight sibling Channel rows the
+        // global ExcludeAioFailoverClonesScope normally hides — the FK cascade on
+        // channel_failovers.channel_id only removes the pivot row when the PRIMARY
+        // channel is deleted, not the clone row the pivot points at, so without this
+        // they'd become permanently orphaned (invisible, but never cleaned up).
+        if ($channel->is_custom && $channel->aio_integration_id && ! $channel->is_aio_failover_clone) {
+            $failoverChannelIds = ChannelFailover::where('channel_id', $channel->id)->pluck('channel_failover_id');
+
+            Channel::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                ->whereIn('id', $failoverChannelIds)
+                ->where('is_aio_failover_clone', true)
+                ->delete();
+        }
+
         if (! $channel->dvr_recording_id) {
             return;
         }

@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Enums\PlaylistSourceType;
+use App\Enums\Status;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Support\Str;
 
 class MediaServerIntegration extends Model
 {
@@ -103,6 +106,48 @@ class MediaServerIntegration extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    /**
+     * Get the playlist associated with this integration, creating it if it
+     * doesn't exist yet. Shared by SyncMediaServer (library sync) and the
+     * AIOStreams "Add to Library" flow, which needs a target playlist to
+     * attach content to even when a full sync has never run.
+     */
+    public function getOrCreatePlaylist(): Playlist
+    {
+        if ($this->playlist_id && $this->playlist) {
+            return $this->playlist;
+        }
+
+        $sourceType = match ($this->type) {
+            'emby' => PlaylistSourceType::Emby,
+            'jellyfin' => PlaylistSourceType::Jellyfin,
+            'plex' => PlaylistSourceType::Plex,
+            'local', 'webdav' => PlaylistSourceType::LocalMedia,
+            'aiostreams' => PlaylistSourceType::AIOStreams,
+            default => PlaylistSourceType::M3u,
+        };
+
+        $url = $this->usesLocalPathConfig()
+            ? 'local://'.$this->name
+            : $this->base_url;
+
+        $playlist = Playlist::createQuietly([
+            'uuid' => Str::orderedUuid()->toString(),
+            'name' => $this->name,
+            'url' => $url,
+            'user_id' => $this->user_id,
+            'source_type' => $sourceType,
+            'status' => Status::Processing,
+            'auto_sync' => false,
+            'user_agent' => 'M3U-Editor-MediaServer-Sync/1.0',
+            'id_channel_by' => 'stream_id',
+        ]);
+
+        $this->update(['playlist_id' => $playlist->id]);
+
+        return $playlist;
     }
 
     /**

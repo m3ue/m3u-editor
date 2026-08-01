@@ -9,6 +9,7 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
+use App\Filament\Resources\MediaServerIntegrations\Pages\ViewAioStreamsCatalog;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Jobs\SyncMediaServer;
 use App\Models\Category;
@@ -602,6 +603,20 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 'required' => 'Please select at least one library to import.',
                             ]),
                     ])->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])),
+
+                // AIOStreams browse link — only meaningful once the record exists.
+                Section::make(__('Browse Catalog'))
+                    ->description(__('Preview this server\'s catalogs the same way your users will see them, and watch content directly.'))
+                    ->icon('heroicon-o-play')
+                    ->schema([
+                        Actions::make([
+                            Action::make('browseCatalogLink')
+                                ->label(__('Open Catalog Browser'))
+                                ->icon('heroicon-o-play')
+                                ->url(fn ($record) => self::getUrl('browse', ['record' => $record])),
+                        ]),
+                    ])
+                    ->visible(fn (Get $get, ?Model $record): bool => $get('type') === 'aiostreams' && $record !== null),
 
                 // AIOStreams catalog overview (read-only after connection test)
                 Section::make(__('Available Catalogs'))
@@ -1532,6 +1547,12 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         )
                         ->visible(fn ($record) => $record->playlist_id !== null),
 
+                    Action::make('browse')
+                        ->label(__('Browse Catalog'))
+                        ->icon('heroicon-o-play')
+                        ->visible(fn (MediaServerIntegration $record): bool => $record->isAioStreams() && $record->enabled)
+                        ->url(fn (MediaServerIntegration $record): string => static::getUrl('browse', ['record' => $record])),
+
                     Action::make('cleanupDuplicates')
                         ->label(__('Cleanup Duplicates'))
                         ->icon('heroicon-o-trash')
@@ -1672,7 +1693,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
         return [
             RelationManagers\MoviesRelationManager::class,
             RelationManagers\SeriesRelationManager::class,
-            RelationManagers\AioStreamsRelationManager::class,
+            RelationManagers\AioStreamsMoviesRelationManager::class,
+            RelationManagers\AioStreamsSeriesRelationManager::class,
         ];
     }
 
@@ -1682,6 +1704,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             'index' => ListMediaServerIntegrations::route('/'),
             'create' => CreateMediaServerIntegration::route('/create'),
             'edit' => EditMediaServerIntegration::route('/{record}/edit'),
+            'browse' => ViewAioStreamsCatalog::route('/{record}/browse'),
         ];
     }
 

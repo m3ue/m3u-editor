@@ -43,7 +43,11 @@ class ProbeChannelStreamsChunk implements ShouldQueue
      */
     public function handle(): void
     {
-        $channels = Channel::whereIn('id', $this->channelIds)->get();
+        // notAioManaged() only, not eligibleForProbe(): explicit channelIds here can come from a
+        // manual bulk "Probe Streams" action that intentionally bypasses probe_enabled — the
+        // automatic/playlist-driven caller (ProbeChannelStreams) already filters by probe_enabled
+        // itself before building the ID list. AIOStreams content must never be probed either way.
+        $channels = Channel::whereIn('id', $this->channelIds)->notAioManaged()->get();
 
         foreach ($channels as $channel) {
             $stats = $this->withProviderThrottling(

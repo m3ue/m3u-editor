@@ -26,6 +26,18 @@ Schedule::command('app:refresh-media-server-integrations')
     ->everyMinute()
     ->withoutOverlapping();
 
+// AIOStreams-backed VOD/episodes that have never resolved a stream yet
+// (unaired-at-add-time episodes now past their air date, or entries whose
+// initial resolution attempts all came up empty): resolve a small capped
+// batch. Deliberately never touches already-'resolved' entries — re-checking
+// a working link is exactly the "poking" pattern some debrid backends
+// (TorBox) ban accounts for. Ordinary link rot on resolved content is
+// handled on-demand instead, via M3uProxyService::resolveFailoverUrl's
+// exhaustion hook at actual playback-failure time.
+Schedule::command('app:resolve-pending-aiostreams-candidates')
+    ->hourly()
+    ->withoutOverlapping();
+
 // Refresh EPG
 Schedule::command('app:refresh-epg')
     ->everyMinute()

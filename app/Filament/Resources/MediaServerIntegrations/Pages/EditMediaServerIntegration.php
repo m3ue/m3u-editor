@@ -21,6 +21,13 @@ class EditMediaServerIntegration extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('browseCatalog')
+                ->label(__('Browse Catalog'))
+                ->icon('heroicon-o-play')
+                ->color('primary')
+                ->url(fn (MediaServerIntegration $record): string => MediaServerIntegrationResource::getUrl('browse', ['record' => $record]))
+                ->visible(fn (MediaServerIntegration $record): bool => $record->isAioStreams() && $record->enabled),
+
             ActionGroup::make([
                 Action::make('sync')
                     ->disabled(fn ($record) => $record->status === 'processing')

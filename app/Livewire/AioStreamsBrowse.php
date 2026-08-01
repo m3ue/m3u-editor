@@ -2,12 +2,18 @@
 
 namespace App\Livewire;
 
+use App\Jobs\NotifyAioStreamsResolutionComplete;
+use App\Jobs\ResolveAioStreamsChannel;
+use App\Jobs\ResolveAioStreamsEpisode;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
+use App\Models\Series;
 use App\Models\ViewerWatchProgress;
 use App\Services\AIOStreamsService;
 use Filament\Actions\Action;
@@ -17,7 +23,9 @@ use Filament\Notifications\Notification;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Renderless;
 use Livewire\Component;
@@ -76,6 +84,14 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
     public array $detailEpisodesBySeason = [];
 
     public ?int $detailSelectedSeason = null;
+
+    /**
+     * Episodes checked for bulk-add, keyed as "{season}:{episode}" so
+     * selections made in one season survive switching to another.
+     *
+     * @var array<string, bool>
+     */
+    public array $selectedEpisodes = [];
 
     /** @var array<int, array<string, mixed>> */
     public array $streamChoices = [];
@@ -255,6 +271,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         $this->detailSeasons = [];
         $this->detailEpisodesBySeason = [];
         $this->detailSelectedSeason = null;
+        $this->selectedEpisodes = [];
         $this->streamChoices = [];
         $this->pendingWatchContext = null;
 
@@ -340,6 +357,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         $this->detailSeasons = [];
         $this->detailEpisodesBySeason = [];
         $this->detailSelectedSeason = null;
+        $this->selectedEpisodes = [];
         $this->streamChoices = [];
         $this->pendingWatchContext = null;
         $this->resumeSeason = null;
@@ -431,6 +449,66 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         ];
     }
 
+    /**
+     * Maps a Stremio meta object (movie or series, from AIOStreamsService::fetchMeta())
+     * onto the Xtream-style `info` json shape VodResource's form/infolist actually reads
+     * (see VodResource.php's "VOD Settings" fieldset) — previously only `plot` was ever
+     * populated here, leaving genre/cast/director/rating/runtime/images blank for every
+     * AIOStreams-added movie regardless of how much metadata AIOStreams returned.
+     *
+     * @param  array<string, mixed>  $meta
+     * @return array<string, mixed>
+     */
+    private function buildAioMetaInfo(array $meta): array
+    {
+        $castNames = collect((array) ($meta['cast'] ?? []))
+            ->map(fn ($member) => is_array($member) ? ($member['name'] ?? null) : $member)
+            ->filter()
+            ->implode(', ');
+
+        $runtimeMinutes = null;
+        if (! empty($meta['runtime']) && preg_match('/(\d+)/', (string) $meta['runtime'], $matches)) {
+            $runtimeMinutes = (int) $matches[1];
+        }
+
+        return array_filter([
+            'name' => $meta['name'] ?? null,
+            'plot' => $meta['description'] ?? null,
+            'description' => $meta['description'] ?? null,
+            'genre' => ! empty($meta['genres']) ? implode(', ', (array) $meta['genres']) : null,
+            'director' => ! empty($meta['director']) ? implode(', ', (array) $meta['director']) : null,
+            'actors' => $castNames ?: null,
+            'cast' => $castNames ?: null,
+            'episode_run_time' => $runtimeMinutes,
+            'release_date' => $meta['releaseInfo'] ?? null,
+            'movie_image' => $meta['poster'] ?? null,
+            'cover_big' => $meta['poster'] ?? null,
+            'backdrop_path' => ! empty($meta['background']) ? [$meta['background']] : null,
+        ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    /**
+     * An episode with no known release date is treated as already aired — we
+     * can't tell otherwise, and AIOStreams addons won't have streams for it
+     * either way once it's actually requested.
+     *
+     * @param  array<string, mixed>  $episodeVideo
+     */
+    public static function hasEpisodeAired(array $episodeVideo): bool
+    {
+        $released = $episodeVideo['released'] ?? null;
+
+        if (! $released) {
+            return true;
+        }
+
+        try {
+            return Carbon::parse($released)->isPast();
+        } catch (\Exception) {
+            return true;
+        }
+    }
+
     public function showDetailAction(): Action
     {
         return Action::make('showDetail')
@@ -456,6 +534,8 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
                 'resumeSeason' => $this->resumeSeason,
                 'resumeEpisode' => $this->resumeEpisode,
                 'resumeEpisodeTitle' => $this->resumeEpisodeTitle,
+                'guestMode' => $this->guestMode,
+                'selectedEpisodes' => $this->selectedEpisodes,
             ]))
             ->modalSubmitAction(false)
             ->modalCancelAction(false);
@@ -471,6 +551,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         $this->detailSeasons = [];
         $this->detailEpisodesBySeason = [];
         $this->detailSelectedSeason = null;
+        $this->selectedEpisodes = [];
         $this->streamChoices = [];
         $this->pendingWatchContext = null;
         $this->resumeSeason = null;
@@ -515,6 +596,14 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             $streamLookupId = "{$this->detailId}:{$season}:{$episode}";
             $episodeVideo = collect($this->detailEpisodesBySeason[$season] ?? [])
                 ->first(fn (array $v) => (int) ($v['episode'] ?? 0) === $episode);
+
+            if ($episodeVideo && ! $this->hasEpisodeAired($episodeVideo)) {
+                $this->streamsLoading = false;
+                $this->streamsFailed = true;
+                Notification::make()->warning()->title(__('This episode has not aired yet'))->send();
+
+                return;
+            }
         }
 
         try {
@@ -551,6 +640,348 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         // anyway previously double-mounted the action; for the wire:init call
         // (no click to anchor Filament's focus-trap to) that made the underlying
         // page jump-scroll to the bottom, force-loading every lazy catalog row.
+    }
+
+    /**
+     * Add the currently-viewed movie to the integration's library playlist as
+     * a custom VOD channel, then kick off async stream resolution. Admin-only —
+     * adding content to a shared playlist is a different trust level than
+     * browsing/watching, which guests can already do.
+     */
+    public function addMovieToLibrary(): void
+    {
+        if ($this->guestMode) {
+            return;
+        }
+
+        $integration = $this->integration;
+        if (! $integration || $this->detailType !== 'movie' || ! $this->detailId || ! $this->detailResult) {
+            return;
+        }
+
+        $existing = Channel::where('aio_integration_id', $integration->id)
+            ->where('aio_item_id', $this->detailId)
+            ->where('aio_type', 'movie')
+            ->first();
+
+        if ($existing) {
+            Notification::make()->warning()->title(__('Already added to library'))->send();
+
+            return;
+        }
+
+        $playlist = $integration->getOrCreatePlaylist();
+        $meta = $this->detailResult;
+        $rating = is_numeric($meta['imdbRating'] ?? null) ? (float) $meta['imdbRating'] : null;
+
+        $channel = Channel::create([
+            'user_id' => $integration->user_id,
+            'playlist_id' => $playlist->id,
+            'name' => $meta['name'] ?? 'Unknown',
+            'title' => $meta['name'] ?? null,
+            'logo' => $meta['poster'] ?? null,
+            'is_custom' => true,
+            'is_vod' => true,
+            'enabled' => true,
+            // AIOStreams VODs manage their own internal failover chain and can't be
+            // probed (see VodResource's disabled probe_enabled/can_merge toggles for
+            // aio_integration_id rows) — set both explicitly rather than relying on
+            // column defaults, which default to true.
+            'can_merge' => false,
+            'probe_enabled' => false,
+            'year' => is_numeric($meta['releaseInfo'] ?? null) ? (int) $meta['releaseInfo'] : null,
+            'rating' => $rating,
+            'rating_5based' => $rating ? round($rating / 2, 1) : null,
+            'info' => $this->buildAioMetaInfo($meta),
+            'aio_integration_id' => $integration->id,
+            'aio_item_id' => $this->detailId,
+            'aio_type' => 'movie',
+            'aio_resolution_status' => 'pending',
+        ]);
+
+        ResolveAioStreamsChannel::dispatch($channel->id);
+        NotifyAioStreamsResolutionComplete::dispatch([$channel->id], [], $integration->user_id, $channel->title ?? $channel->name)
+            ->delay(now()->addSeconds(15));
+
+        Notification::make()->success()->title(__('Added — resolving stream, check back shortly'))->send();
+    }
+
+    /**
+     * Add the currently-viewed series to the library as a custom Series row.
+     * Seasons/episodes are created lazily via addEpisodeToLibrary() only as a
+     * user actually adds one, rather than eagerly fetching every episode's
+     * streams up front (which would multiply AIOStreams requests per series).
+     */
+    public function addSeriesToLibrary(): void
+    {
+        if ($this->guestMode) {
+            return;
+        }
+
+        $integration = $this->integration;
+        if (! $integration || $this->detailType !== 'series' || ! $this->detailId || ! $this->detailResult) {
+            return;
+        }
+
+        if ($this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult)->wasRecentlyCreated === false) {
+            Notification::make()->warning()->title(__('Already added to library'))->send();
+
+            return;
+        }
+
+        Notification::make()->success()->title(__('Series added — add individual episodes to resolve their streams'))->send();
+    }
+
+    /**
+     * Add a single episode of the currently-viewed series to the library,
+     * creating the parent Series/Season rows on demand if needed, then kick
+     * off async stream resolution for that episode.
+     */
+    public function addEpisodeToLibrary(int $season, int $episode): void
+    {
+        if ($this->guestMode) {
+            return;
+        }
+
+        $integration = $this->integration;
+        if (! $integration || $this->detailType !== 'series' || ! $this->detailId || ! $this->detailResult) {
+            return;
+        }
+
+        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+
+        $episodeRow = $this->createAioEpisode($series, $season, $episode);
+
+        if (! $episodeRow) {
+            Notification::make()->warning()->title(__('Episode already added'))->send();
+
+            return;
+        }
+
+        if ($episodeRow->enabled) {
+            NotifyAioStreamsResolutionComplete::dispatch([], [$episodeRow->id], $integration->user_id, $series->name)
+                ->delay(now()->addSeconds(15));
+        }
+
+        Notification::make()->success()->title(__('Episode added — resolving stream, check back shortly'))->send();
+    }
+
+    public function toggleEpisodeSelected(int $season, int $episode): void
+    {
+        $key = "{$season}:{$episode}";
+
+        if (isset($this->selectedEpisodes[$key])) {
+            unset($this->selectedEpisodes[$key]);
+        } else {
+            $this->selectedEpisodes[$key] = true;
+        }
+    }
+
+    /**
+     * Toggle all episodes of the currently-displayed season: if every episode
+     * in it is already selected, clear them; otherwise select them all.
+     * Selections from other seasons (made before switching tabs) are untouched.
+     */
+    public function toggleSelectAllForSeason(int $season): void
+    {
+        $episodeNumbers = collect($this->detailEpisodesBySeason[$season] ?? [])
+            ->map(fn (array $v) => (int) ($v['episode'] ?? 0));
+
+        $allSelected = $episodeNumbers->every(fn (int $ep) => isset($this->selectedEpisodes["{$season}:{$ep}"]));
+
+        foreach ($episodeNumbers as $ep) {
+            $key = "{$season}:{$ep}";
+            if ($allSelected) {
+                unset($this->selectedEpisodes[$key]);
+            } else {
+                $this->selectedEpisodes[$key] = true;
+            }
+        }
+    }
+
+    public function getSelectedEpisodesCountProperty(): int
+    {
+        return count($this->selectedEpisodes);
+    }
+
+    /**
+     * Add every checked episode (possibly spanning multiple seasons) to the
+     * library in one action, then clear the selection. Reports a single
+     * summary notification rather than one per episode.
+     */
+    public function addSelectedEpisodesToLibrary(): void
+    {
+        if ($this->guestMode) {
+            return;
+        }
+
+        $integration = $this->integration;
+        if (! $integration || $this->detailType !== 'series' || ! $this->detailId || ! $this->detailResult || empty($this->selectedEpisodes)) {
+            return;
+        }
+
+        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+
+        $added = 0;
+        $skipped = 0;
+        $dispatchedIds = [];
+
+        foreach (array_keys($this->selectedEpisodes) as $key) {
+            [$season, $episode] = array_map('intval', explode(':', $key));
+
+            $episodeRow = $this->createAioEpisode($series, $season, $episode);
+
+            if ($episodeRow) {
+                $added++;
+                if ($episodeRow->enabled) {
+                    $dispatchedIds[] = $episodeRow->id;
+                }
+            } else {
+                $skipped++;
+            }
+        }
+
+        $this->selectedEpisodes = [];
+
+        if (! empty($dispatchedIds)) {
+            NotifyAioStreamsResolutionComplete::dispatch([], $dispatchedIds, $integration->user_id, $series->name)
+                ->delay(now()->addSeconds(15));
+        }
+
+        $message = trans_choice(':count episode added — resolving streams, check back shortly|:count episodes added — resolving streams, check back shortly', $added, ['count' => $added]);
+        if ($skipped > 0) {
+            $message .= ' '.__('(:count already in library)', ['count' => $skipped]);
+        }
+
+        if ($added > 0) {
+            Notification::make()->success()->title($message)->send();
+        } else {
+            Notification::make()->warning()->title(__('Selected episodes are already in the library'))->send();
+        }
+    }
+
+    /**
+     * Create the custom Episode (+ Season, on demand) row for one episode of
+     * the given series and dispatch its stream resolution job. Returns null
+     * without doing anything if the episode was already added.
+     */
+    private function createAioEpisode(Series $series, int $season, int $episode): ?Episode
+    {
+        $aioItemId = "{$this->detailId}:{$season}:{$episode}";
+
+        if ($series->episodes()->where('aio_item_id', $aioItemId)->exists()) {
+            return null;
+        }
+
+        // Stremio meta doesn't expose per-season posters, so fall back to the
+        // series' own poster rather than leaving the season card blank.
+        $seasonCover = $series->cover_big ?? $series->cover ?? null;
+
+        $seasonRow = $series->seasons()->firstOrCreate(
+            ['season_number' => $season],
+            array_filter([
+                'name' => 'Season '.str_pad((string) $season, 2, '0', STR_PAD_LEFT),
+                'user_id' => $series->user_id,
+                'playlist_id' => $series->playlist_id,
+                'import_batch_no' => Str::orderedUuid()->toString(),
+                'is_custom' => true,
+                'cover' => $seasonCover,
+                'cover_big' => $seasonCover,
+            ], fn ($value) => $value !== null)
+        );
+
+        $episodeVideo = collect($this->detailEpisodesBySeason[$season] ?? [])
+            ->first(fn (array $v) => (int) ($v['episode'] ?? 0) === $episode)
+            ?? collect(Cache::get($this->episodeCacheKey($this->detailId)) ?? [])
+                ->first(fn (array $v) => (int) ($v['season'] ?? 0) === $season && (int) ($v['episode'] ?? 0) === $episode);
+
+        $released = $episodeVideo['released'] ?? $episodeVideo['firstAired'] ?? null;
+        $airDate = null;
+        if ($released) {
+            try {
+                $airDate = Carbon::parse($released);
+            } catch (\Exception) {
+                $airDate = null;
+            }
+        }
+        $hasAired = ! $airDate || $airDate->isPast();
+
+        $plot = $episodeVideo['overview'] ?? null;
+        $thumbnail = $episodeVideo['thumbnail'] ?? null;
+
+        $episodeRow = $series->episodes()->create([
+            'title' => $episodeVideo['title'] ?? $episodeVideo['name'] ?? "Episode {$episode}",
+            'user_id' => $series->user_id,
+            'playlist_id' => $series->playlist_id,
+            'season_id' => $seasonRow->id,
+            'episode_num' => $episode,
+            'season' => $season,
+            'import_batch_no' => Str::orderedUuid()->toString(),
+            'is_custom' => true,
+            'aio_item_id' => $aioItemId,
+            'aio_air_date' => $airDate,
+            // Unaired episodes have no stream (and usually no plot/poster) yet, so
+            // don't surface them as if they were playable until they've actually aired.
+            'enabled' => $hasAired,
+            // AIOStreams episodes manage their own internal failover chain and can't be
+            // probed (see EpisodesRelationManager's disabled probe_enabled toggle) — set
+            // explicitly rather than relying on the column default, which defaults to true.
+            'probe_enabled' => false,
+            'plot' => $plot,
+            'cover' => $thumbnail,
+            'info' => array_filter([
+                'plot' => $plot,
+                'movie_image' => $thumbnail,
+                'cover_big' => $thumbnail,
+                'release_date' => $released,
+            ], fn ($value) => $value !== null && $value !== ''),
+            // Streams can't exist for an episode that hasn't aired yet — resolving
+            // now would just burn the empty-result retry budget and permanently
+            // mark it 'failed'. Leave it 'scheduled' for the upcoming-episodes
+            // command (routes/console.php) to pick up once aio_air_date passes.
+            'aio_resolution_status' => $hasAired ? 'pending' : 'scheduled',
+        ]);
+
+        if ($hasAired) {
+            ResolveAioStreamsEpisode::dispatch($episodeRow->id);
+        }
+
+        return $episodeRow;
+    }
+
+    private function findOrCreateAioSeries(MediaServerIntegration $integration, string $itemId, array $meta): Series
+    {
+        $playlist = $integration->getOrCreatePlaylist();
+        $castNames = collect((array) ($meta['cast'] ?? []))
+            ->map(fn ($member) => is_array($member) ? ($member['name'] ?? null) : $member)
+            ->filter()
+            ->implode(', ');
+
+        return Series::firstOrCreate(
+            [
+                'aio_integration_id' => $integration->id,
+                'aio_item_id' => $itemId,
+                'aio_type' => 'series',
+            ],
+            array_filter([
+                'name' => $meta['name'] ?? 'Unknown',
+                'plot' => $meta['description'] ?? null,
+                'cover' => $meta['poster'] ?? null,
+                'genre' => ! empty($meta['genres']) ? implode(', ', (array) $meta['genres']) : null,
+                'director' => ! empty($meta['director']) ? implode(', ', (array) $meta['director']) : null,
+                'cast' => $castNames ?: null,
+                'rating' => $meta['imdbRating'] ?? null,
+                'rating_5based' => is_numeric($meta['imdbRating'] ?? null) ? round(((float) $meta['imdbRating']) / 2, 1) : null,
+                'release_date' => $meta['releaseInfo'] ?? null,
+                'backdrop_path' => ! empty($meta['background']) ? [$meta['background']] : null,
+                'user_id' => $integration->user_id,
+                'playlist_id' => $playlist->id,
+                'import_batch_no' => Str::orderedUuid()->toString(),
+                'is_custom' => true,
+                'enabled' => true,
+                'aio_resolution_status' => 'resolved',
+            ], fn ($value) => $value !== null && $value !== '')
+        );
     }
 
     public function playChosenStream(int $index): void

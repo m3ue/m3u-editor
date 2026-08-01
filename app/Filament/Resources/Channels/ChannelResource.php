@@ -1126,9 +1126,9 @@ class ChannelResource extends Resource implements CopilotResource
                 BulkAction::make('enable-merge')
                     ->label(__('Enable Merge'))
                     ->action(function (Collection $records, array $data): void {
-                        $records->each(fn ($channel) => $channel->update([
-                            'can_merge' => true,
-                        ]));
+                        foreach ($records->chunk(100) as $chunk) {
+                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['can_merge' => true]);
+                        }
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -1268,7 +1268,7 @@ class ChannelResource extends Resource implements CopilotResource
                     ->label(__('Enable Probing'))
                     ->action(function (Collection $records): void {
                         foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['probe_enabled' => true]);
+                            Channel::whereIn('id', $chunk->pluck('id'))->notAioManaged()->update(['probe_enabled' => true]);
                         }
                     })->after(function () {
                         Notification::make()

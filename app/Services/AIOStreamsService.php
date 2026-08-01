@@ -5,10 +5,12 @@ namespace App\Services;
 use App\Exceptions\MediaServerException;
 use App\Interfaces\MediaServer;
 use App\Models\MediaServerIntegration;
+use App\Settings\GeneralSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * AIOStreamsService - Integration for AIOStreams Stremio addon aggregators.
@@ -23,15 +25,41 @@ class AIOStreamsService implements MediaServer
 
     protected string $baseUrl;
 
-    public function __construct(MediaServerIntegration $integration)
+    protected int $rateLimit;
+
+    public function __construct(MediaServerIntegration $integration, ?GeneralSettings $settings = null)
     {
         $this->integration = $integration;
         $this->baseUrl = $integration->manifest_base_url ?? '';
+        $settings = $settings ?? app(GeneralSettings::class);
+        $this->rateLimit = $settings->aiostreams_rate_limit ?? 10;
     }
 
     public static function make(MediaServerIntegration $integration): self
     {
         return new self($integration);
+    }
+
+    /**
+     * Throttle outbound calls to this integration's AIOStreams instance.
+     *
+     * AIOStreams does not document a safe request rate, and upstream debrid
+     * services are known to restrict simultaneous connections per IP, so
+     * this is deliberately conservative and configurable per integration.
+     */
+    protected function waitForRateLimit(): void
+    {
+        $key = 'aiostreams-rate-limit-'.$this->integration->id;
+
+        if (RateLimiter::tooManyAttempts($key, $this->rateLimit)) {
+            $secondsUntilAvailable = RateLimiter::availableIn($key);
+
+            if ($secondsUntilAvailable > 0) {
+                usleep($secondsUntilAvailable * 1_000_000);
+            }
+        }
+
+        RateLimiter::hit($key, 60);
     }
 
     /**
@@ -48,7 +76,10 @@ class AIOStreamsService implements MediaServer
             throw new MediaServerException('No manifest URL configured.');
         }
 
+        $this->waitForRateLimit();
+
         $response = Http::timeout(15)
+            ->retry(2, 1000)
             ->get($this->integration->manifest_url);
 
         if (! $response->successful()) {
@@ -135,7 +166,9 @@ class AIOStreamsService implements MediaServer
             $path .= '/'.implode('&', $extraParts);
         }
 
-        $response = Http::timeout(20)->get("{$this->baseUrl}/{$path}.json");
+        $this->waitForRateLimit();
+
+        $response = Http::timeout(20)->retry(2, 1000)->get("{$this->baseUrl}/{$path}.json");
 
         if (! $response->successful()) {
             throw new MediaServerException("Catalog fetch failed: HTTP {$response->status()}");
@@ -147,12 +180,23 @@ class AIOStreamsService implements MediaServer
     /**
      * Fetch available streams for a piece of content identified by IMDb/TMDB ID.
      *
+     * AIOStreams' structured quality/format fields aren't publicly documented,
+     * so AioStreamsQualityParser primarily parses the human-readable name/title/
+     * description strings on each returned stream object instead.
+     *
      * @return array{streams: array<int, array<string, mixed>>}
      *
      * @throws MediaServerException
      */
     public function fetchStreams(string $type, string $id): array
     {
+        $this->waitForRateLimit();
+
+        // Deliberately no Http::retry() here: fetchStreams() failures are
+        // already surfaced to user-facing retry actions (e.g. AioStreamsBrowse's
+        // "retry" button, ResolveAioStreamsChannel's own delayed re-attempts),
+        // so retrying silently inside the service would double up on that and
+        // change the existing failure-surfacing behavior other callers rely on.
         $response = Http::timeout(30)->get("{$this->baseUrl}/stream/{$type}/{$id}.json");
 
         if (! $response->successful()) {
@@ -169,7 +213,9 @@ class AIOStreamsService implements MediaServer
      */
     public function fetchMeta(string $type, string $id): ?array
     {
-        $response = Http::timeout(15)->get("{$this->baseUrl}/meta/{$type}/{$id}.json");
+        $this->waitForRateLimit();
+
+        $response = Http::timeout(15)->retry(2, 1000)->get("{$this->baseUrl}/meta/{$type}/{$id}.json");
 
         if (! $response->successful()) {
             Log::warning("AIOStreams meta fetch failed for {$type}/{$id}: HTTP {$response->status()}");

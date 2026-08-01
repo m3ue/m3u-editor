@@ -142,10 +142,9 @@ class MergeChannels implements ShouldQueue
             && ! $this->forceCompleteRemerge
             && ! $this->deactivateFailoverChannels;
 
-        $allChannelsQuery = Channel::where([
-            ['user_id', $this->user->id],
-            ['can_merge', true],
-        ])->whereIn('playlist_id', $playlistIds);
+        $allChannelsQuery = Channel::where('user_id', $this->user->id)
+            ->eligibleForMerge()
+            ->whereIn('playlist_id', $playlistIds);
 
         $this->applyContentTypeScope($allChannelsQuery);
         $this->applyMergeKeyPresenceScope($allChannelsQuery);
@@ -313,10 +312,9 @@ class MergeChannels implements ShouldQueue
             return ['processed' => 0, 'deactivated' => 0];
         }
 
-        $channelsQuery = Channel::where([
-            ['user_id', $this->user->id],
-            ['can_merge', true],
-        ])->whereIn('playlist_id', $playlistIds);
+        $channelsQuery = Channel::where('user_id', $this->user->id)
+            ->eligibleForMerge()
+            ->whereIn('playlist_id', $playlistIds);
 
         $this->applyContentTypeScope($channelsQuery);
 
@@ -386,7 +384,7 @@ class MergeChannels implements ShouldQueue
         $matchesByPattern = array_fill(0, count($validPatterns), []);
 
         $regexChannelsQuery = Channel::where('user_id', $this->user->id)
-            ->where('can_merge', true)
+            ->eligibleForMerge()
             ->whereIn('playlist_id', $playlistIds);
 
         $this->applyContentTypeScope($regexChannelsQuery);

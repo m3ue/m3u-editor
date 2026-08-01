@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\Channel;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -25,8 +24,15 @@ return new class extends Migration
         // E.g., "https://example.com/stream/12345.m3u8" will set source_id to "12345"
         // This assumes that the URL is well-formed and contains a stream ID at the end
 
-        // Process channels in smaller batches to avoid memory issues
-        Channel::whereNotNull('url')
+        // Process channels in smaller batches to avoid memory issues. Uses the query
+        // builder (not the Channel Eloquent model) throughout — migrations run against
+        // the schema as it existed at that point in history, but an Eloquent model
+        // reflects the CURRENT class definition (including any global scopes added
+        // since), which can reference columns that don't exist yet during a full
+        // from-scratch migration replay (e.g. tests' RefreshDatabase).
+        DB::table('channels')
+            ->whereNotNull('url')
+            ->orderBy('id')
             ->chunkById(100, function ($channels) {
                 foreach ($channels as $channel) {
                     // Strip the query string first so pathinfo only sees the path segment.
@@ -37,7 +43,6 @@ return new class extends Migration
                     $streamIdWithExtension = end($urlParts);
                     $streamId = substr(pathinfo($streamIdWithExtension, PATHINFO_FILENAME), 0, 255);
 
-                    // Use DB::table for direct update to avoid model events and potential issues
                     DB::table('channels')
                         ->where('id', $channel->id)
                         ->update(['source_id' => $streamId]);

@@ -66,7 +66,7 @@ class ProbeStreams implements ShouldQueue
 
         $vodChannelQuery = Channel::where('playlist_id', $this->playlistId)
             ->where('is_vod', true)
-            ->where('probe_enabled', true);
+            ->eligibleForProbe();
 
         if (! $includeDisabled) {
             $vodChannelQuery->where('enabled', true);
@@ -79,7 +79,7 @@ class ProbeStreams implements ShouldQueue
         $vodChannelIds = $vodChannelQuery->pluck('id')->toArray();
 
         $episodeQuery = Episode::where('playlist_id', $this->playlistId)
-            ->where('probe_enabled', true);
+            ->eligibleForProbe();
 
         if (! $includeDisabled) {
             $episodeQuery->where('enabled', true);

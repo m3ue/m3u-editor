@@ -270,7 +270,9 @@ class ExtractTranslations extends Command
     private function writeJsonFile(): void
     {
         $existing = $this->loadExistingJson();
-        $merged = array_merge($existing, $this->strings);
+        // array_merge() would renumber purely-numeric-string keys (e.g. "9", "10")
+        // instead of treating them as translation keys, corrupting their values.
+        $merged = $this->strings + $existing;
         ksort($merged);
 
         $path = lang_path('en.json');

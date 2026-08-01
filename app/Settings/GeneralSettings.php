@@ -228,6 +228,11 @@ class GeneralSettings extends Settings
 
     public ?int $tmdb_rate_limit = 40;
 
+    // AIOStreams integration settings
+    public ?int $aiostreams_rate_limit = 10;
+
+    public ?int $aiostreams_max_failover_candidates = 3;
+
     public ?string $tmdb_language = 'en-US';
 
     public ?int $tmdb_confidence_threshold = 80;

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistSourceType;
 use App\Jobs\FetchTmdbIds;
+use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Observers\ChannelObserver;
 use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
@@ -70,11 +71,24 @@ class Channel extends Model
         'last_scrubber_live' => 'boolean',
         'year' => 'integer',
         'edition' => 'string',
+        'aio_integration_id' => 'integer',
+        'aio_last_resolved_at' => 'datetime',
+        'is_aio_failover_clone' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope(new ExcludeAioFailoverClonesScope);
+    }
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function aioIntegration(): BelongsTo
+    {
+        return $this->belongsTo(MediaServerIntegration::class, 'aio_integration_id');
     }
 
     public function streamProfile(): BelongsTo
@@ -203,7 +217,11 @@ class Channel extends Model
             'id', // Foreign key on the deployments table...
             'id', // Local key on the projects table...
             'channel_failover_id' // Local key on the environments table...
-        )->orderBy('channel_failovers.sort');
+        )
+            // AIOStreams failover candidates ARE is_aio_failover_clone=true Channel
+            // rows — the whole point of this relationship is to reach them.
+            ->withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+            ->orderBy('channel_failovers.sort');
     }
 
     /**
@@ -293,18 +311,18 @@ class Channel extends Model
             $channelFormat = 'm3u8';
         } elseif (Str::endsWith($filename, '.ts')) {
             $channelFormat = 'ts';
+        } elseif ($this->is_vod) {
+            // VOD content is never a raw MPEG-TS live stream — defaulting to 'ts' here
+            // (as the branches below do for live channels) makes players treat it as
+            // live and disable seeking. Default to the real container extension when
+            // known, otherwise a standard VOD container.
+            $channelFormat = $this->container_extension ?? 'mkv';
+        } elseif ($playlist->xtream ?? false) {
+            $channelFormat = $playlist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
         } else {
-            if ($playlist->xtream ?? false) {
-                $channelFormat = $playlist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
-            } else {
-                $channelFormat = $this->container_extension ?? 'ts';
-            }
+            $channelFormat = $this->container_extension ?? 'ts';
         }
-        $urlPath = 'live';
-        if ($this->is_vod) {
-            $urlPath = 'movie';
-            $channelFormat = $this->container_extension ?? $channelFormat ?? 'mkv';
-        }
+        $urlPath = $this->is_vod ? 'movie' : 'live';
 
         // If a specific format is provided (e.g. from a StreamProfile), use that instead of the detected format
         if ($profileFormat) {
@@ -797,6 +815,32 @@ class Channel extends Model
         return $query
             ->where('is_vod', false)
             ->where('epg_map_enabled', true);
+    }
+
+    /**
+     * AIOStreams-added channels manage their own internal failover chain and can't be merged.
+     */
+    public function scopeNotAioManaged(Builder $query): Builder
+    {
+        return $query->whereNull('aio_integration_id');
+    }
+
+    /**
+     * Channels that should actually be merged right now: not AIOStreams-managed, and merging
+     * hasn't been opted out of.
+     */
+    public function scopeEligibleForMerge(Builder $query): Builder
+    {
+        return $query->notAioManaged()->where('can_merge', true);
+    }
+
+    /**
+     * Channels that should actually be probed right now: not AIOStreams-managed, and probing
+     * hasn't been opted out of.
+     */
+    public function scopeEligibleForProbe(Builder $query): Builder
+    {
+        return $query->notAioManaged()->where('probe_enabled', true);
     }
 
     public function scopeHasMovieId(Builder $query): Builder

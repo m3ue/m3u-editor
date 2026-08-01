@@ -1,10 +1,15 @@
 <?php
 
+use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
-use App\Filament\Resources\MediaServerIntegrations\RelationManagers\AioStreamsRelationManager;
+use App\Filament\Resources\MediaServerIntegrations\Pages\ViewAioStreamsCatalog;
+use App\Filament\Resources\MediaServerIntegrations\RelationManagers\AioStreamsMoviesRelationManager;
+use App\Filament\Resources\MediaServerIntegrations\RelationManagers\AioStreamsSeriesRelationManager;
 use App\Filament\Resources\MediaServerIntegrations\RelationManagers\MoviesRelationManager;
 use App\Filament\Resources\MediaServerIntegrations\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\Series\SeriesResource;
 use App\Models\MediaServerIntegration;
+use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -18,27 +23,33 @@ beforeEach(function () {
     $this->actingAs($this->user);
 });
 
-it('shows the AIOStreams browse tab for aiostreams integrations, enabled or not', function () {
-    $enabled = MediaServerIntegration::create([
+it('shows the browse catalog header action for an enabled aiostreams integration', function () {
+    $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,
         'name' => 'Test AIOStreams',
         'type' => 'aiostreams',
         'enabled' => true,
         'manifest_url' => 'https://aiostreams.test/manifest.json',
     ]);
-    $disabled = MediaServerIntegration::create([
+
+    Livewire::test(EditMediaServerIntegration::class, ['record' => $integration->id])
+        ->assertActionVisible('browseCatalog');
+});
+
+it('hides the browse catalog header action for a disabled aiostreams integration', function () {
+    $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,
-        'name' => 'Test AIOStreams Disabled',
+        'name' => 'Test AIOStreams',
         'type' => 'aiostreams',
         'enabled' => false,
         'manifest_url' => 'https://aiostreams.test/manifest.json',
     ]);
 
-    expect(AioStreamsRelationManager::canViewForRecord($enabled, EditMediaServerIntegration::class))->toBeTrue();
-    expect(AioStreamsRelationManager::canViewForRecord($disabled, EditMediaServerIntegration::class))->toBeTrue();
+    Livewire::test(EditMediaServerIntegration::class, ['record' => $integration->id])
+        ->assertActionHidden('browseCatalog');
 });
 
-it('hides the AIOStreams browse tab for non-aiostreams integrations', function () {
+it('hides the browse catalog header action for non-aiostreams integrations', function () {
     $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,
         'name' => 'Test Jellyfin',
@@ -48,7 +59,62 @@ it('hides the AIOStreams browse tab for non-aiostreams integrations', function (
         'enabled' => true,
     ]);
 
-    expect(AioStreamsRelationManager::canViewForRecord($integration, EditMediaServerIntegration::class))->toBeFalse();
+    Livewire::test(EditMediaServerIntegration::class, ['record' => $integration->id])
+        ->assertActionHidden('browseCatalog');
+});
+
+it('renders the AIOStreams catalog browse sub-page', function () {
+    $integration = MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test AIOStreams',
+        'type' => 'aiostreams',
+        'enabled' => true,
+        'manifest_url' => 'https://aiostreams.test/manifest.json',
+    ]);
+
+    Livewire::test(ViewAioStreamsCatalog::class, ['record' => $integration->id])
+        ->assertOk()
+        ->assertSee('Search movies');
+});
+
+it('links "Back to Media Server" on the browse catalog page back to this specific integration, not the index', function () {
+    $integration = MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test AIOStreams',
+        'type' => 'aiostreams',
+        'enabled' => true,
+        'manifest_url' => 'https://aiostreams.test/manifest.json',
+    ]);
+
+    Livewire::test(ViewAioStreamsCatalog::class, ['record' => $integration->id])
+        ->assertActionHasUrl('back', MediaServerIntegrationResource::getUrl('edit', ['record' => $integration]));
+});
+
+it('shows the AIOStreams movies and series relation managers for aiostreams integrations', function () {
+    $integration = MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test AIOStreams',
+        'type' => 'aiostreams',
+        'enabled' => true,
+        'manifest_url' => 'https://aiostreams.test/manifest.json',
+    ]);
+
+    expect(AioStreamsMoviesRelationManager::canViewForRecord($integration, EditMediaServerIntegration::class))->toBeTrue();
+    expect(AioStreamsSeriesRelationManager::canViewForRecord($integration, EditMediaServerIntegration::class))->toBeTrue();
+});
+
+it('hides the AIOStreams movies and series relation managers for non-aiostreams integrations', function () {
+    $integration = MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test Jellyfin',
+        'type' => 'jellyfin',
+        'host' => 'jellyfin.example.com',
+        'api_key' => 'secret',
+        'enabled' => true,
+    ]);
+
+    expect(AioStreamsMoviesRelationManager::canViewForRecord($integration, EditMediaServerIntegration::class))->toBeFalse();
+    expect(AioStreamsSeriesRelationManager::canViewForRecord($integration, EditMediaServerIntegration::class))->toBeFalse();
 });
 
 it('hides the movies and series relation managers for aiostreams integrations', function () {
@@ -79,12 +145,6 @@ it('still shows the movies and series relation managers for non-aiostreams integ
 });
 
 it('renders the edit page for an aiostreams integration without error', function () {
-    // Regression: AioStreamsRelationManager is a "fake" relation manager (no real
-    // Eloquent relationship) used purely to embed AioStreamsBrowse inline on this
-    // page. Filament's InteractsWithRelationshipTable::bootedInteractsWithTable()
-    // still eagerly builds a full table config for every relation manager regardless
-    // of whether it's ever rendered, and several of its derived label lookups throw
-    // without a real relationship/related resource unless makeTable() is overridden.
     $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,
         'name' => 'Test AIOStreams',
@@ -97,7 +157,7 @@ it('renders the edit page for an aiostreams integration without error', function
         ->assertOk();
 });
 
-it('renders the AIOStreams relation manager component itself, embedding the browse UI', function () {
+it('links the series edit action to the full Series edit page instead of opening a slideOver', function () {
     $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,
         'name' => 'Test AIOStreams',
@@ -106,10 +166,18 @@ it('renders the AIOStreams relation manager component itself, embedding the brow
         'manifest_url' => 'https://aiostreams.test/manifest.json',
     ]);
 
-    Livewire::test(AioStreamsRelationManager::class, [
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $integration->getOrCreatePlaylist()->id,
+        'is_custom' => true,
+        'aio_integration_id' => $integration->id,
+        'aio_item_id' => 'tt1',
+        'aio_type' => 'series',
+    ]);
+
+    Livewire::test(AioStreamsSeriesRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])
-        ->assertOk()
-        ->assertSee('Search movies');
+        ->assertTableActionHasUrl('edit', SeriesResource::getUrl('edit', ['record' => $series]), record: $series);
 });

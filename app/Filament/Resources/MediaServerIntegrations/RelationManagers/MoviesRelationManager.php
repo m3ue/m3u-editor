@@ -36,7 +36,9 @@ class MoviesRelationManager extends RelationManager
 
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
     {
-        // AIOStreams is on-demand only — nothing is synced into channels/vods to list here.
+        // AIOStreams content is added on-demand rather than synced from a real media
+        // server library, so it doesn't fit this VOD-resource-oriented, read-only view
+        // — see AioStreamsMoviesRelationManager instead.
         return $ownerRecord->type !== 'aiostreams';
     }
 
