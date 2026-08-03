@@ -48,17 +48,16 @@ beforeEach(function () {
     $this->username = 'testuser_'.Str::random(5);
     $this->password = 'testpass';
 
-    PlaylistAuth::create([
+    $this->playlistAuth = PlaylistAuth::create([
         'name' => 'Test Auth',
         'username' => $this->username,
         'password' => $this->password,
         'enabled' => true,
+        'dvr_enabled' => true,
         'user_id' => $this->user->id,
     ]);
 
-    $this->playlist->playlistAuths()->attach(
-        PlaylistAuth::where('username', $this->username)->first()
-    );
+    $this->playlist->playlistAuths()->attach($this->playlistAuth);
 
     $this->group = Group::factory()->for($this->user)->create();
     $this->channel = Channel::factory()
@@ -92,6 +91,7 @@ it('cancels a scheduled (never-started) recording immediately with no post-proce
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create(['status' => DvrRecordingStatus::Scheduled, 'proxy_network_id' => null]);
 
     $response = $this->postJson(
@@ -110,6 +110,7 @@ it('cancels a recording with captured footage into PostProcessing, not Cancelled
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create([
             'status' => DvrRecordingStatus::Recording,
             'proxy_network_id' => 'test-network-id',
@@ -134,6 +135,7 @@ it('deletes a PostProcessing recording — the state a cancelled in-progress rec
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create([
             'status' => DvrRecordingStatus::PostProcessing,
             'user_cancelled' => true,
@@ -153,6 +155,7 @@ it('releases the proxy broadcast when deleting a PostProcessing recording that s
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create([
             'status' => DvrRecordingStatus::PostProcessing,
             'proxy_network_id' => 'test-network-id',
@@ -178,6 +181,7 @@ it('reproduces the TV app "Delete recording" flow — cancel then immediate dele
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create([
             'status' => DvrRecordingStatus::Recording,
             'proxy_network_id' => 'test-network-id',
@@ -219,6 +223,7 @@ it('rejects deleting a Scheduled or Recording recording — nothing has told the
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
         ->for($this->channel)
+        ->for($this->playlistAuth, 'playlistAuth')
         ->create(['status' => $status]);
 
     $response = $this->postJson(
