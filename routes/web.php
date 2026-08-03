@@ -33,6 +33,7 @@ use App\Http\Controllers\WebhookTestController;
 use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
+use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\Route;
 
 // OIDC SSO authentication
@@ -370,17 +371,19 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
 
 /*
  * Media Server (Emby/Jellyfin) proxy routes
- * These hide the API key from external clients
+ * These hide the API key from external clients. Every route requires a valid,
+ * time-limited signature (see MediaServerProxyController::generate*Url()) so an
+ * integration/item ID alone is never enough to access another user's media.
  */
 Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
     MediaServerProxyController::class,
     'proxyImage',
-])->name('media-server.image.proxy');
+])->middleware(ValidateSignature::relative())->name('media-server.image.proxy');
 
 Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
     MediaServerProxyController::class,
     'proxyStream',
-])->name('media-server.stream.proxy');
+])->middleware(ValidateSignature::relative())->name('media-server.stream.proxy');
 
 /*
  * Local Media streaming routes
@@ -389,7 +392,7 @@ Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
 Route::get('/local-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamLocalMedia',
-])->name('local-media.stream');
+])->middleware(ValidateSignature::relative())->name('local-media.stream');
 
 /*
  * WebDAV Media streaming routes
@@ -398,7 +401,7 @@ Route::get('/local-media/{integration}/stream/{item}', [
 Route::get('/webdav-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamWebDavMedia',
-])->name('webdav-media.stream');
+])->middleware(ValidateSignature::relative())->name('webdav-media.stream');
 
 /*
  * DVR routes — file streaming and proxy callbacks

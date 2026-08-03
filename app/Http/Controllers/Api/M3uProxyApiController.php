@@ -18,6 +18,7 @@ use App\Settings\GeneralSettings;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -839,15 +840,18 @@ class M3uProxyApiController extends Controller
      * Called via sendBeacon from the browser when a floating/popout player is closed
      * or when the user navigates away. This is a best-effort signal; the proxy will
      * also detect the TCP connection drop independently.
+     *
+     * Requires an authenticated panel session (see routes/api.php) and verifies the
+     * requested channel/episode belongs to that user before touching proxy state, so
+     * one user cannot stop another user's stream. Always responds 204 - whether the
+     * caller is unauthenticated, the ID is out of scope, or the stop actually
+     * happened - so the response can't be used to probe ownership of another ID.
      */
     public function stopPlayerStream(Request $request): Response
     {
+        $user = Auth::user();
         $id = $request->input('id');
         $type = $request->input('type');
-
-        if (! $id || ! $type) {
-            return response()->noContent(422);
-        }
 
         $field = match ($type) {
             'channel' => 'channel_id',
@@ -855,19 +859,23 @@ class M3uProxyApiController extends Controller
             default => null,
         };
 
-        if (! $field) {
-            return response()->noContent(422);
-        }
+        $model = match ($field) {
+            'channel_id' => $user ? Channel::find($id) : null,
+            'episode_id' => $user ? Episode::find($id) : null,
+            default => null,
+        };
 
-        try {
-            M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
-        } catch (Exception $e) {
-            Log::warning('Failed to stop player stream', [
-                'type' => $type,
-                'id' => $id,
-                'exception_class' => $e::class,
-                'exception_code' => $e->getCode(),
-            ]);
+        if ($field && $model && $user->can('view', $model)) {
+            try {
+                M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
+            } catch (Exception $e) {
+                Log::warning('Failed to stop player stream', [
+                    'type' => $type,
+                    'id' => $id,
+                    'exception_class' => $e::class,
+                    'exception_code' => $e->getCode(),
+                ]);
+            }
         }
 
         return response()->noContent();

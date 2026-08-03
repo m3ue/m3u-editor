@@ -7,12 +7,15 @@ use App\Http\Controllers\Controller;
 use App\Models\PlaylistAlias;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
+use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
+use Exception;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class TvApiController extends Controller
 {
@@ -209,6 +212,52 @@ class TvApiController extends Controller
             ->delete();
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * POST /api/tv/{username}/{password}/player-stream/stop
+     *
+     * Releases this client's registration on a pooled proxy stream (force: false),
+     * so other viewers of the same stream stay connected. Scoped to the authenticated
+     * playlist/credential — the requested channel or episode must belong to it, so one
+     * viewer cannot stop another playlist's stream. Idempotent: always returns 204,
+     * including when the client is already gone or the ID is out of scope, so a caller
+     * can't use the response to probe whether an ID belongs to someone else.
+     */
+    public function stopPlayerStream(Request $request): JsonResponse
+    {
+        $auth = $this->resolveAuth($request);
+        $playlist = $auth['playlist'];
+
+        $data = $request->validate([
+            'type' => ['required', 'string', 'in:live,vod,catchup,series'],
+            'stream_id' => ['required_unless:type,series', 'integer'],
+            'episode_id' => ['required_if:type,series', 'integer'],
+            'client_id' => ['required', 'string', 'max:128', 'regex:/^[\w-]+$/'],
+        ]);
+
+        $isSeries = $data['type'] === 'series';
+        $field = $isSeries ? 'episode_id' : 'channel_id';
+        $id = $isSeries ? $data['episode_id'] : $data['stream_id'];
+
+        $belongsToPlaylist = $isSeries
+            ? (method_exists($playlist, 'episodes') && $playlist->episodes()->whereKey($id)->exists())
+            : (method_exists($playlist, 'channels') && $playlist->channels()->whereKey($id)->exists());
+
+        if ($belongsToPlaylist) {
+            try {
+                M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $data['client_id']);
+            } catch (Exception $e) {
+                Log::warning('Failed to stop TV player stream', [
+                    'type' => $data['type'],
+                    'id' => $id,
+                    'exception_class' => $e::class,
+                    'exception_code' => $e->getCode(),
+                ]);
+            }
+        }
+
+        return response()->json(null, 204);
     }
 
     /**

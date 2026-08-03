@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\M3uProxyApiController;
 use App\Http\Controllers\Api\TvApiController;
 use App\Http\Controllers\ArrWebhookController;
 use App\Http\Controllers\DvrCallbackController;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -41,8 +43,15 @@ Route::prefix('m3u-proxy')->group(function () {
     Route::post('failover-resolver', [M3uProxyApiController::class, 'resolveFailoverUrl'])
         ->name('m3u-proxy.failover-resolver');
 
-    // Player stream stop - called via sendBeacon when in-app player is closed
+    // Player stream stop - called via sendBeacon when in-app player is closed.
+    // sendBeacon cannot attach custom headers (no CSRF token), so only the session
+    // middleware is added here rather than the full 'web' group, to authenticate the
+    // caller via the panel's session cookie without requiring a CSRF token.
     Route::post('player-stream/stop', [M3uProxyApiController::class, 'stopPlayerStream'])
+        ->middleware([
+            EncryptCookies::class,
+            StartSession::class,
+        ])
         ->name('m3u-proxy.player-stream.stop');
 
     // Proxy webhook endpoint - called by m3u-proxy to notify of events
@@ -102,4 +111,6 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.push.subscribe');
     Route::delete('push/unsubscribe', [TvApiController::class, 'unregisterPushToken'])
         ->name('tv.push.unsubscribe');
+    Route::post('player-stream/stop', [TvApiController::class, 'stopPlayerStream'])
+        ->name('tv.player-stream.stop');
 });

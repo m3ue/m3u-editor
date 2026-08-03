@@ -18,6 +18,7 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
@@ -261,14 +262,33 @@ class EpgApiController extends Controller
         $search = $request->get('search', null);
         $group = $request->get('group', null) ?: null;
         $vod = $request->boolean('vod');
-        $username = $request->get('username', null);
-        $password = $request->get('password', null);
+        $requestedUsername = $request->get('username', null);
+        $requestedPassword = $request->get('password', null);
 
-        // If not username/password provided, use playlist credentials
-        if (! $username || ! $password) {
+        // Only embed playable stream URLs for callers we can actually verify: an
+        // authenticated panel session (the in-app EPG viewer), or credentials that
+        // resolve to this exact playlist. Never substitute the playlist owner's
+        // real credentials for a caller we can't authenticate — unauthenticated
+        // callers get metadata only (see $isPlayable below).
+        $username = null;
+        $password = null;
+
+        if (Auth::check()) {
             $username = $user->name ?? 'admin';
             $password = $playlist->uuid;
+        } elseif ($requestedUsername && $requestedPassword) {
+            $authResult = PlaylistFacade::authenticate($requestedUsername, $requestedPassword);
+            $resolvedPlaylist = $authResult[0] ?? null;
+
+            if ($resolvedPlaylist
+                && get_class($resolvedPlaylist) === get_class($playlist)
+                && $resolvedPlaylist->id === $playlist->id) {
+                $username = $authResult[2];
+                $password = $authResult[3];
+            }
         }
+
+        $isPlayable = $username !== null && $password !== null;
 
         // Get parsed date range
         $dateRange = $this->parseDateRange($request);
@@ -443,12 +463,15 @@ class EpgApiController extends Controller
                         break;
                 }
 
-                // Get the channel URL with embedded auth.
-                // XtreamStreamController routes to the channelPlayer method, which
-                // applies the in-app transcoding profile.
-                $channelResults = $channel->getFloatingPlayerAttributes(username: $username, password: $password);
-                $url = $channelResults['url'] ?? '';
-                $channelFormat = $channelResults['format'] ?? '';
+                // Get the channel URL with embedded auth. XtreamStreamController routes
+                // to the channelPlayer method, which applies the in-app transcoding
+                // profile. Skip entirely when the caller isn't verified so no channel
+                // URL (and therefore no credential) is ever built for it.
+                $channelResults = $isPlayable
+                    ? $channel->getFloatingPlayerAttributes(username: $username, password: $password)
+                    : [];
+                $url = $channelResults['url'] ?? null;
+                $channelFormat = $channelResults['format'] ?? null;
 
                 // Get the icon
                 $icon = '';
@@ -486,6 +509,7 @@ class EpgApiController extends Controller
                     'epg_channel_id' => $channel->epg_channel_id ?? null,
                     'tvg_shift' => (int) ($channel->tvg_shift ?? 0), // EPG time shift in hours
                     'sort_index' => $channelSortIndex++,
+                    'playable' => $isPlayable,
                 ];
             }
 
@@ -772,6 +796,7 @@ class EpgApiController extends Controller
                     'uuid' => $playlist->uuid,
                     'type' => get_class($playlist),
                 ],
+                'playable' => $isPlayable,
                 'date_range' => [
                     'start' => $startDate,
                     'end' => $endDate,

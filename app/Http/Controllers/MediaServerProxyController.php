@@ -10,6 +10,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -267,11 +268,22 @@ class MediaServerProxyController extends Controller
     }
 
     /**
+     * Time-limited validity for generated proxy URLs, matching the TTL used
+     * elsewhere in the app for stream-scoped tokens (see DispatcharrAuthMiddleware).
+     */
+    private const PROXY_URL_TTL_HOURS = 24;
+
+    /**
      * Generate a proxy URL for an image.
      */
     public static function generateImageProxyUrl(int $integrationId, string $itemId, string $imageType = 'Primary'): string
     {
-        return ProxyFacade::getBaseUrl()."/media-server/{$integrationId}/image/{$itemId}/{$imageType}";
+        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+            'media-server.image.proxy',
+            now()->addHours(self::PROXY_URL_TTL_HOURS),
+            ['integrationId' => $integrationId, 'itemId' => $itemId, 'imageType' => $imageType],
+            absolute: false
+        );
     }
 
     /**
@@ -279,7 +291,12 @@ class MediaServerProxyController extends Controller
      */
     public static function generateStreamProxyUrl(int $integrationId, string $itemId, string $container = 'ts'): string
     {
-        return ProxyFacade::getBaseUrl()."/media-server/{$integrationId}/stream/{$itemId}.{$container}";
+        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+            'media-server.stream.proxy',
+            now()->addHours(self::PROXY_URL_TTL_HOURS),
+            ['integrationId' => $integrationId, 'itemId' => $itemId, 'container' => $container],
+            absolute: false
+        );
     }
 
     /**
@@ -456,7 +473,12 @@ class MediaServerProxyController extends Controller
      */
     public static function generateLocalMediaStreamUrl(int $integrationId, string $itemId): string
     {
-        return ProxyFacade::getBaseUrl()."/local-media/{$integrationId}/stream/{$itemId}";
+        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+            'local-media.stream',
+            now()->addHours(self::PROXY_URL_TTL_HOURS),
+            ['integration' => $integrationId, 'item' => $itemId],
+            absolute: false
+        );
     }
 
     /**
@@ -464,7 +486,12 @@ class MediaServerProxyController extends Controller
      */
     public static function generateWebDavStreamUrl(int $integrationId, string $itemId): string
     {
-        return ProxyFacade::getBaseUrl()."/webdav-media/{$integrationId}/stream/{$itemId}";
+        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+            'webdav-media.stream',
+            now()->addHours(self::PROXY_URL_TTL_HOURS),
+            ['integration' => $integrationId, 'item' => $itemId],
+            absolute: false
+        );
     }
 
     /**
