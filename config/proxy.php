@@ -38,6 +38,16 @@ return [
     'url_override' => env('PROXY_URL_OVERRIDE', null),
     'url_override_include_logos' => env('PROXY_URL_OVERRIDE_INCLUDE_LOGOS', default: null),
 
+    // Media Server (Plex/Emby/Jellyfin/local/WebDAV) proxy URLs are signed but
+    // non-expiring — they're stored on the Channel record and must stay valid
+    // indefinitely (see MediaServerProxyController::generate*Url()). This version
+    // is stamped into every generated URL and re-checked on every request; bumping
+    // it (per-instance, via env) invalidates every previously generated URL at
+    // once, without needing per-link expiry. The default is only bumped in code if
+    // a future issue requires forcing invalidation for installs that never set
+    // this explicitly.
+    'media_server_url_version' => (int) env('MEDIA_SERVER_PROXY_URL_VERSION', 1),
+
     // On-demand network broadcasts keep running for this many seconds after
     // the last viewer request. A small overlap is added to absorb short
     // disconnects/reconnects from players.

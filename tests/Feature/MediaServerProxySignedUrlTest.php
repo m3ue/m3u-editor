@@ -74,4 +74,29 @@ class MediaServerProxySignedUrlTest extends TestCase
 
         $response->assertForbidden();
     }
+
+    public function test_stream_proxy_route_never_expires()
+    {
+        $integration = MediaServerIntegration::factory()->create();
+
+        $url = MediaServerProxyController::generateStreamProxyUrl($integration->id, 'abc123', 'ts');
+
+        $this->travel(30)->days();
+        $response = $this->get($url);
+
+        $this->assertNotEquals(403, $response->getStatusCode());
+    }
+
+    public function test_stream_proxy_route_rejects_url_with_stale_version()
+    {
+        $integration = MediaServerIntegration::factory()->create();
+
+        $url = MediaServerProxyController::generateStreamProxyUrl($integration->id, 'abc123', 'ts');
+
+        config(['proxy.media_server_url_version' => 2]);
+
+        $response = $this->get($url);
+
+        $response->assertForbidden();
+    }
 }

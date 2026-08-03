@@ -372,8 +372,11 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
 /*
  * Media Server (Emby/Jellyfin) proxy routes
  * These hide the API key from external clients. Every route requires a valid,
- * time-limited signature (see MediaServerProxyController::generate*Url()) so an
+ * non-expiring signature plus a matching url-version (see
+ * MediaServerProxyController::generate*Url() / rejectIfStaleUrlVersion()) so an
  * integration/item ID alone is never enough to access another user's media.
+ * These URLs are stored on Channel records (not regenerated per-request), so they
+ * intentionally never expire — signature + version replace an expiry check.
  */
 Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
     MediaServerProxyController::class,

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Facades\ProxyFacade;
 use App\Models\MediaServerIntegration;
 use App\Services\MediaServerService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
@@ -33,6 +34,10 @@ class MediaServerProxyController extends Controller
      */
     public function proxyImage(Request $request, int $integrationId, string $itemId, string $imageType = 'Primary')
     {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
         try {
             $integration = MediaServerIntegration::find($integrationId);
 
@@ -130,6 +135,10 @@ class MediaServerProxyController extends Controller
      */
     public function proxyStream(Request $request, int $integrationId, string $itemId, string $container = 'ts')
     {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
         try {
             // Ensure long-running streaming inside closure is not subject to the default timeout
             set_time_limit(0);
@@ -268,20 +277,48 @@ class MediaServerProxyController extends Controller
     }
 
     /**
-     * Time-limited validity for generated proxy URLs, matching the TTL used
-     * elsewhere in the app for stream-scoped tokens (see DispatcharrAuthMiddleware).
+     * Stored, "permanent" media-server proxy URLs never re-sign themselves, so a
+     * signature alone can't be revoked once handed out. Every generated URL carries
+     * this version, and every request re-checks it against the live config value —
+     * bumping `MEDIA_SERVER_PROXY_URL_VERSION` invalidates every previously
+     * generated URL at once (they're regenerated with the new version on next sync).
      */
-    private const PROXY_URL_TTL_HOURS = 24;
+    protected static function currentUrlVersion(): int
+    {
+        return (int) config('proxy.media_server_url_version', 1);
+    }
+
+    /**
+     * Reject the request if the signed URL's stamped version doesn't match the
+     * live config value. Signature validity (handled by the ValidateSignature
+     * route middleware) only proves the URL wasn't tampered with — it says
+     * nothing about whether it's still considered current.
+     */
+    protected function rejectIfStaleUrlVersion(Request $request): ?JsonResponse
+    {
+        $requestedVersion = (int) $request->query('v', 0);
+
+        if ($requestedVersion === static::currentUrlVersion()) {
+            return null;
+        }
+
+        Log::warning('Media server proxy URL rejected — stale version', [
+            'path' => $request->path(),
+            'requested_version' => $requestedVersion,
+            'current_version' => static::currentUrlVersion(),
+        ]);
+
+        return response()->json(['error' => 'This URL is no longer valid. Please re-sync to generate a new one.'], 403);
+    }
 
     /**
      * Generate a proxy URL for an image.
      */
     public static function generateImageProxyUrl(int $integrationId, string $itemId, string $imageType = 'Primary'): string
     {
-        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
             'media-server.image.proxy',
-            now()->addHours(self::PROXY_URL_TTL_HOURS),
-            ['integrationId' => $integrationId, 'itemId' => $itemId, 'imageType' => $imageType],
+            ['integrationId' => $integrationId, 'itemId' => $itemId, 'imageType' => $imageType, 'v' => static::currentUrlVersion()],
             absolute: false
         );
     }
@@ -291,10 +328,9 @@ class MediaServerProxyController extends Controller
      */
     public static function generateStreamProxyUrl(int $integrationId, string $itemId, string $container = 'ts'): string
     {
-        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
             'media-server.stream.proxy',
-            now()->addHours(self::PROXY_URL_TTL_HOURS),
-            ['integrationId' => $integrationId, 'itemId' => $itemId, 'container' => $container],
+            ['integrationId' => $integrationId, 'itemId' => $itemId, 'container' => $container, 'v' => static::currentUrlVersion()],
             absolute: false
         );
     }
@@ -313,6 +349,10 @@ class MediaServerProxyController extends Controller
      */
     public function streamLocalMedia(Request $request, int $integration, string $item)
     {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
         try {
             set_time_limit(0);
             ignore_user_abort(true);
@@ -473,10 +513,9 @@ class MediaServerProxyController extends Controller
      */
     public static function generateLocalMediaStreamUrl(int $integrationId, string $itemId): string
     {
-        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
             'local-media.stream',
-            now()->addHours(self::PROXY_URL_TTL_HOURS),
-            ['integration' => $integrationId, 'item' => $itemId],
+            ['integration' => $integrationId, 'item' => $itemId, 'v' => static::currentUrlVersion()],
             absolute: false
         );
     }
@@ -486,10 +525,9 @@ class MediaServerProxyController extends Controller
      */
     public static function generateWebDavStreamUrl(int $integrationId, string $itemId): string
     {
-        return ProxyFacade::getBaseUrl().URL::temporarySignedRoute(
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
             'webdav-media.stream',
-            now()->addHours(self::PROXY_URL_TTL_HOURS),
-            ['integration' => $integrationId, 'item' => $itemId],
+            ['integration' => $integrationId, 'item' => $itemId, 'v' => static::currentUrlVersion()],
             absolute: false
         );
     }
@@ -508,6 +546,10 @@ class MediaServerProxyController extends Controller
      */
     public function streamWebDavMedia(Request $request, int $integration, string $item)
     {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
         try {
             set_time_limit(0);
             ignore_user_abort(true);
