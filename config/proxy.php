@@ -27,6 +27,13 @@ return [
     'm3u_proxy_public_url' => env('M3U_PROXY_PUBLIC_URL'), // Public URL for the proxy (auto-set in start-container)
     'm3u_resolver_url' => env('M3U_PROXY_FAILOVER_RESOLVER_URL', null), // Base URL for the editor that the proxy can use to resolve URLs if needed (for smart failover with capacity checks)
 
+    // Callback routes the proxy calls back into the editor (failover-resolver, webhooks,
+    // broadcast/callback, dvr/callback) reject every request when M3U_PROXY_TOKEN is unset,
+    // since an unset token previously meant "accept all". Only set this for a trusted,
+    // single-machine/local-network deployment where the proxy container isn't reachable
+    // from outside — it re-enables the old accept-all behavior for those routes.
+    'allow_unauthenticated_callbacks' => env('M3U_PROXY_ALLOW_UNAUTHENTICATED_CALLBACKS', false),
+
     // Logo Proxy Configuration
     'url_override' => env('PROXY_URL_OVERRIDE', null),
     'url_override_include_logos' => env('PROXY_URL_OVERRIDE_INCLUDE_LOGOS', default: null),

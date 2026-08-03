@@ -14,8 +14,8 @@ use Illuminate\Support\Facades\Log;
  * DvrCallbackController — Receives webhook callbacks from the m3u-proxy BroadcastManager.
  *
  * The proxy calls this endpoint when a DVR broadcast ends (normally or due to failure).
- * Authentication is via the proxy API token (X-API-Token header or api_token query param),
- * matching the same mechanism the editor uses when calling the proxy.
+ * Authentication is handled by the VerifyM3uProxyCallback middleware (see routes/api.php),
+ * shared with the other m3u-proxy callback routes.
  *
  * Supported events:
  *   programme_ended   — FFmpeg exited cleanly (duration limit reached)
@@ -26,14 +26,6 @@ class DvrCallbackController extends Controller
 {
     public function handle(Request $request): JsonResponse
     {
-        if (! $this->isAuthorized($request)) {
-            Log::warning('DVR callback: unauthorized request', [
-                'ip' => $request->ip(),
-            ]);
-
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-
         $networkId = $request->input('network_id');
         $event = $request->input('event');
         $hlsDir = $request->input('hls_dir');
@@ -154,26 +146,5 @@ class DvrCallbackController extends Controller
         ]);
 
         return response()->json(['status' => 'ok']);
-    }
-
-    /**
-     * Validate the request using the same API token the editor uses when calling the proxy.
-     */
-    private function isAuthorized(Request $request): bool
-    {
-        $configuredToken = config('proxy.m3u_proxy_token');
-
-        // If no token is configured, accept all callbacks (dev/open deployments)
-        if (empty($configuredToken)) {
-            Log::warning('DVR callback: no proxy token configured — accepting all callbacks (open deployment)');
-
-            return true;
-        }
-
-        $providedToken = $request->header('X-API-Token')
-            ?? $request->query('api_token')
-            ?? '';
-
-        return hash_equals((string) $configuredToken, $providedToken);
     }
 }

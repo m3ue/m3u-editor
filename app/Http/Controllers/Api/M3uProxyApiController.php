@@ -849,9 +849,12 @@ class M3uProxyApiController extends Controller
      */
     public function stopPlayerStream(Request $request): Response
     {
-        $user = Auth::user();
         $id = $request->input('id');
         $type = $request->input('type');
+
+        if (! $id || ! $type) {
+            return response()->noContent(422);
+        }
 
         $field = match ($type) {
             'channel' => 'channel_id',
@@ -859,13 +862,20 @@ class M3uProxyApiController extends Controller
             default => null,
         };
 
+        if (! $field) {
+            return response()->noContent(422);
+        }
+
+        // Ownership (and the caller being authenticated at all) is checked here, but
+        // deliberately doesn't change the response - always 204 - so it can't be used
+        // to probe whether an ID exists or belongs to someone else.
+        $user = Auth::user();
         $model = match ($field) {
             'channel_id' => $user ? Channel::find($id) : null,
             'episode_id' => $user ? Episode::find($id) : null,
-            default => null,
         };
 
-        if ($field && $model && $user->can('view', $model)) {
+        if ($model && $user->can('view', $model)) {
             try {
                 M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
             } catch (Exception $e) {

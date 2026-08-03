@@ -7,6 +7,10 @@ use App\Services\NetworkBroadcastService;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    // These tests exercise broadcast lifecycle logic via the proxy callback route,
+    // not the callback auth gate itself (see VerifyM3uProxyCallback / M3uProxyCallbackAuthTest).
+    config(['proxy.m3u_proxy_token' => null, 'proxy.allow_unauthenticated_callbacks' => true]);
+
     Http::fake([
         '*/broadcast/*/status' => Http::response(['status' => 'stopped'], 404),
         '*/broadcast/*/stop' => Http::response(['status' => 'stopped', 'final_segment_number' => 0], 200),

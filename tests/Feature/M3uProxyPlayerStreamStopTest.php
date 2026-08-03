@@ -79,13 +79,16 @@ class M3uProxyPlayerStreamStopTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_missing_type_or_id_still_returns_no_content()
+    public function test_missing_type_or_id_returns_unprocessable()
     {
+        // Structural validation (malformed request) is a distinct concern from the
+        // ownership check above and doesn't need to hide anything, so it reports
+        // 422 rather than folding into the silent 204 contract.
         $user = User::factory()->create();
 
         $response = $this->actingAs($user)->postJson('/api/m3u-proxy/player-stream/stop', []);
 
-        $response->assertNoContent();
+        $response->assertStatus(422);
         Http::assertNothingSent();
     }
 }

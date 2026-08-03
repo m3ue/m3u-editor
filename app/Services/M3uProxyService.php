@@ -3333,7 +3333,7 @@ class M3uProxyService
         // Build the failover resolver path
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/failover-resolver";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/failover-resolver");
         }
 
         // If here, return null
@@ -3349,11 +3349,25 @@ class M3uProxyService
     {
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/broadcast/callback";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/broadcast/callback");
         }
 
         // Build the broadcast callback path
-        return ProxyFacade::getBaseUrl().'/api/m3u-proxy/broadcast/callback';
+        return $this->withCallbackToken(ProxyFacade::getBaseUrl().'/api/m3u-proxy/broadcast/callback');
+    }
+
+    /**
+     * Get the DVR broadcast callback URL for m3u-proxy to send recording-lifecycle events.
+     *
+     * @return string|null The DVR callback endpoint URL, or null if not configured
+     */
+    public function getDvrCallbackUrl(): ?string
+    {
+        if (! empty($this->failoverResolverUrl)) {
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/dvr/callback");
+        }
+
+        return $this->withCallbackToken(ProxyFacade::getBaseUrl().'/api/dvr/callback');
     }
 
     /**
@@ -3365,11 +3379,28 @@ class M3uProxyService
     {
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/webhooks";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/webhooks");
         }
 
         // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
         return null;
+    }
+
+    /**
+     * Append the shared proxy API token as a query parameter so VerifyM3uProxyCallback
+     * can authenticate requests the proxy sends back to these URLs. The proxy's outbound
+     * HTTP clients for these callbacks don't attach custom headers, so the token has to
+     * travel embedded in the URL itself, which the editor fully controls.
+     */
+    private function withCallbackToken(string $url): string
+    {
+        if (empty($this->apiToken)) {
+            return $url;
+        }
+
+        $separator = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$separator.'api_token='.rawurlencode($this->apiToken);
     }
 
     /**
@@ -3404,6 +3435,7 @@ class M3uProxyService
             'dvr_mode' => true,
             'hls_list_size' => 0,
             'output_dir' => config('proxy.broadcast_temp_dir'),
+            'callback_url' => $this->getDvrCallbackUrl(),
             'metadata' => [
                 'type' => 'dvr',
                 'recording_id' => $recording->uuid,

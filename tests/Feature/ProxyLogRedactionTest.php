@@ -151,7 +151,7 @@ it('allowlists webhook callback diagnostics', function () {
                 'source' => "https://provider.test/{$secret}",
             ],
         ],
-    ])->assertOk();
+    ], ['X-API-Token' => 'proxy-api-token'])->assertOk();
 
     expect(formattedProxyLogs($this->proxyLogHandler))
         ->toContain('stream_started')
@@ -179,7 +179,7 @@ it('does not log failover request or exception payloads', function () {
         'current_failover_index' => 2,
         'status_code' => 401,
         'Cookie' => $secret,
-    ])->assertInternalServerError();
+    ], ['X-API-Token' => 'proxy-api-token'])->assertInternalServerError();
 
     expect(formattedProxyLogs($this->proxyLogHandler))
         ->toContain('Error resolving failover')
