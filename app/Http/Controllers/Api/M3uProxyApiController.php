@@ -876,16 +876,7 @@ class M3uProxyApiController extends Controller
         };
 
         if ($model && $user->can('view', $model)) {
-            try {
-                M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $request->input('client_id'));
-            } catch (Exception $e) {
-                Log::warning('Failed to stop player stream', [
-                    'type' => $type,
-                    'id' => $id,
-                    'exception_class' => $e::class,
-                    'exception_code' => $e->getCode(),
-                ]);
-            }
+            M3uProxyService::stopStreamSafely($field, (string) $id, $request->input('client_id'));
         }
 
         return response()->noContent();

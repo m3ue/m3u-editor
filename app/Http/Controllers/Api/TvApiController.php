@@ -9,13 +9,11 @@ use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
-use Exception;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class TvApiController extends Controller
 {
@@ -245,16 +243,7 @@ class TvApiController extends Controller
             : (method_exists($playlist, 'channels') && $playlist->channels()->whereKey($id)->exists());
 
         if ($belongsToPlaylist) {
-            try {
-                M3uProxyService::stopStreamsByMetadata($field, (string) $id, force: false, clientId: $data['client_id']);
-            } catch (Exception $e) {
-                Log::warning('Failed to stop TV player stream', [
-                    'type' => $data['type'],
-                    'id' => $id,
-                    'exception_class' => $e::class,
-                    'exception_code' => $e->getCode(),
-                ]);
-            }
+            M3uProxyService::stopStreamSafely($field, (string) $id, $data['client_id'], 'Failed to stop TV player stream');
         }
 
         return response()->json(null, 204);

@@ -266,14 +266,15 @@ class EpgApiController extends Controller
         $requestedPassword = $request->get('password', null);
 
         // Only embed playable stream URLs for callers we can actually verify: an
-        // authenticated panel session (the in-app EPG viewer), or credentials that
-        // resolve to this exact playlist. Never substitute the playlist owner's
-        // real credentials for a caller we can't authenticate — unauthenticated
-        // callers get metadata only (see $isPlayable below).
+        // authenticated panel session that owns this specific playlist (the
+        // in-app EPG viewer), or credentials that resolve to this exact
+        // playlist. Never substitute the playlist owner's real credentials for
+        // a caller we can't authenticate as that owner — everyone else gets
+        // metadata only (see $isPlayable below).
         $username = null;
         $password = null;
 
-        if (Auth::check()) {
+        if (Auth::check() && Auth::id() === $playlist->user_id) {
             $username = $user->name ?? 'admin';
             $password = $playlist->uuid;
         } elseif ($requestedUsername && $requestedPassword) {

@@ -596,6 +596,27 @@ class M3uProxyService
     }
 
     /**
+     * Stop streams for a single client's channel/episode, swallowing and logging any
+     * failure. Callers are expected to have already verified the caller is allowed to
+     * stop this stream (e.g. it belongs to their playlist, or an ownership policy check)
+     * before calling this — this only wraps the "stop and don't let a proxy hiccup
+     * surface as a 500" behavior shared by every player-facing stop-stream endpoint.
+     */
+    public static function stopStreamSafely(string $field, string $id, ?string $clientId, string $logMessage = 'Failed to stop player stream'): void
+    {
+        try {
+            self::stopStreamsByMetadata($field, $id, force: false, clientId: $clientId);
+        } catch (Exception $e) {
+            Log::warning($logMessage, [
+                'field' => $field,
+                'id' => $id,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
+        }
+    }
+
+    /**
      * Stop all streams for a specific playlist, optionally excluding a channel ID.
      *
      * This is used when switching channels on a connection-limited playlist
