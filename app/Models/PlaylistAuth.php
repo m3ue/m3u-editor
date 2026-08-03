@@ -43,6 +43,7 @@ class PlaylistAuth extends Model
         'stop_oldest_on_limit' => 'boolean',
         'request_enabled' => 'boolean',
         'auto_approve_requests' => 'boolean',
+        'library_publishing_enabled' => 'boolean',
         'aiostreams_enabled' => 'boolean',
         'proxy_enabled' => 'boolean',
         'proxy_stream_profile_ids' => 'array',

@@ -20,6 +20,18 @@ interface MediaServer
      */
     public function fetchLibraries(): Collection;
 
+    /**
+     * @param  list<string>  $paths
+     * @return array{success: bool, created: bool, message: string, library: array<string, mixed>|null}
+     */
+    public function createLibrary(
+        string $name,
+        string $collectionType,
+        array $paths,
+        bool $refreshLibrary = true,
+        ?string $libraryId = null,
+    ): array;
+
     public function fetchMovies(): Collection;
 
     public function fetchSeries(): Collection;

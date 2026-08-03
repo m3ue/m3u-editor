@@ -278,6 +278,20 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->collapsible()
             ->collapsed(fn ($record) => ! ($record?->aiostreams_enabled));
 
+        $libraryPublishingSection = Section::make(__('Library Publishing Access'))
+            ->description(__('Allow this credential to read managed Emby publishing catalogs and report sync results.'))
+            ->compact()
+            ->hidden(fn () => ! (auth()->user()?->canUseIntegrations() ?? false))
+            ->schema([
+                Toggle::make('library_publishing_enabled')
+                    ->label(__('Enable Library Publishing'))
+                    ->default(false)
+                    ->columnSpan(2),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->library_publishing_enabled));
+
         return [
             Grid::make()
                 ->schema([
@@ -452,6 +466,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             $requestsSection,
             $dvrSection,
             $aiostreamsSection,
+            $libraryPublishingSection,
         ];
     }
 }

@@ -21,6 +21,21 @@ use Illuminate\Support\Facades\RateLimiter;
  */
 class AIOStreamsService implements MediaServer
 {
+    public function createLibrary(
+        string $name,
+        string $collectionType,
+        array $paths,
+        bool $refreshLibrary = true,
+        ?string $libraryId = null,
+    ): array {
+        return [
+            'success' => false,
+            'created' => false,
+            'message' => 'Library creation is not supported by this media server.',
+            'library' => null,
+        ];
+    }
+
     protected MediaServerIntegration $integration;
 
     protected string $baseUrl;

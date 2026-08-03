@@ -1695,6 +1695,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             RelationManagers\SeriesRelationManager::class,
             RelationManagers\AioStreamsMoviesRelationManager::class,
             RelationManagers\AioStreamsSeriesRelationManager::class,
+            RelationManagers\EmbyLibraryMappingsRelationManager::class,
         ];
     }
 

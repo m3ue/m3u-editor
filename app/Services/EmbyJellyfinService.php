@@ -135,6 +135,9 @@ class EmbyJellyfinService implements MediaServer
                             'name' => $library['Name'] ?? 'Unknown Library',
                             'type' => $collectionType,
                             'item_count' => $library['ChildCount'] ?? 0,
+                            'paths' => is_array($library['Locations'] ?? null)
+                                ? array_values($library['Locations'])
+                                : array_values(array_filter([$library['Path'] ?? null])),
                             'path' => is_array($library['Locations'] ?? null)
                                 ? implode(', ', $library['Locations'])
                                 : ($library['Path'] ?? ''),
@@ -160,6 +163,140 @@ class EmbyJellyfinService implements MediaServer
     }
 
     /**
+     * @param  list<string>  $paths
+     * @return array{success: bool, created: bool, message: string, library: array<string, mixed>|null}
+     */
+    public function createLibrary(
+        string $name,
+        string $collectionType,
+        array $paths,
+        bool $refreshLibrary = true,
+        ?string $libraryId = null,
+    ): array {
+        if (! $this->integration->isEmby()) {
+            return [
+                'success' => false,
+                'created' => false,
+                'message' => 'Managed library creation is supported only for Emby.',
+                'library' => null,
+            ];
+        }
+
+        if (! in_array($collectionType, ['movies', 'tvshows'], true)) {
+            return [
+                'success' => false,
+                'created' => false,
+                'message' => 'Invalid Emby library collection type.',
+                'library' => null,
+            ];
+        }
+
+        $paths = array_values(array_unique(array_map(
+            fn (mixed $path): string => is_string($path) ? trim($path) : '',
+            $paths,
+        )));
+        $hasInvalidPath = $paths === [] || collect($paths)->contains(
+            fn (string $path): bool => $path === ''
+                || strlen($path) > 1024
+                || str_contains($path, "\0")
+                || preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $path) !== 1,
+        );
+
+        if ($hasInvalidPath) {
+            return [
+                'success' => false,
+                'created' => false,
+                'message' => 'Invalid Emby library path.',
+                'library' => null,
+            ];
+        }
+
+        try {
+            $existingLibraries = $this->fetchLibraries();
+            $existingLibrary = $libraryId === null
+                ? null
+                : $existingLibraries->firstWhere('id', $libraryId);
+
+            if ($existingLibrary !== null) {
+                return [
+                    'success' => true,
+                    'created' => false,
+                    'message' => 'Existing Emby library found by ID.',
+                    'library' => $existingLibrary,
+                    'drift' => $existingLibrary['name'] !== $name
+                        || $existingLibrary['type'] !== $collectionType
+                        || $existingLibrary['paths'] !== $paths,
+                ];
+            }
+
+            $existingLibrary = $existingLibraries->first(fn (array $library): bool => $library['name'] === $name
+                && $library['type'] === $collectionType
+                && $library['paths'] === $paths);
+
+            if ($existingLibrary !== null) {
+                return [
+                    'success' => true,
+                    'created' => false,
+                    'message' => 'Existing managed Emby library found.',
+                    'library' => $existingLibrary,
+                    'drift' => false,
+                ];
+            }
+
+            $conflictingLibrary = $existingLibraries->firstWhere('name', $name);
+
+            if ($conflictingLibrary !== null) {
+                return [
+                    'success' => false,
+                    'created' => false,
+                    'message' => 'An Emby library with this name has different settings.',
+                    'library' => $conflictingLibrary,
+                    'drift' => true,
+                ];
+            }
+
+            $response = $this->client()->post('/Library/VirtualFolders', [
+                'Name' => $name,
+                'CollectionType' => $collectionType,
+                'Paths' => $paths,
+                'RefreshLibrary' => $refreshLibrary,
+            ]);
+
+            if (! $response->successful()) {
+                return [
+                    'success' => false,
+                    'created' => false,
+                    'message' => 'Emby rejected the library request.',
+                    'library' => null,
+                ];
+            }
+
+            $library = $this->fetchLibraries()->first(fn (array $library): bool => $library['name'] === $name
+                && $library['type'] === $collectionType
+                && $library['paths'] === $paths);
+
+            return [
+                'success' => true,
+                'created' => true,
+                'message' => 'Emby library created.',
+                'library' => $library,
+            ];
+        } catch (Exception $exception) {
+            Log::warning('EmbyJellyfinService: Library creation failed', [
+                'integration_id' => $this->integration->id,
+                'exception' => $exception::class,
+            ]);
+
+            return [
+                'success' => false,
+                'created' => false,
+                'message' => 'Emby library request failed.',
+                'library' => null,
+            ];
+        }
+    }
+
+    /**
      * Fetch all movies from the media server.
      * If specific libraries are selected, only fetches from those libraries.
      *
@@ -177,11 +314,11 @@ class EmbyJellyfinService implements MediaServer
             ];
 
             // Filter by selected libraries if specified
-            $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType('movies');
-            if (! empty($selectedLibraryIds)) {
+            $importLibraryIds = $this->integration->getImportLibraryIdsForType('movies');
+            if ($importLibraryIds !== null) {
                 // For multiple libraries, we need to fetch from each and merge
                 $allMovies = collect();
-                foreach ($selectedLibraryIds as $libraryId) {
+                foreach ($importLibraryIds as $libraryId) {
                     $params['ParentId'] = $libraryId;
                     $response = $this->client()->get('/Items', $params);
 
@@ -237,11 +374,11 @@ class EmbyJellyfinService implements MediaServer
             ];
 
             // Filter by selected libraries if specified
-            $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType('tvshows');
-            if (! empty($selectedLibraryIds)) {
+            $importLibraryIds = $this->integration->getImportLibraryIdsForType('tvshows');
+            if ($importLibraryIds !== null) {
                 // For multiple libraries, we need to fetch from each and merge
                 $allSeries = collect();
-                foreach ($selectedLibraryIds as $libraryId) {
+                foreach ($importLibraryIds as $libraryId) {
                     $params['ParentId'] = $libraryId;
                     $response = $this->client()->get('/Items', $params);
 
