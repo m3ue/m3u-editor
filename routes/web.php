@@ -407,6 +407,37 @@ Route::get('/webdav-media/{integration}/stream/{item}', [
 ])->middleware(ValidateSignature::relative())->name('webdav-media.stream');
 
 /*
+ * AIOStreams resolved-media proxy routes
+ * AIOStreams resolves each item to an opaque, provider-hosted URL (often a
+ * debrid service link carrying that account's own auth token) rather than a
+ * stable item ID we could re-query later, so the resolved URL itself is
+ * never put in the route:
+ *  - channel/episode: the URL was already discovered and stored by
+ *    ResolveAioStreamsChannel/Episode on the row itself — this is a plain
+ *    DB lookup keyed by that row's own ID, exactly like proxyStream() looks
+ *    up Plex/Emby items by their own itemId. No payload, no cache.
+ *  - live: for the ad-hoc browse-and-preview flow and the Xtream-style
+ *    catalog/stream-list endpoint (AIOStreamsProxyController::stream(),
+ *    used by the m3u-tv Flutter client) there's no durable row yet, so the
+ *    resolved URL is cached server-side under a short-lived random token —
+ *    see MediaServerProxyController::generateAioStreamsLiveProxyUrls().
+ */
+Route::get('/aiostreams-media/{integration}/channel/{channel}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsChannel',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.channel.stream');
+
+Route::get('/aiostreams-media/{integration}/episode/{episode}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsEpisode',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.episode.stream');
+
+Route::get('/aiostreams-media/{integration}/live/{item}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsLive',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.live.stream');
+
+/*
  * DVR routes — file streaming and proxy callbacks
  * Stream auth mirrors the Xtream stream pattern: username + password (playlist UUID)
  * or PlaylistAuth credentials embedded in the URL.

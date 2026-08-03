@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
@@ -1096,7 +1097,15 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
+        // Extension is derived from the raw upstream URL before it's hidden
+        // behind the proxy below.
         $format = pathinfo(parse_url($url, PHP_URL_PATH) ?? '', PATHINFO_EXTENSION) ?: 'mp4';
+
+        // Never hand the raw resolved URL (often carrying the debrid account's own
+        // auth token) to the browser. There's no durable Channel/Episode row for an
+        // ad-hoc preview, so this goes through the short-lived cache-token "live"
+        // proxy rather than the DB-backed one used for synced channels/episodes.
+        $proxiedUrl = MediaServerProxyController::generateAioStreamsLiveProxyUrl($this->integrationId, $url);
 
         $title = $context['title'] ?? __('Unknown');
         $displayTitle = $title;
@@ -1121,7 +1130,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             'title' => $title,
             'display_title' => $displayTitle,
             'logo' => $context['thumbnail_url'] ?? null,
-            'url' => $url,
+            'url' => $proxiedUrl,
             'format' => $format,
             'type' => 'aiostreams',
         ]));

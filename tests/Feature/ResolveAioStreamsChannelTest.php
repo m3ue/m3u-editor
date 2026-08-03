@@ -53,8 +53,13 @@ it('resolves the top candidates and creates a failover chain', function () {
 
     $this->channel->refresh();
 
+    // The resolved URL is never stored directly — it's hidden behind the media-server
+    // proxy (see MediaServerProxyController::streamAioStreamsChannel()), stored on
+    // the channel's own movie_data (internal-only) and referenced by the channel's
+    // own ID in the generated URL.
     expect($this->channel->aio_resolution_status)->toBe('resolved')
-        ->and($this->channel->url)->toBe('https://example.com/2160p.mkv')
+        ->and($this->channel->url)->toContain("/aiostreams-media/{$this->integration->id}/channel/{$this->channel->id}/stream")
+        ->and($this->channel->movie_data['aiostreams']['resolved_url'])->toBe('https://example.com/2160p.mkv')
         ->and($this->channel->container_extension)->toBe('mkv')
         ->and(ChannelFailover::where('channel_id', $this->channel->id)->count())->toBe(2);
 });
@@ -83,6 +88,12 @@ it('creates failover candidates as hidden clones that do not appear in normal Ch
     expect($this->channel->failoverChannels()->count())->toBe(2)
         ->and($this->channel->failoverChannels()->pluck('channels.id')->sort()->values()->all())
         ->toBe($failoverChannelIds->sort()->values()->all());
+
+    // Each failover clone gets its own resolved URL and a proxy URL keyed by its
+    // own ID, not the primary channel's.
+    $firstFailover = Channel::withoutGlobalScopes()->find($failoverChannelIds->first());
+    expect($firstFailover->url)->toContain("/aiostreams-media/{$this->integration->id}/channel/{$firstFailover->id}/stream")
+        ->and($firstFailover->movie_data['aiostreams']['resolved_url'])->not->toBeNull();
 });
 
 it('deletes orphaned failover clone channels when the primary channel is deleted', function () {

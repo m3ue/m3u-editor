@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Facades\ProxyFacade;
+use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\MediaServerIntegration;
+use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Services\MediaServerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +15,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -723,5 +727,397 @@ class MediaServerProxyController extends Controller
                 'error' => 'Internal server error while streaming WebDAV media',
             ], 500);
         }
+    }
+
+    /**
+     * Generate a URL for streaming a synced (persisted) AIOStreams-backed Channel.
+     *
+     * AIOStreams resolves each item to an opaque, provider-hosted URL (a debrid or
+     * torrent-streaming host) rather than a stable item ID we could re-query — so
+     * unlike Plex/Emby, there's nothing to look up from the integration itself.
+     * That resolved URL was already discovered and stored on the channel by
+     * ResolveAioStreamsChannel (movie_data['aiostreams']['resolved_url']), so this
+     * route just references that row's own ID, the same way generateStreamProxyUrl()
+     * references a Plex/Emby itemId — no payload, no cache.
+     */
+    public static function generateAioStreamsChannelProxyUrl(int $integrationId, int $channelId): string
+    {
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
+            'aiostreams-media.channel.stream',
+            ['integration' => $integrationId, 'channel' => $channelId, 'v' => static::currentUrlVersion()],
+            absolute: false
+        );
+    }
+
+    /**
+     * Generate a URL for streaming a synced (persisted) AIOStreams-backed Episode.
+     * See generateAioStreamsChannelProxyUrl() — same shape, keyed by Episode ID.
+     */
+    public static function generateAioStreamsEpisodeProxyUrl(int $integrationId, int $episodeId): string
+    {
+        return ProxyFacade::getBaseUrl().URL::signedRoute(
+            'aiostreams-media.episode.stream',
+            ['integration' => $integrationId, 'episode' => $episodeId, 'v' => static::currentUrlVersion()],
+            absolute: false
+        );
+    }
+
+    /**
+     * How long a "live" AIOStreams proxy token stays reachable. This path has no
+     * durable Channel/Episode row backing it (ad-hoc browse-and-preview, and the
+     * Xtream-style catalog/stream-list endpoint used by the m3u-tv Flutter client),
+     * so the resolved URL is cached rather than persisted. A video player keeps
+     * issuing range requests against the same URL for the life of one viewing
+     * session (seeking, buffering ahead, resuming from a pause) — 24 hours
+     * comfortably covers even a long title left paused overnight, while staying
+     * clearly short-lived rather than long-term storage.
+     */
+    private const AIOSTREAMS_LIVE_TOKEN_CACHE_HOURS = 24;
+
+    /**
+     * Cache key an AIOStreams live proxy token resolves to. Scoped by integration
+     * so a token can't be replayed against a different integration's namespace.
+     */
+    protected static function aioStreamsLiveCacheKey(int $integrationId, string $token): string
+    {
+        return "aiostreams-live-proxy:{$integrationId}:{$token}";
+    }
+
+    /**
+     * Generate a URL for streaming a resolved AIOStreams URL that has no durable
+     * Channel/Episode row yet. See generateAioStreamsLiveProxyUrls() for the batch
+     * form and the full rationale — this is that method for a single URL.
+     */
+    public static function generateAioStreamsLiveProxyUrl(int $integrationId, string $resolvedUrl): string
+    {
+        return static::generateAioStreamsLiveProxyUrls($integrationId, [$resolvedUrl])[0];
+    }
+
+    /**
+     * Batch form of generateAioStreamsLiveProxyUrl() — used by the ad-hoc
+     * browse-and-preview flow and the catalog/stream-list endpoint
+     * (AIOStreamsProxyController::stream(), consumed by the m3u-tv Flutter client
+     * and any other Xtream-style caller), neither of which has a durable row to
+     * key off. A stream-list response can hold dozens of candidates; writing each
+     * one's cache entry with its own Cache::put() means one database round trip
+     * per candidate. Cache::putMany() performs a single upsert() query for the
+     * whole batch instead (see Illuminate\Cache\DatabaseStore::putMany()).
+     *
+     * The resolved URL itself can also be extremely long (magnet URIs with many
+     * trackers, chained resolver links), so it's cached server-side under a short
+     * random token rather than embedded in the route — the generated URL's length
+     * never depends on the upstream URL's length, and the upstream URL (which may
+     * carry the debrid account's own auth token) never appears in it at all.
+     *
+     * @param  array<int|string, string>  $resolvedUrls  Keyed however the caller likes; the same keys come back in the result.
+     * @return array<int|string, string>
+     */
+    public static function generateAioStreamsLiveProxyUrls(int $integrationId, array $resolvedUrls): array
+    {
+        if ($resolvedUrls === []) {
+            return [];
+        }
+
+        $tokensByKey = [];
+        $cacheValues = [];
+
+        foreach ($resolvedUrls as $key => $resolvedUrl) {
+            $token = Str::random(40);
+            $tokensByKey[$key] = $token;
+            $cacheValues[static::aioStreamsLiveCacheKey($integrationId, $token)] = $resolvedUrl;
+        }
+
+        Cache::putMany($cacheValues, now()->addHours(self::AIOSTREAMS_LIVE_TOKEN_CACHE_HOURS));
+
+        $urlsByKey = [];
+
+        foreach ($tokensByKey as $key => $token) {
+            $urlsByKey[$key] = ProxyFacade::getBaseUrl().URL::signedRoute(
+                'aiostreams-media.live.stream',
+                ['integration' => $integrationId, 'item' => $token, 'v' => static::currentUrlVersion()],
+                absolute: false
+            );
+        }
+
+        return $urlsByKey;
+    }
+
+    /**
+     * Common integration lookup/gating shared by all three AIOStreams handlers.
+     * Returns an error JsonResponse to short-circuit with, or null to proceed.
+     */
+    protected function rejectInvalidAioStreamsIntegration(int $integration): ?JsonResponse
+    {
+        $mediaIntegration = MediaServerIntegration::find($integration);
+
+        if (! $mediaIntegration) {
+            return response()->json(['error' => 'Integration not found'], 404);
+        }
+
+        if (! $mediaIntegration->enabled) {
+            return response()->json(['error' => 'Integration is disabled'], 403);
+        }
+
+        if ($mediaIntegration->type !== 'aiostreams') {
+            return response()->json(['error' => 'Integration is not an AIOStreams type'], 400);
+        }
+
+        return null;
+    }
+
+    /**
+     * Stream a resolved AIOStreams URL for a synced (persisted) Channel.
+     *
+     * Route: /aiostreams-media/{integration}/channel/{channel}/stream
+     *
+     * The resolved URL was already discovered and stored by ResolveAioStreamsChannel
+     * (movie_data['aiostreams']['resolved_url']) — this is a plain DB lookup keyed
+     * by the channel's own ID. Supports range requests for seeking.
+     */
+    public function streamAioStreamsChannel(Request $request, int $integration, int $channel)
+    {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            if ($errorResponse = $this->rejectInvalidAioStreamsIntegration($integration)) {
+                return $errorResponse;
+            }
+
+            // Failover clone channels are hidden by ExcludeAioFailoverClonesScope
+            // everywhere else in the app (Xtream API, M3U export, table listings) —
+            // opt back in explicitly, since this is the one place that needs them.
+            $channelModel = Channel::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                ->where('id', $channel)
+                ->where('aio_integration_id', $integration)
+                ->first();
+
+            $resolvedUrl = $channelModel?->movie_data['aiostreams']['resolved_url'] ?? null;
+
+            return $this->proxyResolvedUrl($request, $resolvedUrl, (string) $integration);
+        } catch (\Exception $e) {
+            Log::error('Exception in AIOStreams channel media proxy', [
+                'integration_id' => $integration,
+                'channel_id' => $channel,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while proxying AIOStreams media',
+            ], 500);
+        }
+    }
+
+    /**
+     * Stream a resolved AIOStreams URL for a synced (persisted) Episode.
+     *
+     * Route: /aiostreams-media/{integration}/episode/{episode}/stream
+     *
+     * See streamAioStreamsChannel() — same shape, reading from Episode::info
+     * (Episodes don't carry their own aio_integration_id; it lives on the parent
+     * Series, so it's resolved via that relation instead of a direct column).
+     */
+    public function streamAioStreamsEpisode(Request $request, int $integration, int $episode)
+    {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            if ($errorResponse = $this->rejectInvalidAioStreamsIntegration($integration)) {
+                return $errorResponse;
+            }
+
+            $episodeModel = Episode::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                ->where('id', $episode)
+                ->whereHas('series', fn ($query) => $query->where('aio_integration_id', $integration))
+                ->first();
+
+            $resolvedUrl = $episodeModel?->info['aiostreams']['resolved_url'] ?? null;
+
+            return $this->proxyResolvedUrl($request, $resolvedUrl, (string) $integration);
+        } catch (\Exception $e) {
+            Log::error('Exception in AIOStreams episode media proxy', [
+                'integration_id' => $integration,
+                'episode_id' => $episode,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while proxying AIOStreams media',
+            ], 500);
+        }
+    }
+
+    /**
+     * Stream a resolved AIOStreams URL cached under a short-lived token — used by
+     * the ad-hoc browse-and-preview flow and the catalog/stream-list endpoint
+     * (see generateAioStreamsLiveProxyUrls()), neither of which has a durable
+     * Channel/Episode row to look the URL up from.
+     *
+     * Route: /aiostreams-media/{integration}/live/{item}/stream
+     */
+    public function streamAioStreamsLive(Request $request, int $integration, string $item)
+    {
+        if ($staleResponse = $this->rejectIfStaleUrlVersion($request)) {
+            return $staleResponse;
+        }
+
+        try {
+            set_time_limit(0);
+            ignore_user_abort(true);
+
+            if ($errorResponse = $this->rejectInvalidAioStreamsIntegration($integration)) {
+                return $errorResponse;
+            }
+
+            $resolvedUrl = Cache::get(static::aioStreamsLiveCacheKey($integration, $item));
+
+            return $this->proxyResolvedUrl($request, $resolvedUrl, (string) $integration);
+        } catch (\Exception $e) {
+            Log::error('Exception in AIOStreams live media proxy', [
+                'integration_id' => $integration,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'Internal server error while proxying AIOStreams media',
+            ], 500);
+        }
+    }
+
+    /**
+     * Proxy a resolved AIOStreams URL with exactly one upstream request — no
+     * preflight HEAD/metadata probe. AIOStreams resolves to arbitrary third-party
+     * debrid/torrent-streaming hosts, many of which rate-limit or cap concurrent
+     * connections per link; a separate HEAD request against the same resolved URL
+     * before the real GET counts as a second connection against that cap and can
+     * get the actual playback request throttled or rejected outright. Status and
+     * headers are instead relayed live from curl's own response as it arrives,
+     * before any body bytes are written — a transparent single-pass proxy.
+     */
+    protected function proxyResolvedUrl(Request $request, ?string $resolvedUrl, string $integrationId): StreamedResponse|JsonResponse
+    {
+        if (
+            ! $resolvedUrl
+            || ! filter_var($resolvedUrl, FILTER_VALIDATE_URL)
+            || ! in_array(parse_url($resolvedUrl, PHP_URL_SCHEME), ['http', 'https'], true)
+        ) {
+            Log::warning('AIOStreams media: resolved URL missing or invalid', [
+                'integration_id' => $integrationId,
+            ]);
+
+            return response()->json(['error' => 'Resolved URL not found. Please re-sync.'], 404);
+        }
+
+        $requestHeaders = ['Accept' => '*/*'];
+
+        if ($request->hasHeader('Range')) {
+            $requestHeaders['Range'] = $request->header('Range');
+        }
+
+        Log::debug('Proxying AIOStreams media', [
+            'integration_id' => $integrationId,
+            'has_range' => $request->hasHeader('Range'),
+        ]);
+
+        return new StreamedResponse(function () use ($resolvedUrl, $requestHeaders) {
+            $ch = curl_init($resolvedUrl);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, array_map(
+                fn ($k, $v) => "{$k}: {$v}",
+                array_keys($requestHeaders),
+                array_values($requestHeaders)
+            ));
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+            // Abort if the upstream stalls completely (0 bytes) for 30s, so a dead
+            // debrid/torrent-streaming connection can't pin a PHP-FPM worker forever.
+            curl_setopt($ch, CURLOPT_LOW_SPEED_LIMIT, 1);
+            curl_setopt($ch, CURLOPT_LOW_SPEED_TIME, 30);
+
+            // CURLOPT_FOLLOWLOCATION means the header callback fires once per
+            // redirect hop. A fresh "HTTP/…" status line marks the start of a new
+            // hop's header block, so resetting the buffer on each one leaves
+            // exactly the FINAL hop's headers by the time the first body byte
+            // arrives below.
+            $currentHopHeaders = [];
+            $finalHeaders = [];
+
+            curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $headerLine) use (&$currentHopHeaders, &$finalHeaders) {
+                $trimmed = rtrim($headerLine, "\r\n");
+
+                if (preg_match('#^HTTP/\S+\s+(\d+)#', $trimmed, $matches)) {
+                    $currentHopHeaders = ['status' => (int) $matches[1]];
+                } elseif ($trimmed === '') {
+                    $finalHeaders = $currentHopHeaders;
+                } elseif (str_contains($trimmed, ':')) {
+                    [$name, $value] = explode(':', $trimmed, 2);
+                    $currentHopHeaders[strtolower(trim($name))] = trim($value);
+                }
+
+                return strlen($headerLine);
+            });
+
+            $responseStarted = false;
+
+            curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseStarted, &$finalHeaders) {
+                // See other proxy methods in this class: a seek abandons this
+                // connection without closing it, and ignore_user_abort(true) means
+                // PHP won't notice unless we check here.
+                if (connection_aborted()) {
+                    return 0;
+                }
+
+                if (! $responseStarted) {
+                    $responseStarted = true;
+
+                    $status = $finalHeaders['status'] ?? 200;
+                    http_response_code(in_array($status, [200, 206], true) ? $status : 200);
+
+                    header('Content-Type: '.($finalHeaders['content-type'] ?? 'application/octet-stream'));
+                    header('Accept-Ranges: bytes');
+                    header('X-Proxied-From: AIOStreams');
+
+                    if (isset($finalHeaders['content-length'])) {
+                        header('Content-Length: '.$finalHeaders['content-length']);
+                    }
+
+                    if (isset($finalHeaders['content-range'])) {
+                        header('Content-Range: '.$finalHeaders['content-range']);
+                    }
+                }
+
+                echo $data;
+                flush();
+
+                return strlen($data);
+            });
+
+            curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+            curl_setopt($ch, CURLOPT_XFERINFOFUNCTION, fn () => connection_aborted() ? 1 : 0);
+
+            curl_exec($ch);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            // The upstream never sent any body (connection failure, DNS failure, or
+            // an error status with no content) — headers were never emitted by
+            // CURLOPT_WRITEFUNCTION above, so do it here instead.
+            if (! $responseStarted) {
+                Log::warning('AIOStreams media: upstream request failed before any content was received', [
+                    'curl_error' => $curlError,
+                ]);
+                http_response_code(502);
+                header('Content-Type: application/json');
+                echo json_encode(['error' => 'Failed to reach the resolved upstream URL']);
+            }
+        });
     }
 }

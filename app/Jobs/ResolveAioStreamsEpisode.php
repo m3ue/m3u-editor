@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
 use App\Models\Scopes\ExcludeAioFailoverClonesScope;
@@ -102,10 +103,17 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
         $info = $episode->info ?? [];
         $info['aiostreams'] = [
             'candidates' => array_map(fn (array $c) => $c['parsed'], $selected),
+            // Never exposed via API/UI — only MediaServerProxyController::streamAioStreamsEpisode()
+            // reads this, to proxy the bytes without the raw (often debrid-account-scoped) URL
+            // ever appearing in a stored/served URL.
+            'resolved_url' => $primary['stream']['url'] ?? null,
         ];
 
+        // $episode already exists (found by ID above), so unlike the failover
+        // clones below it doesn't need a create-then-update round trip — its own
+        // ID is already known, so the proxy URL can go in this same write.
         $episode->update([
-            'url' => $primary['stream']['url'] ?? null,
+            'url' => MediaServerProxyController::generateAioStreamsEpisodeProxyUrl($integration->id, $episode->id),
             'container_extension' => $primary['parsed']['container'] ?? $episode->container_extension,
             'info' => $info,
             // Re-enable an episode that was disabled at creation for being unaired
@@ -134,11 +142,15 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
                 'import_batch_no' => Str::orderedUuid()->toString(),
                 'is_custom' => true,
                 'is_aio_failover_clone' => true,
-                'url' => $candidate['stream']['url'] ?? null,
+                'info' => ['aiostreams' => ['resolved_url' => $candidate['stream']['url'] ?? null]],
                 'container_extension' => $candidate['parsed']['container'] ?? null,
                 'aio_item_id' => $episode->aio_item_id,
                 'aio_resolution_status' => 'resolved',
                 'aio_last_resolved_at' => now(),
+            ]);
+
+            $failoverEpisode->update([
+                'url' => MediaServerProxyController::generateAioStreamsEpisodeProxyUrl($integration->id, $failoverEpisode->id),
             ]);
 
             EpisodeFailover::create([

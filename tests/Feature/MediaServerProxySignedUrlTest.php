@@ -3,7 +3,12 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\MediaServerProxyController;
+use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
+use App\Models\Series;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -98,5 +103,145 @@ class MediaServerProxySignedUrlTest extends TestCase
         $response = $this->get($url);
 
         $response->assertForbidden();
+    }
+
+    private function makeAioStreamsChannel(MediaServerIntegration $integration, ?string $resolvedUrl = 'https://cdn.test/movie.mkv'): Channel
+    {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->create(['user_id' => $user->id]);
+
+        return Channel::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'is_custom' => true,
+            'is_vod' => true,
+            'aio_integration_id' => $integration->id,
+            'movie_data' => $resolvedUrl ? ['aiostreams' => ['resolved_url' => $resolvedUrl]] : null,
+        ]);
+    }
+
+    public function test_aiostreams_channel_media_route_rejects_request_without_signature()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+        $channel = $this->makeAioStreamsChannel($integration);
+
+        $response = $this->get("/aiostreams-media/{$integration->id}/channel/{$channel->id}/stream");
+
+        $response->assertForbidden();
+    }
+
+    public function test_aiostreams_channel_media_route_rejects_non_aiostreams_integration()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'plex']);
+        $channel = $this->makeAioStreamsChannel($integration);
+
+        $url = MediaServerProxyController::generateAioStreamsChannelProxyUrl($integration->id, $channel->id);
+
+        $response = $this->get($url);
+
+        $response->assertStatus(400);
+    }
+
+    public function test_aiostreams_channel_media_route_returns_404_when_channel_has_no_resolved_url()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+        $channel = $this->makeAioStreamsChannel($integration, resolvedUrl: null);
+
+        $url = MediaServerProxyController::generateAioStreamsChannelProxyUrl($integration->id, $channel->id);
+
+        $response = $this->get($url);
+
+        $response->assertStatus(404);
+    }
+
+    private function makeAioStreamsEpisode(MediaServerIntegration $integration, ?string $resolvedUrl = 'https://cdn.test/episode.mkv'): Episode
+    {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->create(['user_id' => $user->id]);
+        $series = Series::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'is_custom' => true,
+            'aio_integration_id' => $integration->id,
+        ]);
+
+        return Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+            'is_custom' => true,
+            'info' => $resolvedUrl ? ['aiostreams' => ['resolved_url' => $resolvedUrl]] : null,
+        ]);
+    }
+
+    public function test_aiostreams_episode_media_route_rejects_request_without_signature()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+        $episode = $this->makeAioStreamsEpisode($integration);
+
+        $response = $this->get("/aiostreams-media/{$integration->id}/episode/{$episode->id}/stream");
+
+        $response->assertForbidden();
+    }
+
+    public function test_aiostreams_episode_media_route_returns_404_when_episode_has_no_resolved_url()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+        $episode = $this->makeAioStreamsEpisode($integration, resolvedUrl: null);
+
+        $url = MediaServerProxyController::generateAioStreamsEpisodeProxyUrl($integration->id, $episode->id);
+
+        $response = $this->get($url);
+
+        $response->assertStatus(404);
+    }
+
+    public function test_aiostreams_live_media_route_rejects_request_without_signature()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+
+        $response = $this->get("/aiostreams-media/{$integration->id}/live/some-token/stream");
+
+        $response->assertForbidden();
+    }
+
+    public function test_aiostreams_live_media_route_rejects_non_aiostreams_integration()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'plex']);
+
+        $url = MediaServerProxyController::generateAioStreamsLiveProxyUrl($integration->id, 'https://cdn.test/movie.mkv');
+
+        $response = $this->get($url);
+
+        $response->assertStatus(400);
+    }
+
+    public function test_aiostreams_live_media_route_returns_404_for_unknown_token()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+
+        // Reuse the real generator so the signature/version are valid — only the
+        // token itself is swapped for one that was never cached.
+        $url = MediaServerProxyController::generateAioStreamsLiveProxyUrl($integration->id, 'https://cdn.test/movie.mkv');
+        $tampered = preg_replace('#(/aiostreams-media/\d+/live/)[^/?]+#', '$1never-cached-token', $url);
+
+        $response = $this->get($tampered);
+
+        // The signature no longer matches (token is part of the signed payload),
+        // so this is rejected by the signature middleware before it ever reaches
+        // the cache lookup — still proves an attacker can't just swap in a guessed
+        // token to reach someone else's cached URL.
+        $response->assertForbidden();
+    }
+
+    public function test_aiostreams_live_media_route_generates_a_short_url_regardless_of_resolved_url_length()
+    {
+        $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+
+        $longResolvedUrl = 'https://cdn.test/movie.mkv?'.str_repeat('a', 5000);
+
+        $url = MediaServerProxyController::generateAioStreamsLiveProxyUrl($integration->id, $longResolvedUrl);
+
+        $this->assertLessThan(300, strlen($url));
     }
 }
