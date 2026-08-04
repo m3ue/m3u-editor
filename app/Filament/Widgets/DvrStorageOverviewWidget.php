@@ -19,7 +19,7 @@ class DvrStorageOverviewWidget extends Widget
     protected function getViewData(): array
     {
         $rows = DvrSetting::with('user')->get()->map(function (DvrSetting $setting) {
-            $usedBytes = $setting->recordings()->whereNotNull('file_size_bytes')->sum('file_size_bytes');
+            $usedBytes = $setting->storage_used_bytes;
             $quotaBytes = $setting->global_disk_quota_gb > 0
                 ? $setting->global_disk_quota_gb * 1024 ** 3
                 : null;
