@@ -208,9 +208,15 @@ it('shows the source picker instead of auto-playing when only one stream is foun
         ->call('playStream')
         ->assertNotDispatched('openFloatingStream')
         ->assertSet('showDetail', true)
-        ->assertSet('streamChoices', [
-            ['url' => 'https://cdn.test/movie-one.mp4', 'name' => '1080p'],
-        ]);
+        ->assertSet('streamChoices', function (array $choices) {
+            expect($choices)->toHaveCount(1);
+            expect($choices[0]['name'])->toBe('1080p');
+            expect($choices[0]['format'])->toBe('mp4');
+            expect($choices[0]['url'])->toContain('/aiostreams-media/'.$this->integration->id.'/live/')
+                ->not->toContain('cdn.test');
+
+            return true;
+        });
 });
 
 it('resumeWatch opens the source picker instantly, with zero network calls, then lazily loads streams', function () {
@@ -268,9 +274,15 @@ it('resumeWatch opens the source picker instantly, with zero network calls, then
 
     $component->call('loadResumeStreams')
         ->assertSet('streamsLoading', false)
-        ->assertSet('streamChoices', [
-            ['url' => 'https://cdn.test/rm-s1e3.mp4', 'name' => '1080p'],
-        ])
+        ->assertSet('streamChoices', function (array $choices) {
+            expect($choices)->toHaveCount(1);
+            expect($choices[0]['name'])->toBe('1080p');
+            expect($choices[0]['format'])->toBe('mp4');
+            expect($choices[0]['url'])->toContain('/aiostreams-media/'.$this->integration->id.'/live/')
+                ->not->toContain('cdn.test');
+
+            return true;
+        })
         ->assertSet('pendingWatchContext.season_number', 1)
         ->assertSet('pendingWatchContext.episode_number', 3)
         ->assertSet('pendingWatchContext.episode_title', 'Anatomy Park');
@@ -332,9 +344,15 @@ it('retries a failed resume stream lookup, preserving season/episode', function 
 
     $component->call('retryLoadStreams')
         ->assertSet('streamsFailed', false)
-        ->assertSet('streamChoices', [
-            ['url' => 'https://cdn.test/rm-s1e3.mp4', 'name' => '1080p'],
-        ]);
+        ->assertSet('streamChoices', function (array $choices) {
+            expect($choices)->toHaveCount(1);
+            expect($choices[0]['name'])->toBe('1080p');
+            expect($choices[0]['format'])->toBe('mp4');
+            expect($choices[0]['url'])->toContain('/aiostreams-media/'.$this->integration->id.'/live/')
+                ->not->toContain('cdn.test');
+
+            return true;
+        });
 
     expect($component->get('mountedActions'))->toHaveCount(1);
 });
@@ -356,8 +374,17 @@ it('shows a source picker when multiple streams are found', function () {
         ->call('openDetail', 'movie', 'tt1')
         ->call('playStream')
         ->assertNotDispatched('openFloatingStream')
-        ->assertSet('streamChoices', [
-            ['url' => 'https://cdn.test/a.mp4', 'name' => '1080p'],
-            ['url' => 'https://cdn.test/b.mp4', 'name' => '720p'],
-        ]);
+        ->assertSet('streamChoices', function (array $choices) {
+            expect($choices)->toHaveCount(2);
+            expect($choices[0]['name'])->toBe('1080p');
+            expect($choices[1]['name'])->toBe('720p');
+            expect($choices[0]['format'])->toBe('mp4');
+            expect($choices[1]['format'])->toBe('mp4');
+            expect($choices[0]['url'])->toContain('/aiostreams-media/'.$this->integration->id.'/live/')
+                ->not->toContain('cdn.test');
+            expect($choices[1]['url'])->toContain('/aiostreams-media/'.$this->integration->id.'/live/')
+                ->not->toContain('cdn.test');
+
+            return true;
+        });
 });

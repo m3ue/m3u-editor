@@ -14,6 +14,10 @@ use Illuminate\Support\Facades\Bus;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // This suite exercises failover-resolution logic, not the callback auth gate
+    // itself (see VerifyM3uProxyCallback / M3uProxyCallbackAuthTest).
+    config(['proxy.m3u_proxy_token' => null, 'proxy.allow_unauthenticated_callbacks' => true]);
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
     $this->integration = MediaServerIntegration::create([

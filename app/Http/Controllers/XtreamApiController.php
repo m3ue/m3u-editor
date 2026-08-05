@@ -2047,13 +2047,21 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'DVR access denied'], 403);
             }
 
+            // Advertising the DVR feature already gates playlist_auth credentials on
+            // their own `dvr_enabled` flag (see canAdvertiseDvrFeature) — enforce the
+            // same rule here so a credential the TV app never showed DVR controls for
+            // can't dispatch DVR actions directly against the shared playlist DVR setting.
+            if ($authMethod === 'playlist_auth' && ! $playlistAuth?->dvr_enabled) {
+                return response()->json(['error' => 'DVR access denied'], 403);
+            }
+
             return match ($action) {
-                'get_dvr_recordings' => $this->getDvrRecordings($request, $dvrPlaylist, $username, $password),
-                'get_dvr_recording' => $this->getDvrRecording($request, $dvrPlaylist, $username, $password),
-                'schedule_dvr' => $this->scheduleDvr($request, $dvrPlaylist),
-                'create_dvr_series_rule' => $this->createDvrSeriesRule($request, $dvrPlaylist),
-                'cancel_dvr_recording' => $this->cancelDvrRecording($request, $dvrPlaylist),
-                'delete_dvr_recording' => $this->deleteDvrRecording($request, $dvrPlaylist),
+                'get_dvr_recordings' => $this->getDvrRecordings($request, $dvrPlaylist, $username, $password, $playlistAuth),
+                'get_dvr_recording' => $this->getDvrRecording($request, $dvrPlaylist, $username, $password, $playlistAuth),
+                'schedule_dvr' => $this->scheduleDvr($request, $dvrPlaylist, $playlistAuth),
+                'create_dvr_series_rule' => $this->createDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
+                'cancel_dvr_recording' => $this->cancelDvrRecording($request, $dvrPlaylist, $playlistAuth),
+                'delete_dvr_recording' => $this->deleteDvrRecording($request, $dvrPlaylist, $playlistAuth),
             };
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
@@ -3408,7 +3416,7 @@ class XtreamApiController extends Controller
     /**
      * List DVR recordings for the authenticated playlist, optionally filtered by status.
      */
-    private function getDvrRecordings(Request $request, $playlist, string $username, string $password): \Illuminate\Http\JsonResponse
+    private function getDvrRecordings(Request $request, $playlist, string $username, string $password, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $dvrSetting = $playlist->dvrSetting;
 
@@ -3421,6 +3429,7 @@ class XtreamApiController extends Controller
         $offset = (int) $request->input('offset', 0);
 
         $query = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with('channel')
             ->orderByDesc('scheduled_start');
 
@@ -3439,7 +3448,7 @@ class XtreamApiController extends Controller
     /**
      * Get a single DVR recording by UUID.
      */
-    private function getDvrRecording(Request $request, $playlist, string $username, string $password): \Illuminate\Http\JsonResponse
+    private function getDvrRecording(Request $request, $playlist, string $username, string $password, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $uuid = $request->input('recording_id');
 
@@ -3455,6 +3464,7 @@ class XtreamApiController extends Controller
 
         $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->where('uuid', $uuid)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with('channel')
             ->first();
 
@@ -3468,7 +3478,7 @@ class XtreamApiController extends Controller
     /**
      * Schedule a one-shot DVR recording rule from the TV app.
      */
-    private function scheduleDvr(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function scheduleDvr(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $channelId = (int) $request->input('channel_id');
         $title = trim((string) $request->input('title', ''));
@@ -3500,6 +3510,7 @@ class XtreamApiController extends Controller
         $rule = DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
+            'playlist_auth_id' => $playlistAuth?->id,
             'type' => DvrRuleType::Manual,
             'channel_id' => $channelId,
             'series_title' => $title,
@@ -3521,7 +3532,7 @@ class XtreamApiController extends Controller
     /**
      * Create a series recording rule.
      */
-    private function createDvrSeriesRule(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function createDvrSeriesRule(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $channelId = (int) $request->input('channel_id');
         $title = trim((string) $request->input('title', ''));
@@ -3548,6 +3559,7 @@ class XtreamApiController extends Controller
         $rule = DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
+            'playlist_auth_id' => $playlistAuth?->id,
             'type' => DvrRuleType::Series,
             'channel_id' => $channelId,
             'series_title' => $title,
@@ -3566,7 +3578,7 @@ class XtreamApiController extends Controller
     /**
      * Cancel a scheduled or in-progress DVR recording.
      */
-    private function cancelDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function cancelDvrRecording(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $uuid = $request->input('recording_id');
 
@@ -3582,6 +3594,7 @@ class XtreamApiController extends Controller
 
         $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->where('uuid', $uuid)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->whereIn('status', [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording])
             ->first();
 
@@ -3610,7 +3623,7 @@ class XtreamApiController extends Controller
      * those resources hasn't had a chance to run yet. releaseProxyResources()
      * frees them here instead of leaving them orphaned on the proxy.
      */
-    private function deleteDvrRecording(Request $request, $playlist): \Illuminate\Http\JsonResponse
+    private function deleteDvrRecording(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
         $uuid = $request->input('recording_id');
 
@@ -3626,6 +3639,7 @@ class XtreamApiController extends Controller
 
         $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->where('uuid', $uuid)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->whereIn('status', [
                 DvrRecordingStatus::Completed,
                 DvrRecordingStatus::Failed,

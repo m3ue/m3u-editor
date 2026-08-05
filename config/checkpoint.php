@@ -74,6 +74,12 @@ return [
             'rector/rector',
             // dev-only, first-party Laravel tool; 1.30.x needed for Blade formatting support
             'laravel/pint',
+            // ── Transitive deps of already-trusted packages above ────────────
+            // phpunit/phpunit (via pestphp/pest v5) requires these sebastian/* internals
+            'sebastian/cli-parser',
+            'sebastian/recursion-context',
+            // laravel/framework requires league/commonmark
+            'league/commonmark',
             // ── Application-specific packages ────────────────────────────────
             'dedoc/scramble',
             'stechstudio/filament-impersonate',

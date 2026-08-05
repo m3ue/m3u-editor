@@ -1178,10 +1178,13 @@ class TmdbService
      */
     protected function findBestMatch(array $results, string $searchTitle, ?int $searchYear, string $titleField, string $dateField, string $type = 'tv'): ?array
     {
-        // Normalize the search title for comparison (same way we normalize for search)
+        // Compare against both the original title and the simplified API query.
+        // The API query may drop localized subtitles, while TMDB can still return the exact full title.
         $normalizedSearch = $this->normalizeForComparison($this->normalizeTitle($searchTitle));
+        $normalizedFullSearch = $this->normalizeForComparison($searchTitle);
         $bestMatch = null;
         $bestScore = 0;
+        $bestMatchIsExactFullTitle = false;
         $exactYearMatch = null;
 
         foreach ($results as $result) {
@@ -1189,19 +1192,27 @@ class TmdbService
             $resultDate = $result[$dateField] ?? '';
             $resultYear = $resultDate ? (int) substr($resultDate, 0, 4) : null;
 
-            // Calculate title similarity using normalized search title
+            // Calculate title similarity against the full title and simplified API query.
             $normalizedResult = $this->normalizeForComparison($resultTitle);
-            $similarity = $this->calculateSimilarity($normalizedSearch, $normalizedResult);
+            $similarity = max(
+                $this->calculateSimilarity($normalizedSearch, $normalizedResult),
+                $this->calculateSimilarity($normalizedFullSearch, $normalizedResult),
+            );
+            $isExactFullTitleMatch = $normalizedFullSearch === $normalizedResult;
 
             // Check if search matches original title/name exactly (for localized content)
             $originalField = isset($result['original_name']) ? 'original_name' : 'original_title';
             if (isset($result[$originalField]) && $result[$originalField] !== $resultTitle) {
                 $normalizedOriginal = $this->normalizeForComparison($result[$originalField]);
-                $originalSimilarity = $this->calculateSimilarity($normalizedSearch, $normalizedOriginal);
+                $originalSimilarity = max(
+                    $this->calculateSimilarity($normalizedSearch, $normalizedOriginal),
+                    $this->calculateSimilarity($normalizedFullSearch, $normalizedOriginal),
+                );
 
                 // Exact match on original title/name should be 100% confidence
-                if ($normalizedSearch === $normalizedOriginal) {
+                if ($normalizedSearch === $normalizedOriginal || $normalizedFullSearch === $normalizedOriginal) {
                     $similarity = 100;
+                    $isExactFullTitleMatch = $isExactFullTitleMatch || $normalizedFullSearch === $normalizedOriginal;
                 } else {
                     $similarity = max($similarity, $originalSimilarity);
                 }
@@ -1226,12 +1237,13 @@ class TmdbService
 
             // Popularity bonus (TMDB returns more popular results first)
             $popularityBonus = isset($result['popularity']) ? min(10, $result['popularity'] / 10) : 0;
-
             $totalScore = $similarity + $yearScore + $popularityBonus;
 
-            if ($totalScore > $bestScore) {
+            if ($isExactFullTitleMatch && ! $bestMatchIsExactFullTitle
+                || $isExactFullTitleMatch === $bestMatchIsExactFullTitle && $totalScore > $bestScore) {
                 $bestScore = $totalScore;
                 $bestMatch = $result;
+                $bestMatchIsExactFullTitle = $isExactFullTitleMatch;
                 $bestMatch['_confidence'] = (int) min(100, $similarity);
             }
 
@@ -1370,15 +1382,15 @@ class TmdbService
         $title = preg_replace('/\s*\((?:Multi|Dual(?:\s+Audio)?|Dolby(?:\s*Atmos)?|Vision|DTS(?:-HD)?|TrueHD|Digital|HDR|HDR10\+?|Directors?\s*Cut)\)/i', '', $title);
 
         // Remove brackets with technical info: [4K], [UHD], [DE], etc.
-        $title = preg_replace('/\s*\[[^\]]*\]/i', '', $title);
+        $title = preg_replace('/[\s\/|,.:;_!?-]*\[[^\]]*\][\s\/|,.:;_!?-]*/u', ' ', $title);
 
         // Remove year in parentheses from title (will be used as separate param)
         // Replace with a space to avoid collapsing adjacent words (e.g., "Alarum (2025) Extra" -> "Alarum Extra", not "AlarumExtra")
         $title = preg_replace('/\s*\(\d{4}\)\s*/', ' ', $title);
 
-        // Remove quality suffixes anywhere in the title (with slash, space, or hyphen)
-        // Matches: 4K/UHD, 4KUHD, 4K UHD, 4K-UHD, UHD, HD, FHD, 720p, 1080p, 2160p, etc.
-        $title = preg_replace('/\s*[-\/\s]*(4K\s*[\/\-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)/i', '', $title);
+        // Remove standalone quality tokens anywhere in the title.
+        // Token delimiters prevent short markers such as HD and SD from corrupting words like Wednesday.
+        $title = preg_replace('/(?:^|[\s\p{P}]+|(?<=[\s\p{P}]))(4K\s*[\/-]?\s*U?HD|UHD|FHD|HD|SD|720p|1080p|2160p|4K|REMUX|BluRay|Blu-Ray|BDRip|WEBRip|WEB-DL|HDRip|HDTV|DVDRip)(?:[\s\p{P}]+|$)/iu', ' ', $title);
 
         // Remove release group tags at end of title: "-LAMA", "-YTS", "-SPARKS", etc.
         // Also handles patterns like "5 1-LAMA" (residual metadata after year/quality removal)

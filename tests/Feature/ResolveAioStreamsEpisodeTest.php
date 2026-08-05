@@ -57,8 +57,13 @@ it('resolves the top candidates, infers the container extension, and creates a f
 
     $this->episode->refresh();
 
+    // The resolved URL is never stored directly — it's hidden behind the media-server
+    // proxy (see MediaServerProxyController::streamAioStreamsEpisode()), stored on
+    // the episode's own info (internal-only) and referenced by the episode's own
+    // ID in the generated URL.
     expect($this->episode->aio_resolution_status)->toBe('resolved')
-        ->and($this->episode->url)->toBe('https://example.com/2160p.mkv')
+        ->and($this->episode->url)->toContain("/aiostreams-media/{$this->integration->id}/episode/{$this->episode->id}/stream")
+        ->and($this->episode->info['aiostreams']['resolved_url'])->toBe('https://example.com/2160p.mkv')
         ->and($this->episode->container_extension)->toBe('mkv')
         ->and(EpisodeFailover::where('episode_id', $this->episode->id)->count())->toBe(2);
 });
@@ -84,6 +89,12 @@ it('creates failover candidates as hidden clones that do not appear in normal Ep
 
     // ...but still reachable via the failover relationship the playback path uses.
     expect($this->episode->failoverEpisodes()->count())->toBe(1);
+
+    // The failover clone gets its own resolved URL and a proxy URL keyed by its
+    // own ID, not the primary episode's.
+    $firstFailover = Episode::withoutGlobalScopes()->find($failoverEpisodeIds->first());
+    expect($firstFailover->url)->toContain("/aiostreams-media/{$this->integration->id}/episode/{$firstFailover->id}/stream")
+        ->and($firstFailover->info['aiostreams']['resolved_url'])->not->toBeNull();
 });
 
 it('deletes orphaned failover clone episodes when the primary episode is deleted', function () {

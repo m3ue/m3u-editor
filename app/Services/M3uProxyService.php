@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\DvrRecordingStatus;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Http\Controllers\MediaServerProxyController;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Channel;
@@ -18,6 +19,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Models\StreamProfile;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -592,6 +594,27 @@ class M3uProxyService
                 'message' => $e->getMessage(),
                 'deleted_count' => 0,
             ];
+        }
+    }
+
+    /**
+     * Stop streams for a single client's channel/episode, swallowing and logging any
+     * failure. Callers are expected to have already verified the caller is allowed to
+     * stop this stream (e.g. it belongs to their playlist, or an ownership policy check)
+     * before calling this — this only wraps the "stop and don't let a proxy hiccup
+     * surface as a 500" behavior shared by every player-facing stop-stream endpoint.
+     */
+    public static function stopStreamSafely(string $field, string $id, ?string $clientId, string $logMessage = 'Failed to stop player stream'): void
+    {
+        try {
+            self::stopStreamsByMetadata($field, $id, force: false, clientId: $clientId);
+        } catch (Exception $e) {
+            Log::warning($logMessage, [
+                'field' => $field,
+                'id' => $id,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
         }
     }
 
@@ -1580,8 +1603,9 @@ class M3uProxyService
             ? $remainingFailovers->isNotEmpty()
             : $remainingFailovers->map(function ($failoverEpisode) {
                 $failoverPlaylist = $failoverEpisode->getEffectivePlaylist();
+                $failoverUrl = $failoverPlaylist ? PlaylistUrlService::getEpisodeUrl($failoverEpisode, $failoverPlaylist) : null;
 
-                return $failoverPlaylist ? PlaylistUrlService::getEpisodeUrl($failoverEpisode, $failoverPlaylist) : null;
+                return $this->resolveMediaServerUpstreamUrl($failoverUrl)['url'] ?? $failoverUrl;
             })
                 ->filter()
                 ->values()
@@ -1663,6 +1687,18 @@ class M3uProxyService
 
             // Transform URL using selected profile
             $url = $selectedProfile->transformEpisodeUrl($episode);
+        }
+
+        // Media-server-backed episodes (Plex/Emby/Jellyfin/WebDAV/AIOStreams) store our own
+        // API-key-hiding proxy URL as their episode URL, since that URL is also handed directly
+        // to external clients when the proxy is disabled. When we ARE going through the proxy,
+        // resolve it to the real upstream URL here (server-side, never exposed to the client) so
+        // the Python proxy fetches the media server directly instead of looping back through this
+        // app's PHP-FPM curl relay for the full duration of playback. Done after the profile
+        // transform above, since that can replace $url with a different provider URL.
+        if ($resolved = $this->resolveMediaServerUpstreamUrl($url)) {
+            $url = $resolved['url'];
+            $headers = array_merge($headers, $resolved['headers']);
         }
 
         // Use appropriate endpoint based on whether transcoding profile is provided
@@ -2552,12 +2588,13 @@ class M3uProxyService
 
     /**
      * If the given URL points at one of this app's own API-key-hiding media-server proxy
-     * routes (MediaServerProxyController's `/media-server/*` or `/webdav-media/*`), resolve
-     * it to the real upstream URL (and any auth headers it needs) so the m3u-proxy service
-     * fetches Plex/Emby/Jellyfin/WebDAV directly instead of looping back through this app's
-     * PHP curl relay for the full duration of playback. Never expose the resolved URL to an
-     * external client — it's only safe to use here because the proxy's fetch is server-side.
-     * Local media has no HTTP source and is intentionally left unresolved.
+     * routes (MediaServerProxyController's `/media-server/*`, `/webdav-media/*`, or
+     * `/aiostreams-media/*`), resolve it to the real upstream URL (and any auth headers it
+     * needs) so the m3u-proxy service fetches Plex/Emby/Jellyfin/WebDAV/AIOStreams directly
+     * instead of looping back through this app's PHP curl relay for the full duration of
+     * playback. Never expose the resolved URL to an external client — it's only safe to use
+     * here because the proxy's fetch is server-side. Local media has no HTTP source and is
+     * intentionally left unresolved.
      *
      * @return array{url: string, headers: array<int, array{header: string, value: string}>}|null
      */
@@ -2568,6 +2605,35 @@ class M3uProxyService
         }
 
         $path = parse_url($url, PHP_URL_PATH) ?? '';
+
+        if (preg_match('#/aiostreams-media/(\d+)/(channel|episode|live)/([^/]+)/stream$#', $path, $matches)) {
+            $integration = MediaServerIntegration::find((int) $matches[1]);
+            if (! $integration || ! $integration->enabled || $integration->type !== 'aiostreams') {
+                return null;
+            }
+
+            $resolvedUrl = match ($matches[2]) {
+                'channel' => Channel::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                    ->where('id', (int) $matches[3])
+                    ->where('aio_integration_id', $integration->id)
+                    ->first()?->movie_data['aiostreams']['resolved_url'] ?? null,
+                'episode' => Episode::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)
+                    ->where('id', (int) $matches[3])
+                    ->whereHas('series', fn ($query) => $query->where('aio_integration_id', $integration->id))
+                    ->first()?->info['aiostreams']['resolved_url'] ?? null,
+                'live' => Cache::get(MediaServerProxyController::aioStreamsLiveCacheKey($integration->id, $matches[3])),
+            };
+
+            if (
+                ! is_string($resolvedUrl)
+                || ! filter_var($resolvedUrl, FILTER_VALIDATE_URL)
+                || ! in_array(parse_url($resolvedUrl, PHP_URL_SCHEME), ['http', 'https'], true)
+            ) {
+                return null;
+            }
+
+            return ['url' => $resolvedUrl, 'headers' => []];
+        }
 
         if (preg_match('#/media-server/(\d+)/stream/([^/.]+)\.([a-zA-Z0-9]+)$#', $path, $matches)) {
             $integration = MediaServerIntegration::find((int) $matches[1]);
@@ -2626,6 +2692,9 @@ class M3uProxyService
         if ($format === 'hls' || $format === 'm3u8') {
             // HLS format: /hls/{stream_id}/playlist.m3u8
             $url = $baseUrl.'/hls/'.$streamId.'/playlist.m3u8';
+        } elseif ($format === 'mpd' || $format === 'dash') {
+            // DASH format: /dash/{stream_id}/manifest.mpd
+            $url = $baseUrl.'/dash/'.$streamId.'/manifest.mpd';
         } else {
             // Direct stream format: /stream/{stream_id}
             $url = $baseUrl.'/stream/'.$streamId;
@@ -3333,7 +3402,7 @@ class M3uProxyService
         // Build the failover resolver path
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/failover-resolver";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/failover-resolver");
         }
 
         // If here, return null
@@ -3349,11 +3418,25 @@ class M3uProxyService
     {
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/broadcast/callback";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/broadcast/callback");
         }
 
         // Build the broadcast callback path
-        return ProxyFacade::getBaseUrl().'/api/m3u-proxy/broadcast/callback';
+        return $this->withCallbackToken(ProxyFacade::getBaseUrl().'/api/m3u-proxy/broadcast/callback');
+    }
+
+    /**
+     * Get the DVR broadcast callback URL for m3u-proxy to send recording-lifecycle events.
+     *
+     * @return string|null The DVR callback endpoint URL, or null if not configured
+     */
+    public function getDvrCallbackUrl(): ?string
+    {
+        if (! empty($this->failoverResolverUrl)) {
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/dvr/callback");
+        }
+
+        return $this->withCallbackToken(ProxyFacade::getBaseUrl().'/api/dvr/callback');
     }
 
     /**
@@ -3365,11 +3448,28 @@ class M3uProxyService
     {
         if (! empty($this->failoverResolverUrl)) {
             // Use the configured failover resolver URL
-            return "$this->failoverResolverUrl/api/m3u-proxy/webhooks";
+            return $this->withCallbackToken("$this->failoverResolverUrl/api/m3u-proxy/webhooks");
         }
 
         // Return null if not configured, as webhooks are optional and may not be needed if the resolver URL is not set
         return null;
+    }
+
+    /**
+     * Append the shared proxy API token as a query parameter so VerifyM3uProxyCallback
+     * can authenticate requests the proxy sends back to these URLs. The proxy's outbound
+     * HTTP clients for these callbacks don't attach custom headers, so the token has to
+     * travel embedded in the URL itself, which the editor fully controls.
+     */
+    private function withCallbackToken(string $url): string
+    {
+        if (empty($this->apiToken)) {
+            return $url;
+        }
+
+        $separator = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$separator.'api_token='.rawurlencode($this->apiToken);
     }
 
     /**
@@ -3404,6 +3504,7 @@ class M3uProxyService
             'dvr_mode' => true,
             'hls_list_size' => 0,
             'output_dir' => config('proxy.broadcast_temp_dir'),
+            'callback_url' => $this->getDvrCallbackUrl(),
             'metadata' => [
                 'type' => 'dvr',
                 'recording_id' => $recording->uuid,

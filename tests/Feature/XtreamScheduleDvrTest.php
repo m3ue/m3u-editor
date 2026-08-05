@@ -40,17 +40,16 @@ beforeEach(function () {
     $this->username = 'testuser_'.Str::random(5);
     $this->password = 'testpass';
 
-    PlaylistAuth::create([
+    $this->playlistAuth = PlaylistAuth::create([
         'name' => 'Test Auth',
         'username' => $this->username,
         'password' => $this->password,
         'enabled' => true,
+        'dvr_enabled' => true,
         'user_id' => $this->user->id,
     ]);
 
-    $this->playlist->playlistAuths()->attach(
-        PlaylistAuth::where('username', $this->username)->first()
-    );
+    $this->playlist->playlistAuths()->attach($this->playlistAuth);
 
     $this->group = Group::factory()->for($this->user)->create();
     $this->channel = Channel::factory()
@@ -95,6 +94,7 @@ it('creates a Manual DvrRecordingRule from the Xtream schedule_dvr action', func
     expect($rule->channel_id)->toBe($this->channel->id);
     expect($rule->series_title)->toBe('Evening News');
     expect($rule->enabled)->toBeTrue();
+    expect($rule->playlist_auth_id)->toBe($this->playlistAuth->id);
 });
 
 it('materialises a Scheduled DvrRecording in the same request via the boot event', function () {
@@ -218,6 +218,7 @@ it('creates a Series DvrRecordingRule from the Xtream create_dvr_series_rule act
     expect($rule)->not->toBeNull();
     expect($rule->type)->toBe(DvrRuleType::Series);
     expect($rule->channel_id)->toBe($this->channel->id);
+    expect($rule->playlist_auth_id)->toBe($this->playlistAuth->id);
 });
 
 it('rejects a series rule for a channel that belongs to a different playlist', function () {

@@ -7,6 +7,7 @@ use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -321,5 +322,99 @@ class EpgApiControllerTest extends TestCase
         $start = Carbon::parse($firstProgramme['start']);
         $stop = Carbon::parse($firstProgramme['stop']);
         $this->assertEquals(60, $start->diffInMinutes($stop));
+    }
+
+    public function test_unauthenticated_request_without_credentials_gets_metadata_only()
+    {
+        // No session, no username/password: the response must never fall back to
+        // embedding the playlist owner's real Xtream credentials in a channel URL.
+        $this->app['auth']->forgetGuards();
+
+        $channel = Channel::factory()->create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'channel' => 995,
+        ]);
+
+        $response = $this->getJson("/api/epg/playlist/{$this->playlist->uuid}/data");
+
+        $response->assertSuccessful();
+
+        $data = $response->json();
+        $this->assertFalse($data['playable']);
+
+        $channelEntry = collect($data['channels'])->firstWhere('id', $channel->id);
+        $this->assertNotNull($channelEntry);
+        $this->assertFalse($channelEntry['playable']);
+        $this->assertNull($channelEntry['url']);
+        $this->assertNull($channelEntry['format']);
+    }
+
+    public function test_unauthenticated_request_with_foreign_playlist_credentials_gets_metadata_only()
+    {
+        // Valid credentials for a *different* playlist must not unlock playable
+        // URLs for this playlist.
+        $this->app['auth']->forgetGuards();
+
+        $otherUser = User::factory()->create();
+        $otherPlaylist = Playlist::factory()->for($otherUser)->create();
+
+        $channel = Channel::factory()->create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'channel' => 994,
+        ]);
+
+        $response = $this->getJson("/api/epg/playlist/{$this->playlist->uuid}/data?".http_build_query([
+            'username' => $otherUser->name,
+            'password' => $otherPlaylist->uuid,
+        ]));
+
+        $response->assertSuccessful();
+
+        $data = $response->json();
+        $this->assertFalse($data['playable']);
+
+        $channelEntry = collect($data['channels'])->firstWhere('id', $channel->id);
+        $this->assertNull($channelEntry['url']);
+    }
+
+    public function test_unauthenticated_request_with_matching_playlist_auth_gets_playable_urls()
+    {
+        // Valid PlaylistAuth credentials assigned to *this* playlist should still
+        // unlock playable URLs for an unauthenticated (no panel session) caller.
+        $this->app['auth']->forgetGuards();
+
+        $playlistAuth = PlaylistAuth::factory()->for($this->user)->create([
+            'enabled' => true,
+        ]);
+        $playlistAuth->assignTo($this->playlist);
+
+        $channel = Channel::factory()->create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'enabled' => true,
+            'is_vod' => false,
+            'channel' => 993,
+        ]);
+
+        $response = $this->getJson("/api/epg/playlist/{$this->playlist->uuid}/data?".http_build_query([
+            'username' => $playlistAuth->username,
+            'password' => $playlistAuth->password,
+        ]));
+
+        $response->assertSuccessful();
+
+        $data = $response->json();
+        $this->assertTrue($data['playable']);
+
+        $channelEntry = collect($data['channels'])->firstWhere('id', $channel->id);
+        $this->assertTrue($channelEntry['playable']);
+        $this->assertNotEmpty($channelEntry['url']);
+        $this->assertStringContainsString((string) $playlistAuth->username, $channelEntry['url']);
     }
 }

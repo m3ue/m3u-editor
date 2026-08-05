@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Models\MediaServerIntegration;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -19,12 +20,13 @@ function makeLocalIntegration(int $userId, array $paths): MediaServerIntegration
     ]);
 }
 
+// Routes through the same signed-URL generator production code uses (see
+// MediaServerProxySignedUrlTest for coverage of the signature requirement itself).
+// Callers always base64-encode the file path before calling generateLocalMediaStreamUrl
+// (see LocalMediaService), so this helper mirrors that.
 function streamUrl(int $integrationId, string $filePath): string
 {
-    return route('local-media.stream', [
-        'integration' => $integrationId,
-        'item' => base64_encode($filePath),
-    ]);
+    return MediaServerProxyController::generateLocalMediaStreamUrl($integrationId, base64_encode($filePath));
 }
 
 beforeEach(function () {
@@ -173,10 +175,7 @@ it('returns 404 for a non-existent file', function () {
 });
 
 it('returns 404 for an unknown integration', function () {
-    $response = $this->get(route('local-media.stream', [
-        'integration' => 99999,
-        'item' => base64_encode('/some/file.mkv'),
-    ]));
+    $response = $this->get(streamUrl(99999, '/some/file.mkv'));
 
     $response->assertNotFound();
 });

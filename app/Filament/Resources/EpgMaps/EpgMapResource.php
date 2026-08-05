@@ -164,6 +164,7 @@ class EpgMapResource extends Resource implements CopilotResource
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
+                            'processing' => false,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MapPlaylistChannelsToEpg(
@@ -191,9 +192,17 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->modalDescription(__('Manually restart this EPG mapping? This will restart the existing mapping process.'))
                     ->modalSubmitActionLabel(__('Restart Now'))
                     ->action(function ($record) {
+                        // Clear the `processing` claim flag as well as the visible
+                        // status/progress — if a prior run died without going
+                        // through its own completion/failure handler (e.g. the
+                        // worker was killed mid-run), `processing` is stuck
+                        // `true` forever and the atomic claim in
+                        // MapPlaylistChannelsToEpg::handle() would silently
+                        // refuse to start a new run.
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
+                            'processing' => false,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new MapPlaylistChannelsToEpg(
@@ -239,6 +248,7 @@ class EpgMapResource extends Resource implements CopilotResource
                                 $record->update([
                                     'status' => Status::Processing,
                                     'progress' => 0,
+                                    'processing' => false,
                                 ]);
                                 app('Illuminate\Contracts\Bus\Dispatcher')
                                     ->dispatch(new MapPlaylistChannelsToEpg(

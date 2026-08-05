@@ -80,6 +80,8 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
             ->where('playlist_id', $map->playlist_id)
             ->eligibleForEpgMapping()
             ->whereNull('epg_channel_id')
+            ->when($map->channels, fn ($query) => $query->whereIn('id', $map->channels))
+            ->when(! $map->channels && $map->group_ids, fn ($query) => $query->whereIn('group_id', $map->group_ids))
             ->orderBy('name')
             ->get(['id', 'name', 'name_custom', 'title', 'title_custom']);
 

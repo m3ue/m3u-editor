@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\M3uProxyApiController;
 use App\Http\Controllers\Api\TvApiController;
 use App\Http\Controllers\ArrWebhookController;
 use App\Http\Controllers\DvrCallbackController;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -37,21 +39,33 @@ Route::middleware(['throttle:60,1'])->prefix('epg')->group(function () {
  * m3u-proxy API routes
  */
 Route::prefix('m3u-proxy')->group(function () {
-    // Failover resolver - called by m3u-proxy to validate failover URLs
+    // Failover resolver - called by m3u-proxy to validate failover URLs.
+    // Authenticated by VerifyM3uProxyCallback (see routes below and M3uProxyService,
+    // which embeds the shared token in the URL it hands to the proxy).
     Route::post('failover-resolver', [M3uProxyApiController::class, 'resolveFailoverUrl'])
+        ->middleware(['m3u-proxy.callback', 'throttle:120,1'])
         ->name('m3u-proxy.failover-resolver');
 
-    // Player stream stop - called via sendBeacon when in-app player is closed
+    // Player stream stop - called via sendBeacon when in-app player is closed.
+    // sendBeacon cannot attach custom headers (no CSRF token), so only the session
+    // middleware is added here rather than the full 'web' group, to authenticate the
+    // caller via the panel's session cookie without requiring a CSRF token.
     Route::post('player-stream/stop', [M3uProxyApiController::class, 'stopPlayerStream'])
+        ->middleware([
+            EncryptCookies::class,
+            StartSession::class,
+        ])
         ->name('m3u-proxy.player-stream.stop');
 
-    // Proxy webhook endpoint - called by m3u-proxy to notify of events
-    // Relies on `m3u-proxy:register-webhook` to register this endpoint with the proxy
+    // Proxy webhook endpoint - called by m3u-proxy to notify of events.
+    // Relies on `m3u-proxy:register-webhook` to register this endpoint with the proxy.
     Route::post('webhooks', [M3uProxyApiController::class, 'handleWebhook'])
+        ->middleware(['m3u-proxy.callback', 'throttle:120,1'])
         ->name('m3u-proxy.webhook');
 
     // Network broadcast callback - called by proxy when broadcast FFmpeg process exits
     Route::post('broadcast/callback', [M3uProxyApiController::class, 'handleBroadcastCallback'])
+        ->middleware(['m3u-proxy.callback', 'throttle:120,1'])
         ->name('m3u-proxy.broadcast.callback');
 });
 
@@ -86,6 +100,7 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
  * Must live in api.php (not web.php) to avoid CSRF verification.
  */
 Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
+    ->middleware(['m3u-proxy.callback', 'throttle:120,1'])
     ->name('dvr.callback');
 
 /*
@@ -102,4 +117,6 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.push.subscribe');
     Route::delete('push/unsubscribe', [TvApiController::class, 'unregisterPushToken'])
         ->name('tv.push.unsubscribe');
+    Route::post('player-stream/stop', [TvApiController::class, 'stopPlayerStream'])
+        ->name('tv.player-stream.stop');
 });

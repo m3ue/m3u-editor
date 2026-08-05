@@ -214,6 +214,56 @@ it('clears candidate rows when no unresolved channels remain', function () {
     expect($map->candidates()->get())->toHaveCount(0);
 });
 
+it('only builds candidates for channels in the mapped group', function () {
+    $otherGroup = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    $match = candidatesEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $inGroup = candidatesChannel('ESPN News HD');
+    $outOfGroup = Channel::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->for($otherGroup)
+        ->create([
+            'name' => 'ESPN News HD Elsewhere',
+            'title' => 'ESPN News HD Elsewhere',
+            'stream_id' => 'espn-news-hd-elsewhere',
+            'epg_map_enabled' => true,
+            'is_vod' => false,
+        ]);
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+    $map->update(['group_ids' => [$this->group->id]]);
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    $rows = $map->candidates()->get();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows->first()->channel_id)->toBe($inGroup->id);
+});
+
+it('only builds candidates for explicitly listed channels when set on the map', function () {
+    $match = candidatesEpgChannel([
+        'name' => 'ESPN News',
+        'display_name' => 'ESPN News',
+        'channel_id' => 'espnews.us',
+    ]);
+    $selected = candidatesChannel('ESPN News HD');
+    $unselected = candidatesChannel('ESPN News HD Two');
+    $map = candidatesMap(['remove_quality_indicators' => true]);
+    $map->update(['channels' => [$selected->id]]);
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    $rows = $map->candidates()->get();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows->first()->channel_id)->toBe($selected->id);
+});
+
 it('skips candidate rows owned by another user', function () {
     $otherUser = User::factory()->create();
     $otherEpg = Epg::withoutEvents(fn () => Epg::factory()->for($otherUser)->create());

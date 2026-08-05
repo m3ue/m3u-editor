@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Scopes\ExcludeAioFailoverClonesScope;
@@ -109,10 +110,17 @@ class ResolveAioStreamsChannel implements ShouldBeUniqueUntilProcessing, ShouldQ
         $movieData = $channel->movie_data ?? [];
         $movieData['aiostreams'] = [
             'candidates' => array_map(fn (array $c) => $c['parsed'], $selected),
+            // Never exposed via API/UI — only MediaServerProxyController::streamAioStreamsChannel()
+            // reads this, to proxy the bytes without the raw (often debrid-account-scoped) URL
+            // ever appearing in a stored/served URL.
+            'resolved_url' => $primary['stream']['url'] ?? null,
         ];
 
+        // $channel already exists (found by ID above), so unlike the failover
+        // clones below it doesn't need a create-then-update round trip — its own
+        // ID is already known, so the proxy URL can go in this same write.
         $channel->update([
-            'url' => $primary['stream']['url'] ?? null,
+            'url' => MediaServerProxyController::generateAioStreamsChannelProxyUrl($channel->aio_integration_id, $channel->id),
             'container_extension' => $primary['parsed']['container'] ?? $channel->container_extension,
             'movie_data' => $movieData,
             'aio_resolution_status' => count($selected) >= $maxCandidates ? 'resolved' : 'partial',
@@ -135,13 +143,17 @@ class ResolveAioStreamsChannel implements ShouldBeUniqueUntilProcessing, ShouldQ
                 'is_custom' => true,
                 'is_vod' => $channel->is_vod,
                 'is_aio_failover_clone' => true,
-                'url' => $candidate['stream']['url'] ?? null,
+                'movie_data' => ['aiostreams' => ['resolved_url' => $candidate['stream']['url'] ?? null]],
                 'container_extension' => $candidate['parsed']['container'] ?? null,
                 'aio_integration_id' => $channel->aio_integration_id,
                 'aio_item_id' => $channel->aio_item_id,
                 'aio_type' => $channel->aio_type,
                 'aio_resolution_status' => 'resolved',
                 'aio_last_resolved_at' => now(),
+            ]);
+
+            $failoverChannel->update([
+                'url' => MediaServerProxyController::generateAioStreamsChannelProxyUrl($channel->aio_integration_id, $failoverChannel->id),
             ]);
 
             ChannelFailover::create([

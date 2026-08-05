@@ -43,6 +43,7 @@ use App\Models\StreamProfile;
 use App\Rules\CheckIfUrlOrLocalPath;
 use App\Rules\Cron;
 use App\Rules\UrlIsAllowed;
+use App\Rules\ValidRegexPattern;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
@@ -1703,6 +1704,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     '\[.*\]',
                                 ])
                                 ->splitKeys(['Tab', 'Return'])
+                                ->rules(fn (Get $get): array => $get('import_prefs.use_regex') ? [new ValidRegexPattern] : [])
                                 ->hintAction(
                                     RegexTesterAction::make(name: 'test-live-groups', flags: 'u', samplesContext: 'groups')
                                         ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))
@@ -1797,6 +1799,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     '\[.*\]',
                                 ])
                                 ->splitKeys(['Tab', 'Return'])
+                                ->rules(fn (Get $get): array => $get('import_prefs.use_regex') ? [new ValidRegexPattern] : [])
                                 ->hintAction(
                                     RegexTesterAction::make(name: 'test-vod-groups', flags: 'u', samplesContext: 'vod_groups')
                                         ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))
@@ -1887,6 +1890,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     '\[.*\]',
                                 ])
                                 ->splitKeys(['Tab', 'Return'])
+                                ->rules(fn (Get $get): array => $get('import_prefs.use_regex') ? [new ValidRegexPattern] : [])
                                 ->hintAction(
                                     RegexTesterAction::make(name: 'test-categories', flags: 'u', samplesContext: 'categories')
                                         ->visible(fn (Get $get): bool => (bool) $get('import_prefs.use_regex'))

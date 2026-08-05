@@ -63,6 +63,36 @@ it('can search for a movie and return TMDB ID', function () {
         ->and($result['imdb_id'])->toBe('tt0133093');
 });
 
+it('prefers an exact full movie title over the simplified API query', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 999999,
+                    'title' => 'Duneland',
+                    'original_title' => 'Duneland',
+                    'release_date' => '2015-01-01',
+                    'popularity' => 100.0,
+                ],
+                [
+                    'id' => 841,
+                    'title' => 'Dune - Der Wüstenplanet',
+                    'original_title' => 'Desert Planet',
+                    'release_date' => '1984-12-14',
+                    'popularity' => 10.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMovie('Dune - Der Wüstenplanet');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(841);
+});
+
 it('can search for a TV series and return TMDB and TVDB IDs', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/tv*' => Http::response([
@@ -88,6 +118,189 @@ it('can search for a TV series and return TMDB and TVDB IDs', function () {
         ->and($result['tmdb_id'])->toBe(4592)
         ->and($result['tvdb_id'])->toBe(78020)
         ->and($result['imdb_id'])->toBe('tt0090390');
+});
+
+it('preserves title words while stripping standalone quality tokens from TV series queries', function (string $title, string $expectedQuery) {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchTvSeries($title, 2022);
+
+    Http::assertSent(fn ($request): bool => ($request->data()['query'] ?? null) === $expectedQuery);
+})->with([
+    'SD inside title' => ['Wednesday HD', 'Wednesday'],
+    'HD inside title' => ['Mehdi SD', 'Mehdi'],
+    'quality at beginning with slash' => ['HD/Title', 'Title'],
+    'quality in middle with slashes' => ['Title/HD/Other', 'Title Other'],
+    'parenthesized quality at end' => ['Title (HD)', 'Title'],
+    'quality at beginning with whitespace' => ['HD Title', 'Title'],
+    'quality in middle with repeated whitespace' => ['Title   SD   Other', 'Title Other'],
+    'quality at end with hyphen' => ['Title-HD', 'Title'],
+    'quality with punctuation delimiters' => ['Title, HD: Other', 'Title Other'],
+    'quality in parentheses between words' => ['Title(HD)Other', 'Title Other'],
+    'quality with repeated delimiters' => ['Title///HD---Other', 'Title Other'],
+    'bracket metadata between words' => ['Title[DE]Other', 'Title Other'],
+    'bracket metadata with repeated delimiters' => ['Title///[HD]---Other', 'Title Other'],
+    'repeated bracket metadata' => ['Title[HD][SD]Other', 'Title Other'],
+    'only quality tokens' => ['HD / SD - 4K', ''],
+]);
+
+it('does not concatenate title words around square-bracket metadata', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response(['results' => []], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $service->searchTvSeries('Title[HD]Other', 2022);
+
+    Http::assertSent(fn ($request): bool => ($request->data()['query'] ?? null) === 'Title Other');
+});
+
+it('prefers an exact full localized TV title after simplifying the API query', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 34356,
+                    'name' => 'Tron - Der Aufstand',
+                    'original_name' => 'TRON: Uprising',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 9.1,
+                ],
+                [
+                    'id' => 303795,
+                    'name' => 'JonTron',
+                    'original_name' => 'JonTron',
+                    'first_air_date' => '2010-08-31',
+                    'popularity' => 15.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('Tron - Der Aufstand');
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(34356);
+});
+
+it('ranks an exact normalized full TV title above a more popular typo', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 1,
+                    'name' => 'Tron - Der Aufstand',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 1.0,
+                ],
+                [
+                    'id' => 2,
+                    'name' => 'Tron - Der Aufstande',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 100.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('Tron - Der Aufstand', 2012);
+
+    expect([$result['tmdb_id'], $result['confidence']])->toBe([1, 100]);
+});
+
+it('ranks an exact normalized full TV title above a same-year typo when the exact title year differs', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 1,
+                    'name' => 'Tron - Der Aufstand',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2011-06-07',
+                    'popularity' => 1.0,
+                ],
+                [
+                    'id' => 2,
+                    'name' => 'Tron - Der Aufstande',
+                    'original_name' => 'Tron',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 100.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('Tron - Der Aufstand', 2012);
+
+    expect([$result['tmdb_id'], $result['confidence']])->toBe([1, 100]);
+});
+
+it('ranks an exact normalized original TV name above a same-year popular typo', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 1,
+                    'name' => 'Tron - Der Aufstand',
+                    'original_name' => 'TRON: Uprising',
+                    'first_air_date' => '2011-06-07',
+                    'popularity' => 1.0,
+                ],
+                [
+                    'id' => 2,
+                    'name' => 'TRON: Uprisin',
+                    'original_name' => 'TRON: Uprisin',
+                    'first_air_date' => '2012-06-07',
+                    'popularity' => 100.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('TRON: Uprising', 2012);
+
+    expect([$result['tmdb_id'], $result['confidence']])->toBe([1, 100]);
+});
+
+it('preserves exact alternative-title fallback matching', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 11,
+                    'name' => 'Little House on the Prairie',
+                    'original_name' => 'Little House on the Prairie',
+                    'first_air_date' => '1974-09-11',
+                    'popularity' => 20.0,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/11/alternative_titles*' => Http::response([
+            'results' => [
+                ['title' => 'Unsere kleine Farm', 'iso_3166_1' => 'DE'],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/11/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchTvSeries('Unsere kleine Farm', 1974);
+
+    expect([$result['tmdb_id'], $result['confidence']])->toBe([11, 100]);
 });
 
 it('handles no results gracefully', function () {

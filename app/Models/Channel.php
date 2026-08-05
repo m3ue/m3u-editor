@@ -309,6 +309,8 @@ class Channel extends Model
         // Determine the channel format based on URL or container extension
         if (Str::endsWith($filename, '.m3u8')) {
             $channelFormat = 'm3u8';
+        } elseif (Str::endsWith($filename, '.mpd')) {
+            $channelFormat = 'mpd';
         } elseif (Str::endsWith($filename, '.ts')) {
             $channelFormat = 'ts';
         } elseif ($this->is_vod) {

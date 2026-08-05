@@ -82,7 +82,32 @@ class AIOStreamsProxyController extends Controller
             return response()->json(['error' => 'Failed to fetch streams from AIOStreams'], 502);
         }
 
-        return response()->json($response->json());
+        $data = $response->json();
+
+        // Never hand a raw resolved URL (often carrying the debrid account's own
+        // auth token) back to the caller — proxy every candidate the same way the
+        // browse UI and synced Channels/Episodes do. There's no durable row behind
+        // this call, so it goes through the short-lived cache-token "live" proxy.
+        // A stream list can hold dozens of candidates, so this is batched into one
+        // cache write (see generateAioStreamsLiveProxyUrls()) rather than one per
+        // candidate.
+        if (is_array($data['streams'] ?? null)) {
+            $rawUrlsByIndex = [];
+
+            foreach ($data['streams'] as $index => $stream) {
+                if (is_string($stream['url'] ?? null) && $stream['url'] !== '') {
+                    $rawUrlsByIndex[$index] = $stream['url'];
+                }
+            }
+
+            $proxiedUrlsByIndex = MediaServerProxyController::generateAioStreamsLiveProxyUrls($integrationId, $rawUrlsByIndex);
+
+            foreach ($proxiedUrlsByIndex as $index => $proxiedUrl) {
+                $data['streams'][$index]['url'] = $proxiedUrl;
+            }
+        }
+
+        return response()->json($data);
     }
 
     /**

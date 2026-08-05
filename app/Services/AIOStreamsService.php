@@ -108,6 +108,7 @@ class AIOStreamsService implements MediaServer
         }
 
         $catalogs = collect($manifest['catalogs'] ?? [])
+            ->filter(fn ($catalog) => is_array($catalog) && ! empty($catalog['id']) && ! empty($catalog['type']) && ! empty($catalog['name']))
             ->map(fn (array $catalog) => [
                 'id' => $catalog['id'],
                 'type' => $catalog['type'],

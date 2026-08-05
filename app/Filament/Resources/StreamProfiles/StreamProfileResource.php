@@ -192,6 +192,7 @@ class StreamProfileResource extends Resource implements CopilotResource
                         'ts' => 'MPEG-TS (.ts)',
                         'mpeg' => 'MPEG (.mpeg)',
                         'm3u8' => 'HLS (.m3u8)',
+                        'mpd' => 'DASH (.mpd)',
                         'flv' => 'FLV (.flv)',
                         'ogg' => 'OGG (.ogg)',
                         'mp3' => 'MP3 (.mp3)',

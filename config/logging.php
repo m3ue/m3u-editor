@@ -89,6 +89,15 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'monthly' => [
+            'driver' => 'monthly',
+            'tap' => [AddAnonymizingProcessor::class],
+            'path' => storage_path('logs/laravel.log'),
+            'level' => env('LOG_LEVEL', 'error'),
+            'max_files' => 3,
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'tap' => [AddAnonymizingProcessor::class],

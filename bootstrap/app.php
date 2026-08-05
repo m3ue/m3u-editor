@@ -3,6 +3,7 @@
 use App\Http\Middleware\AutoLoginMiddleware;
 use App\Http\Middleware\DispatcharrAuthMiddleware;
 use App\Http\Middleware\ProxyRateLimitMiddleware;
+use App\Http\Middleware\VerifyM3uProxyCallback;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ->alias([
                 'dispatcharr.auth' => DispatcharrAuthMiddleware::class,
                 'proxy.throttle' => ProxyRateLimitMiddleware::class,
+                'm3u-proxy.callback' => VerifyM3uProxyCallback::class,
             ])
             ->redirectGuestsTo('login')
             ->trustProxies(at: ['*'])

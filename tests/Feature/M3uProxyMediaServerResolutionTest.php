@@ -2,25 +2,30 @@
 
 /**
  * Regression test for the PHP-FPM worker-exhaustion crash: a media-server-backed
- * (Plex/Emby/Jellyfin/WebDAV) channel's `url` column stores this app's own
- * API-key-hiding proxy URL (e.g. /media-server/{id}/stream/{item}.mkv), which used
- * to be handed straight to M3uProxyService::createStream() as the upstream source.
- * That made the Python m3u-proxy's upstream fetch loop back through PHP's raw
- * curl_exec() relay for the full duration of every stream, which — under a handful
- * of concurrent/rapidly-reseeked streams — exhausted PHP-FPM's worker pool and took
- * the whole app down (dashboard, Livewire, unrelated routes included).
+ * (Plex/Emby/Jellyfin/WebDAV/AIOStreams) channel's or episode's `url` column stores
+ * this app's own API-key-hiding proxy URL (e.g. /media-server/{id}/stream/{item}.mkv),
+ * which used to be handed straight to M3uProxyService::createStream()/createTranscodedStream()
+ * as the upstream source. That made the Python m3u-proxy's upstream fetch loop back
+ * through PHP's raw curl_exec() relay for the full duration of every stream, which —
+ * under a handful of concurrent/rapidly-reseeked streams — exhausted PHP-FPM's worker
+ * pool and took the whole app down (dashboard, Livewire, unrelated routes included).
  *
  * M3uProxyService::resolveMediaServerUpstreamUrl() now detects that shape of URL and
- * swaps it for the real upstream (Plex query-token / Emby api_key / WebDAV Basic Auth)
- * before it's ever sent to the proxy, so the proxy fetches the media server directly.
+ * swaps it for the real upstream (Plex query-token / Emby api_key / WebDAV Basic Auth /
+ * AIOStreams resolved debrid link) before it's ever sent to the proxy, so the proxy
+ * fetches the media server directly. getChannelUrl() and getEpisodeUrl() both call it.
  */
 
+use App\Http\Controllers\MediaServerProxyController;
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -118,6 +123,135 @@ test('getChannelUrl resolves a WebDAV proxy URL to the real file URL with Basic 
 
         return ($body['url'] ?? null) === 'https://webdav.local/Movies/Inception%20%282010%29/Inception.mkv'
             && ($body['headers']['Authorization'] ?? null) === $expectedAuth;
+    });
+});
+
+test('getChannelUrl resolves an AIOStreams channel proxy URL to the real (debrid-token-bearing) upstream', function () {
+    $integration = MediaServerIntegration::factory()->for($this->user)->create([
+        'type' => 'aiostreams',
+    ]);
+
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => false,
+        'enable_proxy' => true,
+        'available_streams' => 0,
+        'xtream' => false,
+    ]);
+
+    $channel = Channel::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'aio_integration_id' => $integration->id,
+        'movie_data' => ['aiostreams' => ['resolved_url' => 'https://real-debrid.example/dl/secret-token/movie.mkv']],
+    ]);
+    $channel->update([
+        'url' => MediaServerProxyController::generateAioStreamsChannelProxyUrl($integration->id, $channel->id),
+    ]);
+
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response(['matching_streams' => [], 'total_matching' => 0, 'total_clients' => 0]),
+        '*/streams' => Http::response(['stream_id' => 'aio-channel-stream-id']),
+    ]);
+
+    $url = app(M3uProxyService::class)->getChannelUrl($playlist, $channel->fresh());
+
+    expect($url)->toContain('stream/aio-channel-stream-id');
+
+    Http::assertSent(function (Request $request) {
+        if ($request->method() !== 'POST' || ! str_ends_with($request->url(), '/streams')) {
+            return false;
+        }
+
+        return ($request->data()['url'] ?? null) === 'https://real-debrid.example/dl/secret-token/movie.mkv'
+            && ! str_contains($request->data()['url'], '/aiostreams-media/');
+    });
+});
+
+test('getEpisodeUrl resolves an AIOStreams episode proxy URL to the real upstream before creating the stream', function () {
+    $integration = MediaServerIntegration::factory()->for($this->user)->create([
+        'type' => 'aiostreams',
+    ]);
+
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => false,
+        'enable_proxy' => true,
+        'available_streams' => 0,
+        'xtream' => false,
+    ]);
+
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+        'is_custom' => true,
+        'aio_integration_id' => $integration->id,
+    ]);
+
+    $episode = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+        'series_id' => $series->id,
+        'is_custom' => true,
+        'info' => ['aiostreams' => ['resolved_url' => 'https://real-debrid.example/dl/secret-token/episode.mkv']],
+    ]);
+    $episode->update([
+        'url' => MediaServerProxyController::generateAioStreamsEpisodeProxyUrl($integration->id, $episode->id),
+    ]);
+
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response(['matching_streams' => [], 'total_matching' => 0, 'total_clients' => 0]),
+        '*/streams' => Http::response(['stream_id' => 'aio-episode-stream-id']),
+    ]);
+
+    $url = app(M3uProxyService::class)->getEpisodeUrl($playlist, $episode->fresh());
+
+    expect($url)->toContain('stream/aio-episode-stream-id');
+
+    Http::assertSent(function (Request $request) {
+        if ($request->method() !== 'POST' || ! str_ends_with($request->url(), '/streams')) {
+            return false;
+        }
+
+        return ($request->data()['url'] ?? null) === 'https://real-debrid.example/dl/secret-token/episode.mkv'
+            && ! str_contains($request->data()['url'], '/aiostreams-media/');
+    });
+});
+
+test('getChannelUrl resolves an AIOStreams ad-hoc "live" cache-token proxy URL to the real upstream', function () {
+    $integration = MediaServerIntegration::factory()->for($this->user)->create([
+        'type' => 'aiostreams',
+    ]);
+
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'profiles_enabled' => false,
+        'enable_proxy' => true,
+        'available_streams' => 0,
+        'xtream' => false,
+    ]);
+
+    $token = 'test-live-token-1234567890';
+    Cache::put(MediaServerProxyController::aioStreamsLiveCacheKey($integration->id, $token), 'https://real-debrid.example/dl/secret-token/live.mkv');
+
+    $channel = Channel::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'url' => "http://m3ueditor.test/aiostreams-media/{$integration->id}/live/{$token}/stream",
+    ]);
+
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response(['matching_streams' => [], 'total_matching' => 0, 'total_clients' => 0]),
+        '*/streams' => Http::response(['stream_id' => 'aio-live-stream-id']),
+    ]);
+
+    $url = app(M3uProxyService::class)->getChannelUrl($playlist, $channel);
+
+    expect($url)->toContain('stream/aio-live-stream-id');
+
+    Http::assertSent(function (Request $request) {
+        if ($request->method() !== 'POST' || ! str_ends_with($request->url(), '/streams')) {
+            return false;
+        }
+
+        return ($request->data()['url'] ?? null) === 'https://real-debrid.example/dl/secret-token/live.mkv';
     });
 });
 

@@ -33,6 +33,7 @@ use App\Http\Controllers\WebhookTestController;
 use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
+use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\Route;
 
 // OIDC SSO authentication
@@ -370,17 +371,22 @@ Route::get('/schedules-direct/{epg}/image/{imageHash}', [
 
 /*
  * Media Server (Emby/Jellyfin) proxy routes
- * These hide the API key from external clients
+ * These hide the API key from external clients. Every route requires a valid,
+ * non-expiring signature plus a matching url-version (see
+ * MediaServerProxyController::generate*Url() / rejectIfStaleUrlVersion()) so an
+ * integration/item ID alone is never enough to access another user's media.
+ * These URLs are stored on Channel records (not regenerated per-request), so they
+ * intentionally never expire — signature + version replace an expiry check.
  */
 Route::get('/media-server/{integrationId}/image/{itemId}/{imageType?}', [
     MediaServerProxyController::class,
     'proxyImage',
-])->name('media-server.image.proxy');
+])->middleware(ValidateSignature::relative())->name('media-server.image.proxy');
 
 Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
     MediaServerProxyController::class,
     'proxyStream',
-])->name('media-server.stream.proxy');
+])->middleware(ValidateSignature::relative())->name('media-server.stream.proxy');
 
 /*
  * Local Media streaming routes
@@ -389,7 +395,7 @@ Route::get('/media-server/{integrationId}/stream/{itemId}.{container}', [
 Route::get('/local-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamLocalMedia',
-])->name('local-media.stream');
+])->middleware(ValidateSignature::relative())->name('local-media.stream');
 
 /*
  * WebDAV Media streaming routes
@@ -398,7 +404,38 @@ Route::get('/local-media/{integration}/stream/{item}', [
 Route::get('/webdav-media/{integration}/stream/{item}', [
     MediaServerProxyController::class,
     'streamWebDavMedia',
-])->name('webdav-media.stream');
+])->middleware(ValidateSignature::relative())->name('webdav-media.stream');
+
+/*
+ * AIOStreams resolved-media proxy routes
+ * AIOStreams resolves each item to an opaque, provider-hosted URL (often a
+ * debrid service link carrying that account's own auth token) rather than a
+ * stable item ID we could re-query later, so the resolved URL itself is
+ * never put in the route:
+ *  - channel/episode: the URL was already discovered and stored by
+ *    ResolveAioStreamsChannel/Episode on the row itself — this is a plain
+ *    DB lookup keyed by that row's own ID, exactly like proxyStream() looks
+ *    up Plex/Emby items by their own itemId. No payload, no cache.
+ *  - live: for the ad-hoc browse-and-preview flow and the Xtream-style
+ *    catalog/stream-list endpoint (AIOStreamsProxyController::stream(),
+ *    used by the m3u-tv Flutter client) there's no durable row yet, so the
+ *    resolved URL is cached server-side under a short-lived random token —
+ *    see MediaServerProxyController::generateAioStreamsLiveProxyUrls().
+ */
+Route::get('/aiostreams-media/{integration}/channel/{channel}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsChannel',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.channel.stream');
+
+Route::get('/aiostreams-media/{integration}/episode/{episode}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsEpisode',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.episode.stream');
+
+Route::get('/aiostreams-media/{integration}/live/{item}/stream', [
+    MediaServerProxyController::class,
+    'streamAioStreamsLive',
+])->middleware(ValidateSignature::relative())->name('aiostreams-media.live.stream');
 
 /*
  * DVR routes — file streaming and proxy callbacks
