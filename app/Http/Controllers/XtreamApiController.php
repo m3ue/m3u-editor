@@ -3346,6 +3346,10 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
         }
 
+        if ($playlistAuth?->hasReachedConcurrentLimit()) {
+            return response()->json(['error' => 'Concurrent recording limit reached'], 422);
+        }
+
         $channel = $playlist->channels()->where('channels.id', $channelId)->first();
         if (! $channel) {
             return response()->json(['error' => 'Channel not found'], 404);

@@ -195,6 +195,29 @@ it('rejects scheduling a channel that belongs to a different playlist', function
     expect(DvrRecordingRule::count())->toBe(0);
 });
 
+it('rejects scheduling when the guest playlist auth is at its concurrent recording limit', function () {
+    $this->playlistAuth->update(['dvr_max_concurrent_recordings' => 1]);
+
+    DvrRecording::factory()
+        ->recording()
+        ->for($this->user)
+        ->for($this->playlist->dvrSetting, 'dvrSetting')
+        ->for($this->playlistAuth, 'playlistAuth')
+        ->create();
+
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Evening News',
+        'start_time' => now()->addHour()->toIso8601String(),
+        'end_time' => now()->addHours(2)->toIso8601String(),
+    ]);
+
+    $response->assertStatus(422)
+        ->assertJson(['error' => 'Concurrent recording limit reached']);
+
+    expect(DvrRecordingRule::count())->toBe(0);
+});
+
 function createDvrSeriesRuleUrl(string $username, string $password): string
 {
     return route('xtream.api.player').'?'.http_build_query([

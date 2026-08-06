@@ -8,6 +8,7 @@ use App\Models\DvrSetting;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -95,4 +96,34 @@ it('returns null percent when quota is zero', function () {
     expect($rows)->toHaveCount(1);
     expect($rows->first()['percent'])->toBeNull();
     expect($rows->first()['quota_bytes'])->toBeNull();
+});
+
+it('loads storage totals without an N+1 query per user', function () {
+    foreach (range(1, 3) as $i) {
+        $user = User::factory()->create(['permissions' => ['use_dvr']]);
+        $playlist = Playlist::factory()->for($user)->create();
+        $dvrSetting = DvrSetting::factory()
+            ->for($user)
+            ->for($playlist)
+            ->enabled()
+            ->create(['global_disk_quota_gb' => 10]);
+
+        DvrRecording::factory()
+            ->for($user)
+            ->for($dvrSetting)
+            ->create(['file_size_bytes' => 1073741824]);
+    }
+
+    $admin = User::factory()->admin()->create();
+    $this->actingAs($admin);
+
+    $widget = app(DvrStorageOverviewWidget::class);
+
+    DB::enableQueryLog();
+    $rows = invade($widget)->getViewData()['rows'];
+    $queryCount = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect($rows)->toHaveCount(3)
+        ->and($queryCount)->toBeLessThanOrEqual(2);
 });
