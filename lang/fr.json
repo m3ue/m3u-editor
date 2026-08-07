@@ -3691,6 +3691,7 @@
     "Russian": "russe",
     "S/E": "S/E",
     "S:s E:e of \":title\" has been submitted and is awaiting admin approval.": "S:s E:e de \":title\" a été soumis et attend l'approbation de l'administrateur.",
+    "Series rules only match against channels with EPG data mapped. If a rule never records, confirm this channel has an EPG source assigned.": "Les règles de série ne correspondent qu'aux chaînes disposant de données EPG associées. Si une règle n'enregistre jamais, vérifiez qu'une source EPG est bien assignée à cette chaîne.",
     "SD Progress": "Progrès du DD",
     "SHA-256 Checksum": "Somme de contrôle SHA-256",
     "SMTP": "SMTP",

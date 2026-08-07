@@ -56,10 +56,14 @@ trait HasDvrMatchedAirings
 
             $query->where('tmdb_id', $rule->tmdb_id);
         } else {
+            // Escape LIKE metacharacters in the user-entered title — see the
+            // same treatment in DvrSchedulerService::matchSeriesRule().
+            $escapedTitle = addcslashes($title, '\\%_');
+
             [$sql, $binding] = match ($matchMode) {
                 DvrMatchMode::Exact => ['lower(title) = lower(?)', $title],
-                DvrMatchMode::StartsWith => ['lower(title) LIKE lower(?)', $title.'%'],
-                default => ['lower(title) LIKE lower(?)', '%'.$title.'%'],
+                DvrMatchMode::StartsWith => ["lower(title) LIKE lower(?) ESCAPE '\\'", $escapedTitle.'%'],
+                default => ["lower(title) LIKE lower(?) ESCAPE '\\'", '%'.$escapedTitle.'%'],
             };
 
             $query->whereRaw($sql, [$binding]);
