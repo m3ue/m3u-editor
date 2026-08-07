@@ -131,9 +131,33 @@ class DvrRecording extends Model
                     }
 
                     if ($vodEpisode = $recording->vodEpisode) {
+                        // Capture the parent IDs BEFORE the delete so we can prune
+                        // an empty parent if this episode was the last in its Series
+                        // (issue #1372: the TV app was listing series with no
+                        // remaining episodes). FK cascade on
+                        // seasons.series_id / episodes.series_id takes care of any
+                        // lingering Season/Episode rows when the Series itself is
+                        // removed, so we never hand-roll that teardown.
+                        $seriesId = $vodEpisode->series_id;
+                        $seasonId = $vodEpisode->season_id;
+
                         $vodEpisode->dvr_recording_id = null;
                         $vodEpisode->save();
                         $vodEpisode->delete();
+
+                        if ($seriesId !== null && Episode::where('series_id', $seriesId)->doesntExist()) {
+                            // Series has zero remaining episodes — drop it. The
+                            // shared "DVR Recordings" Category is intentionally
+                            // NOT touched here: findOrCreateDvrCategory() reuses
+                            // one Category per playlist across every DVR series.
+                            Series::find($seriesId)?->delete();
+                        } elseif ($seasonId !== null && Episode::where('season_id', $seasonId)->doesntExist()) {
+                            // Series survives but this episode's Season is now
+                            // empty — prune the empty Season row. Seasons
+                            // accumulate per series via Season::firstOrCreate,
+                            // so empty rows would otherwise linger.
+                            Season::find($seasonId)?->delete();
+                        }
                     }
                 });
             } catch (\Throwable $e) {
