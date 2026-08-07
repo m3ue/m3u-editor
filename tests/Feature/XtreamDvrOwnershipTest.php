@@ -333,8 +333,10 @@ it('rejects all DVR actions for a PlaylistAuth credential without dvr_enabled', 
 
     $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', $action), [
         'recording_id' => 'does-not-matter',
+        'rule_id' => '1',
         'channel_id' => (string) $this->channel->id,
         'title' => 'Evening News',
+        'q' => 'ne',
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
     ]);
@@ -345,6 +347,47 @@ it('rejects all DVR actions for a PlaylistAuth credential without dvr_enabled', 
     'get_dvr_recording',
     'schedule_dvr',
     'create_dvr_series_rule',
+    'update_dvr_series_rule',
     'cancel_dvr_recording',
     'delete_dvr_recording',
+    'list_dvr_series_rules',
+    'delete_dvr_series_rule',
+    'search_epg_shows',
 ]);
+
+it('does not let one credential see or delete another credential\'s series rule via list/delete_dvr_series_rule', function () {
+    $ruleA = DvrRecordingRule::create([
+        'user_id' => $this->user->id,
+        'dvr_setting_id' => $this->setting->id,
+        'playlist_auth_id' => $this->authA->id,
+        'type' => \App\Enums\DvrRuleType::Series,
+        'channel_id' => $this->channel->id,
+        'series_title' => 'Credential A Show',
+        'match_mode' => DvrMatchMode::Contains,
+        'series_mode' => DvrSeriesMode::All,
+        'enabled' => true,
+    ]);
+
+    DvrRecordingRule::create([
+        'user_id' => $this->user->id,
+        'dvr_setting_id' => $this->setting->id,
+        'playlist_auth_id' => $this->authB->id,
+        'type' => \App\Enums\DvrRuleType::Series,
+        'channel_id' => $this->channel->id,
+        'series_title' => 'Credential B Show',
+        'match_mode' => DvrMatchMode::Contains,
+        'series_mode' => DvrSeriesMode::All,
+        'enabled' => true,
+    ]);
+
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'list_dvr_series_rules'))->assertOk();
+    expect($response->json())->toHaveCount(1);
+    expect($response->json('0.series_title'))->toBe('Credential A Show');
+    expect($response->json('0.recording_count'))->toBe(0);
+
+    $this->postJson(dvrActionUrl('credential-a', 'password-a', 'delete_dvr_series_rule'), [
+        'rule_id' => (string) $ruleA->id,
+    ])->assertOk()->assertJson(['success' => true]);
+
+    expect(DvrRecordingRule::find($ruleA->id))->toBeNull();
+});

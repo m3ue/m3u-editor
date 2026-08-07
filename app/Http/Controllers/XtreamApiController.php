@@ -3407,6 +3407,7 @@ class XtreamApiController extends Controller
             ->where('enabled', true)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with('channel')
+            ->withCount('recordings')
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -4056,7 +4057,7 @@ class XtreamApiController extends Controller
             'end_late_seconds' => $rule->end_late_seconds,
             'created_at' => $rule->created_at?->toIso8601String(),
             'updated_at' => $rule->updated_at?->toIso8601String(),
-            'recording_count' => $rule->recordings()->count(),
+            'recording_count' => $rule->recordings_count,
         ];
     }
 
