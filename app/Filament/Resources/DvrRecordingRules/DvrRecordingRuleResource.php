@@ -119,7 +119,10 @@ class DvrRecordingRuleResource extends Resource
                         ->pluck('title', 'id')
                         ->prepend(__('From Original Source'), 0))
                     ->searchable()
-                    ->nullable(),
+                    ->nullable()
+                    ->helperText(fn (Get $get): ?string => self::isRuleType($get('type'), DvrRuleType::Series)
+                        ? __('Series rules only match against channels with EPG data mapped. If a rule never records, confirm this channel has an EPG source assigned.')
+                        : null),
 
                 TextInput::make('series_title')
                     ->label(__('Series Title'))

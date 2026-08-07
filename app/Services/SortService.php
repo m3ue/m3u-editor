@@ -57,6 +57,29 @@ class SortService
     }
 
     /**
+     * Wraps $column in m3u_natural_sort_key(), casting to text first.
+     *
+     * Postgres does not implicitly cast integer columns (e.g. the 'channel'
+     * sort column) to TEXT for user-defined function calls — MySQL and
+     * SQLite are lenient about this, but Postgres raises "function ...
+     * does not exist" without an explicit cast. Casting text columns again
+     * is a harmless no-op, so this always casts rather than special-casing
+     * which columns need it. Each driver has different CAST syntax, so this
+     * has to happen per call site rather than in a single shared expression.
+     */
+    private function naturalSortKeyExpr(string $driver, string $column): string
+    {
+        $cast = match (true) {
+            $driver === 'mysql' => "CAST({$column} AS CHAR)",
+            $this->isPostgres($driver) => "({$column})::text",
+            $driver === 'sqlite' => "CAST({$column} AS TEXT)",
+            default => $column,
+        };
+
+        return "m3u_natural_sort_key({$cast})";
+    }
+
+    /**
      * Bulk-update channels' sort order using DB window functions when available,
      * falling back to a single CASE-based UPDATE to avoid N queries.
      *
@@ -81,14 +104,16 @@ class SortService
 
         // MySQL (8+)
         if ($driver === 'mysql') {
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
+            $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
 
             return;
         }
 
         // Postgres
         if ($this->isPostgres($driver)) {
-            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
+            $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
+            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
 
             return;
         }
@@ -96,7 +121,8 @@ class SortService
         // SQLite
         if ($driver === 'sqlite') {
             $this->registerSqliteNaturalSortFunction();
-            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
+            $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
 
             return;
         }
@@ -573,6 +599,7 @@ class SortService
         }
 
         $idsSql = implode(',', $ids);
+        $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
 
         // MySQL (8+)
         if ($driver === 'mysql') {
@@ -580,7 +607,7 @@ class SortService
                 "UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -598,7 +625,7 @@ class SortService
                  SET sort = t.rn
                  FROM (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -615,7 +642,7 @@ class SortService
             DB::statement(
                 "WITH ranked AS (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?

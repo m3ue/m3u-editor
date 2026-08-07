@@ -3691,6 +3691,7 @@
     "Russian": "俄语",
     "S/E": "S/E",
     "S:s E:e of \":title\" has been submitted and is awaiting admin approval.": "\":title\" 的 S:s E:e 已提交，正在等待管理员批准。",
+    "Series rules only match against channels with EPG data mapped. If a rule never records, confirm this channel has an EPG source assigned.": "剧集规则仅匹配已映射 EPG 数据的频道。如果某条规则从未录制，请确认该频道已分配 EPG 源。",
     "SD Progress": "Schedules Direct 进度",
     "SHA-256 Checksum": "SHA-256 校验和",
     "SMTP": "SMTP",

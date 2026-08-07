@@ -231,10 +231,15 @@ class DvrSchedulerService
 
             $query->where('tmdb_id', $rule->tmdb_id);
         } else {
+            // Escape LIKE metacharacters in the user-entered title so a series
+            // named e.g. "50%" or "Under_ground" is matched literally instead
+            // of "50" + any-chars / "Under" + any-single-char.
+            $escapedTitle = addcslashes($title, '\\%_');
+
             [$sql, $binding] = match ($matchMode) {
                 DvrMatchMode::Exact => ['lower(title) = lower(?)', $title],
-                DvrMatchMode::StartsWith => ['lower(title) LIKE lower(?)', $title.'%'],
-                default => ['lower(title) LIKE lower(?)', '%'.$title.'%'],
+                DvrMatchMode::StartsWith => ["lower(title) LIKE lower(?) ESCAPE '\\'", $escapedTitle.'%'],
+                default => ["lower(title) LIKE lower(?) ESCAPE '\\'", '%'.$escapedTitle.'%'],
             };
 
             $query->whereRaw($sql, [$binding]);

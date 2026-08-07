@@ -236,6 +236,26 @@ return [
         '53e3187b2a5f',
         'a215f7e698e0',
 
+        // SortService natural-sort rewrite (issue #1369): same guarantees as the
+        // original SortService entries above, just on new lines/hashes.
+        // $orderByColumn/$fallbackOrderByColumn come from a match() that throws
+        // on anything unrecognized; $direction is ternary-validated; $casesSql/
+        // $idsSql are built only from integer channel IDs already in the DB;
+        // persistSortColumn's $table/$column are always hardcoded literals at
+        // its one call site, never attacker-influenced.
+        '8065865cc700',
+        '197210f042df',
+        '05467e06f0a6',
+        // bulkSortGroupChannels' mysql/pgsql/sqlite branches: introducing the
+        // Postgres integer->text cast fix (naturalSortKeyExpr()) moved
+        // $orderByColumn behind a new $sortKeyExpr variable, changing these
+        // 3 hashes. Same $orderByColumn/$direction guarantees as above —
+        // $sortKeyExpr is just naturalSortKeyExpr($driver, $orderByColumn),
+        // where $driver comes from the PDO attribute, not user input.
+        '66a1a4c351d7',
+        '6b5bb290e977',
+        '4c12ed674220',
+
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.
         '93f78b977cb1',

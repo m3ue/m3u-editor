@@ -13,6 +13,8 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Notifications\Notification as AppNotification;
 use App\Services\Arr\ArrService;
+use App\Services\Arr\Contracts\ArrIntegrationInterface;
+use App\Services\Arr\SonarrService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -69,7 +71,8 @@ class ContentRequestService
             $searchedProviders++;
 
             try {
-                $items = ArrService::make($integration)->search($term);
+                $service = ArrService::make($integration);
+                $items = $service->search($term);
             } catch (Throwable $throwable) {
                 $unavailableProviders++;
                 Log::warning('Content request search failed', [
@@ -90,7 +93,12 @@ class ContentRequestService
                 }
 
                 $resultKey = $mediaType.':'.$externalId;
-                $results[$resultKey] ??= [
+
+                if (isset($results[$resultKey])) {
+                    continue;
+                }
+
+                $results[$resultKey] = [
                     'type' => $mediaType,
                     'external_id' => (string) $externalId,
                     'integration_id' => $integration->id,
@@ -105,18 +113,7 @@ class ContentRequestService
                     'runtime' => $item['runtime'] ?? null,
                     'certification' => $item['certification'] ?? null,
                     'seasons' => $mediaType === 'series'
-                        ? collect($item['seasons'] ?? [])
-                            ->filter(fn (array $season): bool => is_numeric($season['seasonNumber'] ?? null) && (int) $season['seasonNumber'] >= 0)
-                            ->map(fn (array $season): array => [
-                                'season_number' => (int) $season['seasonNumber'],
-                                'episode_count' => $season['statistics']['episodeCount'] ?? null,
-                                'episode_file_count' => $season['statistics']['episodeFileCount'] ?? null,
-                                'has_file' => (int) ($season['statistics']['episodeFileCount'] ?? 0) > 0,
-                            ])
-                            ->unique('season_number')
-                            ->sortBy('season_number')
-                            ->values()
-                            ->all()
+                        ? $this->resolveSeasons($service, $item)
                         : [],
                     'already_available' => (bool) ($item['existsInLibrary'] ?? false),
                 ];
@@ -128,6 +125,67 @@ class ContentRequestService
             'searched_providers' => $searchedProviders,
             'unavailable_providers' => $unavailableProviders,
         ];
+    }
+
+    /**
+     * Build the per-season availability list for a series lookup result.
+     *
+     * Sonarr's /series/lookup response can echo series-level totals into every
+     * season's `statistics.episodeFileCount`, falsely marking all seasons as
+     * downloaded. When the series is already in the library, prefer authoritative
+     * per-episode status from /episode instead — the same source used by the
+     * admin detail panel (see ArrSearch::loadDetailData()).
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<int, array{season_number: int, episode_count: ?int, episode_file_count: ?int, has_file: bool}>
+     */
+    private function resolveSeasons(ArrIntegrationInterface $service, array $item): array
+    {
+        $episodeStatus = [];
+        $libraryId = isset($item['libraryId']) ? (int) $item['libraryId'] : null;
+
+        if ($libraryId && $service->supportsEpisodes()) {
+            try {
+                /** @var SonarrService $service */
+                /** @var array{status: array<int, array<int, bool>>} $episodeData */
+                $episodeData = $service->fetchEpisodeData($libraryId);
+                $episodeStatus = $episodeData['status'];
+            } catch (Throwable $throwable) {
+                Log::warning('Failed to fetch authoritative episode status', [
+                    'library_id' => $libraryId,
+                    'error' => $throwable->getMessage(),
+                ]);
+            }
+        }
+
+        return collect($item['seasons'] ?? [])
+            ->filter(fn (array $season): bool => is_numeric($season['seasonNumber'] ?? null) && (int) $season['seasonNumber'] >= 0)
+            ->map(function (array $season) use ($episodeStatus): array {
+                $seasonNumber = (int) $season['seasonNumber'];
+                $episodes = $episodeStatus[$seasonNumber] ?? null;
+
+                if ($episodes !== null) {
+                    $fileCount = count(array_filter($episodes));
+
+                    return [
+                        'season_number' => $seasonNumber,
+                        'episode_count' => count($episodes),
+                        'episode_file_count' => $fileCount,
+                        'has_file' => $fileCount > 0,
+                    ];
+                }
+
+                return [
+                    'season_number' => $seasonNumber,
+                    'episode_count' => $season['statistics']['episodeCount'] ?? null,
+                    'episode_file_count' => $season['statistics']['episodeFileCount'] ?? null,
+                    'has_file' => (int) ($season['statistics']['episodeFileCount'] ?? 0) > 0,
+                ];
+            })
+            ->unique('season_number')
+            ->sortBy('season_number')
+            ->values()
+            ->all();
     }
 
     /**

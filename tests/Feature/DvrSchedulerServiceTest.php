@@ -1234,6 +1234,32 @@ it('match_mode contains records titles containing the pattern', function () {
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(3);
 });
 
+it('match_mode contains treats a literal % in the series title as a literal character, not a LIKE wildcard', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => '50%',
+            'match_mode' => DvrMatchMode::Contains,
+        ]);
+
+    EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'Top 50% Movies',
+        'epg_channel_id' => 'test.channel',
+    ]);
+    // Without escaping the "%" in the rule's title, the LIKE pattern becomes
+    // "%50%%" — equivalent to "%50%" — which would wrongly match this too.
+    EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'Season 50 Highlights',
+        'epg_channel_id' => 'test.channel',
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
 it('match_mode tmdb records programmes by tmdb_id', function () {
     $rule = DvrRecordingRule::factory()
         ->series()
