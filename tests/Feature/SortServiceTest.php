@@ -179,6 +179,42 @@ it('sorting one custom playlist does not affect another custom playlists pivot s
         ->and((float) $pivotBSorts[$channelA->id])->toBe(10.0);
 });
 
+it('sorts numbered channel titles naturally instead of lexicographically (issue #1369)', function () {
+    // A plain SQL string ORDER BY would place "Channel 10" before "Channel 2",
+    // which is only obviously wrong once a group has many numbered channels.
+    foreach ([1, 2, 9, 10, 11, 20, 100] as $i => $number) {
+        Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)
+            ->create(['title' => "Channel {$number}", 'sort' => $i + 1]);
+    }
+
+    $this->service->bulkSortGroupChannels($this->group, 'ASC', 'title');
+
+    expect($this->group->channels()->orderBy('sort')->pluck('title')->toArray())
+        ->toBe(['Channel 1', 'Channel 2', 'Channel 9', 'Channel 10', 'Channel 11', 'Channel 20', 'Channel 100']);
+});
+
+it('sorts numbered custom playlist channel titles naturally (issue #1369)', function () {
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $channels = collect([1, 2, 9, 10, 11, 20, 100])->map(
+        fn ($number) => Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)
+            ->create(['title' => "Channel {$number}"])
+    );
+
+    $customPlaylist->channels()->attach($channels->pluck('id')->all());
+    $attached = $customPlaylist->channels()->get();
+
+    $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $attached, 'ASC', 'title');
+
+    $orderedTitles = DB::table('channel_custom_playlist')
+        ->join('channels', 'channels.id', '=', 'channel_custom_playlist.channel_id')
+        ->where('channel_custom_playlist.custom_playlist_id', $customPlaylist->id)
+        ->orderBy('channel_custom_playlist.sort')
+        ->pluck('channels.title')
+        ->toArray();
+
+    expect($orderedTitles)->toBe(['Channel 1', 'Channel 2', 'Channel 9', 'Channel 10', 'Channel 11', 'Channel 20', 'Channel 100']);
+});
+
 it('rejects invalid column for custom playlist sort', function () {
     $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
     $channel = Channel::factory()->for($this->user)->for($this->playlist)->for($this->group)->create();

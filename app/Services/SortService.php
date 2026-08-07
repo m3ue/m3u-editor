@@ -19,8 +19,50 @@ class SortService
     }
 
     /**
+     * Zero-pads every run of digits in $value to a fixed width (after
+     * lower-casing), so a plain string comparison of the result sorts
+     * numeric runs numerically instead of lexicographically — "channel 2"
+     * and "channel 10" become "channel 000000000002" / "channel 000000000010",
+     * which compare correctly as strings.
+     *
+     * This is the single source of truth for natural-sort ordering: MySQL and
+     * Postgres get an equivalent SQL stored function (see the
+     * add_natural_sort_key_function migration) so ROW_NUMBER() can sort
+     * entirely inside the database; SQLite gets this exact function
+     * registered as a UDF at runtime (registerSqliteNaturalSortFunction());
+     * any other driver falls back to computing it here in PHP.
+     */
+    public static function naturalSortKey(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return preg_replace_callback(
+            '/[0-9]+/',
+            fn (array $m) => str_pad($m[0], 12, '0', STR_PAD_LEFT),
+            mb_strtolower($value)
+        );
+    }
+
+    /**
+     * Registers m3u_natural_sort_key() as a UDF on the current SQLite
+     * connection. SQLite has no persistent server-side functions, so this
+     * has to happen per-connection rather than via a migration (unlike
+     * MySQL/Postgres).
+     */
+    private function registerSqliteNaturalSortFunction(): void
+    {
+        DB::getPdo()->sqliteCreateFunction('m3u_natural_sort_key', [self::class, 'naturalSortKey'], 1);
+    }
+
+    /**
      * Bulk-update channels' sort order using DB window functions when available,
      * falling back to a single CASE-based UPDATE to avoid N queries.
+     *
+     * Ordering uses m3u_natural_sort_key() rather than a plain SQL string
+     * ORDER BY, so titles containing numbers (e.g. "Channel 2" vs "Channel 10")
+     * sort the way a user expects. See naturalSortKey() for why.
      */
     public function bulkSortGroupChannels(Group $record, string $order = 'ASC', ?string $column = 'title'): void
     {
@@ -29,52 +71,96 @@ class SortService
 
         // IMPORTANT: $column is whitelisted here because its value is interpolated
         // directly into raw SQL below; never fall through unknown values.
-        [$orderByColumn, $lowerOrderByColumn] = match ($column) {
-            'title', null => ['COALESCE(title_custom, title)', 'LOWER(COALESCE(title_custom, title))'],
-            'name' => ['COALESCE(name_custom, name)', 'LOWER(COALESCE(name_custom, name))'],
-            'stream_id' => ['COALESCE(stream_id_custom, stream_id)', 'LOWER(COALESCE(stream_id_custom, stream_id))'],
-            'channel' => ['channel', 'channel'],
+        $orderByColumn = match ($column) {
+            'title', null => 'COALESCE(title_custom, title)',
+            'name' => 'COALESCE(name_custom, name)',
+            'stream_id' => 'COALESCE(stream_id_custom, stream_id)',
+            'channel' => 'channel',
             default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
 
         // MySQL (8+)
         if ($driver === 'mysql') {
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
 
             return;
         }
 
         // Postgres
         if ($this->isPostgres($driver)) {
-            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
+            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
 
             return;
         }
 
         // SQLite
         if ($driver === 'sqlite') {
-            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
+            $this->registerSqliteNaturalSortFunction();
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
 
             return;
         }
 
-        // Fallback: single CASE update
-        $ids = $record->channels()->orderByRaw("{$lowerOrderByColumn} {$direction}")->pluck('id')->all();
+        // Fallback for other drivers: stream rows (no natural-sort SQL function
+        // available), sort in PHP, persist with a single CASE update.
+        $rows = [];
+        foreach ($record->channels()->select(['id', DB::raw("{$orderByColumn} as value")])->cursor() as $channel) {
+            $rows[] = ['id' => (int) $channel->id, 'value' => (string) $channel->value];
+        }
+
+        $ids = $this->naturalSortIds($rows, $direction);
+        if (empty($ids)) {
+            return;
+        }
+
+        $this->persistSortColumn('channels', 'sort', $ids);
+    }
+
+    /**
+     * Order [id, value] pairs by natural, case-insensitive comparison of
+     * 'value' with an 'id' tiebreaker, and return the ordered list of ids.
+     * Only used by the PHP-side fallback for drivers without
+     * m3u_natural_sort_key() (i.e. not MySQL, Postgres, or SQLite).
+     *
+     * @param  array<int, array{id: int, value: string}>  $rows
+     * @return array<int, int>
+     */
+    private function naturalSortIds(array $rows, string $direction): array
+    {
+        usort($rows, function (array $a, array $b): int {
+            $comparison = strnatcasecmp($a['value'], $b['value']);
+
+            return $comparison !== 0 ? $comparison : $a['id'] <=> $b['id'];
+        });
+
+        if ($direction === 'DESC') {
+            $rows = array_reverse($rows);
+        }
+
+        return array_map(fn (array $row) => (int) $row['id'], $rows);
+    }
+
+    /**
+     * Persist a 1..N ordering for $ids into $column on $table via a single
+     * CASE-based UPDATE. Only used by PHP-side fallback paths.
+     *
+     * @param  array<int, int>  $ids
+     */
+    private function persistSortColumn(string $table, string $column, array $ids): void
+    {
         if (empty($ids)) {
             return;
         }
 
         $cases = [];
-        $i = 1;
-        foreach ($ids as $id) {
-            $cases[] = "WHEN {$id} THEN {$i}";
-            $i++;
+        foreach ($ids as $i => $id) {
+            $cases[] = "WHEN {$id} THEN ".($i + 1);
         }
 
         $casesSql = implode(' ', $cases);
         $idsSql = implode(',', $ids);
 
-        DB::statement("UPDATE channels SET sort = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+        DB::statement("UPDATE {$table} SET {$column} = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
     }
 
     /**
@@ -462,16 +548,21 @@ class SortService
     /**
      * Sort channels INSIDE a CustomPlaylist only (pivot table),
      * without touching channels.sort (global).
+     *
+     * Ordering uses m3u_natural_sort_key() rather than a plain SQL string
+     * ORDER BY — see naturalSortKey() for why. Sorting happens via a single
+     * DB-side query on MySQL/Postgres/SQLite; only unsupported drivers fall
+     * back to pulling rows into PHP.
      */
     public function bulkSortAlphaCustomPlaylistChannels(CustomPlaylist $playlist, Collection $channels, string $order = 'ASC', string $column = 'title'): void
     {
         $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
         $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
 
-        $lowerOrderByColumn = match ($column) {
-            'title', null => 'LOWER(COALESCE(c.title_custom, c.title))',
-            'name' => 'LOWER(COALESCE(c.name_custom, c.name))',
-            'stream_id' => 'LOWER(COALESCE(c.stream_id_custom, c.stream_id))',
+        $orderByColumn = match ($column) {
+            'title', null => 'COALESCE(c.title_custom, c.title)',
+            'name' => 'COALESCE(c.name_custom, c.name)',
+            'stream_id' => 'COALESCE(c.stream_id_custom, c.stream_id)',
             'channel' => 'COALESCE(ccp2.channel_number, c.channel)',
             default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
@@ -489,7 +580,7 @@ class SortService
                 "UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -507,7 +598,7 @@ class SortService
                  SET sort = t.rn
                  FROM (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -520,10 +611,11 @@ class SortService
             );
         } elseif ($driver === 'sqlite') {
             // SQLite
+            $this->registerSqliteNaturalSortFunction();
             DB::statement(
                 "WITH ranked AS (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$lowerOrderByColumn} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY m3u_natural_sort_key({$orderByColumn}) {$direction}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -536,18 +628,24 @@ class SortService
                 [$playlist->id, $playlist->id]
             );
         } else {
-            // Fallback: CASE update. The subquery alias used above is ccp2; the fallback
-            // uses ccp, so substitute before interpolating into the ORDER BY clause.
-            $fallbackOrderByColumn = str_replace('ccp2.', 'ccp.', $lowerOrderByColumn);
-            $orderedIds = DB::table('channel_custom_playlist as ccp')
-                ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
-                ->where('ccp.custom_playlist_id', $playlist->id)
-                ->whereIn('ccp.channel_id', $ids)
-                ->orderByRaw("{$fallbackOrderByColumn} {$direction}")
-                ->pluck('ccp.channel_id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
+            // Fallback for other drivers: no natural-sort SQL function available,
+            // so stream rows, sort in PHP, and persist with a single CASE update.
+            // The subquery alias used above is ccp2; substitute before reuse here.
+            $fallbackOrderByColumn = str_replace('ccp2.', 'ccp.', $orderByColumn);
 
+            $rows = [];
+            foreach (
+                DB::table('channel_custom_playlist as ccp')
+                    ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
+                    ->where('ccp.custom_playlist_id', $playlist->id)
+                    ->whereIn('ccp.channel_id', $ids)
+                    ->select(['ccp.channel_id as id', DB::raw("{$fallbackOrderByColumn} as value")])
+                    ->cursor() as $row
+            ) {
+                $rows[] = ['id' => (int) $row->id, 'value' => (string) $row->value];
+            }
+
+            $orderedIds = $this->naturalSortIds($rows, $direction);
             if (empty($orderedIds)) {
                 return;
             }

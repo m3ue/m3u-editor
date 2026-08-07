@@ -236,6 +236,20 @@ return [
         '53e3187b2a5f',
         'a215f7e698e0',
 
+        // SortService natural-sort rewrite (issue #1369): same guarantees as the
+        // original SortService entries above, just on new lines/hashes.
+        // $orderByColumn/$fallbackOrderByColumn come from a match() that throws
+        // on anything unrecognized; $direction is ternary-validated; $casesSql/
+        // $idsSql are built only from integer channel IDs already in the DB;
+        // persistSortColumn's $table/$column are always hardcoded literals at
+        // its one call site, never attacker-influenced.
+        'a0e3ac5a8a0a',
+        '19f34e2676c7',
+        '102902cfd367',
+        '8065865cc700',
+        '197210f042df',
+        '05467e06f0a6',
+
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.
         '93f78b977cb1',
