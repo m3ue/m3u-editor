@@ -26,6 +26,7 @@
 
 use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
 use App\Models\Channel;
 use App\Models\DvrRecording;
@@ -360,7 +361,7 @@ it('does not let one credential see or delete another credential\'s series rule 
         'user_id' => $this->user->id,
         'dvr_setting_id' => $this->setting->id,
         'playlist_auth_id' => $this->authA->id,
-        'type' => \App\Enums\DvrRuleType::Series,
+        'type' => DvrRuleType::Series,
         'channel_id' => $this->channel->id,
         'series_title' => 'Credential A Show',
         'match_mode' => DvrMatchMode::Contains,
@@ -372,7 +373,7 @@ it('does not let one credential see or delete another credential\'s series rule 
         'user_id' => $this->user->id,
         'dvr_setting_id' => $this->setting->id,
         'playlist_auth_id' => $this->authB->id,
-        'type' => \App\Enums\DvrRuleType::Series,
+        'type' => DvrRuleType::Series,
         'channel_id' => $this->channel->id,
         'series_title' => 'Credential B Show',
         'match_mode' => DvrMatchMode::Contains,
