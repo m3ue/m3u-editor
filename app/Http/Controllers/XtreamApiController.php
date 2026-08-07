@@ -18,6 +18,7 @@ use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\Epg;
+use App\Models\EpgProgramme;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
@@ -37,6 +38,7 @@ use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
+use App\Support\SeriesKey;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -68,6 +70,9 @@ class XtreamApiController extends Controller
         'create_dvr_series_rule',
         'cancel_dvr_recording',
         'delete_dvr_recording',
+        'list_dvr_series_rules',
+        'delete_dvr_series_rule',
+        'search_epg_shows',
     ];
 
     private const FAVORITE_COLUMNS = [
@@ -2037,6 +2042,9 @@ class XtreamApiController extends Controller
                 'create_dvr_series_rule' => $this->createDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
                 'cancel_dvr_recording' => $this->cancelDvrRecording($request, $dvrPlaylist, $playlistAuth),
                 'delete_dvr_recording' => $this->deleteDvrRecording($request, $dvrPlaylist, $playlistAuth),
+                'list_dvr_series_rules' => $this->listDvrSeriesRules($request, $dvrPlaylist, $playlistAuth),
+                'delete_dvr_series_rule' => $this->deleteDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
+                'search_epg_shows' => $this->searchEpgShows($request, $dvrPlaylist, $playlistAuth),
             };
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
@@ -3327,6 +3335,212 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * List all enabled series recording rules for the authenticated playlist.
+     */
+    private function listDvrSeriesRules(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json([]);
+        }
+
+        $rules = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('type', DvrRuleType::Series)
+            ->where('enabled', true)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->with('channel')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($rules->map(fn (DvrRecordingRule $rule) => $this->formatDvrSeriesRule($rule)));
+    }
+
+    /**
+     * Delete a series recording rule by ID.
+     */
+    private function deleteDvrSeriesRule(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $ruleId = (int) $request->input('rule_id');
+
+        if (! $ruleId) {
+            return response()->json(['error' => 'rule_id parameter is required'], 400);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $rule = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('id', $ruleId)
+            ->where('type', DvrRuleType::Series)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->first();
+
+        if (! $rule) {
+            return response()->json(['error' => 'Series rule not found'], 404);
+        }
+
+        $rule->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Search EPG programme listings across all mapped channels to discover shows
+     * available for series recording. Uses SeriesKey::normalize() on programme
+     * titles so the returned groups match DvrRecordingRule::saving hook's own
+     * normalization — this guarantees that a series rule created from search
+     * results will match future EPG programme data for the same show.
+     */
+    private function searchEpgShows(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $q = trim((string) $request->input('q', ''));
+
+        if (mb_strlen($q) < 2) {
+            return response()->json(['error' => 'q parameter is required (minimum 2 characters)'], 400);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting?->enabled) {
+            return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        // Collect the set of EPG channel_id strings this playlist's channels are mapped to.
+        $playlistChannels = $playlist->channels()
+            ->whereNotNull('epg_channel_id')
+            ->with('epgChannel')
+            ->get();
+
+        $epgChannelIds = $playlistChannels
+            ->map(fn (Channel $ch) => $ch->epgChannel?->channel_id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($epgChannelIds->isEmpty()) {
+            return response()->json([]);
+        }
+
+        // Build lookup: epg_channel_id string → [channel_id, channel_name] from the playlist.
+        $channelLookup = [];
+        foreach ($playlistChannels as $ch) {
+            $epgChanId = $ch->epgChannel?->channel_id;
+            if ($epgChanId && ! isset($channelLookup[$epgChanId])) {
+                $channelLookup[$epgChanId] = [
+                    'channel_id' => $ch->id,
+                    'channel_name' => $ch->title ?: ($ch->name ?? ''),
+                ];
+            }
+        }
+
+        // Fetch matching programmes across all mapped EPG channels, including those
+        // that just finished (up to 24 hours ago) for discoverability.
+        $cutoff = Carbon::now()->subHours(24);
+        $programmes = EpgProgramme::whereIn('epg_channel_id', $epgChannelIds->toArray())
+            ->where('start_time', '>=', $cutoff)
+            ->where('title', 'like', '%'.$q.'%')
+            ->limit(500)
+            ->get();
+
+        // Group by SeriesKey-normalized title — this must match the normalization
+        // in DvrRecordingRule::saving so rules created from these results will
+        // match future programme data.
+        $groups = [];
+        foreach ($programmes as $p) {
+            $norm = SeriesKey::normalize($p->title);
+
+            if ($norm === '') {
+                continue;
+            }
+
+            if (! isset($groups[$norm])) {
+                $groups[$norm] = [
+                    'display_title' => $p->title,
+                    'programmes' => [],
+                    'channel_ids' => [],
+                ];
+            }
+
+            $groups[$norm]['programmes'][] = $p;
+            $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+            if ($resolved) {
+                $groups[$norm]['channel_ids'][$resolved['channel_id']] = $resolved;
+            }
+        }
+
+        $results = [];
+        foreach ($groups as $norm => $group) {
+            /** @var array<int, EpgProgramme> $progs */
+            $progs = $group['programmes'];
+
+            // Sort within group: most recent first.
+            usort($progs, fn (EpgProgramme $a, EpgProgramme $b) => $b->start_time->timestamp <=> $a->start_time->timestamp);
+
+            $channels = array_values($group['channel_ids']);
+
+            // next_airing_at: earliest start_time in the future, null if none.
+            $now = Carbon::now();
+            $nextAiringAt = null;
+            foreach ($progs as $p) {
+                if ($p->start_time->gt($now)) {
+                    $nextAiringAt = $nextAiringAt
+                        ? ($p->start_time->lt($nextAiringAt) ? $p->start_time : $nextAiringAt)
+                        : $p->start_time;
+                }
+            }
+
+            $recentEpisodes = array_slice(array_map(function (EpgProgramme $p) use ($channelLookup) {
+                $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+
+                return [
+                    'channel_id' => $resolved['channel_id'] ?? null,
+                    'channel_name' => $resolved['channel_name'] ?? null,
+                    'title' => $p->title,
+                    'start_time' => $p->start_time->toIso8601String(),
+                    'end_time' => $p->end_time?->toIso8601String(),
+                    'season' => $p->season,
+                    'episode' => $p->episode,
+                    'description' => $p->description,
+                ];
+            }, $progs), 0, 5);
+
+            $results[] = [
+                'normalized_title' => $norm,
+                'display_title' => $group['display_title'],
+                'channel_count' => count($channels),
+                'channels' => $channels,
+                'episode_count' => count($progs),
+                'next_airing_at' => $nextAiringAt?->toIso8601String(),
+                'recent_episodes' => $recentEpisodes,
+            ];
+        }
+
+        // Sort: next-airing first, then most episodes.
+        usort($results, function (array $a, array $b) {
+            $aNext = $a['next_airing_at'];
+            $bNext = $b['next_airing_at'];
+
+            if ($aNext && ! $bNext) {
+                return -1;
+            }
+            if (! $aNext && $bNext) {
+                return 1;
+            }
+            if ($aNext && $bNext) {
+                return $aNext <=> $bNext;
+            }
+
+            return $b['episode_count'] <=> $a['episode_count'];
+        });
+
+        return response()->json(array_slice($results, 0, 100));
+    }
+
+    /**
      * Schedule a one-shot DVR recording rule from the TV app.
      */
     private function scheduleDvr(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
@@ -3569,6 +3783,29 @@ class XtreamApiController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Format a DvrRecordingRule (series rule) into the API response shape.
+     */
+    private function formatDvrSeriesRule(DvrRecordingRule $rule): array
+    {
+        return [
+            'id' => $rule->id,
+            'channel_id' => $rule->channel_id,
+            'channel_name' => $rule->channel?->title ?? $rule->channel?->name,
+            'series_title' => $rule->series_title,
+            'match_mode' => $rule->match_mode->value,
+            'series_mode' => $rule->series_mode->value,
+            'keep_last' => $rule->keep_last,
+            'enabled' => (bool) $rule->enabled,
+            'enable_comskip' => (bool) $rule->enable_comskip,
+            'start_early_seconds' => $rule->start_early_seconds,
+            'end_late_seconds' => $rule->end_late_seconds,
+            'created_at' => $rule->created_at?->toIso8601String(),
+            'updated_at' => $rule->updated_at?->toIso8601String(),
+            'recording_count' => $rule->recordings()->count(),
+        ];
     }
 
     /**
