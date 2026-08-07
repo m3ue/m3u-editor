@@ -16,7 +16,12 @@ class PruneOrphanDvrSeries extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
 
-        $query = Series::query()->whereDoesntHave('episodes');
+        // Scope to DVR-created series only — DvrVodIntegrationService tags every
+        // Series/Season/Episode it creates with import_batch_no = 'dvr'. Without
+        // this filter, a normal M3U/Xtream series can be mid-sync (its Series row
+        // created by ProcessM3uImportSeries before ProcessM3uImportSeriesEpisodes
+        // has populated episodes) and would be wrongly swept up as an "orphan".
+        $query = Series::query()->where('import_batch_no', 'dvr')->whereDoesntHave('episodes');
 
         $count = (clone $query)->count();
 
