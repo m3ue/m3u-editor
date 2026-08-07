@@ -24,7 +24,9 @@
  *      advertisement (canAdvertiseDvrFeature).
  */
 
+use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
+use App\Enums\DvrSeriesMode;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
@@ -109,6 +111,122 @@ it('stamps schedule_dvr and create_dvr_series_rule with the requesting credentia
 
     $rule = DvrRecordingRule::find($response->json('rule_id'));
     expect($rule->playlist_auth_id)->toBe($this->authB->id);
+});
+
+it('stores new_flag series_mode as new_flag, not rewriting it to all', function () {
+    // Regression for the legacy new_only→series_mode migration in
+    // DvrRecordingRule::saving: new_only defaults false and the API historically
+    // never set it, so every new_flag rule was rewritten to all on save.
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'New Flag Show',
+        'series_mode' => 'new_flag',
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+
+    expect($rule->series_mode)->toBe(DvrSeriesMode::NewFlag);
+    expect($rule->new_only)->toBeTrue();
+});
+
+it('does not let new_only rewrite a unique_se rule to new_flag', function () {
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Unique Se Show',
+        'series_mode' => 'unique_se',
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+
+    expect($rule->series_mode)->toBe(DvrSeriesMode::UniqueSe);
+    expect($rule->new_only)->toBeFalse();
+});
+
+it('updates only fields present on update_dvr_series_rule, leaving others untouched', function () {
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Editable Show',
+        'series_mode' => 'all',
+        'keep_last' => 3,
+        'priority' => 40,
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+    expect($rule->series_mode)->toBe(DvrSeriesMode::All);
+    expect($rule->keep_last)->toBe(3);
+    expect($rule->priority)->toBe(40);
+
+    // Update only series_mode + priority; keep_last/channel/match_mode must be untouched.
+    $update = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'update_dvr_series_rule'), [
+        'rule_id' => (string) $rule->id,
+        'series_mode' => 'new_flag',
+        'priority' => 60,
+    ])->assertOk();
+    expect($update->json('rule_id'))->toBe($rule->id);
+
+    $rule->refresh();
+    expect($rule->series_mode)->toBe(DvrSeriesMode::NewFlag);
+    expect($rule->new_only)->toBeTrue(); // lockstep with series_mode
+    expect($rule->priority)->toBe(60);
+    expect($rule->keep_last)->toBe(3); // unspecified field unchanged
+    expect($rule->channel_id)->toBe($this->channel->id); // unspecified field unchanged
+    expect($rule->match_mode)->toBe(DvrMatchMode::Contains); // unspecified field unchanged
+});
+
+it('updates match_mode and start/end padding on update_dvr_series_rule', function () {
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Padding Show',
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+
+    $this->postJson(dvrActionUrl('credential-a', 'password-a', 'update_dvr_series_rule'), [
+        'rule_id' => (string) $rule->id,
+        'match_mode' => 'exact',
+        'start_early_seconds' => '300',
+        'end_late_seconds' => '600',
+    ])->assertOk();
+
+    $rule->refresh();
+    expect($rule->match_mode)->toBe(DvrMatchMode::Exact);
+    expect($rule->start_early_seconds)->toBe(300);
+    expect($rule->end_late_seconds)->toBe(600);
+});
+
+it('switches a pinned rule to any-channel with a blank channel_id on update', function () {
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Unpin Show',
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+    expect($rule->channel_id)->toBe($this->channel->id);
+
+    $this->postJson(dvrActionUrl('credential-a', 'password-a', 'update_dvr_series_rule'), [
+        'rule_id' => (string) $rule->id,
+        'channel_id' => '',
+    ])->assertOk();
+
+    $rule->refresh();
+    expect($rule->channel_id)->toBeNull();
+});
+
+it('404s update_dvr_series_rule for a rule owned by another credential', function () {
+    $response = $this->postJson(dvrActionUrl('credential-a', 'password-a', 'create_dvr_series_rule'), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Owned Show',
+    ])->assertOk();
+
+    $rule = DvrRecordingRule::find($response->json('rule_id'));
+
+    $this->postJson(dvrActionUrl('credential-b', 'password-b', 'update_dvr_series_rule'), [
+        'rule_id' => (string) $rule->id,
+        'priority' => '90',
+    ])->assertNotFound();
+
+    $rule->refresh();
+    expect($rule->priority)->not->toBe(90);
 });
 
 it('does not let one credential see another credential\'s recordings via get_dvr_recordings', function () {
