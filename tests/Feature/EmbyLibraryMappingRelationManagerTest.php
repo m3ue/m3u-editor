@@ -178,6 +178,107 @@ it('previews the exact canonical dry-run plan without mutating the mapping', fun
     expect($mapping->refresh()->last_planned_revision)->toBeNull();
 });
 
+it('defers reconcile with a generic pending result while the managed library is unresolved', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+    ]);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => null,
+        'target_library_name' => 'Managed Movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => true,
+        'last_planned_revision' => 'unsafe-revision',
+    ]);
+    Http::preventStrayRequests();
+    Http::fakeSequence('https://emby.test:8096/Library/VirtualFolders')
+        ->push([], 200)
+        ->push([], 204)
+        ->push([], 200);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('reconcile')->table($mapping))
+        ->assertNotified();
+
+    $mapping->refresh();
+    expect($mapping->target_library_id)->toBeNull()
+        ->and($mapping->status)->toBe('pending')
+        ->and($mapping->status_summary)->toBe('Pending')
+        ->and($mapping->error_summary)->toBeNull()
+        ->and($mapping->last_planned_revision)->toBeNull()
+        ->and($mapping->status_summary.$mapping->error_summary)
+        ->not->toContain('emby-secret', '/srv/emby/managed/movies');
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'DELETE');
+});
+
+it('resolves a pending managed library from a later exact listing without duplicate state', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+    ]);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => null,
+        'target_library_name' => 'Managed Movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => true,
+        'last_planned_revision' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fakeSequence('https://emby.test:8096/Library/VirtualFolders')
+        ->push([], 200)
+        ->push([], 204)
+        ->push([], 200)
+        ->push([[
+            'ItemId' => 'managed-library-1',
+            'Name' => 'Managed Movies',
+            'CollectionType' => 'movies',
+            'Locations' => ['/srv/emby/managed/movies'],
+        ]], 200);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('reconcile')->table($mapping))
+        ->assertNotified();
+
+    expect($mapping->refresh()->status)->toBe('pending')
+        ->and($mapping->target_library_id)->toBeNull();
+
+    $component->callAction(TestAction::make('reconcile')->table($mapping))
+        ->assertNotified();
+
+    $mapping->refresh();
+    $currentPlan = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
+    expect($mapping->target_library_id)->toBe('managed-library-1')
+        ->and($mapping->status)->toBe('planned')
+        ->and($mapping->last_planned_revision)->toBe($currentPlan['revision'])
+        ->and(EmbyLibraryMapping::query()->count())->toBe(1)
+        ->and(Http::recorded(fn (Request $request): bool => $request->method() === 'POST'))->toHaveCount(1);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'DELETE');
+});
+
 it('creates a managed Emby library and plans a bounded manual reconcile', function () {
     config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
     $user = User::factory()->create(['permissions' => ['use_integrations']]);

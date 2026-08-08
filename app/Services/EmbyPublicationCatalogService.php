@@ -29,6 +29,17 @@ class EmbyPublicationCatalogService
                 ->where('enabled', true));
 
         foreach ($query->lazyById(100) as $mapping) {
+            if ($mapping->is_managed && $mapping->target_library_id === null) {
+                $mapping->updateQuietly([
+                    'last_planned_revision' => null,
+                    'status' => 'pending',
+                    'status_summary' => __('Pending'),
+                    'error_summary' => null,
+                ]);
+
+                continue;
+            }
+
             $catalog = $this->buildMapping($mapping, $username, $password);
             $mapping->updateQuietly([
                 'last_planned_revision' => $catalog['revision'],

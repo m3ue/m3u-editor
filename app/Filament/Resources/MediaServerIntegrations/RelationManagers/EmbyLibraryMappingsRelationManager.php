@@ -209,7 +209,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->color(fn (string $state): string => match ($state) {
                         'synced' => 'success',
                         'failed' => 'danger',
-                        'planned' => 'warning',
+                        'pending', 'planned' => 'warning',
                         default => 'gray',
                     }),
                 TextColumn::make('last_applied_revision')
@@ -376,6 +376,21 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         if ($targetLibraryId !== $mapping->target_library_id) {
             $mapping->updateQuietly(['target_library_id' => $targetLibraryId]);
             $mapping->refresh();
+        }
+
+        if ($targetLibraryId === null) {
+            $mapping->updateQuietly([
+                'last_planned_revision' => null,
+                'status' => 'pending',
+                'status_summary' => __('Pending'),
+                'error_summary' => null,
+            ]);
+            Notification::make()
+                ->warning()
+                ->title(__('Pending'))
+                ->send();
+
+            return;
         }
 
         $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);

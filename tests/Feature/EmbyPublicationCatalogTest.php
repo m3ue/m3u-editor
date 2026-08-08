@@ -461,6 +461,30 @@ it('scopes custom playlist group mappings to the selected group', function () {
         ->and(json_encode($catalog))->not->toContain('Excluded Movie');
 });
 
+it('defers unresolved managed mappings from the user publication catalog', function () {
+    $user = User::factory()->create();
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'enabled' => true,
+    ]);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'target_library_id' => null,
+        'is_managed' => true,
+        'enabled' => true,
+        'status' => 'planned',
+        'status_summary' => 'Unsafe stale plan',
+        'last_planned_revision' => 'unsafe-revision',
+    ]);
+
+    $catalog = app(EmbyPublicationCatalogService::class)->buildForUser($user, 'tuner', 'secret');
+
+    expect($catalog['mappings'])->toBeEmpty()
+        ->and($mapping->refresh()->status)->toBe('pending')
+        ->and($mapping->status_summary)->toBe('Pending')
+        ->and($mapping->error_summary)->toBeNull()
+        ->and($mapping->last_planned_revision)->toBeNull();
+});
+
 it('builds a deterministic full user snapshot and records only enabled planned revisions', function () {
     $user = User::factory()->create();
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([

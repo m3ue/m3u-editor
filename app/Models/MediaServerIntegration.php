@@ -401,16 +401,22 @@ class MediaServerIntegration extends Model
      */
     public function getImportLibraryIdsForType(string $type): ?array
     {
-        $managedLibraryIds = [];
         $managedMappings = $this->embyLibraryMappings()
             ->where('is_managed', true)
             ->where('collection_type', $type)
-            ->whereNotNull('target_library_id')
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNotNull('target_library_id')
+                ->orWhere('enabled', true))
             ->select(['id', 'target_library_id'])
             ->cursor();
 
+        $managedLibraryIds = [];
+        $requiresFilteredImport = false;
         foreach ($managedMappings as $mapping) {
-            $managedLibraryIds[] = $mapping->target_library_id;
+            $requiresFilteredImport = true;
+            if ($mapping->target_library_id !== null) {
+                $managedLibraryIds[] = $mapping->target_library_id;
+            }
         }
 
         $selectedLibraryIds = $this->getSelectedLibraryIdsForType($type);
@@ -418,7 +424,7 @@ class MediaServerIntegration extends Model
             return array_values(array_diff($selectedLibraryIds, $managedLibraryIds));
         }
 
-        if ($managedLibraryIds === []) {
+        if (! $requiresFilteredImport) {
             return null;
         }
 

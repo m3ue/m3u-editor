@@ -204,6 +204,64 @@ it('normalizes Emby errors without exposing response details', function () {
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'DELETE');
 });
 
+it('fails closed for movie imports while a created managed library is unresolved', function () {
+    EmbyLibraryMapping::factory()
+        ->for($this->integration->user)
+        ->for($this->integration, 'integration')
+        ->create([
+            'collection_type' => 'movies',
+            'target_library_id' => null,
+            'target_library_name' => 'Managed Movies',
+            'output_path' => '/srv/emby/managed/movies',
+            'is_managed' => true,
+            'enabled' => true,
+        ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 204)
+            ->push([], 200),
+        'https://emby.test:8096/Items*' => Http::response(['Items' => []], 200),
+    ]);
+
+    $service = MediaServerService::make($this->integration);
+    $result = $service->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        refreshLibrary: false,
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['created'])->toBeTrue()
+        ->and($result['library'])->toBeNull()
+        ->and($service->fetchMovies())->toBeEmpty();
+    Http::assertNotSent(fn (Request $request): bool => str_starts_with($request->url(), 'https://emby.test:8096/Items?')
+        && ($request->data()['ParentId'] ?? null) === null);
+});
+
+it('fails closed for series imports while a managed library is unresolved', function () {
+    EmbyLibraryMapping::factory()
+        ->for($this->integration->user)
+        ->for($this->integration, 'integration')
+        ->create([
+            'collection_type' => 'tvshows',
+            'target_library_id' => null,
+            'target_library_name' => 'Managed TV',
+            'output_path' => '/srv/emby/managed/tv',
+            'is_managed' => true,
+            'enabled' => true,
+        ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Items*' => Http::response(['Items' => []], 200),
+    ]);
+
+    expect(MediaServerService::make($this->integration)->fetchSeries())->toBeEmpty();
+    Http::assertNothingSent();
+});
+
 it('excludes managed Emby libraries from default movie imports', function () {
     $this->integration->update([
         'available_libraries' => [
