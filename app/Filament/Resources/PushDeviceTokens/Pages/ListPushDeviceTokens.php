@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PushDeviceTokens\Pages;
 
+use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
 use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
 use App\Models\DeviceAuthorization;
 use App\Models\PlaylistAuth;
@@ -93,7 +94,7 @@ class ListPushDeviceTokens extends ListRecords
                 ->components([
                     $this->getTabsContentComponent(),
                     Section::make(__('Pair a Device'))
-                        ->icon('heroicon-o-device-phone-mobile')
+                        ->icon('heroicon-o-qr-code')
                         ->compact()
                         ->description(__('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.'))
                         ->schema([
@@ -106,6 +107,12 @@ class ListPushDeviceTokens extends ListRecords
                                 ->label(__('Grant Access As'))
                                 ->required()
                                 ->searchable()
+                                ->hintAction(Action::make('manage')
+                                    ->icon('heroicon-o-arrow-top-right-on-square')
+                                    ->iconPosition('after')
+                                    ->label(__('Manage Auth'))
+                                    ->url(PlaylistAuthResource::getUrl())
+                                    ->openUrlInNewTab())
                                 ->options(fn (): array => PlaylistAuth::where('user_id', auth()->id())->pluck('name', 'id')->all())
                                 ->helperText(__('M3U TV will sign in using this credential\'s username and password.')),
                         ]),

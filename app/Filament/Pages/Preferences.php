@@ -1130,7 +1130,7 @@ class Preferences extends SettingsPage
                                     ->headerActions([
                                         Action::make(__('Pair a Device'))
                                             ->label(__('Pair a Device'))
-                                            ->icon('heroicon-o-device-phone-mobile')
+                                            ->icon('heroicon-o-qr-code')
                                             ->url(PushDeviceTokenResource::getUrl(parameters: ['tab' => 'pairing']))
                                             ->hidden(fn (Get $get): bool => ! (bool) $get('device_pairing_enabled') || ! (bool) $get('app_output_enabled')),
                                     ])

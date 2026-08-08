@@ -63,8 +63,35 @@ return [
             'guzzlehttp/guzzle',
             // updated alongside guzzlehttp/guzzle 7.12.1
             'guzzlehttp/psr7',
+            // v5.7.6 was the deliberate upgrade target: fixes an MFA access-control
+            // gap (panel access wasn't checked before presenting the MFA challenge,
+            // v5.7.5) and hashes cached MFA codes by secret instead of secret+code
+            // (v5.7.6). Applies to all filament/* subpackages pulled in together.
+            'filament/actions',
+            'filament/filament',
+            'filament/forms',
+            'filament/infolists',
+            'filament/notifications',
+            'filament/query-builder',
+            'filament/schemas',
+            'filament/spatie-laravel-settings-plugin',
+            'filament/spatie-laravel-tags-plugin',
+            'filament/support',
+            'filament/tables',
+            'filament/widgets',
+            // direct filament/* dependencies, bumped alongside the filament/*
+            // upgrade above (danharrin is a Filament core maintainer)
+            'anourvalar/eloquent-serialize',
+            'danharrin/livewire-rate-limiting',
+            // same guzzle-family pattern as guzzlehttp/guzzle + psr7 above
+            'guzzlehttp/promises',
             // ── Core Laravel ecosystem — trusted first-party packages ────────
             'laravel/framework',
+            // transitive deps of laravel/framework, bumped alongside it
+            'nesbot/carbon',
+            'symfony/http-foundation',
+            'symfony/http-kernel',
+            'symfony/mime',
             // ── Well-known, widely-audited ecosystem packages ────────────────
             'league/flysystem',
             'vlucas/phpdotenv',
