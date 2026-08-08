@@ -102,7 +102,7 @@ class ListPushDeviceTokens extends ListRecords
                                 ->required()
                                 ->maxLength(12)
                                 ->placeholder('XXXX-XXXX')
-                                ->mask('9999-9999')
+                                ->mask('****-****')
                                 ->stripCharacters('-'),
                             Select::make('playlist_auth_id')
                                 ->label(__('Grant Access As'))
