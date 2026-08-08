@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\DeviceAuthorizationController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
@@ -102,6 +103,20 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
 Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
     ->middleware(['m3u-proxy.callback', 'throttle:120,1'])
     ->name('dvr.callback');
+
+/*
+ * Device authorization (Trakt-style pairing) - lets the TV app request a
+ * short-lived pairing code and poll for approval from the admin panel,
+ * instead of requiring Xtream credentials to be typed on the TV remote.
+ */
+Route::prefix('device')->group(function () {
+    Route::post('code', [DeviceAuthorizationController::class, 'requestCode'])
+        ->middleware('throttle:20,1')
+        ->name('device.code');
+    Route::post('token', [DeviceAuthorizationController::class, 'poll'])
+        ->middleware('throttle:60,1')
+        ->name('device.token');
+});
 
 /*
  * TV app API routes (authenticated via Xtream credentials in URL path - no Sanctum)

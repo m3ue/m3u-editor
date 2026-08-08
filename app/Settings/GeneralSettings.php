@@ -306,6 +306,11 @@ class GeneralSettings extends Settings
     // This setting allows users to enable or disable the app output for xAPI integration.
     public ?bool $app_output_enabled = true;
 
+    // Trakt-style device pairing (M3U TV onboarding without typing a password
+    // on the remote). Also requires app_output_enabled, since all M3U TV
+    // features depend on the enhanced Xtream API output.
+    public ?bool $device_pairing_enabled = true;
+
     public static function group(): string
     {
         return 'general';

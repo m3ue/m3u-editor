@@ -1,63 +1,49 @@
 <?php
 
-namespace Tests\Feature;
-
 use App\Services\M3uProxyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
-class M3uProxyCallbackUrlTokenTest extends TestCase
-{
-    use RefreshDatabase;
+uses(RefreshDatabase::class);
 
-    protected function setUp(): void
-    {
-        parent::setUp();
+beforeEach(function () {
+    config([
+        'proxy.m3u_resolver_url' => 'https://resolver.example.com',
+        'proxy.m3u_proxy_token' => 'super-secret-token',
+    ]);
+});
 
-        config([
-            'proxy.m3u_resolver_url' => 'https://resolver.example.com',
-            'proxy.m3u_proxy_token' => 'super-secret-token',
-        ]);
-    }
+it('embeds the shared token in the failover resolver url', function () {
+    $url = (new M3uProxyService)->getFailoverResolverUrl();
 
-    public function test_failover_resolver_url_embeds_the_shared_token()
-    {
-        $url = (new M3uProxyService)->getFailoverResolverUrl();
+    $this->assertStringContainsString('/api/m3u-proxy/failover-resolver', $url);
+    $this->assertStringContainsString('api_token=super-secret-token', $url);
+});
 
-        $this->assertStringContainsString('/api/m3u-proxy/failover-resolver', $url);
-        $this->assertStringContainsString('api_token=super-secret-token', $url);
-    }
+it('embeds the shared token in the broadcast callback url', function () {
+    $url = (new M3uProxyService)->getBroadcastCallbackUrl();
 
-    public function test_broadcast_callback_url_embeds_the_shared_token()
-    {
-        $url = (new M3uProxyService)->getBroadcastCallbackUrl();
+    $this->assertStringContainsString('/api/m3u-proxy/broadcast/callback', $url);
+    $this->assertStringContainsString('api_token=super-secret-token', $url);
+});
 
-        $this->assertStringContainsString('/api/m3u-proxy/broadcast/callback', $url);
-        $this->assertStringContainsString('api_token=super-secret-token', $url);
-    }
+it('embeds the shared token in the webhook url', function () {
+    $url = (new M3uProxyService)->getWebhookUrl();
 
-    public function test_webhook_url_embeds_the_shared_token()
-    {
-        $url = (new M3uProxyService)->getWebhookUrl();
+    $this->assertStringContainsString('/api/m3u-proxy/webhooks', $url);
+    $this->assertStringContainsString('api_token=super-secret-token', $url);
+});
 
-        $this->assertStringContainsString('/api/m3u-proxy/webhooks', $url);
-        $this->assertStringContainsString('api_token=super-secret-token', $url);
-    }
+it('embeds the shared token in the dvr callback url', function () {
+    $url = (new M3uProxyService)->getDvrCallbackUrl();
 
-    public function test_dvr_callback_url_embeds_the_shared_token()
-    {
-        $url = (new M3uProxyService)->getDvrCallbackUrl();
+    $this->assertStringContainsString('/api/dvr/callback', $url);
+    $this->assertStringContainsString('api_token=super-secret-token', $url);
+});
 
-        $this->assertStringContainsString('/api/dvr/callback', $url);
-        $this->assertStringContainsString('api_token=super-secret-token', $url);
-    }
+it('omits the token param in callback urls when none configured', function () {
+    config(['proxy.m3u_proxy_token' => null]);
 
-    public function test_callback_urls_omit_token_param_when_none_configured()
-    {
-        config(['proxy.m3u_proxy_token' => null]);
+    $url = (new M3uProxyService)->getFailoverResolverUrl();
 
-        $url = (new M3uProxyService)->getFailoverResolverUrl();
-
-        $this->assertStringNotContainsString('api_token=', $url);
-    }
-}
+    $this->assertStringNotContainsString('api_token=', $url);
+});

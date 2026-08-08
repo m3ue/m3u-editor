@@ -45,8 +45,8 @@ class ProcessEpgImport implements ShouldQueue
     // Delete the job if the model is missing
     public $deleteWhenMissingModels = true;
 
-    // Giving a timeout of 30 minutes to the Job to process the file
-    public $timeout = 60 * 30;
+    // Giving a timeout of 60 minutes to the Job to process the file
+    public $timeout = 60 * 60;
 
     /**
      * Sanitize UTF-8 string to remove invalid sequences
@@ -237,7 +237,7 @@ class ProcessEpgImport implements ShouldQueue
                 $response = $this->withProviderThrottling(fn () => Http::withUserAgent($userAgent)
                     ->sink($filePath)
                     ->withOptions(['verify' => $verify])
-                    ->timeout(60 * 5) // set timeout to five minutes
+                    ->timeout(config('dev.epg_download_timeout', 900)) // set timeout based on config
                     ->throw()->get($url->toString()));
 
                 if ($response->ok() && Storage::disk('local')->exists($epg->file_path)) {

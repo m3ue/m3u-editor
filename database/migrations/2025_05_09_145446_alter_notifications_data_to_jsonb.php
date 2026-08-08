@@ -10,8 +10,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Only run migration if using pgsql
-        if (config('database.default') !== 'pgsql') {
+        // Only run migration if using pgsql. Check the connection's actual
+        // driver rather than config('database.default') — the default
+        // connection is frequently named something other than "pgsql" (e.g.
+        // "pg_test" in testing/CI) despite being the same Postgres driver.
+        if (DB::connection()->getDriverName() !== 'pgsql') {
             return;
         }
         DB::statement(
@@ -29,8 +32,11 @@ SQL
      */
     public function down(): void
     {
-        // Only run migration if using pgsql
-        if (config('database.default') !== 'pgsql') {
+        // Only run migration if using pgsql. Check the connection's actual
+        // driver rather than config('database.default') — the default
+        // connection is frequently named something other than "pgsql" (e.g.
+        // "pg_test" in testing/CI) despite being the same Postgres driver.
+        if (DB::connection()->getDriverName() !== 'pgsql') {
             return;
         }
         DB::statement(

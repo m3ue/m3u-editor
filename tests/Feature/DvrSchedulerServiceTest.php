@@ -30,6 +30,7 @@ use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\DvrSchedulerService;
 use App\Support\SeriesKey;
@@ -377,6 +378,33 @@ it('does not schedule when the dvr setting is at capacity', function () {
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
 });
 
+it('does not schedule when the guest playlist auth is at its concurrent recording limit', function () {
+    $playlistAuth = PlaylistAuth::factory()->create(['dvr_max_concurrent_recordings' => 1]);
+
+    DvrRecording::factory()
+        ->recording()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($playlistAuth, 'playlistAuth')
+        ->create();
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($playlistAuth, 'playlistAuth')
+        ->create(['series_title' => 'Guest Capacity Show']);
+
+    EpgProgramme::factory()->upcoming(10)->create([
+        'title' => 'Guest Capacity Show',
+        'epg_channel_id' => 'test.channel',
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(0);
+});
+
 // --- Disabled rules ---
 
 it('does not process disabled rules', function () {
@@ -675,6 +703,37 @@ it('does not dispatch more starts in one tick than free capacity slots', functio
         ->count(3)
         ->for($this->setting, 'dvrSetting')
         ->for($this->user)
+        ->state(fn () => [
+            'status' => DvrRecordingStatus::Scheduled,
+            'scheduled_start' => now()->subMinute(),
+            'scheduled_end' => now()->addHour(),
+        ])
+        ->create();
+
+    $this->service->tick();
+
+    Queue::assertPushed(StartDvrRecording::class, 1);
+});
+
+it('does not dispatch more starts in one tick than a guest playlist auth has free slots', function () {
+    $this->setting->update(['max_concurrent_recordings' => 10]);
+
+    $playlistAuth = PlaylistAuth::factory()->create(['dvr_max_concurrent_recordings' => 2]);
+
+    // One slot is already occupied by an in-flight recording for this guest
+    DvrRecording::factory()
+        ->recording()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($playlistAuth, 'playlistAuth')
+        ->create();
+
+    // Three rows for the same guest are all due this tick — only one should start (1 active + 1 new = 2 max)
+    DvrRecording::factory()
+        ->count(3)
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($playlistAuth, 'playlistAuth')
         ->state(fn () => [
             'status' => DvrRecordingStatus::Scheduled,
             'scheduled_start' => now()->subMinute(),
@@ -1173,6 +1232,32 @@ it('match_mode contains records titles containing the pattern', function () {
     $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(3);
+});
+
+it('match_mode contains treats a literal % in the series title as a literal character, not a LIKE wildcard', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => '50%',
+            'match_mode' => DvrMatchMode::Contains,
+        ]);
+
+    EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'Top 50% Movies',
+        'epg_channel_id' => 'test.channel',
+    ]);
+    // Without escaping the "%" in the rule's title, the LIKE pattern becomes
+    // "%50%%" — equivalent to "%50%" — which would wrongly match this too.
+    EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'Season 50 Highlights',
+        'epg_channel_id' => 'test.channel',
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
 
 it('match_mode tmdb records programmes by tmdb_id', function () {

@@ -9,6 +9,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PushDeviceToken;
+use App\Settings\GeneralSettings;
 use BackedEnum;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\BulkActionGroup;
@@ -62,7 +63,41 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
      */
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->isAdmin();
+        return auth()->check() && auth()->user()->isAdmin()
+            && (static::isPushRelayEnabled() || static::isDevicePairingEnabled());
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::isPushRelayEnabled() || static::isDevicePairingEnabled();
+    }
+
+    /**
+     * Push relay device registrations (the "Devices" tab).
+     */
+    public static function isPushRelayEnabled(): bool
+    {
+        try {
+            return (bool) (app(GeneralSettings::class)->push_relay_enabled ?? true);
+        } catch (\Exception $e) {
+            return true;
+        }
+    }
+
+    /**
+     * Trakt-style device pairing (the "Device Pairing" tab) also requires
+     * enhanced Xtream API output, since every M3U TV feature depends on it.
+     */
+    public static function isDevicePairingEnabled(): bool
+    {
+        try {
+            $settings = app(GeneralSettings::class);
+
+            return (bool) ($settings->device_pairing_enabled ?? true)
+                && (bool) ($settings->app_output_enabled ?? true);
+        } catch (\Exception $e) {
+            return true;
+        }
     }
 
     public static function table(Table $table): Table

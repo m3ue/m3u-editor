@@ -57,6 +57,16 @@ class DvrSetting extends Model
     }
 
     /**
+     * Total storage used by recordings under this DVR setting, in bytes.
+     */
+    public function getStorageUsedBytesAttribute(): int
+    {
+        return (int) $this->recordings()
+            ->whereNotNull('file_size_bytes')
+            ->sum('file_size_bytes');
+    }
+
+    /**
      * Resolve the effective start-early seconds for a recording rule.
      */
     public function resolveStartEarlySeconds(?int $ruleOverride): int

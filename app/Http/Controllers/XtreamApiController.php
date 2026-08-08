@@ -20,6 +20,7 @@ use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Epg;
+use App\Models\EpgProgramme;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
@@ -40,6 +41,7 @@ use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
+use App\Support\SeriesKey;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -68,10 +70,15 @@ class XtreamApiController extends Controller
     private const DVR_ACTIONS = [
         'get_dvr_recordings',
         'get_dvr_recording',
+        'get_dvr_storage',
         'schedule_dvr',
         'create_dvr_series_rule',
+        'update_dvr_series_rule',
         'cancel_dvr_recording',
         'delete_dvr_recording',
+        'list_dvr_series_rules',
+        'delete_dvr_series_rule',
+        'search_epg_shows',
     ];
 
     private const FAVORITE_COLUMNS = [
@@ -163,6 +170,61 @@ class XtreamApiController extends Controller
      * This provides the same user information as the panel.
      * Contains: `username`, `password`, `message`, `auth`, `status`, `exp_date`, `is_trial`,
      * `active_cons`, `created_at`, `max_connections`, `allowed_output_formats`.
+     *
+     * ### create_dvr_series_rule
+     * Creates a Series-type DVR recording rule for a show title. Query parameters:
+     *   - `title` (string, required): The show title; matched by the chosen match mode.
+     *   - `channel_id` (int, optional): Pin the rule to a specific playlist channel. **Omit
+     *     for "any channel"** — DvrSchedulerService::resolveSeriesEpgScope() then scopes to
+     *     all EPG-mapped channels in the playlist. `source_channel_id` is intentionally NOT
+     *     accepted from the API; setting it would narrow scope back to a single channel.
+     *   - `match_mode` (string, optional, default `contains`): One of `contains`, `exact`,
+     *     `starts_with`, `tmdb`.
+     *   - `series_mode` (string, optional): One of `all`, `new_flag`, `unique_se`. Defaults
+     *     to `dvr_setting.default_series_mode` server-side.
+     *   - `keep_last` (int, optional): Defaults to `dvr_setting.default_series_keep_last`.
+     *   - `priority` (int, optional): Defaults to 50 via the column migration default.
+     *     Clamped 0-100 when supplied. **Omit to inherit the column default; do not send
+     *     a hardcoded value.**
+     *   - `start_early_seconds` (int, optional): Seconds to start early. **Omit to inherit
+     *     `dvr_setting.default_start_early_seconds`** (resolved at runtime). Blank is not
+     *     coerced to 0 — `0` is a meaningful value (no padding) distinct from "inherit".
+     *   - `end_late_seconds` (int, optional): Seconds to end late. Same omit-to-inherit
+     *     semantics as `start_early_seconds`.
+     * Returns `{success: true, rule_id: <int>}`. Returns 409 `{error, rule_id, duplicate: true}`
+     * when a Series rule for the same normalized title already exists under this DVR
+     * setting (+ auth).
+     *
+     * ### update_dvr_series_rule
+     * Updates an existing Series-type DVR recording rule in place — never delete-and-recreate,
+     * because deleting a rule cascades to its recordings and destroys recording history (and
+     * changes the rule id). Query parameters:
+     *   - `rule_id` (int, required): The id of the rule to update.
+     *   - `channel_id` (int, optional): Pin the rule to a specific playlist channel. **Send as
+     *     an empty value to switch to "any channel"**; the request body/param must be present
+     *     (even if blank) to distinguish "set to any channel" from "leave channel unchanged".
+     *   - `match_mode` (string, optional): One of `contains`, `exact`, `starts_with`, `tmdb`.
+     *   - `series_mode` (string, optional): One of `all`, `new_flag`, `unique_se`.
+     *   - `keep_last` (int, optional).
+     *   - `priority` (int, optional): Clamped 0-100 when supplied.
+     *   - `start_early_seconds` (int, optional).
+     *   - `end_late_seconds` (int, optional).
+     * **Omit-to-inherit on update:** only fields present in the request are applied; fields
+     * that are absent are left at their current values. Never send placeholder values — a
+     * field you intend to keep must be omitted, not sent as its current value. `series_mode`
+     * is stored in lockstep with the legacy `new_only` flag (see task 16).
+     * Returns `{success: true, rule_id: <int>}`.
+     *
+     * ### search_epg_shows
+     * Searches EPG programmes across all EPG-mapped channels in the playlist (plus those
+     * that aired in the last 24 hours for discoverability) and groups results by
+     * SeriesKey-normalized title. Query parameter: `q` (string, required, min 2 chars).
+     * Returns at most 100 results, sorted by next-airing first then by episode count.
+     * Each result object contains: `normalized_title`, `display_title`, `has_series_rule`
+     * (bool — whether a Series rule already exists for this title), `series_rule_id` (int|null
+     * — the existing rule's id when `has_series_rule` is true, for delete-without-round-trip),
+     * `channel_count`, `channels` (array of `{channel_id, channel_name}`), `episode_count`,
+     * `next_airing_at` (ISO 8601 or null), `recent_episodes` (up to 5 most-recent airings).
      *
      *
      * @param  string  $uuid  The UUID of the playlist (required path parameter)
@@ -2058,10 +2120,15 @@ class XtreamApiController extends Controller
             return match ($action) {
                 'get_dvr_recordings' => $this->getDvrRecordings($request, $dvrPlaylist, $username, $password, $playlistAuth),
                 'get_dvr_recording' => $this->getDvrRecording($request, $dvrPlaylist, $username, $password, $playlistAuth),
+                'get_dvr_storage' => $this->getDvrStorage($dvrPlaylist, $playlistAuth),
                 'schedule_dvr' => $this->scheduleDvr($request, $dvrPlaylist, $playlistAuth),
                 'create_dvr_series_rule' => $this->createDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
+                'update_dvr_series_rule' => $this->updateDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
                 'cancel_dvr_recording' => $this->cancelDvrRecording($request, $dvrPlaylist, $playlistAuth),
                 'delete_dvr_recording' => $this->deleteDvrRecording($request, $dvrPlaylist, $playlistAuth),
+                'list_dvr_series_rules' => $this->listDvrSeriesRules($request, $dvrPlaylist, $playlistAuth),
+                'delete_dvr_series_rule' => $this->deleteDvrSeriesRule($request, $dvrPlaylist, $playlistAuth),
+                'search_epg_shows' => $this->searchEpgShows($request, $dvrPlaylist, $playlistAuth),
             };
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
@@ -3476,6 +3543,280 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * Get the current user/guest's DVR storage usage against their quota.
+     *
+     * A guest (PlaylistAuth) only ever sees their own usage, scoped to their own
+     * recordings, regardless of whether they have an explicit quota configured —
+     * guests never see account-wide totals. The account owner sees the whole
+     * DVR setting's usage against its global quota.
+     */
+    private function getDvrStorage($playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        if ($playlistAuth) {
+            $usedBytes = $playlistAuth->storage_used_bytes;
+            $quotaBytes = $playlistAuth->dvr_storage_quota_gb !== null
+                ? $playlistAuth->dvr_storage_quota_gb * 1024 ** 3
+                : null;
+
+            return response()->json([
+                'used_bytes' => $usedBytes,
+                'quota_bytes' => $quotaBytes,
+                'percent_used' => $quotaBytes !== null
+                    ? ($quotaBytes > 0 ? min(100, round($usedBytes / $quotaBytes * 100, 1)) : 100)
+                    : null,
+                'recording_count' => $playlistAuth->dvrRecordings()->count(),
+                'scope' => 'guest',
+            ]);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json([
+                'used_bytes' => 0,
+                'quota_bytes' => null,
+                'percent_used' => null,
+                'recording_count' => 0,
+                'scope' => 'account',
+            ]);
+        }
+
+        $usedBytes = $dvrSetting->storage_used_bytes;
+        $quotaBytes = $dvrSetting->global_disk_quota_gb > 0
+            ? $dvrSetting->global_disk_quota_gb * 1024 ** 3
+            : null;
+
+        return response()->json([
+            'used_bytes' => $usedBytes,
+            'quota_bytes' => $quotaBytes,
+            'percent_used' => $quotaBytes ? min(100, round($usedBytes / $quotaBytes * 100, 1)) : null,
+            'recording_count' => $dvrSetting->recordings()->count(),
+            'scope' => 'account',
+        ]);
+    }
+
+    /**
+     * List all enabled series recording rules for the authenticated playlist.
+     */
+    private function listDvrSeriesRules(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json([]);
+        }
+
+        $rules = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('type', DvrRuleType::Series)
+            ->where('enabled', true)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->with('channel')
+            ->withCount('recordings')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($rules->map(fn (DvrRecordingRule $rule) => $this->formatDvrSeriesRule($rule)));
+    }
+
+    /**
+     * Delete a series recording rule by ID.
+     */
+    private function deleteDvrSeriesRule(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $ruleId = (int) $request->input('rule_id');
+
+        if (! $ruleId) {
+            return response()->json(['error' => 'rule_id parameter is required'], 400);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $rule = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('id', $ruleId)
+            ->where('type', DvrRuleType::Series)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->first();
+
+        if (! $rule) {
+            return response()->json(['error' => 'Series rule not found'], 404);
+        }
+
+        $rule->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Search EPG programme listings across all mapped channels to discover shows
+     * available for series recording. Uses SeriesKey::normalize() on programme
+     * titles so the returned groups match DvrRecordingRule::saving hook's own
+     * normalization — this guarantees that a series rule created from search
+     * results will match future EPG programme data for the same show.
+     */
+    private function searchEpgShows(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $q = trim((string) $request->input('q', ''));
+
+        if (mb_strlen($q) < 2) {
+            return response()->json(['error' => 'q parameter is required (minimum 2 characters)'], 400);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting?->enabled) {
+            return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        // Pre-fetch the set of existing Series rules for this DVR setting (scoped by
+        // playlist_auth when applicable) keyed by their auto-derived normalized_title,
+        // so each result can advertise `has_series_rule` + `series_rule_id` without
+        // a per-group query. Uses the same SeriesKey::normalize normalization as the
+        // grouping below — which matches DvrRecordingRule::saving's column population —
+        // so a normalized-title lookup here is consistent with what a future rule
+        // created from this result would store.
+        $seriesRuleTitles = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('type', DvrRuleType::Series)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->pluck('id', 'normalized_title');
+
+        // Collect the set of EPG channel_id strings this playlist's channels are mapped to.
+        $playlistChannels = $playlist->channels()
+            ->whereNotNull('epg_channel_id')
+            ->with('epgChannel')
+            ->get();
+
+        $epgChannelIds = $playlistChannels
+            ->map(fn (Channel $ch) => $ch->epgChannel?->channel_id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($epgChannelIds->isEmpty()) {
+            return response()->json([]);
+        }
+
+        // Build lookup: epg_channel_id string → [channel_id, channel_name] from the playlist.
+        $channelLookup = [];
+        foreach ($playlistChannels as $ch) {
+            $epgChanId = $ch->epgChannel?->channel_id;
+            if ($epgChanId && ! isset($channelLookup[$epgChanId])) {
+                $channelLookup[$epgChanId] = [
+                    'channel_id' => $ch->id,
+                    'channel_name' => $ch->title ?: ($ch->name ?? ''),
+                ];
+            }
+        }
+
+        // Fetch matching programmes across all mapped EPG channels, including those
+        // that just finished (up to 24 hours ago) for discoverability.
+        $cutoff = Carbon::now()->subHours(24);
+        $programmes = EpgProgramme::whereIn('epg_channel_id', $epgChannelIds->toArray())
+            ->where('start_time', '>=', $cutoff)
+            ->where('title', 'ilike', '%'.$q.'%')
+            ->limit(500)
+            ->get();
+
+        // Group by SeriesKey-normalized title — this must match the normalization
+        // in DvrRecordingRule::saving so rules created from these results will
+        // match future programme data.
+        $groups = [];
+        foreach ($programmes as $p) {
+            $norm = SeriesKey::normalize($p->title);
+
+            if ($norm === '') {
+                continue;
+            }
+
+            if (! isset($groups[$norm])) {
+                $groups[$norm] = [
+                    'display_title' => $p->title,
+                    'programmes' => [],
+                    'channel_ids' => [],
+                ];
+            }
+
+            $groups[$norm]['programmes'][] = $p;
+            $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+            if ($resolved) {
+                $groups[$norm]['channel_ids'][$resolved['channel_id']] = $resolved;
+            }
+        }
+
+        $results = [];
+        foreach ($groups as $norm => $group) {
+            /** @var array<int, EpgProgramme> $progs */
+            $progs = $group['programmes'];
+
+            // Sort within group: most recent first.
+            usort($progs, fn (EpgProgramme $a, EpgProgramme $b) => $b->start_time->timestamp <=> $a->start_time->timestamp);
+
+            $channels = array_values($group['channel_ids']);
+
+            // next_airing_at: earliest start_time in the future, null if none.
+            $now = Carbon::now();
+            $nextAiringAt = null;
+            foreach ($progs as $p) {
+                if ($p->start_time->gt($now)) {
+                    $nextAiringAt = $nextAiringAt
+                        ? ($p->start_time->lt($nextAiringAt) ? $p->start_time : $nextAiringAt)
+                        : $p->start_time;
+                }
+            }
+
+            $recentEpisodes = array_slice(array_map(function (EpgProgramme $p) use ($channelLookup) {
+                $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+
+                return [
+                    'channel_id' => $resolved['channel_id'] ?? null,
+                    'channel_name' => $resolved['channel_name'] ?? null,
+                    'title' => $p->title,
+                    'start_time' => $p->start_time->toIso8601String(),
+                    'end_time' => $p->end_time?->toIso8601String(),
+                    'season' => $p->season,
+                    'episode' => $p->episode,
+                    'description' => $p->description,
+                ];
+            }, $progs), 0, 5);
+
+            $results[] = [
+                'normalized_title' => $norm,
+                'display_title' => $group['display_title'],
+                'has_series_rule' => $seriesRuleTitles->has($norm),
+                'series_rule_id' => $seriesRuleTitles[$norm] ?? null,
+                'channel_count' => count($channels),
+                'channels' => $channels,
+                'episode_count' => count($progs),
+                'next_airing_at' => $nextAiringAt?->toIso8601String(),
+                'recent_episodes' => $recentEpisodes,
+            ];
+        }
+
+        // Sort: next-airing first, then most episodes.
+        usort($results, function (array $a, array $b) {
+            $aNext = $a['next_airing_at'];
+            $bNext = $b['next_airing_at'];
+
+            if ($aNext && ! $bNext) {
+                return -1;
+            }
+            if (! $aNext && $bNext) {
+                return 1;
+            }
+            if ($aNext && $bNext) {
+                return $aNext <=> $bNext;
+            }
+
+            return $b['episode_count'] <=> $a['episode_count'];
+        });
+
+        return response()->json(array_slice($results, 0, 100));
+    }
+
+    /**
      * Schedule a one-shot DVR recording rule from the TV app.
      */
     private function scheduleDvr(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
@@ -3493,6 +3834,10 @@ class XtreamApiController extends Controller
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
+        }
+
+        if ($playlistAuth?->hasReachedConcurrentLimit()) {
+            return response()->json(['error' => 'Concurrent recording limit reached'], 422);
         }
 
         $channel = $playlist->channels()->where('channels.id', $channelId)->first();
@@ -3531,14 +3876,40 @@ class XtreamApiController extends Controller
 
     /**
      * Create a series recording rule.
+     *
+     * Accepts the full option set (priority, padding, match mode, series mode,
+     * keep_last). All new optional fields use omit-to-inherit: only fields the
+     * caller actually sends are stored. `priority` falls back to its column
+     * default (50 per the migration) when absent/blank/non-numeric; padding
+     * fields fall back to runtime resolution via
+     * DvrSetting::resolveStartEarlySeconds()/resolveEndLateSeconds(). Blank is
+     * NOT coerced to 0 because 0 is a meaningful value for padding (no padding)
+     * and is NOT the same as "inherit".
+     *
+     * Omitting both `channel_id` and `source_channel_id` is the explicit "any
+     * channel" form — see DvrSchedulerService::resolveSeriesEpgScope() for the
+     * scope resolution. `source_channel_id` is intentionally not accepted from
+     * the API; setting it would narrow scope back to a single channel.
+     *
+     * Returns 409 with `rule_id` + `duplicate: true` when a Series rule for
+     * the same normalized title already exists under this DVR setting (+ auth),
+     * so the client can switch its button to the "rule exists" state rather
+     * than showing a generic failure.
+     *
+     * Scheduling is handled by DvrRecordingRule::boot()'s created hook calling
+     * scheduleRuleImmediately() for enabled rules; this action does NOT dispatch
+     * DvrSchedulerTick (the model's hook already covers the API path).
      */
     private function createDvrSeriesRule(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
-        $channelId = (int) $request->input('channel_id');
+        $rawChannelId = $request->input('channel_id');
+        $channelId = ($rawChannelId === null || $rawChannelId === '')
+            ? null
+            : (int) $rawChannelId;
         $title = trim((string) $request->input('title', ''));
 
-        if (! $channelId || ! $title) {
-            return response()->json(['error' => 'channel_id and title are required'], 400);
+        if (! $title) {
+            return response()->json(['error' => 'title is required'], 400);
         }
 
         $dvrSetting = $playlist->dvrSetting?->enabled ? $playlist->dvrSetting : null;
@@ -3547,16 +3918,43 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
         }
 
-        $channel = $playlist->channels()->where('channels.id', $channelId)->first();
-        if (! $channel) {
-            return response()->json(['error' => 'Channel not found'], 404);
+        // Duplicate guard: same dvr_setting, same normalized show title, same auth.
+        // Uses the auto-derived `normalized_title` column that DvrRecordingRule::saving
+        // populates via SeriesKey::normalize — matching the stored column (not
+        // re-computing with a different normalizer) so future EPG matches align.
+        $normalizedTitle = SeriesKey::normalize($title);
+        $existing = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('type', DvrRuleType::Series)
+            ->where('normalized_title', $normalizedTitle)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'error' => 'A series rule for this show already exists',
+                'rule_id' => $existing->id,
+                'duplicate' => true,
+            ], 409);
+        }
+
+        if ($channelId !== null) {
+            $channel = $playlist->channels()->where('channels.id', $channelId)->first();
+            if (! $channel) {
+                return response()->json(['error' => 'Channel not found'], 404);
+            }
         }
 
         $matchMode = DvrMatchMode::tryFrom($request->input('match_mode', 'contains')) ?? DvrMatchMode::Contains;
         $seriesMode = DvrSeriesMode::tryFrom($request->input('series_mode', $dvrSetting->default_series_mode?->value ?? 'all')) ?? DvrSeriesMode::All;
-        $keepLast = $request->input('keep_last') !== null ? (int) $request->input('keep_last') : $dvrSetting->default_series_keep_last;
+        // Same blank-vs-meaningful-zero discipline as the new optional fields: a blank
+        // or non-numeric value falls through to the DVR setting default instead of being
+        // coerced to 0 (which would silently disable the keep-last policy).
+        $rawKeepLast = $request->input('keep_last');
+        $keepLast = is_numeric($rawKeepLast)
+            ? (int) $rawKeepLast
+            : $dvrSetting->default_series_keep_last;
 
-        $rule = DvrRecordingRule::create([
+        $createAttrs = [
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
             'playlist_auth_id' => $playlistAuth?->id,
@@ -3565,9 +3963,136 @@ class XtreamApiController extends Controller
             'series_title' => $title,
             'match_mode' => $matchMode,
             'series_mode' => $seriesMode,
+            // Keep the legacy `new_only` flag in lockstep with series_mode so the
+            // DvrRecordingRule::saving hook's new_only→series_mode migration (which
+            // rewrites series_mode=new_flag to all when new_only is false) does not
+            // clobber an explicitly-requested new_flag. Must be EXACTLY this
+            // equality: new_only=true alongside series_mode=unique_se would trip the
+            // hook's first branch and clobber unique_se → new_flag.
+            'new_only' => ($seriesMode === DvrSeriesMode::NewFlag),
             'keep_last' => $keepLast,
             'enabled' => true,
+        ];
+
+        // Omit-to-inherit for all three new optional fields. Absent or blank
+        // leaves the key OUT of the create array so the column default (priority=50
+        // per the migration) or runtime resolution via DvrSetting::resolveStartEarly
+        // Seconds()/resolveEndLateSeconds() applies. Critically, blank is NOT
+        // coerced to 0 because 0 is a meaningful value for the padding fields
+        // (no padding) and is NOT the same as "inherit" — see the spec.
+        $rawPriority = $request->input('priority');
+        if (is_numeric($rawPriority)) {
+            $createAttrs['priority'] = max(0, min(100, (int) $rawPriority));
+        }
+
+        $rawStartEarly = $request->input('start_early_seconds');
+        if ($rawStartEarly !== null && $rawStartEarly !== '') {
+            $createAttrs['start_early_seconds'] = (int) $rawStartEarly;
+        }
+        $rawEndLate = $request->input('end_late_seconds');
+        if ($rawEndLate !== null && $rawEndLate !== '') {
+            $createAttrs['end_late_seconds'] = (int) $rawEndLate;
+        }
+
+        $rule = DvrRecordingRule::create($createAttrs);
+
+        return response()->json([
+            'success' => true,
+            'rule_id' => $rule->id,
         ]);
+    }
+
+    /**
+     * Update an existing Series DVR recording rule in place.
+     *
+     * This intentionally does NOT delete-and-recreate: deleting a rule cascades to
+     * its recordings and would destroy recording history and change the rule id.
+     *
+     * **Omit-to-inherit on update** — only fields actually present in the request are
+     * applied; absent fields keep their current value. Nothing is nulled out unless
+     * the request explicitly says so (see `channel_id` below).
+     */
+    private function updateDvrSeriesRule(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
+    {
+        $ruleId = (int) $request->input('rule_id');
+
+        if (! $ruleId) {
+            return response()->json(['error' => 'rule_id parameter is required'], 400);
+        }
+
+        $dvrSetting = $playlist->dvrSetting;
+
+        if (! $dvrSetting) {
+            return response()->json(['error' => 'DVR not configured for this playlist'], 404);
+        }
+
+        $rule = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('id', $ruleId)
+            ->where('type', DvrRuleType::Series)
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->first();
+
+        if (! $rule) {
+            return response()->json(['error' => 'Series rule not found'], 404);
+        }
+
+        // channel_id: present-and-blank means "any channel" (null); present-with-a-value
+        // pins to that channel; absent means "leave unchanged". `$request->has` returns
+        // false for a blank value, so check presence via `$request->input` + `exists`.
+        if ($request->exists('channel_id')) {
+            $rawChannelId = $request->input('channel_id');
+            $channelId = ($rawChannelId === null || $rawChannelId === '')
+                ? null
+                : (int) $rawChannelId;
+
+            if ($channelId !== null) {
+                $channel = $playlist->channels()->where('channels.id', $channelId)->first();
+                if (! $channel) {
+                    return response()->json(['error' => 'Channel not found'], 404);
+                }
+            }
+
+            $rule->channel_id = $channelId;
+        }
+
+        if ($request->has('match_mode')) {
+            $matchMode = DvrMatchMode::tryFrom($request->input('match_mode'));
+            if ($matchMode !== null) {
+                $rule->match_mode = $matchMode;
+            }
+        }
+
+        if ($request->has('series_mode')) {
+            $seriesMode = DvrSeriesMode::tryFrom($request->input('series_mode'));
+            if ($seriesMode !== null) {
+                $rule->series_mode = $seriesMode;
+                // Keep the legacy new_only flag in lockstep with series_mode for the same
+                // saving-hook migration reason as createDvrSeriesRule (task 16).
+                $rule->new_only = ($seriesMode === DvrSeriesMode::NewFlag);
+            }
+        }
+
+        $rawKeepLast = $request->input('keep_last');
+        if (is_numeric($rawKeepLast)) {
+            $rule->keep_last = (int) $rawKeepLast;
+        }
+
+        $rawPriority = $request->input('priority');
+        if (is_numeric($rawPriority)) {
+            $rule->priority = max(0, min(100, (int) $rawPriority));
+        }
+
+        $rawStartEarly = $request->input('start_early_seconds');
+        if ($rawStartEarly !== null && $rawStartEarly !== '') {
+            $rule->start_early_seconds = (int) $rawStartEarly;
+        }
+
+        $rawEndLate = $request->input('end_late_seconds');
+        if ($rawEndLate !== null && $rawEndLate !== '') {
+            $rule->end_late_seconds = (int) $rawEndLate;
+        }
+
+        $rule->save();
 
         return response()->json([
             'success' => true,
@@ -3714,6 +4239,30 @@ class XtreamApiController extends Controller
         }
 
         return $data;
+    }
+
+    /**
+     * Format a DvrRecordingRule (series rule) into the API response shape.
+     */
+    private function formatDvrSeriesRule(DvrRecordingRule $rule): array
+    {
+        return [
+            'id' => $rule->id,
+            'channel_id' => $rule->channel_id,
+            'channel_name' => $rule->channel?->title ?? $rule->channel?->name,
+            'series_title' => $rule->series_title,
+            'match_mode' => $rule->match_mode->value,
+            'series_mode' => $rule->series_mode->value,
+            'keep_last' => $rule->keep_last,
+            'priority' => $rule->priority,
+            'enabled' => (bool) $rule->enabled,
+            'enable_comskip' => (bool) $rule->enable_comskip,
+            'start_early_seconds' => $rule->start_early_seconds,
+            'end_late_seconds' => $rule->end_late_seconds,
+            'created_at' => $rule->created_at?->toIso8601String(),
+            'updated_at' => $rule->updated_at?->toIso8601String(),
+            'recording_count' => $rule->recordings_count,
+        ];
     }
 
     /**

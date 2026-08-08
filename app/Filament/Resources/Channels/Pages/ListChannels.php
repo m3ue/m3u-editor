@@ -34,7 +34,6 @@ use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Filament\View\PanelsRenderHook;
-use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -43,8 +42,6 @@ use Livewire\Attributes\Url;
 class ListChannels extends ListRecords
 {
     use RenderlessColumnUpdates;
-
-    // use HasToggleableTable;
 
     protected static string $resource = ChannelResource::class;
 

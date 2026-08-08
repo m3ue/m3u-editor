@@ -1050,6 +1050,11 @@ class Preferences extends SettingsPage
                                     ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed.'))
                                     ->icon('heroicon-m-device-phone-mobile')
                                     ->headerActions([
+                                        Action::make(__('Manage Devices'))
+                                            ->label(__('Manage Devices'))
+                                            ->icon('heroicon-o-device-phone-mobile')
+                                            ->url(PushDeviceTokenResource::getUrl())
+                                            ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
                                         Action::make('test_push_relay')
                                             ->label(__('Send Push Notification'))
                                             ->icon('heroicon-o-paper-airplane')
@@ -1117,16 +1122,34 @@ class Preferences extends SettingsPage
                                             ->label(__('Enable push relay'))
                                             ->helperText(__('When enabled, TV notifications are also forwarded to registered mobile devices through the public relay.'))
                                             ->live(),
-                                        Action::make(__('Manage Devices'))
-                                            ->label(__('Manage Devices'))
+                                    ]),
+
+                                Section::make(__('Device Pairing'))
+                                    ->description(__('Let M3U TV request a short pairing code instead of typing a password on the remote. The admin enters the code here and picks which credential to sign the TV in with.'))
+                                    ->icon('heroicon-m-qr-code')
+                                    ->headerActions([
+                                        Action::make(__('Pair a Device'))
+                                            ->label(__('Pair a Device'))
                                             ->icon('heroicon-o-device-phone-mobile')
-                                            ->url(PushDeviceTokenResource::getUrl())
-                                            ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
+                                            ->url(PushDeviceTokenResource::getUrl(parameters: ['tab' => 'pairing']))
+                                            ->hidden(fn (Get $get): bool => ! (bool) $get('device_pairing_enabled') || ! (bool) $get('app_output_enabled')),
+                                    ])
+                                    ->schema([
+                                        Callout::make()
+                                            ->warning()
+                                            ->description(__('Device pairing requires enhanced Xtream API output, since every M3U TV feature depends on it. Enable "Enhanced output enabled" above to use pairing.'))
+                                            ->hidden(fn (Get $get): bool => (bool) $get('app_output_enabled')),
+                                        Toggle::make('device_pairing_enabled')
+                                            ->label(__('Enable device pairing'))
+                                            ->helperText(__('When enabled, M3U TV can request a pairing code and the "Device Pairing" tab is available under Devices. Disabling this hides the tab and rejects any in-flight pairing requests.'))
+                                            ->disabled(fn (Get $get): bool => ! (bool) $get('app_output_enabled'))
+                                            ->live(),
                                     ]),
 
                                 Section::make(__('Notification Channels'))
                                     ->description(__('Define the notification channels available in the TV app. Users can subscribe to specific channels so they only receive relevant notifications. Channels not listed here are still usable — they appear automatically once a notification arrives on that channel.'))
                                     ->icon('heroicon-m-tag')
+                                    ->collapsed()
                                     ->schema([
                                         Repeater::make('tv_notification_channels')
                                             ->label(__('Default Notification Channels'))

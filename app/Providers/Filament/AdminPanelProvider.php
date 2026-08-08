@@ -50,6 +50,7 @@ use App\Filament\Resources\Vods\VodResource;
 use App\Filament\Widgets\DiscordWidget;
 use App\Filament\Widgets\DocumentsWidget;
 use App\Filament\Widgets\DonateCrypto;
+use App\Filament\Widgets\DvrStorageOverviewWidget;
 use App\Filament\Widgets\KoFiWidget;
 use App\Filament\Widgets\M3uTvWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
@@ -61,6 +62,7 @@ use App\Filament\Widgets\UpdateNoticeWidget;
 use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
 use App\Http\Middleware\SeedLocaleFromUser;
+use App\Http\Middleware\SyncTableColumnPreferences;
 use App\Settings\GeneralSettings;
 use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\FilamentLanguageSwitcherPlugin;
@@ -120,6 +122,7 @@ class AdminPanelProvider extends PanelProvider
             'copilot_quick_actions' => [],
             'copilot_url' => null,
             'push_relay_enabled' => true,
+            'device_pairing_enabled' => true,
         ];
         try {
             $envShowWan = config('dev.show_wan_details', false);
@@ -141,6 +144,7 @@ class AdminPanelProvider extends PanelProvider
                 'copilot_quick_actions' => $userPreferences->copilot_quick_actions ?? $settings['copilot_quick_actions'],
                 'copilot_url' => $userPreferences->copilot_url ?? $settings['copilot_url'],
                 'push_relay_enabled' => $userPreferences->push_relay_enabled ?? $settings['push_relay_enabled'],
+                'device_pairing_enabled' => $userPreferences->device_pairing_enabled ?? $settings['device_pairing_enabled'],
             ];
         } catch (Exception $e) {
             // Ignore
@@ -193,7 +197,7 @@ class AdminPanelProvider extends PanelProvider
                                 ->icon('heroicon-s-shield-check')
                                 ->items([
                                     ...(config('auth.auto_login') ? [] : UserResource::getNavigationItems()),
-                                    ...($settings['push_relay_enabled'] ? PushDeviceTokenResource::getNavigationItems() : []),
+                                    ...(($settings['push_relay_enabled'] || $settings['device_pairing_enabled']) ? PushDeviceTokenResource::getNavigationItems() : []),
                                     ...Preferences::getNavigationItems(),
                                 ]),
                         ] : []),
@@ -299,6 +303,7 @@ class AdminPanelProvider extends PanelProvider
                 KoFiWidget::class,
                 QueueDashboardWidget::class,
                 PluginsOverviewWidget::class,
+                DvrStorageOverviewWidget::class,
                 // DonateCrypto::class,
                 StatsOverview::class,
                 // SharedStreamStatsWidget::class,
@@ -344,6 +349,7 @@ class AdminPanelProvider extends PanelProvider
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
                 SeedLocaleFromUser::class, // Seeds session from DB locale (runs before plugin's SetLocale)
+                SyncTableColumnPreferences::class, // Bridges Filament's table column manager session state to the DB, per user
             ])
             ->authMiddleware([
                 Authenticate::class,

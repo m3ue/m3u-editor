@@ -134,8 +134,8 @@ it('denies request actions when the capability gate is disabled', function () {
     Http::assertNothingSent();
 });
 
-it('does not authenticate disabled or expired playlist auth credentials', function (array $attributes) {
-    $this->auth->update($attributes);
+it('does not authenticate disabled or expired playlist auth credentials', function (Closure $attributes) {
+    $this->auth->update($attributes());
 
     $this->getJson(requestActionUrl('panel'))
         ->assertUnauthorized()
@@ -147,8 +147,13 @@ it('does not authenticate disabled or expired playlist auth credentials', functi
         ->assertJsonPath('error.code', 'authentication_failed')
         ->assertJsonMissingPath('data');
 })->with([
-    'disabled' => [['enabled' => false]],
-    'expired' => [['expires_at' => now()->subMinute()]],
+    'disabled' => [fn () => ['enabled' => false]],
+    // `now()` must be evaluated lazily inside the closure: Pest's ->with()
+    // datasets are collected once when the file loads, before the app boots
+    // and applies the configured timezone, so a bare now() here would bake
+    // in a stale, wrong-timezone timestamp instead of "1 minute ago" at
+    // actual test-run time.
+    'expired' => [fn () => ['expires_at' => now()->subMinute()]],
 ]);
 
 it('does not advertise or execute request actions through alias credentials', function () {

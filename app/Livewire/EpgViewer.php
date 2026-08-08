@@ -70,10 +70,10 @@ class EpgViewer extends Component implements HasActions, HasForms
         $this->record = $record;
         $this->type = class_basename($this->record);
 
-        // Determine DVR enabled state for Playlist records
-        if ($this->type === 'Playlist') {
-            $this->dvrEnabled = (bool) $this->record->dvrSetting?->enabled;
-        }
+        // dvrSetting() exists directly on Playlist, CustomPlaylist, and MergedPlaylist
+        // (via HasPolymorphicPlaylistOwner) — safe to resolve unconditionally; other
+        // record types (e.g. Epg) simply have no such relation and resolve to null.
+        $this->dvrEnabled = (bool) $this->record->dvrSetting?->enabled;
     }
 
     /**

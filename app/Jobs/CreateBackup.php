@@ -19,8 +19,11 @@ class CreateBackup implements ShouldQueue
     // Only try to process the job twice
     public $tries = 2;
 
-    // Giving a timeout of 10 minutes to the Job to process the mapping
-    public $timeout = 60 * 10;
+    // Giving a timeout of 60 minutes to the Job to process the mapping.
+    // Large database dumps (multi-GB) can take well beyond 10 minutes; a
+    // timeout kill mid-dump orphans the partial file in storage/app/backup-temp
+    // since it skips Spatie's own cleanup path.
+    public $timeout = 60 * 60;
 
     /**
      * Create a new job instance.

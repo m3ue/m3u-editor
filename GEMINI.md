@@ -413,3 +413,18 @@ livewire(ListUsers::class)
   - `$view`: `protected string` (not `protected static string`) on `Page` and `Widget` classes
 
 </laravel-boost-guidelines>
+
+<!--
+The section below is NOT managed by Laravel Boost. `php artisan boost:update` only
+rewrites content inside <laravel-boost-guidelines>...</laravel-boost-guidelines> above
+(see vendor/laravel/boost/src/Install/GuidelineWriter.php), so this survives updates.
+-->
+
+## Testing (project-specific, not covered by Boost)
+
+**Never run the entire test suite.** It's large and slow, and running it repeatedly (especially in the background) burns AI usage for no benefit. Always scope test runs to what you actually changed:
+
+- Filter by test name: `vendor/bin/pest --filter=testName` or `php artisan test --filter=testName`.
+- Or target the specific file(s): `vendor/bin/pest tests/Feature/ExampleTest.php`.
+- If several files are plausibly affected, run each of those specific files/filters — do not fall back to a bare `php artisan test` / `vendor/bin/pest` with no scoping.
+- Only run the full suite if the user explicitly asks for one (e.g. before a release, or to confirm a broad refactor didn't regress anything elsewhere).

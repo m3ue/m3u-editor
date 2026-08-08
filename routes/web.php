@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
 use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
@@ -35,6 +36,15 @@ use App\Http\Controllers\XtreamStreamController;
 use App\Services\ExternalIpService;
 use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\Route;
+
+// Vanity URL for Device Pairing — short and easy to type from a phone/computer
+// while looking at a TV. Forwards ?code= through if present (e.g. from a QR link).
+Route::get('/pdt', function () {
+    return redirect(PushDeviceTokenResource::getUrl('index', array_filter([
+        'tab' => 'pairing',
+        'code' => request()->query('code'),
+    ])));
+})->name('device-pairing.vanity');
 
 // OIDC SSO authentication
 Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('auth.oidc.redirect');

@@ -77,8 +77,12 @@ class PlaylistAuth extends Model
     /**
      * Whether this auth has reached its per-guest concurrent recording cap.
      * Returns false when no cap is configured (null = unlimited).
+     *
+     * @param  int  $pendingInTick  Recordings already counted as started for this auth
+     *                              earlier in the same scheduler tick but not yet
+     *                              reflected in the database — see DvrSetting::isAtCapacity().
      */
-    public function hasReachedConcurrentLimit(): bool
+    public function hasReachedConcurrentLimit(int $pendingInTick = 0): bool
     {
         if ($this->dvr_max_concurrent_recordings === null) {
             return false;
@@ -88,7 +92,7 @@ class PlaylistAuth extends Model
             ->whereIn('status', [DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing])
             ->count();
 
-        return $active >= $this->dvr_max_concurrent_recordings;
+        return ($active + $pendingInTick) >= $this->dvr_max_concurrent_recordings;
     }
 
     /**

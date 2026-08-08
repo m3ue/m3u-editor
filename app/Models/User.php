@@ -186,6 +186,11 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasMany(Series::class);
     }
 
+    public function tableColumnPreferences()
+    {
+        return $this->hasMany(TableColumnPreference::class);
+    }
+
     /**
      * Check if the user was created via OIDC authentication.
      */

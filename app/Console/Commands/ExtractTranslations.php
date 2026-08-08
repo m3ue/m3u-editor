@@ -107,7 +107,7 @@ class ExtractTranslations extends Command
         } else {
             $this->applyFileReplacements();
             $this->writeJsonFile();
-            $this->info("\nDone. Run <comment>php artisan app:generate-translations</comment> to produce DE/FR/ES files.");
+            $this->info("\nDone.");
         }
 
         if (! empty($this->warnings)) {

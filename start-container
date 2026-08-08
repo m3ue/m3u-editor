@@ -305,6 +305,7 @@ logo_cache_dir="${config_dir}/cached-logos"
 playlist_dir="${config_dir}/playlist"
 playlist_epg_dir="${config_dir}/playlist-epg-files"
 backup_dir="${config_dir}/m3u-editor-backups"
+backup_temp_dir="${config_dir}/m3u-editor-temp-backups"
 log_dir="${config_dir}/logs"
 user_plugins_dir="${config_dir}/plugins"
 plugin_data_dir="${config_dir}/plugin-data"
@@ -345,6 +346,7 @@ fi
 [ ! -d "${playlist_dir}" ] && mkdir -p "${playlist_dir}"
 [ ! -d "${playlist_epg_dir}" ] && mkdir -p "${playlist_epg_dir}"
 [ ! -d "${backup_dir}" ] && mkdir -p "${backup_dir}"
+[ ! -d "${backup_temp_dir}" ] && mkdir -p "${backup_temp_dir}"
 [ ! -d "${log_dir}" ] && mkdir -p "${log_dir}"
 [ ! -d "${user_plugins_dir}" ] && mkdir -p "${user_plugins_dir}"
 [ ! -d "${plugin_data_dir}" ] && mkdir -p "${plugin_data_dir}"
@@ -403,6 +405,18 @@ ln -sf "${log_dir}" storage/
 [ ! -d "storage/app/private/playlist" ] && ln -sf "${playlist_dir}" storage/app/private/playlist
 [ ! -d "storage/app/private/playlist-epg-files" ] && ln -sf "${playlist_epg_dir}" storage/app/private/playlist-epg-files
 [ ! -d "storage/app/private/m3u-editor-backups" ] && ln -sf "${backup_dir}" storage/app/private/m3u-editor-backups
+
+# Link backup staging area (storage/app/backup-temp) to the already-mounted
+# config volume instead of the container's writable layer, so a stuck/killed
+# backup:run (large DB dump, job timeout, OOM) doesn't silently fill container
+# disk. Contents are transient staging only, so wipe them on every boot -
+# don't rm the symlink itself if it's already in place.
+if [ -L "storage/app/backup-temp" ]; then
+    rm -rf "${backup_temp_dir:?}"/*
+else
+    rm -rf storage/app/backup-temp
+    ln -sf "${backup_temp_dir}" storage/app/backup-temp
+fi
 
 # Link user-installed plugins and plugin runtime data (persisted across container rebuilds)
 # Note: bundled (first-party) plugins live in plugins-bundled/ inside the image and are NOT symlinked.

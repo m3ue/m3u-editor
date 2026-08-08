@@ -10,9 +10,13 @@
 declare(strict_types=1);
 
 use App\Enums\DvrRuleType;
+use App\Models\Category;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\Episode;
+use App\Models\Season;
+use App\Models\Series;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
@@ -138,4 +142,104 @@ it('does not prune a parent directory that still contains other recordings', fun
         ->assertMissing($deleted)
         ->assertExists($kept)
         ->assertExists('library/2026/Some Show');
+});
+
+// ---------------------------------------------------------------------------
+// issue #1372 — orphan Series/Season prune on DvrRecording delete
+// ---------------------------------------------------------------------------
+
+it('deletes the orphaned Series when its only episode recording is removed', function (): void {
+    // Authored by TestEngineer
+    $setting = DvrSetting::factory()->create(['storage_disk' => 'dvr']);
+    $series = Series::factory()->create();
+    $season = Season::factory()->create(['series_id' => $series->id]);
+    $episode = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+    ]);
+    $recording = DvrRecording::factory()->create([
+        'dvr_setting_id' => $setting->id,
+    ]);
+    $episode->dvr_recording_id = $recording->id;
+    $episode->save();
+
+    $recording->delete();
+
+    expect(Series::find($series->id))->toBeNull();
+});
+
+it('keeps the Series alive when one of two episode recordings is deleted', function (): void {
+    // Authored by TestEngineer
+    $setting = DvrSetting::factory()->create(['storage_disk' => 'dvr']);
+    $series = Series::factory()->create();
+    $season = Season::factory()->create(['series_id' => $series->id]);
+    $episodeA = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+    ]);
+    $episodeB = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+    ]);
+    $recordingA = DvrRecording::factory()->create(['dvr_setting_id' => $setting->id]);
+    $recordingB = DvrRecording::factory()->create(['dvr_setting_id' => $setting->id]);
+    $episodeA->dvr_recording_id = $recordingA->id;
+    $episodeA->save();
+    $episodeB->dvr_recording_id = $recordingB->id;
+    $episodeB->save();
+
+    $recordingA->delete();
+
+    expect(Series::find($series->id))->not->toBeNull()
+        ->and(Episode::where('series_id', $series->id)->count())->toBe(1)
+        ->and(DvrRecording::find($recordingB->id))->not->toBeNull();
+});
+
+it('prunes an emptied Season while leaving its sibling Season and the Series intact', function (): void {
+    // Authored by TestEngineer
+    $setting = DvrSetting::factory()->create(['storage_disk' => 'dvr']);
+    $series = Series::factory()->create();
+    $seasonA = Season::factory()->create(['series_id' => $series->id]);
+    $seasonB = Season::factory()->create(['series_id' => $series->id]);
+    $episodeA = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $seasonA->id,
+    ]);
+    $episodeB = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $seasonB->id,
+    ]);
+    $recordingA = DvrRecording::factory()->create(['dvr_setting_id' => $setting->id]);
+    $recordingB = DvrRecording::factory()->create(['dvr_setting_id' => $setting->id]);
+    $episodeA->dvr_recording_id = $recordingA->id;
+    $episodeA->save();
+    $episodeB->dvr_recording_id = $recordingB->id;
+    $episodeB->save();
+
+    $recordingA->delete();
+
+    expect(Season::find($seasonA->id))->toBeNull()
+        ->and(Season::find($seasonB->id))->not->toBeNull()
+        ->and(Series::find($series->id))->not->toBeNull()
+        ->and(DvrRecording::find($recordingB->id))->not->toBeNull()
+        ->and(Episode::find($episodeB->id))->not->toBeNull();
+});
+
+it('does not delete the shared DVR category when the Series is pruned', function (): void {
+    // Authored by TestEngineer
+    $setting = DvrSetting::factory()->create(['storage_disk' => 'dvr']);
+    $category = Category::factory()->create(['name_internal' => 'DVR Recordings']);
+    $series = Series::factory()->create(['category_id' => $category->id]);
+    $season = Season::factory()->create(['series_id' => $series->id]);
+    $episode = Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+    ]);
+    $recording = DvrRecording::factory()->create(['dvr_setting_id' => $setting->id]);
+    $episode->dvr_recording_id = $recording->id;
+    $episode->save();
+
+    $recording->delete();
+
+    expect(Category::find($category->id))->not->toBeNull();
 });

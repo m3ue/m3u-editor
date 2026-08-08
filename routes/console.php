@@ -66,7 +66,7 @@ Schedule::command('queue:prune-failed --hours=48')
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();
 
-// Prune old model history
+// Prune old model history (also handles DeviceAuthorization via its Prunable trait)
 Schedule::command('model:prune')->daily();
 
 // Ensure m3u-proxy webhook is registered (handles proxy restarts, delayed startup, etc.)

@@ -41,4 +41,5 @@ return [
     // playlists (many VOD entries) on throttled/slow connections can take a while to fully
     // transfer; this covers the whole request (connect + transfer), not just the connect phase.
     'playlist_download_timeout' => env('PLAYLIST_DOWNLOAD_TIMEOUT', 900),
+    'epg_download_timeout' => env('EPG_DOWNLOAD_TIMEOUT', 900),
 ];
