@@ -63,6 +63,7 @@ it('advertises the versioned managed library publishing contract to authenticate
 
     $response->assertOk()
         ->assertJsonPath('m3u_editor.library_publishing.api_version', 1)
+        ->assertJsonPath('m3u_editor.library_publishing.actions.register_publisher', 'm3u_editor_register_publisher')
         ->assertJsonPath('m3u_editor.library_publishing.actions.catalog', 'm3u_editor_catalog')
         ->assertJsonPath('m3u_editor.library_publishing.actions.sync_result', 'm3u_editor_sync_result')
         ->assertJsonPath('m3u_editor.library_publishing.snapshot_mode', 'full')
@@ -79,6 +80,63 @@ it('advertises the versioned managed library publishing contract to authenticate
         ->not->toContain('/srv/emby');
 });
 
+it('advertises publisher registration before the first mapping exists', function () {
+    $this->mapping->delete();
+
+    $this->getJson(embyPublishingActionUrl('get_server_info'))
+        ->assertOk()
+        ->assertJsonPath(
+            'm3u_editor.library_publishing.actions.register_publisher',
+            'm3u_editor_register_publisher',
+        );
+});
+
+it('rejects invalid companion writable path advertisements', function (mixed $writablePaths) {
+    $response = $this->postJson('/player_api.php', [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_register_publisher',
+        'api_version' => 1,
+        'integration_id' => $this->integration->id,
+        'writable_paths' => $writablePaths,
+    ]);
+
+    $response->assertUnprocessable()
+        ->assertJsonPath('error.code', 'invalid_request');
+    expect($this->integration->refresh()->emby_publisher_writable_paths)->toBeNull()
+        ->and($this->integration->emby_publisher_capabilities_updated_at)->toBeNull();
+})->with([
+    'missing list' => null,
+    'relative path' => [['relative/path']],
+    'NUL-bearing path' => [["/srv/emby/managed\0/movies"]],
+    'overlong path' => [['/'.str_repeat('a', 1024)]],
+    'duplicate path' => [['/srv/emby/managed', '/srv/emby/managed']],
+    'duplicate normalized path' => [['/srv/emby/managed', ' /srv/emby/managed ']],
+    'associative path list' => [['movies' => '/srv/emby/managed']],
+    'over-limit list' => [array_map(fn (int $index): string => "/srv/emby/managed/{$index}", range(1, 51))],
+]);
+
+it('rejects cross-owner publisher registration', function () {
+    $otherUser = User::factory()->create(['permissions' => ['use_integrations']]);
+    $foreignIntegration = MediaServerIntegration::factory()->for($otherUser)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => null,
+    ]);
+
+    $this->postJson('/player_api.php', [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_register_publisher',
+        'api_version' => 1,
+        'integration_id' => $foreignIntegration->id,
+        'writable_paths' => ['/srv/emby/managed/movies'],
+    ])->assertNotFound()
+        ->assertJsonPath('error.code', 'integration_not_found');
+
+    expect($foreignIntegration->refresh()->emby_publisher_writable_paths)->toBeNull()
+        ->and($foreignIntegration->emby_publisher_capabilities_updated_at)->toBeNull();
+});
+
 it('denies managed library publishing to playlist credentials without explicit access', function () {
     $this->auth->update(['library_publishing_enabled' => false]);
 
@@ -89,6 +147,18 @@ it('denies managed library publishing to playlist credentials without explicit a
         'api_version' => 1,
     ]))->assertForbidden()
         ->assertJsonPath('error.code', 'library_publishing_unavailable');
+
+    $this->postJson('/player_api.php', [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_register_publisher',
+        'api_version' => 1,
+        'integration_id' => $this->integration->id,
+        'writable_paths' => ['/srv/emby/managed/movies'],
+    ])->assertForbidden()
+        ->assertJsonPath('error.code', 'library_publishing_unavailable');
+
+    expect($this->integration->refresh()->emby_publisher_writable_paths)->toBeNull();
 });
 
 it('publishes valid source-owner playback credentials to an opted-in companion', function () {

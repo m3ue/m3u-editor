@@ -6,6 +6,7 @@ use App\Models\EmbyLibraryMapping;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\EmbyPublicationCatalogService;
 use Filament\Actions\Action as FilamentAction;
@@ -71,6 +72,70 @@ it('creates an owned mapping from eligible sources and companion writable paths'
     expect($mapping->user_id)->toBe($user->id)
         ->and($mapping->media_server_integration_id)->toBe($integration->id)
         ->and($mapping->source_identifier)->toBe((string) $group->id)
+        ->and($mapping->output_path)->toBe('/srv/emby/managed/movies');
+});
+
+it('registers companion writable paths before creating the first owned mapping', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $auth = PlaylistAuth::factory()->for($user)->create([
+        'enabled' => true,
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'library_publishing_enabled' => true,
+    ]);
+    $auth->assignTo($playlist);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => null,
+    ]);
+
+    $this->postJson('/player_api.php', [
+        'username' => 'emby-companion',
+        'password' => 'companion-secret',
+        'action' => 'm3u_editor_register_publisher',
+        'api_version' => 1,
+        'integration_id' => $integration->id,
+        'writable_paths' => ['/srv/emby/managed/movies'],
+    ])->assertOk()
+        ->assertJsonPath('data.integration_id', $integration->id)
+        ->assertJsonPath('data.writable_paths', ['/srv/emby/managed/movies']);
+
+    expect($integration->refresh()->emby_publisher_writable_paths)
+        ->toBe(['/srv/emby/managed/movies'])
+        ->and($integration->emby_publisher_capabilities_updated_at)->not->toBeNull();
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'enabled' => true,
+        'source_kind' => 'vod_group',
+        'source_identifier' => (string) $group->id,
+        'source_label' => 'Action',
+        'target_library_id' => null,
+        'target_library_name' => 'Managed Movies',
+        'collection_type' => 'movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => true,
+        'options' => [
+            'naming' => 'media-year',
+            'nfo' => true,
+            'versions' => true,
+            'cleanup' => 'replace',
+            'refresh' => true,
+        ],
+    ])->assertHasNoActionErrors();
+
+    $mapping = EmbyLibraryMapping::query()->sole();
+    expect($mapping->user_id)->toBe($user->id)
+        ->and($mapping->media_server_integration_id)->toBe($integration->id)
         ->and($mapping->output_path)->toBe('/srv/emby/managed/movies');
 });
 
