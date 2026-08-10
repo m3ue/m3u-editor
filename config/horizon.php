@@ -186,10 +186,10 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             // Set maxProcesses to 1 if using SQLite to avoid database locks
-            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 12,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => (int) env('HORIZON_QUEUE_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 12),
+            'maxTime' => (int) env('HORIZON_QUEUE_MAX_TIME', 0),
+            'maxJobs' => (int) env('HORIZON_QUEUE_MAX_JOBS', 0),
+            'memory' => (int) env('HORIZON_QUEUE_MEMORY', 512), // MB
             'tries' => 3, // Number of times to attempt a job before marking it as failed
             'timeout' => 60 * 125, // Should be longer than the retry_after value set in queue.php
             'nice' => 0,
@@ -203,10 +203,10 @@ return [
             'connection' => 'redis',
             'queue' => ['schedules-direct'],
             'balance' => 'simple',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => (int) env('HORIZON_SD_MAX_PROCESSES', 1),
+            'maxTime' => (int) env('HORIZON_SD_MAX_TIME', 0),
+            'maxJobs' => (int) env('HORIZON_SD_MAX_JOBS', 0),
+            'memory' => (int) env('HORIZON_SD_MEMORY', 512), // MB
             'tries' => 3,
             'timeout' => 60 * 125,
             'nice' => 0,
@@ -218,10 +218,10 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             // Set maxProcesses to 1 if using SQLite to avoid database locks
-            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => (int) env('HORIZON_DVR_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4),
+            'maxTime' => (int) env('HORIZON_DVR_MAX_TIME', 0),
+            'maxJobs' => (int) env('HORIZON_DVR_MAX_JOBS', 0),
+            'memory' => (int) env('HORIZON_DVR_MEMORY', 512), // MB
             'tries' => 2, // DVR jobs get fewer retries to avoid duplicate recordings
             'timeout' => 60 * 60, // 1 hour (long-running recordings)
             'nice' => 5,
@@ -238,10 +238,10 @@ return [
             'connection' => 'redis',
             'queue' => ['aiostreams-resolve'],
             'balance' => 'simple',
-            'maxProcesses' => 2,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => (int) env('HORIZON_AIOSTREAMS_MAX_PROCESSES', 2),
+            'maxTime' => (int) env('HORIZON_AIOSTREAMS_MAX_TIME', 0),
+            'maxJobs' => (int) env('HORIZON_AIOSTREAMS_MAX_JOBS', 0),
+            'memory' => (int) env('HORIZON_AIOSTREAMS_MEMORY', 512), // MB
             'tries' => 1, // jobs handle their own empty-result retry/backoff internally
             'timeout' => 60 * 5,
             'nice' => 5,
