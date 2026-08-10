@@ -1124,6 +1124,14 @@ it('integrates through the channel when the setting has merged_playlist_id (play
 
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
     expect($episode->playlist_id)->toBe($sourcePlaylist->id);
+
+    $expectedUrl = route('dvr.recording.stream', [
+        'username' => $user->name,
+        'password' => $sourcePlaylist->uuid,
+        'uuid' => $recording->uuid,
+        'format' => $setting->dvr_output_format ?? 'ts',
+    ]);
+    expect($episode->url)->toBe($expectedUrl);
 });
 
 it('integrates through the channel when the setting has custom_playlist_id (playlist_id null)', function () {

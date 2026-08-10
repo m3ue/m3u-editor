@@ -8,6 +8,7 @@ use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Episode;
 use App\Models\Group;
+use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Support\EpisodeNumberParser;
@@ -183,7 +184,8 @@ class DvrVodIntegrationService
     private function buildStreamUrl(DvrRecording $recording): string
     {
         $setting = $recording->dvrSetting;
-        $playlist = $setting?->playlist;
+        $playlistId = $setting ? $this->resolvePlaylistId($setting, $recording) : null;
+        $playlist = $playlistId ? Playlist::find($playlistId) : null;
         $user = $recording->user;
 
         if ($playlist && $user) {
