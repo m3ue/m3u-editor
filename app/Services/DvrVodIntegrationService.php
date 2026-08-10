@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\DvrRecording;
+use App\Models\DvrSetting;
 use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Season;
@@ -44,11 +45,16 @@ class DvrVodIntegrationService
             return;
         }
 
-        $playlistId = $setting->playlist_id;
+        $playlistId = $this->resolvePlaylistId($setting, $recording);
         $userId = $recording->user_id;
 
         if (! $playlistId || ! $userId) {
-            Log::warning("DvrVodIntegration: missing playlist_id or user_id for recording {$recording->id} — skipping");
+            Log::warning("DvrVodIntegration: cannot resolve playlist_id for recording {$recording->id} — skipping", [
+                'setting_id' => $setting->id,
+                'channel_id' => $recording->channel_id,
+                'resolved_playlist_id' => $playlistId,
+                'user_id' => $userId,
+            ]);
 
             return;
         }
@@ -69,6 +75,37 @@ class DvrVodIntegrationService
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Resolve the real Playlist id used to key all VOD rows created from this
+     * recording.
+     *
+     * DvrSetting uses polymorphic-ish ownership (playlist_id /
+     * custom_playlist_id / merged_playlist_id — exactly one non-null). Series,
+     * Channel, Episode, Group, and Category rows all require a real Playlist FK,
+     * so when the setting's owner is a CustomPlaylist or MergedPlaylist we fall
+     * back to the recording's channel's playlist_id. Channels always resolve
+     * through to a real Playlist (a merged/custom playlist is just a virtual
+     * aggregation of source playlists), so the recording's actual broadcast
+     * source is the correct semantic target.
+     *
+     * Returns null when neither path yields a real Playlist id — caller is
+     * expected to skip integration in that case.
+     */
+    private function resolvePlaylistId(DvrSetting $setting, DvrRecording $recording): ?int
+    {
+        if ($setting->playlist_id !== null) {
+            return $setting->playlist_id;
+        }
+
+        $channel = $recording->channel;
+
+        if ($channel !== null && $channel->playlist_id !== null) {
+            return (int) $channel->playlist_id;
+        }
+
+        return null;
     }
 
     /**
