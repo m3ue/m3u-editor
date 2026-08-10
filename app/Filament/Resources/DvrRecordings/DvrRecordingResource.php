@@ -304,17 +304,6 @@ class DvrRecordingResource extends Resource
             ->recordActions([
                 ActionGroup::make([
                     ViewAction::make(),
-                    Action::make('watch')
-                        ->label(__('Watch'))
-                        ->icon('heroicon-o-play-circle')
-                        ->color('success')
-                        ->visible(fn (DvrRecording $record): bool => in_array($record->status, [
-                            DvrRecordingStatus::Recording,
-                            DvrRecordingStatus::Completed,
-                        ]) && $record->dvrSetting?->owner())
-                        ->action(function (DvrRecording $record, $livewire): void {
-                            $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
-                        }),
                     Action::make('retry')
                         ->label(__('Retry Post-Processing'))
                         ->icon('heroicon-o-arrow-path')
@@ -365,6 +354,20 @@ class DvrRecordingResource extends Resource
                     DeleteAction::make()
                         ->modalDescription(__('Are you sure you want to delete this recording? The file on disk and any linked VOD entry will also be removed.')),
                 ])->button()->hiddenLabel()->size('sm'),
+                Action::make('play')
+                    ->tooltip(__('Watch'))
+                    ->action(function (DvrRecording $record, $livewire): void {
+                        $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
+                    })
+                    ->icon('heroicon-s-play-circle')
+                    ->color('success')
+                    ->visible(fn (DvrRecording $record): bool => in_array($record->status, [
+                        DvrRecordingStatus::Recording,
+                        DvrRecordingStatus::Completed,
+                    ]) && $record->dvrSetting?->owner())
+                    ->button()
+                    ->hiddenLabel()
+                    ->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([

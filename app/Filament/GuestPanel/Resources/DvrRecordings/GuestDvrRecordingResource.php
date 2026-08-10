@@ -7,6 +7,7 @@ use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Jobs\ProcessComskipOnRecording;
 use App\Jobs\StopDvrRecording;
 use App\Models\DvrRecording;
+use App\Models\PlaylistAuth;
 use App\Tables\Columns\AnimatedStatusColumn;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -30,6 +31,36 @@ class GuestDvrRecordingResource extends Resource
     protected static ?string $model = DvrRecording::class;
 
     protected static ?string $slug = 'dvr';
+
+    /**
+     * Whether the given guest may play the given recording.
+     *
+     * Single source of truth for the play authorization, deliberately factored
+     * out of the table so it can be asserted directly. The guest panel resolves
+     * its auth from request attributes, and `Livewire::test()` cannot carry
+     * those across synthetic requests (see the note on
+     * setupGuestReleaseDateContext in the guest tests), so the action closures
+     * themselves are not reachable from a test. Keeping the predicate here means
+     * the rule is still covered, and — more importantly — that `visible()` and
+     * the in-action backend guard cannot drift apart, since both call this.
+     */
+    public static function guestCanPlay(DvrRecording $record, ?PlaylistAuth $auth): bool
+    {
+        if (! in_array($record->status, [
+            DvrRecordingStatus::Recording,
+            DvrRecordingStatus::Completed,
+        ], true)) {
+            return false;
+        }
+
+        if (! $record->dvrSetting?->owner()) {
+            return false;
+        }
+
+        // Guests may only play their own recordings. Owner-created recordings
+        // (null playlist_auth_id) are never a guest's to play.
+        return $auth !== null && $record->playlist_auth_id === $auth->id;
+    }
 
     public static function getNavigationLabel(): string
     {
@@ -271,6 +302,29 @@ class GuestDvrRecordingResource extends Resource
                                 ->send();
                         }),
                 ])->button()->hiddenLabel()->size('sm'),
+                Action::make('play')
+                    ->label(__('Watch'))
+                    ->tooltip(__('Watch'))
+                    ->icon('heroicon-s-play-circle')
+                    ->color('success')
+                    ->button()
+                    ->hiddenLabel()
+                    ->size('sm')
+                    ->visible(fn (DvrRecording $record): bool => static::guestCanPlay($record, $currentAuth))
+                    ->action(function (DvrRecording $record, $livewire) use ($currentAuth): void {
+                        // Backend guard — prevents forged Livewire calls bypassing
+                        // ->visible(). Same predicate, deliberately re-evaluated.
+                        if (! static::guestCanPlay($record, $currentAuth)) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('Unauthorized'))
+                                ->send();
+
+                            return;
+                        }
+
+                        $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
+                    }),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([]);
     }

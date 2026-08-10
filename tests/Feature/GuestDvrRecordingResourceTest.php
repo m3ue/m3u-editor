@@ -206,3 +206,82 @@ it('cancel guard accepts recordings in Recording status', function () {
     expect($isOwner)->toBeTrue()
         ->and($isCancellable)->toBeTrue();
 });
+
+// --- Play action visibility (visible() closure predicates) ---
+
+/*
+ * Play authorization (#1366).
+ *
+ * These assert GuestDvrRecordingResource::guestCanPlay() directly, which is the
+ * single predicate both ->visible() and the in-action backend guard call. The
+ * guest panel resolves its auth from request attributes and Livewire::test()
+ * cannot carry those across synthetic requests (see the note on
+ * setupGuestReleaseDateContext), so the action closures are not reachable from a
+ * test — asserting the shared predicate is what keeps the rule covered, and
+ * stops the two layers drifting apart.
+ */
+
+function makeGuestPlayRecording(object $ctx, DvrRecordingStatus $status, ?int $authId): DvrRecording
+{
+    return DvrRecording::factory()
+        ->for($ctx->dvrSetting)
+        ->for($ctx->user)
+        ->create(['playlist_auth_id' => $authId, 'status' => $status]);
+}
+
+it('guestCanPlay allows an owned Completed recording', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Completed, $this->guestA->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeTrue();
+});
+
+it('guestCanPlay allows an owned in-progress recording', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Recording, $this->guestA->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeTrue();
+});
+
+it('guestCanPlay REFUSES a recording owned by a different guest', function () {
+    // The security case: guest A must never play guest B's recording.
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Completed, $this->guestB->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeFalse();
+});
+
+it('guestCanPlay REFUSES an owner-created recording (null playlist_auth_id)', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Completed, null);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeFalse();
+});
+
+it('guestCanPlay REFUSES when there is no authenticated guest', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Completed, $this->guestA->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, null))->toBeFalse();
+});
+
+it('guestCanPlay REFUSES a Scheduled recording even when owned', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Scheduled, $this->guestA->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeFalse();
+});
+
+it('guestCanPlay REFUSES a Failed recording even when owned', function () {
+    $record = makeGuestPlayRecording($this, DvrRecordingStatus::Failed, $this->guestA->id);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeFalse();
+});
+
+it('guestCanPlay REFUSES when the DvrSetting has no resolvable owner', function () {
+    $orphanSetting = DvrSetting::factory()->enabled()->for($this->user)->create([
+        'playlist_id' => null,
+        'custom_playlist_id' => null,
+        'merged_playlist_id' => null,
+    ]);
+    $record = DvrRecording::factory()
+        ->for($orphanSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id, 'status' => DvrRecordingStatus::Completed]);
+
+    expect(GuestDvrRecordingResource::guestCanPlay($record, $this->guestA))->toBeFalse();
+});
