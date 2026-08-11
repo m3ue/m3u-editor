@@ -93,10 +93,21 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->required()
                                 ->searchable()
                                 ->live()
-                                ->afterStateUpdated(fn (Set $set, Get $get, ?string $state) => $set(
-                                    'source_label',
-                                    $this->sourceOptions($get('source_kind'))[$state] ?? null,
-                                )),
+                                ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
+                                    // For custom_playlist_group, sourceOptions() labels are the
+                                    // CustomPlaylist's own name — never a valid source_label value
+                                    // (that only ever comes from sourceLabelOptions(), which also
+                                    // needs collection_type to know which groups are eligible).
+                                    // Setting it here would populate "Mapped group" with a value
+                                    // that's guaranteed invalid until collection_type is chosen too.
+                                    if ($get('source_kind') === 'custom_playlist_group') {
+                                        $set('source_label', null);
+
+                                        return;
+                                    }
+
+                                    $set('source_label', $this->sourceOptions($get('source_kind'))[$state] ?? null);
+                                }),
                             Select::make('collection_type')
                                 ->label(__('Library type'))
                                 ->options([
@@ -132,7 +143,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 // it's disabled rather than hidden: still visible for transparency
                                 // and still validated/submitted, just not something the user needs
                                 // to (or can) redundantly re-pick.
-                                ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group')
+                                ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group' || ! $get('collection_type'))
                                 ->dehydrated()
                                 ->required()
                                 ->helperText(function (Get $get): string {

@@ -505,3 +505,32 @@ it('scopes Mapped group options to VOD groups for movies and series categories f
         ->and(embyMappedGroupOptions($component, 'custom_playlist_group', (string) $customPlaylist->id, 'tvshows'))
         ->toBe(['Drama' => 'Drama']);
 });
+
+it('does not prematurely populate Mapped group with the custom playlist\'s own name', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $customPlaylist = CustomPlaylist::factory()->for($user)->createQuietly(['name' => 'Sports']);
+    $vodChannel = Channel::factory()->for($user)->for($playlist)->createQuietly([
+        'group' => 'Action', 'is_vod' => true, 'enabled' => true,
+    ]);
+    $customPlaylist->channels()->attach([$vodChannel->id]);
+
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table());
+
+    // sourceOptions('custom_playlist_group') labels are the CustomPlaylist's
+    // own name ("Sports") — selecting it as "Source" must not leak that into
+    // "Mapped group", which is only ever populated from sourceLabelOptions().
+    $component->set('mountedActions.0.data.source_kind', 'custom_playlist_group')
+        ->set('mountedActions.0.data.source_identifier', (string) $customPlaylist->id)
+        ->assertSet('mountedActions.0.data.source_label', null);
+
+    // Nor should picking a library type resurrect the stale value.
+    $component->set('mountedActions.0.data.collection_type', 'movies')
+        ->assertSet('mountedActions.0.data.source_label', null);
+});
