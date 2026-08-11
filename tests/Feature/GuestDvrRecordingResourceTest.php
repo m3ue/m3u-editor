@@ -41,6 +41,25 @@ function setOwnerAuthRecordingContext(Playlist $playlist, User $user): void
     session()->put("{$prefix}guest_auth_password", $playlist->uuid);
 }
 
+/**
+ * Set up a "stale guest" session: the session still has credentials in the
+ * expected keys (so getCurrentAuth() returns non-null), but they don't match
+ * any PlaylistAuth row (so getCurrentPlaylistAuth() returns null). This is
+ * the state a guest lands in when their PlaylistAuth is revoked/disabled
+ * mid-session while stale session credentials still exist — the exact
+ * scenario issue #1398 follow-up is about. getDvrSetting() must still
+ * resolve normally via the request attribute so the only path that can leak
+ * is the playlist_auth_id whereNull() coercion of the original fix.
+ */
+function setStaleGuestRecordingContext(Playlist $playlist): void
+{
+    request()->attributes->set('playlist_uuid', $playlist->uuid);
+
+    $prefix = base64_encode($playlist->uuid).'_';
+    session()->put("{$prefix}guest_auth_username", 'nonexistent_guest');
+    session()->put("{$prefix}guest_auth_password", 'irrelevant_password');
+}
+
 beforeEach(function () {
     Queue::fake();
     config()->set('dvr.dvr_enabled', true);
@@ -453,4 +472,69 @@ it('guestCanCancel REFUSES anyone (including a resolvable owner_auth match) when
         ->create(['playlist_auth_id' => null, 'status' => DvrRecordingStatus::Scheduled]);
 
     expect(GuestDvrRecordingResource::guestCanCancel($recording, null))->toBeFalse();
+});
+
+// --- Stale-guest null-auth fail-open (issue #1398 follow-up) ---
+//
+// When a guest's PlaylistAuth is revoked/disabled while they still hold a
+// session with credentials in the expected keys, getCurrentAuth() returns
+// non-null but getCurrentPlaylistAuth() returns null. The merged fix for
+// #1398 (scoping to playlist_auth_id) is correct for live guests, but the
+// `?->id` fallback to whereNull() was turning that null into "show every
+// recording with playlist_auth_id = null" — i.e. the playlist owner's. The
+// fix in getEloquentQuery() must fail closed in this state. isOwnerAuth()
+// must be allowed through, otherwise the legitimate playlist-owner login
+// (which has no PlaylistAuth row) regresses.
+
+it('returns no recordings when getCurrentPlaylistAuth() resolves to null and the session is not owner-auth', function () {
+    $ownerRecording = DvrRecording::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null]);
+
+    DvrRecording::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id]);
+
+    setStaleGuestRecordingContext($this->playlist);
+
+    // Sanity check on the precondition — if these stop holding the test no
+    // longer exercises the bug it's meant to.
+    expect(GuestDvrRecordingResource::getDvrSetting())->not->toBeNull()
+        ->and(GuestDvrRecordingResource::getCurrentPlaylistAuth())->toBeNull();
+
+    $count = GuestDvrRecordingResource::getEloquentQuery()->count();
+
+    expect($count)->toBe(0);
+});
+
+it('returns no recordings when getCurrentPlaylistAuth() resolves to null even if the owner has recordings', function () {
+    // Specifically guard against leaking the owner's recording, which is the
+    // exact privacy regression #1398 exists to prevent.
+    DvrRecording::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null]);
+
+    setStaleGuestRecordingContext($this->playlist);
+
+    $ids = GuestDvrRecordingResource::getEloquentQuery()->pluck('id')->all();
+
+    expect($ids)->toBe([]);
+});
+
+it('navigation badge is null when getCurrentPlaylistAuth() resolves to null', function () {
+    DvrRecording::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null, 'status' => DvrRecordingStatus::Scheduled]);
+    DvrRecording::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id, 'status' => DvrRecordingStatus::Scheduled]);
+
+    setStaleGuestRecordingContext($this->playlist);
+
+    expect(GuestDvrRecordingResource::getNavigationBadge())->toBeNull();
 });

@@ -168,6 +168,19 @@ class GuestDvrRecordingResource extends Resource
 
         $currentAuth = static::getCurrentPlaylistAuth();
 
+        // Stale session: the credentials no longer resolve to a live
+        // PlaylistAuth row (e.g. revoked/disabled mid-session). Without this
+        // guard, Laravel's query builder turns `where(col, null)` into
+        // `whereNull(col)` and would happily return the playlist OWNER's
+        // recordings (the only ones with playlist_auth_id = null), re-opening
+        // the leak issue #1398 exists to close. isOwnerAuth() must be allowed
+        // through — the owner has no PlaylistAuth row, so getCurrentPlaylistAuth()
+        // legitimately returns null for them, and they own the recordings with
+        // playlist_auth_id = null.
+        if (! $currentAuth && ! static::isOwnerAuth()) {
+            return parent::getEloquentQuery()->whereRaw('1 = 0');
+        }
+
         return parent::getEloquentQuery()
             ->with(['channel', 'playlistAuth', 'dvrSetting.playlist', 'dvrSetting.customPlaylist', 'dvrSetting.mergedPlaylist'])
             ->where('dvr_setting_id', $dvrSetting->id)

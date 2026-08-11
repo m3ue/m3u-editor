@@ -28,6 +28,19 @@ class GuestScheduledSeriesWidget extends Widget
 
         $currentAuth = static::getCurrentPlaylistAuth();
 
+        // Stale session: the credentials no longer resolve to a live
+        // PlaylistAuth row (e.g. revoked/disabled mid-session). Without this
+        // guard, Laravel's query builder turns `where(col, null)` into
+        // `whereNull(col)` and would happily return the playlist OWNER's
+        // series rules (the only ones with playlist_auth_id = null),
+        // re-opening the leak issue #1398 exists to close. isOwnerAuth() must
+        // be allowed through — the owner has no PlaylistAuth row, so
+        // getCurrentPlaylistAuth() legitimately returns null for them, and
+        // they own the rules with playlist_auth_id = null.
+        if (! $currentAuth && ! static::isOwnerAuth()) {
+            return new Collection;
+        }
+
         return DvrRecordingRule::with(['channel'])
             ->where('dvr_setting_id', $dvrSetting->id)
             ->where('type', DvrRuleType::Series)
