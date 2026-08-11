@@ -345,23 +345,10 @@ class EmbyPublicationCatalogService
 
     private function seriesCanonicalId(Series $series): string
     {
-        $ids = $this->seriesIds($series);
-
-        if ($ids['tmdb'] !== null) {
-            return 'series:tmdb:'.$ids['tmdb'];
-        }
-
-        if ($ids['tvdb'] !== null) {
-            return 'series:tvdb:'.$ids['tvdb'];
-        }
-
-        if ($ids['imdb'] !== null) {
-            return 'series:imdb:'.Str::lower($ids['imdb']);
-        }
-
         $year = $this->seriesYear($series) ?? 'unknown';
+        $fallback = 'series:title:'.$this->safeComponent($series->name).':'.$year.':'.hash('sha256', (string) $series->id);
 
-        return 'series:title:'.$this->safeComponent($series->name).':'.$year.':'.hash('sha256', (string) $series->id);
+        return $this->canonicalIdFromIds('series', $this->seriesIds($series), $fallback);
     }
 
     /**
@@ -371,11 +358,11 @@ class EmbyPublicationCatalogService
     {
         $metadata = $series->metadata ?? [];
 
-        return [
-            'tmdb' => $this->integerId($series->tmdb_id ?? $metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null),
-            'tvdb' => $this->integerId($series->tvdb_id ?? $metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null),
-            'imdb' => $this->stringId($series->imdb_id ?? $metadata['imdb_id'] ?? $metadata['imdb'] ?? null),
-        ];
+        return $this->normalizeIds(
+            $series->tmdb_id ?? $metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null,
+            $series->tvdb_id ?? $metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null,
+            $series->imdb_id ?? $metadata['imdb_id'] ?? $metadata['imdb'] ?? null,
+        );
     }
 
     /**
@@ -428,18 +415,10 @@ class EmbyPublicationCatalogService
         $ids = $this->episodeIds($episode);
         $seasonNumber = (int) ($episode->season ?? 0);
         $episodeNumber = (int) ($episode->episode_num ?? 0);
-        $canonicalId = match (true) {
-            $ids['tmdb'] !== null => 'episode:tmdb:'.$ids['tmdb'],
-            $ids['tvdb'] !== null => 'episode:tvdb:'.$ids['tvdb'],
-            $ids['imdb'] !== null => 'episode:imdb:'.Str::lower($ids['imdb']),
-            $seasonNumber > 0 && $episodeNumber > 0 => sprintf(
-                'episode:%s:s%02de%02d',
-                $seriesCanonicalId,
-                $seasonNumber,
-                $episodeNumber,
-            ),
-            default => 'episode:source:'.hash('sha256', (string) $episode->id),
-        };
+        $fallback = $seasonNumber > 0 && $episodeNumber > 0
+            ? sprintf('episode:%s:s%02de%02d', $seriesCanonicalId, $seasonNumber, $episodeNumber)
+            : 'episode:source:'.hash('sha256', (string) $episode->id);
+        $canonicalId = $this->canonicalIdFromIds('episode', $ids, $fallback);
         $info = $episode->info ?? [];
         $originalTitle = (string) ($info['original_title'] ?? $episode->title);
         $variants = [
@@ -507,11 +486,11 @@ class EmbyPublicationCatalogService
     {
         $info = $episode->info ?? [];
 
-        return [
-            'tmdb' => $this->integerId($episode->tmdb_id ?? $info['tmdb_id'] ?? $info['tmdb'] ?? null),
-            'tvdb' => $this->integerId($info['tvdb_id'] ?? $info['tvdb'] ?? null),
-            'imdb' => $this->stringId($info['imdb_id'] ?? $info['imdb'] ?? null),
-        ];
+        return $this->normalizeIds(
+            $episode->tmdb_id ?? $info['tmdb_id'] ?? $info['tmdb'] ?? null,
+            $info['tvdb_id'] ?? $info['tvdb'] ?? null,
+            $info['imdb_id'] ?? $info['imdb'] ?? null,
+        );
     }
 
     private function seriesYear(Series $series): ?int
@@ -527,25 +506,16 @@ class EmbyPublicationCatalogService
 
     private function movieCanonicalId(Channel $channel): string
     {
-        $ids = $this->movieIds($channel);
-
-        if ($ids['tmdb'] !== null) {
-            return 'movie:tmdb:'.$ids['tmdb'];
-        }
-
-        if ($ids['imdb'] !== null) {
-            return 'movie:imdb:'.Str::lower($ids['imdb']);
-        }
-
-        if ($ids['tvdb'] !== null) {
-            return 'movie:tvdb:'.$ids['tvdb'];
-        }
-
         $title = $this->displayTitle($channel);
         $year = $this->movieYear($channel) ?? 'unknown';
         $sourceIdentity = $channel->uuid ?: (string) $channel->id;
+        $fallback = 'movie:title:'.$this->safeComponent($title).':'.$year.':'.hash('sha256', $sourceIdentity);
 
-        return 'movie:title:'.$this->safeComponent($title).':'.$year.':'.hash('sha256', $sourceIdentity);
+        // Priority is tmdb -> tvdb -> imdb, matching seriesCanonicalId() and
+        // episodeItem()'s cascade (canonicalIdFromIds()) — kept identical
+        // across media types so the same provider always wins when an item
+        // carries more than one external ID.
+        return $this->canonicalIdFromIds('movie', $this->movieIds($channel), $fallback);
     }
 
     /**
@@ -556,11 +526,11 @@ class EmbyPublicationCatalogService
         $info = $channel->info;
         $movieData = $channel->movie_data;
 
-        return [
-            'tmdb' => $this->integerId($channel->tmdb_id ?? $info['tmdb_id'] ?? $info['tmdb'] ?? $movieData['tmdb_id'] ?? null),
-            'tvdb' => $this->integerId($channel->tvdb_id ?? $info['tvdb_id'] ?? $info['tvdb'] ?? $movieData['tvdb_id'] ?? null),
-            'imdb' => $this->stringId($channel->imdb_id ?? $info['imdb_id'] ?? $info['imdb'] ?? $movieData['imdb_id'] ?? null),
-        ];
+        return $this->normalizeIds(
+            $channel->tmdb_id ?? $info['tmdb_id'] ?? $info['tmdb'] ?? $movieData['tmdb_id'] ?? null,
+            $channel->tvdb_id ?? $info['tvdb_id'] ?? $info['tvdb'] ?? $movieData['tvdb_id'] ?? null,
+            $channel->imdb_id ?? $info['imdb_id'] ?? $info['imdb'] ?? $movieData['imdb_id'] ?? null,
+        );
     }
 
     /**
@@ -732,5 +702,48 @@ class EmbyPublicationCatalogService
     private function stringId(mixed $value): ?string
     {
         return is_scalar($value) && trim((string) $value) !== '' ? trim((string) $value) : null;
+    }
+
+    /**
+     * Normalize a movie/series/episode's raw tmdb/tvdb/imdb field values into
+     * the shared {tmdb, tvdb, imdb} shape. Callers pull the raw values from
+     * whichever model-specific fields apply (Channel/Series/Episode each
+     * carry them under different property/metadata-array names), but the
+     * type coercion is identical everywhere, so it lives here once.
+     *
+     * @return array{tmdb: int|null, tvdb: int|null, imdb: string|null}
+     */
+    private function normalizeIds(mixed $tmdb, mixed $tvdb, mixed $imdb): array
+    {
+        return [
+            'tmdb' => $this->integerId($tmdb),
+            'tvdb' => $this->integerId($tvdb),
+            'imdb' => $this->stringId($imdb),
+        ];
+    }
+
+    /**
+     * Build a canonical ID from the shared tmdb -> tvdb -> imdb priority
+     * cascade, falling back to $fallback when none of the three are present.
+     * Shared by movie/series/episode canonical-ID resolution so the priority
+     * order can't silently drift between media types.
+     *
+     * @param  array{tmdb: int|null, tvdb: int|null, imdb: string|null}  $ids
+     */
+    private function canonicalIdFromIds(string $mediaType, array $ids, string $fallback): string
+    {
+        if ($ids['tmdb'] !== null) {
+            return "{$mediaType}:tmdb:{$ids['tmdb']}";
+        }
+
+        if ($ids['tvdb'] !== null) {
+            return "{$mediaType}:tvdb:{$ids['tvdb']}";
+        }
+
+        if ($ids['imdb'] !== null) {
+            return "{$mediaType}:imdb:".Str::lower($ids['imdb']);
+        }
+
+        return $fallback;
     }
 }
