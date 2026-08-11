@@ -698,7 +698,9 @@ it('denies timeshift stream access for a nonexistent channel', function () {
 it('handles null backdrop paths for get series when logo proxy is enabled', function () {
     $this->playlist->update(['enable_logo_proxy' => true]);
 
-    $category = Category::factory()->for($this->user)->create();
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+    ]);
 
     Series::factory()->create([
         'user_id' => $this->user->id,
@@ -720,14 +722,17 @@ it('orders series categories by sort order for a regular playlist', function () 
     $third = Category::factory()->for($this->user)->for($this->playlist)->create([
         'name' => 'Third',
         'sort_order' => 30,
+        'enabled' => true,
     ]);
     $first = Category::factory()->for($this->user)->for($this->playlist)->create([
         'name' => 'First',
         'sort_order' => 10,
+        'enabled' => true,
     ]);
     $second = Category::factory()->for($this->user)->for($this->playlist)->create([
         'name' => 'Second',
         'sort_order' => 20,
+        'enabled' => true,
     ]);
 
     foreach ([$first, $second, $third] as $category) {
@@ -746,6 +751,78 @@ it('orders series categories by sort order for a regular playlist', function () 
         ['First', 'Second', 'Third'],
         array_column($response->json(), 'category_name'),
     );
+});
+
+it('does not expose disabled series categories or their series', function () {
+    $visibleCategory = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Visible Series',
+        'enabled' => true,
+    ]);
+    $hiddenCategory = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Hidden Series',
+        'enabled' => false,
+    ]);
+
+    Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $visibleCategory->id,
+        'name' => 'Visible Show',
+        'enabled' => true,
+    ]);
+    Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $hiddenCategory->id,
+        'name' => 'Hidden Show',
+        'enabled' => true,
+    ]);
+
+    $categoriesResponse = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_categories'));
+    $seriesResponse = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $categoriesResponse->assertOk()
+        ->assertJsonFragment(['category_name' => 'Visible Series'])
+        ->assertJsonMissing(['category_name' => 'Hidden Series']);
+    $seriesResponse->assertOk()
+        ->assertJsonFragment(['name' => 'Visible Show'])
+        ->assertJsonMissing(['name' => 'Hidden Show']);
+});
+
+it('does not expose series info from a disabled category', function () {
+    $hiddenCategory = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => false,
+    ]);
+    $hiddenSeries = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $hiddenCategory->id,
+        'enabled' => true,
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl(
+        $this->username,
+        $this->password,
+        'get_series_info',
+        ['series_id' => $hiddenSeries->id],
+    ));
+
+    $response->assertNotFound();
+});
+
+it('keeps uncategorized series visible', function () {
+    Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => null,
+        'name' => 'Uncategorized Show',
+        'enabled' => true,
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $response->assertOk()
+        ->assertJsonFragment(['name' => 'Uncategorized Show']);
 });
 
 it('enables tv archive for live streams when shift is set', function () {
@@ -794,7 +871,9 @@ it('enables tv archive for live streams when shift is set', function () {
 });
 
 it('returns valid json with episode count for dvr series info', function () {
-    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+    ]);
 
     $series = Series::factory()->create([
         'user_id' => $this->user->id,

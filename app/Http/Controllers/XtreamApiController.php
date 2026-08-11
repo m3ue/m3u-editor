@@ -992,6 +992,13 @@ class XtreamApiController extends Controller
                 ->orderBy('series.sort', 'asc')
                 ->with(['tags', 'category']);
 
+            if (! $isCustomPlaylist) {
+                $seriesQuery->where(function ($query) {
+                    $query->whereNull('series.category_id')
+                        ->orWhereHas('category', fn ($categoryQuery) => $categoryQuery->where('enabled', true));
+                });
+            }
+
             // Apply category filtering if category_id is provided
             if ($categoryId && $categoryId !== 'all') {
                 if ($isCustomPlaylist) {
@@ -1120,9 +1127,18 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'series_id parameter is required for get_series_info action'], 400);
             }
 
-            $seriesItem = $playlist->series()
-                ->where('enabled', true)
-                ->where('series.id', $seriesId)
+            $seriesInfoQuery = $playlist->series()
+                ->where('series.enabled', true)
+                ->where('series.id', $seriesId);
+
+            if (! $isCustomPlaylist) {
+                $seriesInfoQuery->where(function ($query) {
+                    $query->whereNull('series.category_id')
+                        ->orWhereHas('category', fn ($categoryQuery) => $categoryQuery->where('enabled', true));
+                });
+            }
+
+            $seriesItem = $seriesInfoQuery
                 ->with(['seasons.episodes', 'category'])
                 ->first();
 
@@ -1562,7 +1578,8 @@ class XtreamApiController extends Controller
                 // Get categories from series only — the series() relationship on PlaylistAlias
                 // automatically applies any alias category filter, so no extra scoping needed.
                 $categories = $playlist->series()
-                    ->where('enabled', true)
+                    ->where('series.enabled', true)
+                    ->whereHas('category', fn ($query) => $query->where('enabled', true))
                     ->with('category')
                     ->get()
                     ->pluck('category')
