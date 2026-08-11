@@ -355,6 +355,7 @@ class DvrRecordingResource extends Resource
                         ->modalDescription(__('Are you sure you want to delete this recording? The file on disk and any linked VOD entry will also be removed.')),
                 ])->button()->hiddenLabel()->size('sm'),
                 Action::make('play')
+                    ->label(__('Watch'))
                     ->tooltip(__('Watch'))
                     ->action(function (DvrRecording $record, $livewire): void {
                         $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());

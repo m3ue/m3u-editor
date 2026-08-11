@@ -137,7 +137,7 @@ class GuestDvrRecordingResource extends Resource
         }
 
         return parent::getEloquentQuery()
-            ->with(['channel', 'playlistAuth'])
+            ->with(['channel', 'playlistAuth', 'dvrSetting.playlist', 'dvrSetting.customPlaylist', 'dvrSetting.mergedPlaylist'])
             ->where('dvr_setting_id', $dvrSetting->id)
             ->orderByDesc('scheduled_start');
     }
