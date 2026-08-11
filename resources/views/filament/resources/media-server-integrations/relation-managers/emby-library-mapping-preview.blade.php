@@ -4,10 +4,7 @@
 
 <div class="space-y-2">
     @if ($itemsTotal > $itemsShown)
-        <x-filament::callout
-            icon="heroicon-o-information-circle"
-            color="info"
-        >
+        <x-filament::callout icon="heroicon-o-information-circle" color="info">
             <x-slot name="heading">
                 {{ __('Showing :shown of :total items', ['shown' => $itemsShown, 'total' => $itemsTotal]) }}
             </x-slot>
