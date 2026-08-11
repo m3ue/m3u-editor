@@ -3129,7 +3129,22 @@ class XtreamApiController extends Controller
     ): bool {
         $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
-        if (! $effectivePlaylist || ! $effectivePlaylist->user?->canUseIntegrations()) {
+        return $effectivePlaylist !== null
+            && $this->libraryPublishingAuthorized($effectivePlaylist, $authMethod, $playlistAuth);
+    }
+
+    /**
+     * Core authorization check for the managed-library-publishing protocol,
+     * shared by canAdvertiseLibraryPublishing() (raw $playlist, used for the
+     * info-response feature flag) and the three action handlers below (which
+     * already hold an $effectivePlaylist and must not re-resolve it).
+     */
+    private function libraryPublishingAuthorized(
+        Playlist|CustomPlaylist|MergedPlaylist $effectivePlaylist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): bool {
+        if (! $effectivePlaylist->user?->canUseIntegrations()) {
             return false;
         }
 
@@ -3148,12 +3163,41 @@ class XtreamApiController extends Controller
             ->exists();
     }
 
+    /**
+     * Build the standard 400/422 error response for a failed api_version-
+     * gated validator, shared by the three managed-library-publishing action
+     * handlers below.
+     */
+    private function apiVersionValidationError(Request $request): JsonResponse
+    {
+        $code = $request->integer('api_version') !== 1
+            ? 'unsupported_api_version'
+            : 'invalid_request';
+
+        return $this->requestError(
+            $code,
+            $code === 'unsupported_api_version'
+                ? 'The requested API version is not supported.'
+                : 'The request parameters are invalid.',
+            $code === 'unsupported_api_version' ? 400 : 422,
+        );
+    }
+
     private function registerManagedLibraryPublisher(
         Request $request,
         mixed $playlist,
         string $authMethod,
         ?PlaylistAuth $playlistAuth,
     ): JsonResponse {
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
+        if (! $effectivePlaylist || ! $this->libraryPublishingAuthorized($effectivePlaylist, $authMethod, $playlistAuth)) {
+            return $this->requestError(
+                'library_publishing_unavailable',
+                'Managed library publishing is not available for these credentials.',
+                403,
+            );
+        }
+
         $input = $request->all();
         if (is_array($input['writable_paths'] ?? null)) {
             $input['writable_paths'] = array_map(
@@ -3171,39 +3215,14 @@ class XtreamApiController extends Controller
                 'string',
                 'distinct:strict',
                 function (string $attribute, mixed $value, \Closure $fail): void {
-                    $isAbsolute = is_string($value)
-                        && preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $value) === 1;
-
-                    if (! is_string($value)
-                        || strlen($value) > 1024
-                        || str_contains($value, "\0")
-                        || ! $isAbsolute) {
+                    if (! is_string($value) || ! MediaServerIntegration::isSafeWritablePath($value)) {
                         $fail('The :attribute must be a valid absolute path.');
                     }
                 },
             ],
         ]);
         if ($validator->fails()) {
-            $code = $request->integer('api_version') !== 1
-                ? 'unsupported_api_version'
-                : 'invalid_request';
-
-            return $this->requestError(
-                $code,
-                $code === 'unsupported_api_version'
-                    ? 'The requested API version is not supported.'
-                    : 'The request parameters are invalid.',
-                $code === 'unsupported_api_version' ? 400 : 422,
-            );
-        }
-
-        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
-        if (! $effectivePlaylist || ! $this->canAdvertiseLibraryPublishing($playlist, $authMethod, $playlistAuth)) {
-            return $this->requestError(
-                'library_publishing_unavailable',
-                'Managed library publishing is not available for these credentials.',
-                403,
-            );
+            return $this->apiVersionValidationError($request);
         }
 
         $validated = $validator->validated();
@@ -3234,30 +3253,20 @@ class XtreamApiController extends Controller
         string $authMethod,
         ?PlaylistAuth $playlistAuth,
     ): JsonResponse {
-        $validator = Validator::make($request->all(), [
-            'api_version' => ['required', 'integer', 'in:1'],
-        ]);
-        if ($validator->fails()) {
-            $code = $request->integer('api_version') !== 1
-                ? 'unsupported_api_version'
-                : 'invalid_request';
-
-            return $this->requestError(
-                $code,
-                $code === 'unsupported_api_version'
-                    ? 'The requested API version is not supported.'
-                    : 'The request parameters are invalid.',
-                $code === 'unsupported_api_version' ? 400 : 422,
-            );
-        }
-
         $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
-        if (! $effectivePlaylist || ! $this->canAdvertiseLibraryPublishing($playlist, $authMethod, $playlistAuth)) {
+        if (! $effectivePlaylist || ! $this->libraryPublishingAuthorized($effectivePlaylist, $authMethod, $playlistAuth)) {
             return $this->requestError(
                 'library_publishing_unavailable',
                 'Managed library publishing is not available for these credentials.',
                 403,
             );
+        }
+
+        $validator = Validator::make($request->all(), [
+            'api_version' => ['required', 'integer', 'in:1'],
+        ]);
+        if ($validator->fails()) {
+            return $this->apiVersionValidationError($request);
         }
 
         return response()->json(app(EmbyPublicationCatalogService::class)->buildForUser($effectivePlaylist->user));
@@ -3269,6 +3278,15 @@ class XtreamApiController extends Controller
         string $authMethod,
         ?PlaylistAuth $playlistAuth,
     ): JsonResponse {
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
+        if (! $effectivePlaylist || ! $this->libraryPublishingAuthorized($effectivePlaylist, $authMethod, $playlistAuth)) {
+            return $this->requestError(
+                'library_publishing_unavailable',
+                'Managed library publishing is not available for these credentials.',
+                403,
+            );
+        }
+
         $validator = Validator::make($request->all(), [
             'api_version' => ['required', 'integer', 'in:1'],
             'integration_id' => ['required', 'integer', 'min:1'],
@@ -3279,26 +3297,7 @@ class XtreamApiController extends Controller
             'error' => ['nullable', 'string', 'max:2000'],
         ]);
         if ($validator->fails()) {
-            $code = $request->integer('api_version') !== 1
-                ? 'unsupported_api_version'
-                : 'invalid_request';
-
-            return $this->requestError(
-                $code,
-                $code === 'unsupported_api_version'
-                    ? 'The requested API version is not supported.'
-                    : 'The request parameters are invalid.',
-                $code === 'unsupported_api_version' ? 400 : 422,
-            );
-        }
-
-        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
-        if (! $effectivePlaylist || ! $this->canAdvertiseLibraryPublishing($playlist, $authMethod, $playlistAuth)) {
-            return $this->requestError(
-                'library_publishing_unavailable',
-                'Managed library publishing is not available for these credentials.',
-                403,
-            );
+            return $this->apiVersionValidationError($request);
         }
 
         $validated = $validator->validated();

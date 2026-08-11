@@ -206,6 +206,33 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Whether a string is safe to store/advertise as an Emby publisher
+     * writable path: an absolute path (Unix, Windows drive, or UNC), within
+     * length/byte bounds, and free of ".." traversal segments.
+     *
+     * These paths live on the companion app's (Emby) host, never on
+     * m3u-editor's own filesystem, so there is no local root to resolve
+     * against via realpath() — this is a shape/sanity check, not a
+     * filesystem-boundary check. Shared by this model's own getter (paths
+     * already stored) and XtreamApiController::registerManagedLibraryPublisher()
+     * (paths a companion app is registering), so both enforce identical rules.
+     */
+    public static function isSafeWritablePath(string $path): bool
+    {
+        if ($path === '' || strlen($path) > 1024 || str_contains($path, "\0")) {
+            return false;
+        }
+
+        if (preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $path) !== 1) {
+            return false;
+        }
+
+        $segments = preg_split('/[\/\\\\]+/', $path);
+
+        return ! in_array('..', $segments, true);
+    }
+
+    /**
      * @return list<string>
      */
     public function getEmbyPublisherWritablePaths(): array
@@ -218,9 +245,8 @@ class MediaServerIntegration extends Model
             }
 
             $path = trim($path);
-            $isAbsolute = preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $path) === 1;
 
-            if ($path === '' || strlen($path) > 1024 || str_contains($path, "\0") || ! $isAbsolute) {
+            if (! static::isSafeWritablePath($path)) {
                 continue;
             }
 

@@ -108,6 +108,8 @@ it('rejects invalid companion writable path advertisements', function (mixed $wr
 })->with([
     'missing list' => null,
     'relative path' => [['relative/path']],
+    'traversal path' => [['/srv/emby/managed/../../etc']],
+    'traversal path (windows-style)' => [['C:\\emby\\managed\\..\\..\\Windows']],
     'NUL-bearing path' => [["/srv/emby/managed\0/movies"]],
     'overlong path' => [['/'.str_repeat('a', 1024)]],
     'duplicate path' => [['/srv/emby/managed', '/srv/emby/managed']],
