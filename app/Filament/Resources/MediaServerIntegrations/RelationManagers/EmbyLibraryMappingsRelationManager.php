@@ -39,6 +39,15 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
 
     protected static ?string $title = 'Managed Libraries';
 
+    /**
+     * Cap on how many catalog items the "Preview" action renders into the
+     * DOM. The full item list (used for the actual sync) can run into the
+     * thousands for a large library, which is enough to crash the browser
+     * once rendered as one big <pre> block — the revision hash and every
+     * other field are still computed from the complete, untruncated catalog.
+     */
+    private const int PREVIEW_ITEM_LIMIT = 50;
+
     public function isReadOnly(): bool
     {
         return false;
@@ -344,15 +353,33 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                 Action::make('preview')
                     ->label(__('Preview'))
                     ->icon('heroicon-o-eye')
-                    ->modalHeading(__('Exact catalog plan'))
+                    ->modalHeading(__('Catalog plan preview'))
                     ->modalWidth('4xl')
-                    ->modalContent(fn (EmbyLibraryMapping $record) => view(
-                        'filament.resources.media-server-integrations.relation-managers.emby-library-mapping-preview',
-                        ['catalog' => app(EmbyPublicationCatalogService::class)->buildMapping($record)],
-                    ))
+                    ->modalContent(function (EmbyLibraryMapping $record) {
+                        $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($record);
+                        $itemsTotal = count($catalog['items']);
+
+                        // The full catalog (all $itemsTotal items) is still what gets hashed
+                        // into 'revision' above and what actually gets synced — only the
+                        // rendered JSON is capped, since a large library's full item list can
+                        // be large enough to crash the browser rendering it into the DOM.
+                        if ($itemsTotal > self::PREVIEW_ITEM_LIMIT) {
+                            $catalog['items'] = array_slice($catalog['items'], 0, self::PREVIEW_ITEM_LIMIT);
+                        }
+
+                        return view(
+                            'filament.resources.media-server-integrations.relation-managers.emby-library-mapping-preview',
+                            [
+                                'catalog' => $catalog,
+                                'itemsTotal' => $itemsTotal,
+                                'itemsShown' => count($catalog['items']),
+                            ],
+                        );
+                    })
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
+                    ->slideOver()
                     ->modalSubmitAction(false),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([

@@ -4970,7 +4970,6 @@
     "Do not clean up files": "No limpiar archivos",
     "Emby library": "Biblioteca de Emby",
     "Emby library configuration differs from this mapping.": "La configuración de la biblioteca de Emby difiere de esta asignación.",
-    "Exact catalog plan": "Plan de catálogo exacto",
     "Existing library": "Biblioteca existente",
     "Keep stale managed files": "Conservar archivos gestionados obsoletos",
     "Last error": "Último error",
@@ -5008,5 +5007,7 @@
     "Choose a library type first.": "Primero elija un tipo de biblioteca.",
     "This custom playlist has no VOD groups available to publish as movies.": "Esta lista de reproducción personalizada no tiene grupos VOD disponibles para publicar como películas.",
     "This custom playlist has no series categories available to publish as TV shows.": "Esta lista de reproducción personalizada no tiene categorías de series disponibles para publicar como series de TV.",
-    "Copied!": "¡Copiado!"
+    "Catalog plan preview": "Vista previa del plan de catálogo",
+    "Showing :shown of :total items": "Mostrando :shown de :total elementos",
+    "The full catalog (all :total items) is what actually gets synced — this preview is capped so a large library does not crash the browser.": "El catálogo completo (los :total elementos) es lo que realmente se sincroniza; esta vista previa está limitada para que una biblioteca grande no bloquee el navegador."
 }

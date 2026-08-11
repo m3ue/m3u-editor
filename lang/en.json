@@ -3267,7 +3267,6 @@
     "Exact": "Exact",
     "Exact Match": "Exact Match",
     "Exact Match Distance": "Exact Match Distance",
-    "Exact catalog plan": "Exact catalog plan",
     "Exact normalized": "Exact normalized",
     "Exact normalized name only": "Exact normalized name only",
     "Exclude disabled groups from master selection": "Exclude disabled groups from master selection",
@@ -6066,5 +6065,7 @@
     "Choose a library type first.": "Choose a library type first.",
     "This custom playlist has no VOD groups available to publish as movies.": "This custom playlist has no VOD groups available to publish as movies.",
     "This custom playlist has no series categories available to publish as TV shows.": "This custom playlist has no series categories available to publish as TV shows.",
-    "Copied!": "Copied!"
+    "Catalog plan preview": "Catalog plan preview",
+    "Showing :shown of :total items": "Showing :shown of :total items",
+    "The full catalog (all :total items) is what actually gets synced — this preview is capped so a large library does not crash the browser.": "The full catalog (all :total items) is what actually gets synced — this preview is capped so a large library does not crash the browser."
 }

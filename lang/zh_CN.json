@@ -4970,7 +4970,6 @@
     "Do not clean up files": "不清理文件",
     "Emby library": "Emby 媒体库",
     "Emby library configuration differs from this mapping.": "Emby 媒体库配置与此映射不一致。",
-    "Exact catalog plan": "精确目录计划",
     "Existing library": "现有媒体库",
     "Keep stale managed files": "保留过期的受管理文件",
     "Last error": "最近一次错误",
@@ -5008,5 +5007,7 @@
     "Choose a library type first.": "请先选择媒体库类型。",
     "This custom playlist has no VOD groups available to publish as movies.": "此自定义播放列表没有可作为电影发布的点播 (VOD) 分组。",
     "This custom playlist has no series categories available to publish as TV shows.": "此自定义播放列表没有可作为电视剧发布的剧集分类。",
-    "Copied!": "已复制！"
+    "Catalog plan preview": "目录计划预览",
+    "Showing :shown of :total items": "显示 :total 个项目中的 :shown 个",
+    "The full catalog (all :total items) is what actually gets synced — this preview is capped so a large library does not crash the browser.": "实际同步的是完整目录（全部 :total 个项目）——为避免大型媒体库导致浏览器崩溃，此预览已做限制。"
 }

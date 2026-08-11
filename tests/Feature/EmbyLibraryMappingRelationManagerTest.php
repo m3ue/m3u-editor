@@ -581,3 +581,40 @@ it('disambiguates same-named VOD groups across playlists in the Source search, w
         ->set('mountedActions.0.data.source_identifier', (string) $groupB->id)
         ->assertSet('mountedActions.0.data.source_label', 'Action');
 });
+
+it('caps the number of items rendered in the Preview modal without affecting the actual revision hash', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'collection_type' => 'movies',
+        'target_library_id' => null,
+    ]);
+
+    // More than the 50-item preview cap.
+    Channel::factory()->for($user)->for($playlist)->count(60)->createQuietly([
+        'is_vod' => true, 'enabled' => true,
+    ]);
+
+    $fullPlan = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
+    expect($fullPlan['items'])->toHaveCount(60);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->assertTableActionExists('preview', function (FilamentAction $action) use ($fullPlan): bool {
+        $modalHtml = (string) $action->getModalContent();
+
+        // The rendered JSON only carries 50 items...
+        $renderedItemCount = substr_count($modalHtml, '&quot;canonical_id&quot;');
+
+        // ...but the revision shown is still the hash of the complete, untruncated catalog.
+        return $renderedItemCount === 50
+            && str_contains($modalHtml, $fullPlan['revision']);
+    }, $mapping);
+});
