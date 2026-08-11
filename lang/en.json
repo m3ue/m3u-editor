@@ -6057,5 +6057,8 @@
     "your-api-key-here": "your-api-key-here",
     "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist": "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist",
     "—": "—",
-    "— Any —": "— Any —"
+    "— Any —": "— Any —",
+    "Managed library configuration drifted": "Managed library configuration drifted",
+    "Emby library configuration differs from this mapping.": "Emby library configuration differs from this mapping.",
+    "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it."
 }

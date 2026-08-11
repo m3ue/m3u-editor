@@ -166,6 +166,27 @@ class EmbyJellyfinService implements MediaServer
      * @param  list<string>  $paths
      * @return array{success: bool, created: bool, message: string, library: array<string, mixed>|null}
      */
+    /**
+     * Build the standard createLibrary() result shape, so every return path
+     * carries the same keys (including 'drift') instead of each branch
+     * assembling its own array and risking an omitted key.
+     */
+    private function libraryResult(
+        bool $success,
+        bool $created,
+        string $message,
+        ?array $library = null,
+        bool $drift = false,
+    ): array {
+        return [
+            'success' => $success,
+            'created' => $created,
+            'message' => $message,
+            'library' => $library,
+            'drift' => $drift,
+        ];
+    }
+
     public function createLibrary(
         string $name,
         string $collectionType,
@@ -174,21 +195,11 @@ class EmbyJellyfinService implements MediaServer
         ?string $libraryId = null,
     ): array {
         if (! $this->integration->isEmby()) {
-            return [
-                'success' => false,
-                'created' => false,
-                'message' => 'Managed library creation is supported only for Emby.',
-                'library' => null,
-            ];
+            return $this->libraryResult(false, false, 'Managed library creation is supported only for Emby.');
         }
 
         if (! in_array($collectionType, ['movies', 'tvshows'], true)) {
-            return [
-                'success' => false,
-                'created' => false,
-                'message' => 'Invalid Emby library collection type.',
-                'library' => null,
-            ];
+            return $this->libraryResult(false, false, 'Invalid Emby library collection type.');
         }
 
         $paths = array_values(array_unique(array_map(
@@ -196,19 +207,11 @@ class EmbyJellyfinService implements MediaServer
             $paths,
         )));
         $hasInvalidPath = $paths === [] || collect($paths)->contains(
-            fn (string $path): bool => $path === ''
-                || strlen($path) > 1024
-                || str_contains($path, "\0")
-                || preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $path) !== 1,
+            fn (string $path): bool => ! MediaServerIntegration::isSafeWritablePath($path),
         );
 
         if ($hasInvalidPath) {
-            return [
-                'success' => false,
-                'created' => false,
-                'message' => 'Invalid Emby library path.',
-                'library' => null,
-            ];
+            return $this->libraryResult(false, false, 'Invalid Emby library path.');
         }
 
         try {
@@ -218,15 +221,11 @@ class EmbyJellyfinService implements MediaServer
                 : $existingLibraries->firstWhere('id', $libraryId);
 
             if ($existingLibrary !== null) {
-                return [
-                    'success' => true,
-                    'created' => false,
-                    'message' => 'Existing Emby library found by ID.',
-                    'library' => $existingLibrary,
-                    'drift' => $existingLibrary['name'] !== $name
-                        || $existingLibrary['type'] !== $collectionType
-                        || $existingLibrary['paths'] !== $paths,
-                ];
+                $drift = $existingLibrary['name'] !== $name
+                    || $existingLibrary['type'] !== $collectionType
+                    || $existingLibrary['paths'] !== $paths;
+
+                return $this->libraryResult(true, false, 'Existing Emby library found by ID.', $existingLibrary, $drift);
             }
 
             $existingLibrary = $existingLibraries->first(fn (array $library): bool => $library['name'] === $name
@@ -234,25 +233,13 @@ class EmbyJellyfinService implements MediaServer
                 && $library['paths'] === $paths);
 
             if ($existingLibrary !== null) {
-                return [
-                    'success' => true,
-                    'created' => false,
-                    'message' => 'Existing managed Emby library found.',
-                    'library' => $existingLibrary,
-                    'drift' => false,
-                ];
+                return $this->libraryResult(true, false, 'Existing managed Emby library found.', $existingLibrary);
             }
 
             $conflictingLibrary = $existingLibraries->firstWhere('name', $name);
 
             if ($conflictingLibrary !== null) {
-                return [
-                    'success' => false,
-                    'created' => false,
-                    'message' => 'An Emby library with this name has different settings.',
-                    'library' => $conflictingLibrary,
-                    'drift' => true,
-                ];
+                return $this->libraryResult(false, false, 'An Emby library with this name has different settings.', $conflictingLibrary, true);
             }
 
             $response = $this->client()->post('/Library/VirtualFolders', [
@@ -263,36 +250,21 @@ class EmbyJellyfinService implements MediaServer
             ]);
 
             if (! $response->successful()) {
-                return [
-                    'success' => false,
-                    'created' => false,
-                    'message' => 'Emby rejected the library request.',
-                    'library' => null,
-                ];
+                return $this->libraryResult(false, false, 'Emby rejected the library request.');
             }
 
             $library = $this->fetchLibraries()->first(fn (array $library): bool => $library['name'] === $name
                 && $library['type'] === $collectionType
                 && $library['paths'] === $paths);
 
-            return [
-                'success' => true,
-                'created' => true,
-                'message' => 'Emby library created.',
-                'library' => $library,
-            ];
+            return $this->libraryResult(true, true, 'Emby library created.', $library);
         } catch (Exception $exception) {
             Log::warning('EmbyJellyfinService: Library creation failed', [
                 'integration_id' => $this->integration->id,
                 'exception' => $exception::class,
             ]);
 
-            return [
-                'success' => false,
-                'created' => false,
-                'message' => 'Emby library request failed.',
-                'library' => null,
-            ];
+            return $this->libraryResult(false, false, 'Emby library request failed.');
         }
     }
 

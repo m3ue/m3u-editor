@@ -22,7 +22,7 @@ interface MediaServer
 
     /**
      * @param  list<string>  $paths
-     * @return array{success: bool, created: bool, message: string, library: array<string, mixed>|null}
+     * @return array{success: bool, created: bool, message: string, library: array<string, mixed>|null, drift: bool}
      */
     public function createLibrary(
         string $name,

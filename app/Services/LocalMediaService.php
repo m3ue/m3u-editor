@@ -31,6 +31,7 @@ class LocalMediaService implements MediaServer
             'created' => false,
             'message' => 'Library creation is not supported by this media server.',
             'library' => null,
+            'drift' => false,
         ];
     }
 

@@ -21,6 +21,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -50,6 +51,13 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         return $ownerRecord->isEmby()
             && $user?->canUseIntegrations()
             && ($user->isAdmin() || $ownerRecord->user_id === $user->id);
+    }
+
+    public static function getTabComponent(Model $ownerRecord, string $pageClass): Tab
+    {
+        return Tab::make(__('Managed Libraries'))
+            ->badge($ownerRecord->embyLibraryMappings()->count())
+            ->icon('heroicon-m-rectangle-stack');
     }
 
     public function form(Schema $schema): Schema
@@ -208,7 +216,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         'synced' => 'success',
-                        'failed' => 'danger',
+                        'failed', 'drifted' => 'danger',
                         'pending', 'planned' => 'warning',
                         default => 'gray',
                     }),
@@ -231,6 +239,12 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             ])
             ->filters([])
             ->headerActions([
+                Action::make('download_m3u_emby_plugin')
+                    ->label(__('Get m3u-editor for Emby'))
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->color('gray')
+                    ->url('https://github.com/Serph91P/m3u-editor-for-emby')
+                    ->openUrlInNewTab(),
                 CreateAction::make()
                     ->label(__('Create mapping'))
                     ->mutateDataUsing(fn (array $data): array => [
@@ -388,6 +402,27 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             Notification::make()
                 ->warning()
                 ->title(__('Pending'))
+                ->send();
+
+            return;
+        }
+
+        // Emby's VirtualFolders API found the library by ID, but its name,
+        // type, or paths no longer match this mapping — most likely someone
+        // edited the mapping (or the library itself) after they were last in
+        // sync. We don't auto-correct Emby's config here (renaming/moving a
+        // library's paths can be destructive), so surface it clearly instead
+        // of reporting a silent "planned" success.
+        if ($result['drift'] ?? false) {
+            $mapping->updateQuietly([
+                'status' => 'drifted',
+                'status_summary' => __('Emby library configuration differs from this mapping.'),
+                'error_summary' => null,
+            ]);
+            Notification::make()
+                ->warning()
+                ->title(__('Managed library configuration drifted'))
+                ->body(__('The existing Emby library\'s name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.'))
                 ->send();
 
             return;
