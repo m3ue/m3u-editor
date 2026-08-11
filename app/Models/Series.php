@@ -313,18 +313,22 @@ class Series extends Model
                                 'metadata' => $seasonInfo,
                             ]);
                         } else {
-                            // Update the season if it exists
+                            // Update the season if it exists. Only overwrite the
+                            // provider-sourced fields when the provider actually sent
+                            // matching season info this time around — otherwise keep
+                            // whatever was previously fetched instead of clobbering it
+                            // with a generic fallback.
                             $playlistSeason->update([
                                 'new' => false,
-                                'name' => $seasonInfo['name'] ?? 'Season '.str_pad($season, 2, '0', STR_PAD_LEFT),
-                                'source_season_id' => $seasonInfo['id'] ?? null,
+                                'name' => $seasonInfo['name'] ?? $playlistSeason->name,
+                                'source_season_id' => $seasonInfo['id'] ?? $playlistSeason->source_season_id,
                                 'category_id' => $playlistCategory->id,
-                                'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
-                                'cover' => $seasonInfo['cover'] ?? null,
-                                'cover_big' => $seasonInfo['cover_big'] ?? null,
+                                'episode_count' => (int) ($seasonInfo['episode_count'] ?? $playlistSeason->episode_count),
+                                'cover' => $seasonInfo['cover'] ?? $playlistSeason->getRawOriginal('cover'),
+                                'cover_big' => $seasonInfo['cover_big'] ?? $playlistSeason->getRawOriginal('cover_big'),
                                 'series_id' => $this->id,
                                 'import_batch_no' => $batchNo,
-                                'metadata' => $seasonInfo,
+                                'metadata' => $seasonInfo ?: $playlistSeason->metadata,
                             ]);
                         }
 

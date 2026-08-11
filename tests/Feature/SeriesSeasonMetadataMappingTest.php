@@ -114,3 +114,70 @@ it('reassigns an existing episode when the provider moves it to another season',
     expect($episode->season)->toBe(2)
         ->and($episode->season_id)->toBe($seasonTwo->id);
 });
+
+it('does not clobber an existing season name and cover when the provider stops sending metadata for it', function () {
+    Http::fakeSequence('provider.test/player_api.php*')
+        ->push([
+            'info' => ['name' => 'Test Series'],
+            'seasons' => [
+                ['id' => 101, 'season_number' => 1, 'name' => 'Season One', 'cover' => 'https://provider.test/s1.jpg'],
+            ],
+            'episodes' => [
+                '1' => [[
+                    'id' => 1001,
+                    'episode_num' => 1,
+                    'title' => 'S01E01 - Episode',
+                    'container_extension' => 'mkv',
+                    'info' => [],
+                ]],
+            ],
+        ])
+        ->push([
+            'info' => ['name' => 'Test Series'],
+            // Provider's next response omits season 1 entirely (only season 2 has explicit metadata).
+            'seasons' => [
+                ['id' => 102, 'season_number' => 2, 'name' => 'Season Two'],
+            ],
+            'episodes' => [
+                '1' => [[
+                    'id' => 1001,
+                    'episode_num' => 1,
+                    'title' => 'S01E01 - Episode',
+                    'container_extension' => 'mkv',
+                    'info' => [],
+                ]],
+            ],
+        ]);
+
+    expect($this->series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false))->toBeTrue();
+    $seasonOne = Season::where('series_id', $this->series->id)->where('season_number', 1)->firstOrFail();
+    expect($seasonOne->name)->toBe('Season One')
+        ->and($seasonOne->getRawOriginal('cover'))->toBe('https://provider.test/s1.jpg');
+
+    expect($this->series->fresh()->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false))->toBeTrue();
+    $seasonOne->refresh();
+
+    expect($seasonOne->name)->toBe('Season One')
+        ->and($seasonOne->getRawOriginal('cover'))->toBe('https://provider.test/s1.jpg');
+});
+
+it('falls back to the series cover when a season has no provider artwork of its own', function () {
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $this->category->id,
+        'cover' => 'https://provider.test/series-cover.jpg',
+    ]);
+
+    $season = Season::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $this->category->id,
+        'series_id' => $series->id,
+        'cover' => null,
+        'cover_big' => null,
+    ]);
+
+    expect($season->cover)->toBe('https://provider.test/series-cover.jpg')
+        ->and($season->cover_big)->toBe('https://provider.test/series-cover.jpg');
+});
