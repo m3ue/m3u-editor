@@ -101,6 +101,45 @@ class Series extends Model
         return $this->hasMany(Episode::class)->where('enabled', true);
     }
 
+    /**
+     * Resolve provider season metadata by its explicit season number.
+     *
+     * Xtream providers commonly return seasons as a zero-indexed JSON list,
+     * while episodes are keyed by the real season number (1, 2, ...).
+     */
+    private static function resolveProviderSeasonInfo(array $seasons, int|string $seasonNumber): array
+    {
+        $target = (int) $seasonNumber;
+        $hasExplicitSeasonNumber = false;
+
+        foreach ($seasons as $seasonInfo) {
+            if (! is_array($seasonInfo)) {
+                continue;
+            }
+
+            $candidate = $seasonInfo['season_number'] ?? $seasonInfo['season'] ?? null;
+            if ($candidate !== null) {
+                $hasExplicitSeasonNumber = true;
+                if ((int) $candidate === $target) {
+                    return $seasonInfo;
+                }
+            }
+        }
+
+        if ($hasExplicitSeasonNumber) {
+            return [];
+        }
+
+        if (! array_is_list($seasons) && isset($seasons[$seasonNumber]) && is_array($seasons[$seasonNumber])) {
+            return $seasons[$seasonNumber];
+        }
+
+        $orderedSeasons = array_values(array_filter($seasons, 'is_array'));
+        $position = $target - 1;
+
+        return $position >= 0 && isset($orderedSeasons[$position]) ? $orderedSeasons[$position] : [];
+    }
+
     public function getMovieDbIds(): array
     {
         $tvdbId = $this->tvdb_id ?? $this->metadata['tvdb_id'] ?? $this->metadata['tvdb'] ?? null;
@@ -255,7 +294,7 @@ class Series extends Model
                             ->first();
 
                         // Get season info if available
-                        $seasonInfo = $seasons[$season] ?? [];
+                        $seasonInfo = self::resolveProviderSeasonInfo($seasons, $season);
 
                         if (! $playlistSeason) {
                             // Create the season if it doesn't exist
@@ -277,6 +316,7 @@ class Series extends Model
                             // Update the season if it exists
                             $playlistSeason->update([
                                 'new' => false,
+                                'name' => $seasonInfo['name'] ?? 'Season '.str_pad($season, 2, '0', STR_PAD_LEFT),
                                 'source_season_id' => $seasonInfo['id'] ?? null,
                                 'category_id' => $playlistCategory->id,
                                 'episode_count' => (int) ($seasonInfo['episode_count'] ?? 0),
@@ -333,6 +373,7 @@ class Series extends Model
                             update: [
                                 'title',
                                 'import_batch_no',
+                                'season_id',
                                 'episode_num',
                                 'container_extension',
                                 'custom_sid',
