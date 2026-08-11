@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DvrRecording extends Model
 {
@@ -429,6 +430,46 @@ class DvrRecording extends Model
     public function hasFilePath(): bool
     {
         return $this->status === DvrRecordingStatus::Completed && ! empty($this->file_path);
+    }
+
+    /**
+     * Resolve the storage disk this recording's file lives on.
+     */
+    public function resolveStorageDisk(): string
+    {
+        return $this->dvrSetting?->storage_disk ?: config('dvr.storage_disk');
+    }
+
+    /**
+     * Resolve the MIME type from the recording file's extension.
+     */
+    public function resolveMimeType(): string
+    {
+        return match (strtolower(pathinfo($this->file_path, PATHINFO_EXTENSION))) {
+            'mp4' => 'video/mp4',
+            'mkv' => 'video/x-matroska',
+            default => 'video/mp2t',
+        };
+    }
+
+    /**
+     * Build a download response for this recording's file, or null if the
+     * file is missing from disk. Delegates the actual streaming to the
+     * storage disk's driver rather than hand-rolling fopen/fread, so
+     * missing/unreadable files are handled by Flysystem instead of risking
+     * a TypeError from feof()/fread() on a failed fopen().
+     */
+    public function downloadResponse(): ?StreamedResponse
+    {
+        $disk = $this->resolveStorageDisk();
+
+        if (! Storage::disk($disk)->exists($this->file_path)) {
+            return null;
+        }
+
+        return Storage::disk($disk)->download($this->file_path, basename($this->file_path), [
+            'Content-Type' => $this->resolveMimeType(),
+        ]);
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\BackupDownloadController;
 use App\Http\Controllers\ChannelController;
+use App\Http\Controllers\DvrRecordingDownloadController;
 use App\Http\Controllers\DvrStreamController;
 use App\Http\Controllers\EpgController;
 use App\Http\Controllers\EpgFileController;
@@ -127,6 +128,10 @@ Route::get('/admin/backups/download/{disk}/{path}', BackupDownloadController::cl
     ->middleware(['auth'])
     ->where('path', '[A-Za-z0-9\-_]+')
     ->name('backups.download');
+
+Route::get('/admin/dvr-recordings/{recording}/download', DvrRecordingDownloadController::class)
+    ->middleware(['auth'])
+    ->name('dvr-recordings.download');
 
 Route::get('/extension-plugins/{plugin}/runs/{run}/report', PluginRunReportController::class)
     ->middleware(['auth'])
