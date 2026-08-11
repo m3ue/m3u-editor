@@ -186,7 +186,7 @@ it('scopes rules to the current playlist DvrSetting', function () {
     $otherPlaylist = Playlist::factory()->for($otherUser)->create();
     $otherSetting = DvrSetting::factory()->enabled()->for($otherPlaylist)->for($otherUser)->create();
 
-    DvrRecordingRule::factory()->for($this->dvrSetting)->for($this->user)->create();
+    DvrRecordingRule::factory()->for($this->dvrSetting)->for($this->user)->create(['playlist_auth_id' => $this->guestA->id]);
     DvrRecordingRule::factory()->for($otherSetting)->for($otherUser)->create();
 
     $ids = GuestDvrRuleResource::getEloquentQuery()->pluck('dvr_setting_id')->unique()->all();
@@ -201,6 +201,38 @@ it('returns no rules when no DvrSetting exists', function () {
     $count = GuestDvrRuleResource::getEloquentQuery()->count();
 
     expect($count)->toBe(0);
+});
+
+it('excludes rules owned by a different guest from the list query', function () {
+    $ownRule = DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id]);
+
+    DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestB->id]);
+
+    $ids = GuestDvrRuleResource::getEloquentQuery()->pluck('id')->all();
+
+    expect($ids)->toBe([$ownRule->id]);
+});
+
+it('excludes owner-created rules (null playlist_auth_id) from the list query', function () {
+    $ownRule = DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id]);
+
+    DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null]);
+
+    $ids = GuestDvrRuleResource::getEloquentQuery()->pluck('id')->all();
+
+    expect($ids)->toBe([$ownRule->id]);
 });
 
 // --- create action null guard ---

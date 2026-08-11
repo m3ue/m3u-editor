@@ -103,9 +103,14 @@ class GuestDvrRuleResource extends Resource
             return parent::getEloquentQuery()->whereRaw('1 = 0');
         }
 
+        $currentAuth = static::getCurrentPlaylistAuth();
+
         return parent::getEloquentQuery()
             ->with(['channel', 'playlistAuth'])
             ->where('dvr_setting_id', $dvrSetting->id)
+            // Guests only see their own rules — never another guest's, nor
+            // the playlist owner's (null playlist_auth_id).
+            ->where('playlist_auth_id', $currentAuth?->id)
             ->orderByDesc('created_at');
     }
 

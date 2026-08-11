@@ -26,10 +26,15 @@ class GuestScheduledSeriesWidget extends Widget
             return new Collection;
         }
 
+        $currentAuth = static::getCurrentPlaylistAuth();
+
         return DvrRecordingRule::with(['channel'])
             ->where('dvr_setting_id', $dvrSetting->id)
             ->where('type', DvrRuleType::Series)
             ->where('enabled', true)
+            // Guests only see their own series rules — never another
+            // guest's, nor the playlist owner's (null playlist_auth_id).
+            ->where('playlist_auth_id', $currentAuth?->id)
             ->orderByDesc('priority')
             ->orderBy('series_title')
             ->get();
