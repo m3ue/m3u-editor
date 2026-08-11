@@ -37,6 +37,7 @@ use App\Services\DvrRecorderService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\VodFileNameService;
 use App\Settings\GeneralSettings;
 use App\Support\SeriesKey;
 use Carbon\Carbon;
@@ -904,8 +905,9 @@ class XtreamApiController extends Controller
             }
 
             $cursor = $channelsQuery->cursor();
+            $vodFileNameService = app(VodFileNameService::class);
 
-            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist) {
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService) {
                 $num = 0;
                 $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
@@ -953,7 +955,7 @@ class XtreamApiController extends Controller
                         'num' => $vodChannelNo,
                         'name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->title_custom ?? $channel->title,
-                        'year' => $channel->year ?? '',
+                        'year' => $vodFileNameService->resolveMovieYear($channel),
                         'stream_type' => 'movie',
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,

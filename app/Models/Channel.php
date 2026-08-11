@@ -745,10 +745,9 @@ class Channel extends Model
                     // Make sure base release_date is always set
                     $movieData['info']['release_date'] = $releaseDateAlt;
                 }
-                if ($releaseDate || $releaseDateAlt) {
-                    // If either data is set, and year is not set, update it
+                if (empty($year) && ($releaseDate || $releaseDateAlt)) {
+                    // Derive a year only when one has not already been stored.
                     $dateToParse = $releaseDate ?? $releaseDateAlt;
-                    $year = null;
                     try {
                         $date = new \DateTime($dateToParse);
                         $year = (int) $date->format('Y');
