@@ -382,7 +382,7 @@ it('falls back to VOD metadata when the channel year is missing', function () {
     $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
 
     $response->assertOk()
-        ->assertJsonPath('0.year', '2024');
+        ->assertJsonPath('0.year', 2024);
 });
 
 // Tests for get_vod_info - returns VOD channel (movie) info, not Series
@@ -416,6 +416,24 @@ it('returns vod info successfully', function () {
         ])
         ->assertJsonPath('movie_data.stream_id', $vodChannel->id)
         ->assertJsonPath('movie_data.name', 'Test Movie');
+});
+
+it('falls back to VOD metadata when the channel year is missing for get vod info', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Metadata Year Movie',
+        'year' => null,
+        'rating' => 8.5,
+        'last_metadata_fetch' => now(), // Skip metadata fetch in test
+        'info' => ['release_date' => '2024-05-17'],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('movie_data.year', 2024);
 });
 
 it('returns not found for get vod info when vod is missing', function () {

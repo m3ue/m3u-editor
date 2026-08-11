@@ -250,6 +250,17 @@ class VodFileNameService
     }
 
     /**
+     * Same resolution as resolveMovieYear(), normalized to the Channel model's
+     * `year` attribute type (nullable int) for API responses.
+     */
+    public function resolveMovieYearAsInt(Channel $channel): ?int
+    {
+        $year = $this->resolveMovieYear($channel);
+
+        return $year !== '' ? (int) $year : null;
+    }
+
+    /**
      * @param  array<string, mixed>  $values
      * @param  array<string>  $keys
      */
