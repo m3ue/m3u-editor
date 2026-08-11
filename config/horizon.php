@@ -2,6 +2,16 @@
 
 use Illuminate\Support\Str;
 
+// Horizon pool settings below accept env overrides for maxProcesses/maxTime/maxJobs/memory.
+// env() returns the raw string when set, so a blank or non-numeric value (e.g. an empty
+// line in a templated .env) would silently cast to 0 via (int) and stop that queue's
+// workers dead. This falls back to the default instead in that case.
+$horizonIntEnv = static function (string $key, int $default): int {
+    $value = env($key);
+
+    return is_numeric($value) ? (int) $value : $default;
+};
+
 return [
 
     /*
@@ -186,27 +196,27 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             // Set maxProcesses to 1 if using SQLite to avoid database locks
-            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 12,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => $horizonIntEnv('HORIZON_QUEUE_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 12),
+            'maxTime' => $horizonIntEnv('HORIZON_QUEUE_MAX_TIME', 0),
+            'maxJobs' => $horizonIntEnv('HORIZON_QUEUE_MAX_JOBS', 0),
+            'memory' => $horizonIntEnv('HORIZON_QUEUE_MEMORY', 512), // MB
             'tries' => 3, // Number of times to attempt a job before marking it as failed
             'timeout' => 60 * 125, // Should be longer than the retry_after value set in queue.php
             'nice' => 0,
         ],
 
         // SchedulesDirect syncs (ProcessEpgImport for SD-sourced EPGs) run here
-        // exclusively. maxProcesses is fixed at 1 regardless of DB driver so only
+        // exclusively. maxProcesses defaults to 1 regardless of DB driver so only
         // one SD sync runs at a time across all accounts/EPGs - SD blocks accounts
         // that make concurrent/duplicate requests for the same station+date.
         'm3u-editor-sd-queue' => [
             'connection' => 'redis',
             'queue' => ['schedules-direct'],
             'balance' => 'simple',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => $horizonIntEnv('HORIZON_SD_MAX_PROCESSES', 1),
+            'maxTime' => $horizonIntEnv('HORIZON_SD_MAX_TIME', 0),
+            'maxJobs' => $horizonIntEnv('HORIZON_SD_MAX_JOBS', 0),
+            'memory' => $horizonIntEnv('HORIZON_SD_MEMORY', 512), // MB
             'tries' => 3,
             'timeout' => 60 * 125,
             'nice' => 0,
@@ -218,10 +228,10 @@ return [
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             // Set maxProcesses to 1 if using SQLite to avoid database locks
-            'maxProcesses' => env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => $horizonIntEnv('HORIZON_DVR_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4),
+            'maxTime' => $horizonIntEnv('HORIZON_DVR_MAX_TIME', 0),
+            'maxJobs' => $horizonIntEnv('HORIZON_DVR_MAX_JOBS', 0),
+            'memory' => $horizonIntEnv('HORIZON_DVR_MEMORY', 512), // MB
             'tries' => 2, // DVR jobs get fewer retries to avoid duplicate recordings
             'timeout' => 60 * 60, // 1 hour (long-running recordings)
             'nice' => 5,
@@ -231,17 +241,15 @@ return [
         // low-concurrency and isolated from the general queue on purpose: bursts of
         // resolution jobs (e.g. bulk-add, or many exhausted failover chains around the
         // same time) hit AIOStreams and, transitively, debrid backends that penalize
-        // aggressive/concurrent request patterns — see PLAN_AIOSTREAMS.md's ban-avoidance
-        // notes. AIOStreamsService::waitForRateLimit() throttles within a single worker;
-        // capping maxProcesses here bounds concurrency across workers too.
+        // aggressive/concurrent request patterns.
         'aiostreams-queue' => [
             'connection' => 'redis',
             'queue' => ['aiostreams-resolve'],
             'balance' => 'simple',
-            'maxProcesses' => 2,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 512, // MB
+            'maxProcesses' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_PROCESSES', 2),
+            'maxTime' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_TIME', 0),
+            'maxJobs' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_JOBS', 0),
+            'memory' => $horizonIntEnv('HORIZON_AIOSTREAMS_MEMORY', 512), // MB
             'tries' => 1, // jobs handle their own empty-result retry/backoff internally
             'timeout' => 60 * 5,
             'nice' => 5,

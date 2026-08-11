@@ -150,7 +150,7 @@ class VodFileNameService
         $hasStats = ! empty($streamStats);
 
         $title = $this->movieTitle($channel);
-        $year = $this->movieYear($channel);
+        $year = $this->resolveMovieYear($channel);
 
         $replacements = [
             '{title}' => PlaylistService::makeFilesystemSafe($title, $setting->replace_char ?? 'space'),
@@ -236,7 +236,7 @@ class VodFileNameService
             ?: 'Unnamed';
     }
 
-    private function movieYear(Channel $channel): string
+    public function resolveMovieYear(Channel $channel): string
     {
         $year = $this->scalarAttribute($channel, 'year')
             ?: $this->scalarFromArray($channel->info ?? [], ['year', 'release_year', 'releasedate', 'release_date'])
@@ -247,6 +247,17 @@ class VodFileNameService
         }
 
         return '';
+    }
+
+    /**
+     * Same resolution as resolveMovieYear(), normalized to the Channel model's
+     * `year` attribute type (nullable int) for API responses.
+     */
+    public function resolveMovieYearAsInt(Channel $channel): ?int
+    {
+        $year = $this->resolveMovieYear($channel);
+
+        return $year !== '' ? (int) $year : null;
     }
 
     /**

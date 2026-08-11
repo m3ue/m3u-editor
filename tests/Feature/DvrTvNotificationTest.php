@@ -12,7 +12,6 @@
  */
 
 use App\Events\TvNotificationEvent;
-use App\Jobs\SendPushNotificationRelay;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
@@ -22,7 +21,6 @@ use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvNotification;
 use App\Models\User;
-use App\Services\PushRelayService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
@@ -76,9 +74,12 @@ it('persists a TvNotification and dispatches TvNotificationEvent on the dvr chan
     );
 });
 
-it('delivers a global dvr status notification to every entitled credential transport', function () {
+it('notifies only the admin channel for an owner-created recording, never any guest', function () {
+    // The recording has no playlist_auth_id (created directly by the owner),
+    // so no guest — regardless of their own dvr_enabled flag — should see it.
     $playlistAuths = PlaylistAuth::factory()->count(2)->for($this->user)->create([
         'enabled' => true,
+        'dvr_enabled' => true,
     ]);
 
     foreach ($playlistAuths as $index => $playlistAuth) {
@@ -97,42 +98,84 @@ it('delivers a global dvr status notification to every entitled credential trans
 
     $notification = TvNotification::sole();
     $event = null;
-    $relayJob = null;
 
     Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
         $event = $dispatched;
 
         return true;
     });
-    Queue::assertPushed(SendPushNotificationRelay::class, function (SendPushNotificationRelay $dispatched) use (&$relayJob): bool {
-        $relayJob = $dispatched;
+
+    $channels = collect($event->broadcastOn())->pluck('name');
+    expect($channels->values()->all())->toBe([
+        "private-tv.{$this->playlist->getMorphClass()}-admin.{$this->playlist->uuid}",
+    ]);
+
+    foreach ($playlistAuths as $playlistAuth) {
+        expect($channels)->not->toContain("private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}");
+    }
+
+    expect($notification->playlist_auth_id)->toBeNull()
+        ->and($event->adminOnly)->toBeTrue();
+});
+
+it('notifies only the owning guest\'s channel for a guest-created recording', function () {
+    $owningAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'dvr_enabled' => true,
+    ]);
+    $otherAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'dvr_enabled' => true,
+    ]);
+    $owningAuth->assignTo($this->playlist);
+    $otherAuth->assignTo($this->playlist);
+
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->for($this->channel)
+        ->create(['title' => 'Evening News', 'playlist_auth_id' => $owningAuth->id]);
+
+    Event::fake([TvNotificationEvent::class]);
+
+    $recording->notifyTv('Recording Started', 'info');
+
+    $notification = TvNotification::sole();
+    $event = null;
+
+    Event::assertDispatched(TvNotificationEvent::class, function (TvNotificationEvent $dispatched) use (&$event): bool {
+        $event = $dispatched;
 
         return true;
     });
 
     $channels = collect($event->broadcastOn())->pluck('name');
-    foreach ($playlistAuths as $playlistAuth) {
-        expect($channels)->toContain("private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}");
-    }
+    expect($channels->values()->all())->toBe([
+        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$owningAuth->id}",
+    ]);
 
-    $notificationIds = [];
-    $relay = Mockery::mock(PushRelayService::class);
-    $relay->shouldReceive('isEnabled')->once()->andReturnTrue();
-    $relay->shouldReceive('send')
-        ->twice()
-        ->andReturnUsing(function (string $token, string $platform, string $title, ?string $body, ?array $data) use (&$notificationIds): void {
-            $notificationIds[$token] = data_get($data, 'notification_id');
-        });
+    expect($notification->playlist_auth_id)->toBe($owningAuth->id);
+});
 
-    $relayJob->handle($relay);
+it('skips the notification entirely when the owning guest\'s dvr_enabled is false', function () {
+    $owningAuth = PlaylistAuth::factory()->for($this->user)->create([
+        'enabled' => true,
+        'dvr_enabled' => false,
+    ]);
+    $owningAuth->assignTo($this->playlist);
 
-    expect($notification->playlist_auth_id)->toBeNull()
-        ->and($event->id)->toBe($notification->id)
-        ->and($relayJob->notificationUuid)->toBe($notification->id)
-        ->and($notificationIds)->toBe([
-            'dvr-device-0' => $notification->id,
-            'dvr-device-1' => $notification->id,
-        ]);
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->for($this->channel)
+        ->create(['title' => 'Evening News', 'playlist_auth_id' => $owningAuth->id]);
+
+    Event::fake([TvNotificationEvent::class]);
+
+    $recording->notifyTv('Recording Started', 'info');
+
+    Event::assertNotDispatched(TvNotificationEvent::class);
+    expect(TvNotification::count())->toBe(0);
 });
 
 it('does nothing when the dvr setting has no resolvable owning playlist', function () {

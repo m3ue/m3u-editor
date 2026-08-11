@@ -81,7 +81,12 @@ class DvrRecordingStatusEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
-        return self::entitledTvChannels($this->notifiableType, $this->notifiableId, $this->notifiableUuid);
+        return self::entitledTvChannels(
+            $this->notifiableType,
+            $this->notifiableId,
+            $this->notifiableUuid,
+            requireDvrEnabled: true,
+        );
     }
 
     public function broadcastAs(): string

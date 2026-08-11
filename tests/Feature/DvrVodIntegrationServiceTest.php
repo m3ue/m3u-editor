@@ -22,9 +22,11 @@ use App\Enums\DvrRecordingStatus;
 use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Episode;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
@@ -1062,4 +1064,127 @@ it('classifies category="news" without S/E as TV', function () {
     $this->service->integrateRecording($recording);
 
     expect(Series::count())->toBe(1);
+});
+
+// ── Fix #31: Polymorphic DvrSetting ownership resolution ────────────────────────
+// DvrSetting can be owned by a Playlist, CustomPlaylist, or MergedPlaylist.
+// Series / Channel / Episode / Group / Category all require a real Playlist FK,
+// so when the setting's playlist_id is null, integrateRecording must fall back
+// to the recording's channel's playlist_id. Channels always resolve through to
+// a real Playlist even when surfaced through a merged or custom playlist.
+
+it('uses setting playlist_id when present (real Playlist owner) — regression', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->for($playlist)->create();
+    $channel = Channel::factory()->for($user)->for($playlist)->create();
+
+    $recording = DvrRecording::factory()
+        ->completed()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->for($channel, 'channel')
+        ->create([
+            'title' => 'Regression Show',
+            'season' => 1,
+            'episode' => 1,
+            'metadata' => null,
+        ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->playlist_id)->toBe($setting->playlist_id)
+        ->and($episode->playlist_id)->toBe($channel->playlist_id);
+});
+
+it('integrates through the channel when the setting has merged_playlist_id (playlist_id null)', function () {
+    $user = User::factory()->create();
+    $sourcePlaylist = Playlist::factory()->for($user)->create();
+    $mergedPlaylist = MergedPlaylist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->create([
+        'playlist_id' => null,
+        'merged_playlist_id' => $mergedPlaylist->id,
+    ]);
+    $channel = Channel::factory()->for($user)->for($sourcePlaylist)->create();
+
+    $recording = DvrRecording::factory()
+        ->completed()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->for($channel, 'channel')
+        ->create([
+            'title' => 'Merged Show',
+            'season' => 1,
+            'episode' => 1,
+            'metadata' => null,
+        ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->playlist_id)->toBe($sourcePlaylist->id);
+
+    $expectedUrl = route('dvr.recording.stream', [
+        'username' => $user->name,
+        'password' => $sourcePlaylist->uuid,
+        'uuid' => $recording->uuid,
+        'format' => $setting->dvr_output_format ?? 'ts',
+    ]);
+    expect($episode->url)->toBe($expectedUrl);
+});
+
+it('integrates through the channel when the setting has custom_playlist_id (playlist_id null)', function () {
+    $user = User::factory()->create();
+    $sourcePlaylist = Playlist::factory()->for($user)->create();
+    $customPlaylist = CustomPlaylist::factory()->for($user)->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->create([
+        'playlist_id' => null,
+        'custom_playlist_id' => $customPlaylist->id,
+    ]);
+    $channel = Channel::factory()->for($user)->for($sourcePlaylist)->create();
+
+    $recording = DvrRecording::factory()
+        ->completed()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->for($channel, 'channel')
+        ->create([
+            'title' => 'Custom Show',
+            'season' => 1,
+            'episode' => 1,
+            'metadata' => null,
+        ]);
+
+    $this->service->integrateRecording($recording);
+
+    $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
+    expect($episode->playlist_id)->toBe($sourcePlaylist->id);
+});
+
+it('skips gracefully when setting has no playlist_id and channel has no playlist_id', function () {
+    $user = User::factory()->create();
+    $setting = DvrSetting::factory()->enabled()->for($user)->create([
+        'playlist_id' => null,
+        'merged_playlist_id' => null,
+        'custom_playlist_id' => null,
+    ]);
+    // Channel with null playlist_id — pathological case (channels.playlist_id is nullable)
+    $channel = Channel::factory()->for($user)->create(['playlist_id' => null]);
+
+    $recording = DvrRecording::factory()
+        ->completed()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->for($channel, 'channel')
+        ->create([
+            'title' => 'Skip Channel Show',
+            'season' => 1,
+            'episode' => 1,
+            'metadata' => null,
+        ]);
+
+    expect(fn () => $this->service->integrateRecording($recording))->not->toThrow(Exception::class);
+    expect(Episode::where('dvr_recording_id', $recording->id)->exists())->toBeFalse();
+    expect(Channel::where('dvr_recording_id', $recording->id)->exists())->toBeFalse();
 });

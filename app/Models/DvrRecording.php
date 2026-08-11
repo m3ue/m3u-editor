@@ -334,11 +334,28 @@ class DvrRecording extends Model
             return;
         }
 
+        $playlistAuth = $this->playlistAuth;
+
+        // A guest whose credential has since been disabled, has expired, or
+        // had DVR access turned off shouldn't keep receiving notifications
+        // about recordings tied to their account.
+        if ($playlistAuth && ! $playlistAuth->isEligibleForDvrNotifications()) {
+            return;
+        }
+
         AppNotification::make()
             ->title($title)
             ->body($this->title)
             ->status($status)
-            ->tvBroadcast($playlist, 'dvr');
+            // Owner-created recordings (null playlistAuth) notify only the
+            // admin/owner channel; guest recordings notify only the guest who
+            // created them — never every other guest sharing the playlist.
+            ->tvBroadcast(
+                $playlist,
+                'dvr',
+                adminOnly: $playlistAuth === null,
+                playlistAuth: $playlistAuth,
+            );
     }
 
     public function user(): BelongsTo

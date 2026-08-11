@@ -9,6 +9,7 @@ use App\Models\DvrSetting;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
@@ -301,4 +302,83 @@ it('filters recordings by guest playlist_auth_id', function () {
         ->filterTable('playlist_auth_id', $authA->id)
         ->assertCanSeeTableRecords([$aliceRecording])
         ->assertCanNotSeeTableRecords([$bobRecording]);
+});
+
+it('shows the play action for a completed recording with an owner', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->completed()
+        ->create([
+            'title' => 'Completed Playable',
+        ]);
+
+    Livewire::test(ListDvrRecordings::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertActionVisible(TestAction::make('play')->table($recording));
+});
+
+it('shows the play action for a recording-in-progress', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->recording()
+        ->create([
+            'title' => 'Live Recording',
+        ]);
+
+    Livewire::test(ListDvrRecordings::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertActionVisible(TestAction::make('play')->table($recording));
+});
+
+it('hides the play action for a scheduled recording', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->create([
+            'status' => DvrRecordingStatus::Scheduled,
+            'title' => 'Scheduled Recording',
+        ]);
+
+    Livewire::test(ListDvrRecordings::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertActionHidden(TestAction::make('play')->table($recording));
+});
+
+it('hides the play action for a failed recording', function () {
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->failed()
+        ->create([
+            'title' => 'Failed Recording',
+        ]);
+
+    Livewire::test(ListDvrRecordings::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertActionHidden(TestAction::make('play')->table($recording));
+});
+
+it('hides the play action when the dvr setting has no owner', function () {
+    $orphanSetting = DvrSetting::factory()
+        ->for($this->user)
+        ->create(['playlist_id' => null]);
+
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($orphanSetting)
+        ->completed()
+        ->create([
+            'title' => 'Orphaned Completed Recording',
+        ]);
+
+    Livewire::test(ListDvrRecordings::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertActionHidden(TestAction::make('play')->table($recording));
 });

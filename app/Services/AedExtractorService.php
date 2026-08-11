@@ -35,15 +35,16 @@ class AedExtractorService
 
     /**
      * Build a fallback AedEvent using no_event_format when regex extraction fails.
+     * Returns null when no_event_format is blank, meaning no fallback event should be generated.
      */
-    public function fallback(AedProfile $profile, string $channelTitle): AedEvent
+    public function fallback(AedProfile $profile, string $channelTitle): ?AedEvent
     {
-        $title = $profile->no_event_format
-            ? str_replace('{channel}', $channelTitle, $profile->no_event_format)
-            : $channelTitle;
+        if (empty($profile->no_event_format)) {
+            return null;
+        }
 
         return new AedEvent(
-            title: $title,
+            title: str_replace('{channel}', $channelTitle, $profile->no_event_format),
             description: null,
             start: null,
             end: null,

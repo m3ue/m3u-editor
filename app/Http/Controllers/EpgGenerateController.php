@@ -481,6 +481,13 @@ class EpgGenerateController extends Controller
                     $aedEvent = $aedExtractor->extract($aedProfile, $rawTitle)
                         ?? $aedExtractor->fallback($aedProfile, $rawTitle);
 
+                    // No event found and no-event fallback is disabled: emit nothing for this channel
+                    if ($aedEvent === null) {
+                        echo $buffer;
+
+                        continue;
+                    }
+
                     $aedIcon = $aedProfile->logo_url
                         ? $this->escapeXml($aedProfile->logo_url)
                         : null;

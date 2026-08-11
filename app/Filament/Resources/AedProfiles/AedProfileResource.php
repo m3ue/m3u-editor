@@ -382,7 +382,7 @@ class AedProfileResource extends Resource implements CopilotResource
                             ->label(__('No Event Format (Optional)'))
                             ->default('{channel}')
                             ->maxLength(500)
-                            ->helperText(__('Used when regex extraction fails entirely. {channel} = original channel title.')),
+                            ->helperText(__('Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.')),
 
                         TextInput::make('category')
                             ->label(__('EPG Category (Optional)'))

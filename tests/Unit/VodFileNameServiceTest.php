@@ -52,6 +52,14 @@ it('falls back to movie data year and manual fields when stream stats are disabl
     expect($fileName)->toBe('Example Movie (2024) [2160p H.265 DTS 5.1 DV]');
 });
 
+it('resolves the movie year as a nullable int, matching the channel year attribute type', function () {
+    $service = new VodFileNameService;
+
+    expect($service->resolveMovieYearAsInt(new Channel(['year' => 1982])))->toBe(1982)
+        ->and($service->resolveMovieYearAsInt(new Channel(['movie_data' => ['release_date' => '2024-03-01']])))->toBe(2024)
+        ->and($service->resolveMovieYearAsInt(new Channel))->toBeNull();
+});
+
 it('detects quality from common resolution shapes', function (array $streamStats, string $quality) {
     expect(StreamStatsService::detectQuality($streamStats))->toBe($quality);
 })->with([

@@ -26,6 +26,20 @@ function setGuestDvrRuleContext(Playlist $playlist, PlaylistAuth $auth): void
     session()->put("{$prefix}guest_auth_password", $auth->password);
 }
 
+/**
+ * Set up the "owner_auth" fallback session: username = the playlist owner's
+ * m3u-editor User::$name, password = the playlist UUID. There is no
+ * PlaylistAuth record for this login (PlaylistService::authenticate() Method 2).
+ */
+function setOwnerAuthRuleContext(Playlist $playlist, User $user): void
+{
+    request()->attributes->set('playlist_uuid', $playlist->uuid);
+
+    $prefix = base64_encode($playlist->uuid).'_';
+    session()->put("{$prefix}guest_auth_username", $user->name);
+    session()->put("{$prefix}guest_auth_password", $playlist->uuid);
+}
+
 beforeEach(function () {
     Queue::fake();
     config()->set('dvr.dvr_enabled', true);
@@ -283,4 +297,70 @@ it('can create Manual and Series rules (not Once) via canCreate', function () {
 
     expect($manual->type)->toBe(DvrRuleType::Manual)
         ->and($series->type)->toBe(DvrRuleType::Series);
+});
+
+// --- Owner (owner_auth) access ---
+//
+// The playlist owner can log into the guest panel with no PlaylistAuth
+// record at all — username = their m3u-editor User::$name, password = the
+// playlist UUID (PlaylistService::authenticate()'s "owner_auth" fallback).
+// They have no dvr_enabled flag of their own, so access is gated by the
+// playlist-level DvrSetting::$enabled instead, and they own rules with a
+// null playlist_auth_id — the ones created from the main admin panel.
+
+it('grants access and create to the owner via owner_auth when the playlist-level DvrSetting is enabled', function () {
+    setOwnerAuthRuleContext($this->playlist, $this->user);
+
+    expect(GuestDvrRuleResource::canAccess())->toBeTrue()
+        ->and(GuestDvrRuleResource::canCreate())->toBeTrue();
+});
+
+it('denies access to the owner via owner_auth when the playlist-level DvrSetting is disabled', function () {
+    $this->dvrSetting->update(['enabled' => false]);
+    setOwnerAuthRuleContext($this->playlist, $this->user);
+
+    expect(GuestDvrRuleResource::canAccess())->toBeFalse()
+        ->and(GuestDvrRuleResource::canCreate())->toBeFalse();
+});
+
+it('scopes the owner\'s list query to their own (null playlist_auth_id) rules only', function () {
+    $ownerRule = DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null]);
+
+    DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id]);
+
+    setOwnerAuthRuleContext($this->playlist, $this->user);
+
+    $ids = GuestDvrRuleResource::getEloquentQuery()->pluck('id')->all();
+
+    expect($ids)->toBe([$ownerRule->id]);
+});
+
+it('allows the owner (owner_auth) to edit and delete their own rule', function () {
+    setOwnerAuthRuleContext($this->playlist, $this->user);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => null]);
+
+    expect(GuestDvrRuleResource::canEdit($rule))->toBeTrue()
+        ->and(GuestDvrRuleResource::canDelete($rule))->toBeTrue();
+});
+
+it('denies the owner (owner_auth) editing a guest-owned rule', function () {
+    setOwnerAuthRuleContext($this->playlist, $this->user);
+
+    $rule = DvrRecordingRule::factory()
+        ->for($this->dvrSetting)
+        ->for($this->user)
+        ->create(['playlist_auth_id' => $this->guestA->id]);
+
+    expect(GuestDvrRuleResource::canEdit($rule))->toBeFalse()
+        ->and(GuestDvrRuleResource::canDelete($rule))->toBeFalse();
 });

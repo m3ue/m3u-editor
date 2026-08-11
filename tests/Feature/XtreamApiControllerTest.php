@@ -369,6 +369,22 @@ it('returns an empty list for get vod streams when there is no vod', function ()
     $response->assertStatus(200)->assertExactJson([]);
 });
 
+it('falls back to VOD metadata when the channel year is missing', function () {
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Metadata Year Movie',
+        'year' => null,
+        'info' => ['release_date' => '2024-05-17'],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonPath('0.year', 2024);
+});
+
 // Tests for get_vod_info - returns VOD channel (movie) info, not Series
 it('returns vod info successfully', function () {
     $group = Group::factory()->for($this->user)->create();
@@ -400,6 +416,24 @@ it('returns vod info successfully', function () {
         ])
         ->assertJsonPath('movie_data.stream_id', $vodChannel->id)
         ->assertJsonPath('movie_data.name', 'Test Movie');
+});
+
+it('falls back to VOD metadata when the channel year is missing for get vod info', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Metadata Year Movie',
+        'year' => null,
+        'rating' => 8.5,
+        'last_metadata_fetch' => now(), // Skip metadata fetch in test
+        'info' => ['release_date' => '2024-05-17'],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('movie_data.year', 2024);
 });
 
 it('returns not found for get vod info when vod is missing', function () {
@@ -714,6 +748,57 @@ it('handles null backdrop paths for get series when logo proxy is enabled', func
 
     $response->assertOk();
     $response->assertJsonCount(1);
+});
+
+it('does not double-proxy an already app-hosted series cover when logo proxy is enabled', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $category = Category::factory()->for($this->user)->create();
+    $localCover = url('/media-server-image-proxy/abc123/cover.jpg');
+    $localBackdrop = url('/media-server-image-proxy/abc123/backdrop.jpg');
+
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'cover' => $localCover,
+        'backdrop_path' => json_encode([$localBackdrop]),
+        'metadata' => json_encode(['tmdb' => '', 'last_modified' => null]),
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.cover', $localCover)
+        ->assertJsonPath('info.backdrop_path.0', $localBackdrop);
+});
+
+it('does not double-proxy an already app-hosted vod cover when logo proxy is enabled', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $group = Group::factory()->for($this->user)->create();
+    $localCover = url('/media-server-image-proxy/abc123/cover.jpg');
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Test Movie',
+        'title' => 'Test Movie',
+        'logo' => $localCover,
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'name' => 'Test Movie',
+            'cover_big' => $localCover,
+            'movie_image' => $localCover,
+            'rating' => 8.5,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.cover_big', $localCover)
+        ->assertJsonPath('info.movie_image', $localCover);
 });
 
 it('orders series categories by sort order for a regular playlist', function () {

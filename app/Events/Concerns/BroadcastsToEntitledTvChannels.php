@@ -21,8 +21,12 @@ trait BroadcastsToEntitledTvChannels
     /**
      * @return array<int, PrivateChannel>
      */
-    private static function entitledTvChannels(string $notifiableType, int|string $notifiableId, string $notifiableUuid): array
-    {
+    private static function entitledTvChannels(
+        string $notifiableType,
+        int|string $notifiableId,
+        string $notifiableUuid,
+        bool $requireDvrEnabled = false,
+    ): array {
         $channels = [
             new PrivateChannel("tv.{$notifiableType}.{$notifiableUuid}"),
             new PrivateChannel("tv.{$notifiableType}-admin.{$notifiableUuid}"),
@@ -30,6 +34,7 @@ trait BroadcastsToEntitledTvChannels
 
         $entitled = PlaylistAuth::query()
             ->entitledToNotificationRecipient($notifiableType, $notifiableId)
+            ->when($requireDvrEnabled, fn ($query) => $query->where('dvr_enabled', true))
             ->with('assignedPlaylist.authenticatable')
             ->get();
 

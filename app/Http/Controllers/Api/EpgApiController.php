@@ -678,6 +678,13 @@ class EpgApiController extends Controller
                         $event = $aedExtractor->extract($aedProfile, $rawTitle)
                             ?? $aedExtractor->fallback($aedProfile, $rawTitle);
 
+                        // No event found and no-event fallback is disabled: emit nothing for this channel
+                        if ($event === null) {
+                            $programmes[$playlistChannelId] = $dummyProgrammes;
+
+                            continue;
+                        }
+
                         $eventIcon = $aedProfile->logo_url ?: $icon;
                         $slotMinutes = $event->durationMinutes;
 

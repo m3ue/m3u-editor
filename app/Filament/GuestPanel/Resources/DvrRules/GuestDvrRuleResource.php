@@ -7,6 +7,7 @@ use App\Enums\DvrSeriesMode;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestDvr;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
+use App\Models\PlaylistAuth;
 use App\Settings\GeneralSettings;
 use App\Traits\HasDvrMatchedAirings;
 use Filament\Actions\Action;
@@ -69,16 +70,29 @@ class GuestDvrRuleResource extends Resource
 
     public static function canEdit(Model $record): bool
     {
-        $auth = static::getCurrentPlaylistAuth();
-
-        return $auth && $record->playlist_auth_id === $auth->id;
+        return static::guestOwnsRule($record, static::getCurrentPlaylistAuth());
     }
 
     public static function canDelete(Model $record): bool
     {
-        $auth = static::getCurrentPlaylistAuth();
+        return static::guestOwnsRule($record, static::getCurrentPlaylistAuth());
+    }
 
-        return $auth && $record->playlist_auth_id === $auth->id;
+    /**
+     * Whether the current session owns the given rule and may edit, delete,
+     * or toggle it.
+     *
+     * Guests only own rules they created themselves. The playlist owner has
+     * no PlaylistAuth record, so their rules carry a null playlist_auth_id —
+     * those created directly through the main admin panel.
+     */
+    public static function guestOwnsRule(Model $record, ?PlaylistAuth $auth): bool
+    {
+        if ($auth !== null) {
+            return $record->playlist_auth_id === $auth->id;
+        }
+
+        return static::isOwnerAuth() && $record->playlist_auth_id === null;
     }
 
     public static function getUrl(
@@ -104,6 +118,14 @@ class GuestDvrRuleResource extends Resource
         }
 
         $currentAuth = static::getCurrentPlaylistAuth();
+
+        // A null $currentAuth is only safe to treat as "the playlist owner"
+        // when isOwnerAuth() confirms it — otherwise (a guest session that
+        // failed to resolve) ->where('playlist_auth_id', null) would become
+        // whereNull() and leak the owner's rules to that guest.
+        if (! $currentAuth && ! static::isOwnerAuth()) {
+            return parent::getEloquentQuery()->whereRaw('1 = 0');
+        }
 
         return parent::getEloquentQuery()
             ->with(['channel', 'playlistAuth'])
@@ -254,7 +276,7 @@ class GuestDvrRuleResource extends Resource
 
                 ToggleColumn::make('enabled')
                     ->label(__('Enabled'))
-                    ->disabled(fn (DvrRecordingRule $record): bool => ! ($currentAuth && $record->playlist_auth_id === $currentAuth->id))
+                    ->disabled(fn (DvrRecordingRule $record): bool => ! static::guestOwnsRule($record, $currentAuth))
                     ->toggleable()
                     ->sortable(),
 
@@ -299,7 +321,7 @@ class GuestDvrRuleResource extends Resource
             ->recordActions([
                 EditAction::make()
                     ->before(function (DvrRecordingRule $record, Action $action) use ($currentAuth): void {
-                        if (! $currentAuth || $record->playlist_auth_id !== $currentAuth->id) {
+                        if (! static::guestOwnsRule($record, $currentAuth)) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Unauthorized'))
@@ -334,7 +356,7 @@ class GuestDvrRuleResource extends Resource
 
                 DeleteAction::make()
                     ->before(function (DvrRecordingRule $record, Action $action) use ($currentAuth): void {
-                        if (! $currentAuth || $record->playlist_auth_id !== $currentAuth->id) {
+                        if (! static::guestOwnsRule($record, $currentAuth)) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Unauthorized'))
@@ -358,7 +380,7 @@ class GuestDvrRuleResource extends Resource
                         $dvrSetting = static::getDvrSetting();
                         $auth = static::getCurrentPlaylistAuth();
 
-                        if (! $dvrSetting || ! $auth) {
+                        if (! $dvrSetting || (! $auth && ! static::isOwnerAuth())) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Unauthorized'))

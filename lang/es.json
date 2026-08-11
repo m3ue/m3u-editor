@@ -4609,7 +4609,7 @@
     "Use with caution": "Usar con precaución",
     "Used to reference this auth internally.": "Se utiliza para hacer referencia a esta autenticación internamente.",
     "Used when no rule matches and when probe data is missing for a channel.": "Se utiliza cuando ninguna regla coincide y cuando faltan datos de sonda para un canal.",
-    "Used when regex extraction fails entirely. {channel} = original channel title.": "Used when regex extraction fails entirely. {channel} = original channel title.",
+    "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.": "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.",
     "Useful for multi-host access (VPN/Tailscale/etc.)": "Útil para acceso a múltiples hosts (VPN/Tailscale/etc.)",
     "User": "Usuario",
     "User Permissions": "Permisos de usuario",

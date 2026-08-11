@@ -155,6 +155,18 @@ class PlaylistAuth extends Model
         return now()->greaterThanOrEqualTo($this->expires_at);
     }
 
+    /**
+     * Whether this credential may currently receive DVR notifications:
+     * the account itself must be enabled, not expired, and have DVR access
+     * turned on. A recording tied to this auth predates none of these
+     * conditions changing, so all three are re-checked at notify time
+     * rather than assumed from the recording's existence.
+     */
+    public function isEligibleForDvrNotifications(): bool
+    {
+        return $this->enabled && ! $this->isExpired() && $this->dvr_enabled;
+    }
+
     public function playlists(): HasMany
     {
         return $this->hasMany(PlaylistAuthPivot::class, 'playlist_auth_id')

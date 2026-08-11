@@ -136,7 +136,7 @@ it('also broadcasts on every entitled PlaylistAuth channel, not just the owner c
     // channel — never the bare owner channel. Before this fix, dvr.status
     // pushes only went to the owner channel, so such sessions never saw the
     // EPG "recording" dot or DVR status label update from the push alone.
-    $playlistAuth = PlaylistAuth::factory()->for($this->user)->create(['enabled' => true]);
+    $playlistAuth = PlaylistAuth::factory()->for($this->user)->create(['enabled' => true, 'dvr_enabled' => true]);
     $playlistAuth->assignTo($this->playlist);
 
     $recording = DvrRecording::factory()
@@ -150,6 +150,25 @@ it('also broadcasts on every entitled PlaylistAuth channel, not just the owner c
     $channels = collect($event->broadcastOn())->pluck('name');
 
     expect($channels)->toContain(
+        "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}"
+    );
+});
+
+it('does not broadcast dvr.status to a PlaylistAuth channel whose DVR access is disabled', function () {
+    $playlistAuth = PlaylistAuth::factory()->for($this->user)->create(['enabled' => true, 'dvr_enabled' => false]);
+    $playlistAuth->assignTo($this->playlist);
+
+    $recording = DvrRecording::factory()
+        ->for($this->user)
+        ->for($this->dvrSetting)
+        ->for($this->channel)
+        ->make(['status' => DvrRecordingStatus::Scheduled]);
+    $recording->save();
+
+    $event = DvrRecordingStatusEvent::fromRecording($recording->fresh());
+    $channels = collect($event->broadcastOn())->pluck('name');
+
+    expect($channels)->not->toContain(
         "private-tv.{$this->playlist->getMorphClass()}.{$this->playlist->uuid}.{$playlistAuth->id}"
     );
 });

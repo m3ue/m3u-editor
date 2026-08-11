@@ -4609,7 +4609,7 @@
     "Use with caution": "谨慎使用",
     "Used to reference this auth internally.": "用于在内部引用此身份验证。",
     "Used when no rule matches and when probe data is missing for a channel.": "当没有规则匹配以及通道的探测数据丢失时使用。",
-    "Used when regex extraction fails entirely. {channel} = original channel title.": "Used when regex extraction fails entirely. {channel} = original channel title.",
+    "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.": "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.",
     "Useful for multi-host access (VPN/Tailscale/etc.)": "适用于多主机访问（VPN/Tailscale 等）",
     "User": "用户",
     "User Permissions": "用户权限",

@@ -142,11 +142,32 @@ class PlaylistInfo extends Component
             'xtream_info' => [
                 'active_connections' => "$activeConnections/$maxConnections",
                 'max_streams_reached' => $activeConnections >= $maxConnections,
-                'expires' => $expires ? $expires->diffForHumans() : 'N/A',
+                'expires' => $expires ? $this->formatExpiresInDays($expires) : 'N/A',
                 'expires_description' => $expires ? $expires->toDateTimeString() : 'N/A',
                 'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
             ],
         ];
+    }
+
+    /**
+     * Format an expiration Carbon instance as an exact number of days,
+     * rather than the rounded single-unit output of diffForHumans().
+     */
+    private function formatExpiresInDays(Carbon $expires): string
+    {
+        $days = (int) round(now()->diffInDays($expires, absolute: false));
+
+        if ($days < 0) {
+            $days = abs($days);
+
+            return $days === 1 ? '1 day ago' : "{$days} days ago";
+        }
+
+        if ($days === 0) {
+            return 'Today';
+        }
+
+        return $days === 1 ? '1 day' : "{$days} days";
     }
 
     /**
@@ -223,7 +244,7 @@ class PlaylistInfo extends Component
             'xtream_info' => [
                 'active_connections' => "$activeConnections/$maxConnections",
                 'max_streams_reached' => $maxConnections > 0 && $activeConnections >= $maxConnections,
-                'expires' => $expires ? $expires->diffForHumans() : 'N/A',
+                'expires' => $expires ? $this->formatExpiresInDays($expires) : 'N/A',
                 'expires_description' => $expires ? $expires->toDateTimeString() : 'N/A',
                 'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
                 'profiles_enabled' => true,

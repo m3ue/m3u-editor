@@ -192,3 +192,43 @@ it('does not touch sort on existing VOD channels when auto-sort is disabled', fu
     expect((int) $existing->refresh()->sort)->toBe(99)
         ->and(Channel::count())->toBe(1);
 });
+
+it('preserves an existing VOD year when a provider omits it on re-sync', function () {
+    $existing = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+        'source_id' => 'src-1',
+        'is_vod' => true,
+        'year' => 2024,
+    ]);
+
+    $job = createChunkSortJob($this->playlist, $this->group, [
+        chunkSortPayloadRow($this->playlist, [
+            'is_vod' => true,
+            'container_extension' => 'mp4',
+            'year' => null,
+        ]),
+    ]);
+
+    (new ProcessM3uVodImportChunk([$job->id], batchCount: 1))->handle();
+
+    expect((int) $existing->refresh()->year)->toBe(2024);
+});
+
+it('updates an existing VOD year when a provider supplies one on re-sync', function () {
+    $existing = Channel::factory()->for($this->playlist)->for($this->user)->for($this->group)->create([
+        'source_id' => 'src-1',
+        'is_vod' => true,
+        'year' => 2023,
+    ]);
+
+    $job = createChunkSortJob($this->playlist, $this->group, [
+        chunkSortPayloadRow($this->playlist, [
+            'is_vod' => true,
+            'container_extension' => 'mp4',
+            'year' => 2024,
+        ]),
+    ]);
+
+    (new ProcessM3uVodImportChunk([$job->id], batchCount: 1))->handle();
+
+    expect((int) $existing->refresh()->year)->toBe(2024);
+});

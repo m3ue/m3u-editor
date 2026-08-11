@@ -31,6 +31,29 @@ trait HasGuestDvr
     }
 
     /**
+     * Whether the current guest-panel session belongs to the playlist owner,
+     * authenticated with their m3u-editor username and the playlist UUID as
+     * the password (PlaylistService::authenticate()'s "owner_auth" fallback),
+     * rather than a PlaylistAuth record. Owners have no PlaylistAuth of their
+     * own, so this is the only way to recognize them in the guest panel.
+     */
+    protected static function isOwnerAuth(): bool
+    {
+        if (static::getCurrentPlaylistAuth() !== null) {
+            return false;
+        }
+
+        $credentials = static::getCurrentAuth();
+        if (! $credentials) {
+            return false;
+        }
+
+        $result = PlaylistFacade::authenticate($credentials['username'], $credentials['password']);
+
+        return is_array($result) && ($result[1] ?? null) === 'owner_auth';
+    }
+
+    /**
      * Resolve the DvrSetting for the current guest's assigned playlist
      * (Playlist, CustomPlaylist, MergedPlaylist, or an alias of one of those).
      */
@@ -51,8 +74,11 @@ trait HasGuestDvr
     }
 
     /**
-     * Whether the current guest is permitted to use DVR features.
-     * Requires dvr_enabled on their PlaylistAuth AND the playlist must have a DvrSetting.
+     * Whether the current session is permitted to use DVR features.
+     *
+     * Guests (PlaylistAuth) are gated by their own dvr_enabled flag. The
+     * playlist owner has no PlaylistAuth record, so their access is gated by
+     * the playlist-level DvrSetting::$enabled flag instead.
      */
     protected static function guestCanAccessDvr(): bool
     {
@@ -60,11 +86,16 @@ trait HasGuestDvr
             return false;
         }
 
-        $auth = static::getCurrentPlaylistAuth();
-        if (! $auth || ! $auth->dvr_enabled) {
+        $dvrSetting = static::getDvrSetting();
+        if (! $dvrSetting) {
             return false;
         }
 
-        return static::getDvrSetting() !== null;
+        $auth = static::getCurrentPlaylistAuth();
+        if ($auth) {
+            return (bool) $auth->dvr_enabled;
+        }
+
+        return $dvrSetting->enabled && static::isOwnerAuth();
     }
 }

@@ -143,12 +143,21 @@ test('fallback returns no_event_format with {channel} placeholder', function () 
         ->and($result->hasTime())->toBeFalse();
 });
 
-test('fallback uses channel title when no_event_format is null', function () {
-    $profile = makeProfile(['no_event_format' => null]);
+test('fallback returns null when no_event_format is null', function () {
+    $profile = makeProfile();
+    $profile->no_event_format = null;
     $service = new AedExtractorService;
     $result = $service->fallback($profile, 'My Sports Channel');
 
-    expect($result->title)->toBe('My Sports Channel');
+    expect($result)->toBeNull();
+});
+
+test('fallback returns null when no_event_format is blank', function () {
+    $profile = makeProfile(['no_event_format' => '']);
+    $service = new AedExtractorService;
+    $result = $service->fallback($profile, 'My Sports Channel');
+
+    expect($result)->toBeNull();
 });
 
 test('handles invalid regex without crashing', function () {

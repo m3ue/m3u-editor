@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -64,5 +65,20 @@ class Season extends Model
     public function scopeForSerie(Builder $query, int $serieId): Builder
     {
         return $query->where('series_id', $serieId);
+    }
+
+    /**
+     * Display-only poster URL: falls back to the parent series' cover when the
+     * provider didn't send season-specific artwork (e.g. a season missing from
+     * its "seasons" list). Deliberately does NOT override `cover`/`cover_big`
+     * themselves, since several write paths (FetchTmdbIds, DvrVodIntegrationService)
+     * use `empty($season->cover)` to decide whether real season art still needs
+     * to be fetched — a fallback there would make them think it's already set.
+     */
+    protected function displayCover(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => $this->cover_big ?? $this->cover ?? $this->serie?->cover,
+        );
     }
 }

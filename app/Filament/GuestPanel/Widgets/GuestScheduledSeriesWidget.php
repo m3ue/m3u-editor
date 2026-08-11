@@ -28,6 +28,14 @@ class GuestScheduledSeriesWidget extends Widget
 
         $currentAuth = static::getCurrentPlaylistAuth();
 
+        // A null $currentAuth is only safe to treat as "the playlist owner"
+        // when isOwnerAuth() confirms it — otherwise (a guest session that
+        // failed to resolve) ->where('playlist_auth_id', null) would become
+        // whereNull() and leak the owner's series rules to that guest.
+        if (! $currentAuth && ! static::isOwnerAuth()) {
+            return new Collection;
+        }
+
         return DvrRecordingRule::with(['channel'])
             ->where('dvr_setting_id', $dvrSetting->id)
             ->where('type', DvrRuleType::Series)

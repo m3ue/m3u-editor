@@ -5707,7 +5707,7 @@
     "Used": "Used",
     "Used to reference this auth internally.": "Used to reference this auth internally.",
     "Used when no rule matches and when probe data is missing for a channel.": "Used when no rule matches and when probe data is missing for a channel.",
-    "Used when regex extraction fails entirely. {channel} = original channel title.": "Used when regex extraction fails entirely. {channel} = original channel title.",
+    "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.": "Used when regex extraction fails entirely. {channel} = original channel title. Leave blank to skip generating any programme for channels with no detected event.",
     "Useful for multi-host access (VPN/Tailscale/etc.)": "Useful for multi-host access (VPN/Tailscale/etc.)",
     "User": "User",
     "User Permissions": "User Permissions",
