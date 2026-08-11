@@ -5002,5 +5002,7 @@
     "Title only": "Solo título",
     "Unnamed library": "Biblioteca sin nombre",
     "VOD group": "Grupo VOD",
-    "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "El nombre, tipo o rutas de la biblioteca de Emby existente ya no coinciden con esta asignación. Actualícela manualmente en Emby, o elimínela allí para que la conciliación la vuelva a crear."
+    "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "El nombre, tipo o rutas de la biblioteca de Emby existente ya no coinciden con esta asignación. Actualícela manualmente en Emby, o elimínela allí para que la conciliación la vuelva a crear.",
+    "Choose the specific group or category within the custom playlist to publish.": "Elija el grupo o categoría específico dentro de la lista de reproducción personalizada que se va a publicar.",
+    "Automatically set from the source selected above.": "Se establece automáticamente según la fuente seleccionada arriba."
 }

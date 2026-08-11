@@ -102,7 +102,23 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                     $get('source_kind'),
                                     $get('source_identifier'),
                                 ))
+                                // Only custom_playlist_group needs a second-level pick here: the
+                                // "Source" select above chose the CustomPlaylist itself, and this
+                                // field is where the specific group/category inside it is chosen —
+                                // it's also the actual value the catalog matches items against for
+                                // that source kind (see EmbyPublicationCatalogService). For every
+                                // other source kind, source_identifier already uniquely identifies
+                                // the group/category, and source_label is auto-populated from it
+                                // (afterStateUpdated above) with the single matching option — so
+                                // it's disabled rather than hidden: still visible for transparency
+                                // and still validated/submitted, just not something the user needs
+                                // to (or can) redundantly re-pick.
+                                ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group')
+                                ->dehydrated()
                                 ->required()
+                                ->helperText(fn (Get $get): string => $get('source_kind') === 'custom_playlist_group'
+                                    ? __('Choose the specific group or category within the custom playlist to publish.')
+                                    : __('Automatically set from the source selected above.'))
                                 ->searchable(),
                             Select::make('collection_type')
                                 ->label(__('Library type'))
