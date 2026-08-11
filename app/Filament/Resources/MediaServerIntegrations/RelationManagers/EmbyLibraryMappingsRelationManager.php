@@ -324,6 +324,23 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->slideOver(),
             ])
             ->recordActions([
+                DeleteAction::make()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
+                EditAction::make()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
+                    ->slideOver(),
+                Action::make('reconcile')
+                    ->label(__('Reconcile'))
+                    ->icon('heroicon-o-arrow-path')
+                    ->requiresConfirmation()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
+                    ->action(fn (EmbyLibraryMapping $record) => $this->reconcile($record)),
                 Action::make('preview')
                     ->label(__('Preview'))
                     ->icon('heroicon-o-eye')
@@ -332,15 +349,10 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                         app(EmbyPublicationCatalogService::class)->buildMapping($record),
                         JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
                     ) ?: '{}')
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel()
                     ->modalSubmitAction(false),
-                Action::make('reconcile')
-                    ->label(__('Reconcile'))
-                    ->icon('heroicon-o-arrow-path')
-                    ->requiresConfirmation()
-                    ->action(fn (EmbyLibraryMapping $record) => $this->reconcile($record)),
-                EditAction::make()
-                    ->slideOver(),
-                DeleteAction::make(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
