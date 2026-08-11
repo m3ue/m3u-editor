@@ -263,7 +263,7 @@ it('previews the exact canonical dry-run plan without mutating the mapping', fun
     ])->assertTableActionExists(
         'preview',
         fn (FilamentAction $action): bool => str_contains(
-            (string) $action->getModalDescription(),
+            (string) $action->getModalContent(),
             $plan['revision'],
         ),
         $mapping,

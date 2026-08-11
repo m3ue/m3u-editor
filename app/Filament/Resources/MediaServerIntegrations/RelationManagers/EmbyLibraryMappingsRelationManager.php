@@ -345,10 +345,11 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->label(__('Preview'))
                     ->icon('heroicon-o-eye')
                     ->modalHeading(__('Exact catalog plan'))
-                    ->modalDescription(fn (EmbyLibraryMapping $record): string => json_encode(
-                        app(EmbyPublicationCatalogService::class)->buildMapping($record),
-                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-                    ) ?: '{}')
+                    ->modalWidth('4xl')
+                    ->modalContent(fn (EmbyLibraryMapping $record) => view(
+                        'filament.resources.media-server-integrations.relation-managers.emby-library-mapping-preview',
+                        ['catalog' => app(EmbyPublicationCatalogService::class)->buildMapping($record)],
+                    ))
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
