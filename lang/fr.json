@@ -5005,7 +5005,7 @@
     "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "Le nom, le type ou les chemins de la bibliothèque Emby existante ne correspondent plus à cette association. Mettez-la à jour manuellement dans Emby, ou supprimez-la là-bas pour que la réconciliation la recrée.",
     "Choose the specific group or category within the custom playlist to publish.": "Choisissez le groupe ou la catégorie spécifique au sein de la liste de lecture personnalisée à publier.",
     "Automatically set from the source selected above.": "Défini automatiquement à partir de la source sélectionnée ci-dessus.",
-    "Choose a library type above first.": "Choisissez d'abord un type de bibliothèque ci-dessus.",
+    "Choose a library type first.": "Choisissez d'abord un type de bibliothèque.",
     "This custom playlist has no VOD groups available to publish as movies.": "Cette liste de lecture personnalisée ne contient aucun groupe VOD pouvant être publié en tant que films.",
     "This custom playlist has no series categories available to publish as TV shows.": "Cette liste de lecture personnalisée ne contient aucune catégorie de séries pouvant être publiée en tant que séries télévisées."
 }

@@ -152,7 +152,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                     }
 
                                     if (! $get('collection_type')) {
-                                        return __('Choose a library type above first.');
+                                        return __('Choose a library type first.');
                                     }
 
                                     if ($this->sourceLabelOptions($get('source_kind'), $get('source_identifier'), $get('collection_type')) === []) {

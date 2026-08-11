@@ -5005,7 +5005,7 @@
     "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "现有 Emby 媒体库的名称、类型或路径与此映射不再匹配。请在 Emby 中手动更新，或在那里删除它，以便协调同步重新创建它。",
     "Choose the specific group or category within the custom playlist to publish.": "选择要发布的自定义播放列表中的具体分组或分类。",
     "Automatically set from the source selected above.": "根据上方选择的来源自动设置。",
-    "Choose a library type above first.": "请先在上方选择媒体库类型。",
+    "Choose a library type first.": "请先选择媒体库类型。",
     "This custom playlist has no VOD groups available to publish as movies.": "此自定义播放列表没有可作为电影发布的点播 (VOD) 分组。",
     "This custom playlist has no series categories available to publish as TV shows.": "此自定义播放列表没有可作为电视剧发布的剧集分类。"
 }
