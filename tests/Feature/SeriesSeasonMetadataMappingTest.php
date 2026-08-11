@@ -161,7 +161,7 @@ it('does not clobber an existing season name and cover when the provider stops s
         ->and($seasonOne->getRawOriginal('cover'))->toBe('https://provider.test/s1.jpg');
 });
 
-it('falls back to the series cover when a season has no provider artwork of its own', function () {
+it('falls back to the series cover for display only, leaving the raw season cover columns untouched', function () {
     $series = Series::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -178,6 +178,11 @@ it('falls back to the series cover when a season has no provider artwork of its 
         'cover_big' => null,
     ]);
 
-    expect($season->cover)->toBe('https://provider.test/series-cover.jpg')
-        ->and($season->cover_big)->toBe('https://provider.test/series-cover.jpg');
+    // Display accessor falls back to the series cover...
+    expect($season->display_cover)->toBe('https://provider.test/series-cover.jpg');
+
+    // ...but the raw columns stay null, so write paths that check
+    // empty($season->cover) still correctly detect "no season art yet".
+    expect($season->cover)->toBeNull()
+        ->and($season->cover_big)->toBeNull();
 });

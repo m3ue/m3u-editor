@@ -243,7 +243,7 @@
                 @foreach ($episodesBySeason as $seasonNumber => $episodes)
                     @php
                         $season = $seasonsLookup->get($seasonNumber);
-                        $cover = $season?->cover_big ?? $season?->cover;
+                        $cover = $season?->display_cover;
                         $seasonName = $season?->name ?? 'Season '.str_pad($seasonNumber, 2, '0', STR_PAD_LEFT);
                         $totalEpisodes = $episodes->count();
                         $enabledEpisodes = $episodes->where('enabled', true)->count();
