@@ -5004,5 +5004,8 @@
     "VOD group": "Grupo VOD",
     "The existing Emby library's name, type, or paths no longer match this mapping. Update it manually in Emby, or delete it there to let reconcile recreate it.": "El nombre, tipo o rutas de la biblioteca de Emby existente ya no coinciden con esta asignación. Actualícela manualmente en Emby, o elimínela allí para que la conciliación la vuelva a crear.",
     "Choose the specific group or category within the custom playlist to publish.": "Elija el grupo o categoría específico dentro de la lista de reproducción personalizada que se va a publicar.",
-    "Automatically set from the source selected above.": "Se establece automáticamente según la fuente seleccionada arriba."
+    "Automatically set from the source selected above.": "Se establece automáticamente según la fuente seleccionada arriba.",
+    "Choose a library type above first.": "Primero elija un tipo de biblioteca arriba.",
+    "This custom playlist has no VOD groups available to publish as movies.": "Esta lista de reproducción personalizada no tiene grupos VOD disponibles para publicar como películas.",
+    "This custom playlist has no series categories available to publish as TV shows.": "Esta lista de reproducción personalizada no tiene categorías de series disponibles para publicar como series de TV."
 }

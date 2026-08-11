@@ -19,6 +19,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -64,7 +65,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     {
         return $schema
             ->components([
-                Section::make(__('Source'))
+                Fieldset::make(__('Source'))
                     ->schema([
                         Grid::make(2)->schema([
                             Select::make('source_kind')
@@ -96,11 +97,29 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                     'source_label',
                                     $this->sourceOptions($get('source_kind'))[$state] ?? null,
                                 )),
+                            Select::make('collection_type')
+                                ->label(__('Library type'))
+                                ->options([
+                                    'movies' => __('Movies'),
+                                    'tvshows' => __('TV shows'),
+                                ])
+                                ->required()
+                                ->live()
+                                ->afterStateUpdated(function (Set $set, Get $get): void {
+                                    // A group/category chosen for one collection type is not
+                                    // necessarily valid for the other (sourceLabelOptions() is
+                                    // scoped by collection_type — see below), so it can't just
+                                    // carry over silently.
+                                    if ($get('source_kind') === 'custom_playlist_group') {
+                                        $set('source_label', null);
+                                    }
+                                }),
                             Select::make('source_label')
                                 ->label(__('Mapped group'))
                                 ->options(fn (Get $get): array => $this->sourceLabelOptions(
                                     $get('source_kind'),
                                     $get('source_identifier'),
+                                    $get('collection_type'),
                                 ))
                                 // Only custom_playlist_group needs a second-level pick here: the
                                 // "Source" select above chose the CustomPlaylist itself, and this
@@ -116,21 +135,28 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group')
                                 ->dehydrated()
                                 ->required()
-                                ->helperText(fn (Get $get): string => $get('source_kind') === 'custom_playlist_group'
-                                    ? __('Choose the specific group or category within the custom playlist to publish.')
-                                    : __('Automatically set from the source selected above.'))
+                                ->helperText(function (Get $get): string {
+                                    if ($get('source_kind') !== 'custom_playlist_group') {
+                                        return __('Automatically set from the source selected above.');
+                                    }
+
+                                    if (! $get('collection_type')) {
+                                        return __('Choose a library type above first.');
+                                    }
+
+                                    if ($this->sourceLabelOptions($get('source_kind'), $get('source_identifier'), $get('collection_type')) === []) {
+                                        return $get('collection_type') === 'movies'
+                                            ? __('This custom playlist has no VOD groups available to publish as movies.')
+                                            : __('This custom playlist has no series categories available to publish as TV shows.');
+                                    }
+
+                                    return __('Choose the specific group or category within the custom playlist to publish.');
+                                })
                                 ->searchable(),
-                            Select::make('collection_type')
-                                ->label(__('Library type'))
-                                ->options([
-                                    'movies' => __('Movies'),
-                                    'tvshows' => __('TV shows'),
-                                ])
-                                ->required(),
                         ]),
                     ])
                     ->columnSpanFull(),
-                Section::make(__('Emby library'))
+                Fieldset::make(__('Emby library'))
                     ->schema([
                         Grid::make(2)->schema([
                             Select::make('target_library_id')
@@ -161,6 +187,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->options(fn (): array => $this->writablePathOptions())
                                 ->required()
                                 ->searchable()
+                                ->columnSpanFull()
                                 ->helperText(__('Only paths validated and advertised by m3u-editor for Emby are available.')),
                             Toggle::make('is_managed')
                                 ->label(__('Create and manage this Emby library'))
@@ -171,7 +198,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                         ]),
                     ])
                     ->columnSpanFull(),
-                Section::make(__('Publishing options'))
+                Fieldset::make(__('Publishing options'))
                     ->schema([
                         Grid::make(2)->schema([
                             Select::make('options.naming')
@@ -199,6 +226,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->default(true),
                             Toggle::make('options.refresh')
                                 ->label(__('Refresh Emby after successful sync'))
+                                ->columnSpanFull()
                                 ->default(true),
                         ]),
                     ])
@@ -268,7 +296,8 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                         'media_server_integration_id' => $this->ownerRecord->id,
                         'user_id' => $this->ownerRecord->user_id,
                         'status' => 'idle',
-                    ]),
+                    ])
+                    ->slideOver(),
             ])
             ->recordActions([
                 Action::make('preview')
@@ -285,7 +314,8 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->icon('heroicon-o-arrow-path')
                     ->requiresConfirmation()
                     ->action(fn (EmbyLibraryMapping $record) => $this->reconcile($record)),
-                EditAction::make(),
+                EditAction::make()
+                    ->slideOver(),
                 DeleteAction::make(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
@@ -329,12 +359,16 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     }
 
     /** @return array<string, string> */
-    private function sourceLabelOptions(?string $sourceKind, ?string $sourceIdentifier): array
+    private function sourceLabelOptions(?string $sourceKind, ?string $sourceIdentifier, ?string $collectionType): array
     {
         if ($sourceKind !== 'custom_playlist_group') {
             $label = $this->sourceOptions($sourceKind)[$sourceIdentifier] ?? null;
 
             return $label === null ? [] : [$label => $label];
+        }
+
+        if (! in_array($collectionType, EmbyLibraryMapping::COLLECTION_TYPES, true)) {
+            return [];
         }
 
         $customPlaylist = CustomPlaylist::query()
@@ -344,12 +378,18 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             return [];
         }
 
-        $groups = $customPlaylist->filterableGroupsQuery(isVod: true)
-            ->union($customPlaylist->filterableCategoriesQuery())
-            ->orderBy('name')
-            ->cursor();
+        // Scoped by collection_type rather than unioning both: movies are
+        // matched against VOD-channel groups and tvshows against series
+        // categories (see EmbyPublicationCatalogService::buildMovies()/
+        // buildSeries()), so a name valid for one is never a valid match for
+        // the other — offering both together let you pick an option that
+        // silently matched nothing at publish time.
+        $groups = $collectionType === 'movies'
+            ? $customPlaylist->filterableGroupsQuery(isVod: true)
+            : $customPlaylist->filterableCategoriesQuery();
+
         $options = [];
-        foreach ($groups as $group) {
+        foreach ($groups->orderBy('name')->cursor() as $group) {
             $options[$group->name] = $group->name;
         }
 

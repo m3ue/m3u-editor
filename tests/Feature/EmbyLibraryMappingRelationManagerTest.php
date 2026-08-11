@@ -2,11 +2,15 @@
 
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\RelationManagers\EmbyLibraryMappingsRelationManager;
+use App\Models\Category;
+use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\Series;
 use App\Models\User;
 use App\Services\EmbyPublicationCatalogService;
 use Filament\Actions\Action as FilamentAction;
@@ -17,6 +21,21 @@ use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+/**
+ * Invokes the relation manager's private sourceLabelOptions() directly, since
+ * it's not reachable through a public API and the "Mapped group" field's
+ * live-updating options aren't easily assertable through Livewire's action
+ * testing helpers.
+ */
+function embyMappedGroupOptions($component, ?string $sourceKind, ?string $sourceIdentifier, ?string $collectionType): array
+{
+    $instance = $component->instance();
+    $method = new ReflectionMethod($instance, 'sourceLabelOptions');
+    $method->setAccessible(true);
+
+    return $method->invoke($instance, $sourceKind, $sourceIdentifier, $collectionType);
+}
 
 it('shows managed library mappings only on authorized Emby integrations', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
@@ -435,4 +454,54 @@ it('edits and deletes an owned mapping through Filament actions', function () {
 
     $component->callAction(TestAction::make('delete')->table($mapping));
     expect(EmbyLibraryMapping::find($mapping->id))->toBeNull();
+});
+
+it('returns no Mapped group options for a live-only custom playlist, for either library type', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $customPlaylist = CustomPlaylist::factory()->for($user)->createQuietly();
+
+    // Live channels only (is_vod: false, no series attached) — nothing here
+    // is eligible content for Emby publishing (movies/tvshows only).
+    $liveChannel = Channel::factory()->for($user)->for($playlist)->createQuietly([
+        'group' => 'PPV', 'is_vod' => false, 'enabled' => true,
+    ]);
+    $customPlaylist->channels()->attach([$liveChannel->id]);
+
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    expect(embyMappedGroupOptions($component, 'custom_playlist_group', (string) $customPlaylist->id, 'movies'))->toBe([])
+        ->and(embyMappedGroupOptions($component, 'custom_playlist_group', (string) $customPlaylist->id, 'tvshows'))->toBe([]);
+});
+
+it('scopes Mapped group options to VOD groups for movies and series categories for tvshows independently', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $customPlaylist = CustomPlaylist::factory()->for($user)->createQuietly();
+
+    $vodChannel = Channel::factory()->for($user)->for($playlist)->createQuietly([
+        'group' => 'Action', 'is_vod' => true, 'enabled' => true,
+    ]);
+    $customPlaylist->channels()->attach([$vodChannel->id]);
+
+    $category = Category::factory()->for($user)->createQuietly(['name' => 'Drama']);
+    $series = Series::factory()->for($user)->for($category)->createQuietly(['enabled' => true]);
+    $customPlaylist->series()->attach([$series->id]);
+
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    expect(embyMappedGroupOptions($component, 'custom_playlist_group', (string) $customPlaylist->id, 'movies'))
+        ->toBe(['Action' => 'Action'])
+        ->and(embyMappedGroupOptions($component, 'custom_playlist_group', (string) $customPlaylist->id, 'tvshows'))
+        ->toBe(['Drama' => 'Drama']);
 });
