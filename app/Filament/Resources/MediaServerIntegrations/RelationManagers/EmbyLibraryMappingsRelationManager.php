@@ -89,10 +89,24 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 }),
                             Select::make('source_identifier')
                                 ->label(__('Source'))
-                                ->options(fn (Get $get): array => $this->sourceOptions($get('source_kind')))
                                 ->required()
                                 ->searchable()
                                 ->live()
+                                // Async search rather than a static options() list: vod_group and
+                                // series_category can each span thousands of rows across a user's
+                                // playlists, so loading them all upfront doesn't scale. The search
+                                // results (and the option label shown once a value is selected) also
+                                // append the owning playlist's name for vod_group/series_category —
+                                // group/category names collide across playlists constantly, and
+                                // without it there's no way to tell which playlist's "Action" you're
+                                // actually picking. This is presentation-only: the raw, unsuffixed
+                                // name is still what gets written to source_label below, since
+                                // that's matched verbatim against channels.group/categories.name by
+                                // EmbyPublicationCatalogService.
+                                ->getSearchResultsUsing(fn (Get $get, string $search): array => $this->sourceSearchOptions($get('source_kind'), $search))
+                                ->getOptionLabelUsing(fn (Get $get, ?string $state): ?string => $state === null
+                                    ? null
+                                    : $this->sourceSearchOptions($get('source_kind'), '', $state)[$state] ?? null)
                                 ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
                                     // For custom_playlist_group, sourceOptions() labels are the
                                     // CustomPlaylist's own name — never a valid source_label value
@@ -364,6 +378,77 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         $options = [];
         foreach ($query->orderBy('name')->cursor() as $record) {
             $options[(string) $record->id] = $record->name;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Options for the "Source" select's async search (and, via
+     * $onlyIdentifier, for resolving the label of an already-selected
+     * value). Unlike sourceOptions(), labels for vod_group/series_category
+     * are suffixed with the owning playlist's name — group/category names
+     * routinely collide across a user's playlists, and this is the only
+     * field where that ambiguity matters, so the suffix lives here rather
+     * than in sourceOptions() (whose plain names still back source_label,
+     * which EmbyPublicationCatalogService matches verbatim against
+     * channels.group / categories.name).
+     *
+     * @return array<string, string>
+     */
+    private function sourceSearchOptions(?string $sourceKind, string $search, ?string $onlyIdentifier = null): array
+    {
+        if ($sourceKind === 'all') {
+            return ['*' => __('All eligible items')];
+        }
+
+        if ($sourceKind === 'custom_playlist_group') {
+            $query = CustomPlaylist::query()->where('user_id', $this->ownerRecord->user_id);
+
+            if ($onlyIdentifier !== null) {
+                $query->whereKey($onlyIdentifier);
+            } elseif ($search !== '') {
+                $query->whereRaw('LOWER(name) LIKE ?', ['%'.strtolower($search).'%']);
+            }
+
+            $options = [];
+            foreach ($query->orderBy('name')->limit(50)->cursor() as $record) {
+                $options[(string) $record->id] = $record->name;
+            }
+
+            return $options;
+        }
+
+        $model = match ($sourceKind) {
+            'vod_group' => Group::class,
+            'series_category' => Category::class,
+            default => null,
+        };
+
+        if ($model === null) {
+            return [];
+        }
+
+        $query = $model::query()
+            ->where('user_id', $this->ownerRecord->user_id)
+            ->with('playlist:id,name')
+            ->when($sourceKind === 'vod_group', fn ($q) => $q->where('type', 'vod'));
+
+        if ($onlyIdentifier !== null) {
+            $query->whereKey($onlyIdentifier);
+        } elseif ($search !== '') {
+            $searchLower = strtolower($search);
+            $query->where(function ($inner) use ($searchLower): void {
+                $inner->whereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"])
+                    ->orWhereHas('playlist', fn ($p) => $p->whereRaw('LOWER(name) LIKE ?', ["%{$searchLower}%"]));
+            });
+        }
+
+        $options = [];
+        foreach ($query->orderBy('name')->limit(50)->get() as $record) {
+            $options[(string) $record->id] = $record->playlist?->name
+                ? "{$record->name} ({$record->playlist->name})"
+                : $record->name;
         }
 
         return $options;

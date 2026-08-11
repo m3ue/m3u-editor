@@ -37,6 +37,16 @@ function embyMappedGroupOptions($component, ?string $sourceKind, ?string $source
     return $method->invoke($instance, $sourceKind, $sourceIdentifier, $collectionType);
 }
 
+/** Invokes the relation manager's private sourceSearchOptions() directly. */
+function embySourceSearchOptions($component, ?string $sourceKind, string $search, ?string $onlyIdentifier = null): array
+{
+    $instance = $component->instance();
+    $method = new ReflectionMethod($instance, 'sourceSearchOptions');
+    $method->setAccessible(true);
+
+    return $method->invoke($instance, $sourceKind, $search, $onlyIdentifier);
+}
+
 it('shows managed library mappings only on authorized Emby integrations', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
@@ -533,4 +543,41 @@ it('does not prematurely populate Mapped group with the custom playlist\'s own n
     // Nor should picking a library type resurrect the stale value.
     $component->set('mountedActions.0.data.collection_type', 'movies')
         ->assertSet('mountedActions.0.data.source_label', null);
+});
+
+it('disambiguates same-named VOD groups across playlists in the Source search, without leaking the suffix into Mapped group', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlistA = Playlist::factory()->for($user)->createQuietly(['name' => 'Provider A']);
+    $playlistB = Playlist::factory()->for($user)->createQuietly(['name' => 'Provider B']);
+    $groupA = Group::factory()->for($user)->for($playlistA)->create(['name' => 'Action', 'type' => 'vod']);
+    $groupB = Group::factory()->for($user)->for($playlistB)->create(['name' => 'Action', 'type' => 'vod']);
+
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    $results = embySourceSearchOptions($component, 'vod_group', 'action');
+    expect($results)->toBe([
+        (string) $groupA->id => 'Action (Provider A)',
+        (string) $groupB->id => 'Action (Provider B)',
+    ]);
+
+    // The already-selected-value lookup (getOptionLabelUsing) resolves the same way.
+    expect(embySourceSearchOptions($component, 'vod_group', '', (string) $groupB->id))
+        ->toBe([(string) $groupB->id => 'Action (Provider B)']);
+
+    // Mapped group's auto-populated value must stay the raw group name — it's
+    // matched verbatim against channels.group by EmbyPublicationCatalogService,
+    // so the "(Provider B)" UI disambiguation must never leak into it.
+    $action = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table());
+
+    $action->set('mountedActions.0.data.source_kind', 'vod_group')
+        ->set('mountedActions.0.data.source_identifier', (string) $groupB->id)
+        ->assertSet('mountedActions.0.data.source_label', 'Action');
 });
