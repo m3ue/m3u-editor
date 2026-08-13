@@ -90,6 +90,15 @@ class XtreamApiController extends Controller
     ];
 
     /**
+     * Max number of `recent_episodes` returned per show in `search_epg_shows`.
+     * The list is the picker for which upcoming airing to schedule a recording
+     * on (m3u-tv#204), so it has to be large enough that the next actionable
+     * airing isn't pushed off the end by a deep schedule, while still bounding
+     * payload growth.
+     */
+    private const int MAX_RECENT_EPISODES = 40;
+
+    /**
      * Xtream API request handler.
      *
      * This endpoint serves as the primary interface for Xtream API interactions.
@@ -227,7 +236,8 @@ class XtreamApiController extends Controller
      * (bool — whether a Series rule already exists for this title), `series_rule_id` (int|null
      * — the existing rule's id when `has_series_rule` is true, for delete-without-round-trip),
      * `channel_count`, `channels` (array of `{channel_id, channel_name}`), `episode_count`,
-     * `next_airing_at` (ISO 8601 or null), `recent_episodes` (up to 5 most-recent airings).
+     * `next_airing_at` (ISO 8601 or null), `recent_episodes` (up to MAX_RECENT_EPISODES
+     * airings — upcoming first soonest, then most-recent-past).
      *
      *
      * @param  string  $uuid  The UUID of the playlist (required path parameter)
@@ -3797,7 +3807,7 @@ class XtreamApiController extends Controller
         $cutoff = Carbon::now()->subHours(24);
         $programmes = EpgProgramme::whereIn('epg_channel_id', $epgChannelIds->toArray())
             ->where('start_time', '>=', $cutoff)
-            ->where('title', 'ilike', '%'.$q.'%')
+            ->whereRaw('LOWER(title) LIKE LOWER(?)', ['%'.$q.'%'])
             ->limit(500)
             ->get();
 
@@ -3832,8 +3842,25 @@ class XtreamApiController extends Controller
             /** @var array<int, EpgProgramme> $progs */
             $progs = $group['programmes'];
 
-            // Sort within group: most recent first.
-            usort($progs, fn (EpgProgramme $a, EpgProgramme $b) => $b->start_time->timestamp <=> $a->start_time->timestamp);
+            // Upcoming airings first (soonest first), past as a tail. This list is
+            // the per-episode recording picker on the TV client's show-detail screen
+            // (m3u-tv#204), so a single descending-by-timestamp usort would bury
+            // the next actionable airing behind farther-out ones — the bug being
+            // fixed (#1411). Don't collapse this back to a single usort without
+            // re-checking that case.
+            $now = Carbon::now();
+            $upcoming = [];
+            $past = [];
+            foreach ($progs as $p) {
+                if ($p->start_time->gt($now)) {
+                    $upcoming[] = $p;
+                } else {
+                    $past[] = $p;
+                }
+            }
+            usort($upcoming, fn (EpgProgramme $a, EpgProgramme $b) => $a->start_time->timestamp <=> $b->start_time->timestamp);
+            usort($past, fn (EpgProgramme $a, EpgProgramme $b) => $b->start_time->timestamp <=> $a->start_time->timestamp);
+            $progs = [...$upcoming, ...$past];
 
             $channels = array_values($group['channel_ids']);
 
@@ -3861,7 +3888,7 @@ class XtreamApiController extends Controller
                     'episode' => $p->episode,
                     'description' => $p->description,
                 ];
-            }, $progs), 0, 5);
+            }, $progs), 0, self::MAX_RECENT_EPISODES);
 
             $results[] = [
                 'normalized_title' => $norm,
