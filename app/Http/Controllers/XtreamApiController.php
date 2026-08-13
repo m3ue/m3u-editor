@@ -240,8 +240,11 @@ class XtreamApiController extends Controller
      * (bool — whether a Series rule already exists for this title), `series_rule_id` (int|null
      * — the existing rule's id when `has_series_rule` is true, for delete-without-round-trip),
      * `channel_count`, `channels` (array of `{channel_id, channel_name}`), `episode_count`,
-     * `next_airing_at` (ISO 8601 or null), `recent_episodes` (up to MAX_RECENT_EPISODES
-     * airings, upcoming first soonest, then most-recent-past).
+     * `next_airing_at` (ISO 8601 or null), `airing_now` (array — programmes currently
+     * in progress on EPG-mapped channels; empty when none, never null; programmes with
+     * an unknown `end_time` are excluded since progress can't be confirmed), and
+     * `recent_episodes` (up to MAX_RECENT_EPISODES airings, upcoming first soonest, then
+     * most-recent-past). Entry shape for `airing_now[]` and `recent_episodes[]` is identical.
      *
      *
      * @param  string  $uuid  The UUID of the playlist (required path parameter)
@@ -3892,21 +3895,27 @@ class XtreamApiController extends Controller
             // is already sorted ascending above, so the first entry is it.
             $nextAiringAt = $upcoming[0]->start_time ?? null;
 
-            $recentEpisodes = array_slice(array_map(function (EpgProgramme $p) use ($channelLookup) {
-                $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+            $recentEpisodes = array_slice(
+                array_map(fn (EpgProgramme $p) => $this->formatEpisodePayload($p, $channelLookup), $progs),
+                0,
+                self::MAX_RECENT_EPISODES,
+            );
 
-                return [
-                    'channel_id' => $resolved['channel_id'] ?? null,
-                    'channel_name' => $resolved['channel_name'] ?? null,
-                    'title' => $p->title,
-                    'subtitle' => $p->subtitle,
-                    'start_time' => $p->start_time->toIso8601String(),
-                    'end_time' => $p->end_time?->toIso8601String(),
-                    'season' => $p->season,
-                    'episode' => $p->episode,
-                    'description' => $p->description,
-                ];
-            }, $progs), 0, self::MAX_RECENT_EPISODES);
+            // airing_now: programmes currently in progress on EPG-mapped channels.
+            // Every in-progress programme has a non-future start, so it lives in $past
+            // (sorted most-recent-start first). Don't assume $past[0] is the answer -
+            // the most recently started programme may have already ended (the test
+            // covers exactly that case). Programmes with a null end_time cannot be
+            // confirmed in progress and are excluded. Always emit an array so the
+            // client doesn't need a null/empty branch.
+            $airingNowProgs = array_values(array_filter(
+                $past,
+                fn (EpgProgramme $p) => $p->end_time !== null && $p->end_time->gt($now),
+            ));
+            $airingNow = array_map(
+                fn (EpgProgramme $p) => $this->formatEpisodePayload($p, $channelLookup),
+                $airingNowProgs,
+            );
 
             $results[] = [
                 'normalized_title' => $norm,
@@ -3917,6 +3926,7 @@ class XtreamApiController extends Controller
                 'channels' => $channels,
                 'episode_count' => count($progs),
                 'next_airing_at' => $nextAiringAt?->toIso8601String(),
+                'airing_now' => $airingNow,
                 'recent_episodes' => $recentEpisodes,
             ];
         }
@@ -3940,6 +3950,32 @@ class XtreamApiController extends Controller
         });
 
         return response()->json(array_slice($results, 0, 100));
+    }
+
+    /**
+     * Build the per-episode payload used by both `recent_episodes[]` and `airing_now[]`
+     * in `search_epg_shows`. The shapes must stay identical so the TV client can parse
+     * either list with its existing `EpgShowEpisode.fromXtream` factory without needing
+     * a second model.
+     *
+     * @param  array<string, array{channel_id: int, channel_name: string}>  $channelLookup
+     * @return array{channel_id: int|null, channel_name: string|null, title: string, subtitle: ?string, start_time: string, end_time: ?string, season: mixed, episode: mixed, description: ?string}
+     */
+    private function formatEpisodePayload(EpgProgramme $p, array $channelLookup): array
+    {
+        $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+
+        return [
+            'channel_id' => $resolved['channel_id'] ?? null,
+            'channel_name' => $resolved['channel_name'] ?? null,
+            'title' => $p->title,
+            'subtitle' => $p->subtitle,
+            'start_time' => $p->start_time->toIso8601String(),
+            'end_time' => $p->end_time?->toIso8601String(),
+            'season' => $p->season,
+            'episode' => $p->episode,
+            'description' => $p->description,
+        ];
     }
 
     /**
