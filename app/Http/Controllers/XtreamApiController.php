@@ -237,7 +237,7 @@ class XtreamApiController extends Controller
      * — the existing rule's id when `has_series_rule` is true, for delete-without-round-trip),
      * `channel_count`, `channels` (array of `{channel_id, channel_name}`), `episode_count`,
      * `next_airing_at` (ISO 8601 or null), `recent_episodes` (up to MAX_RECENT_EPISODES
-     * airings — upcoming first soonest, then most-recent-past).
+     * airings, upcoming first soonest, then most-recent-past).
      *
      *
      * @param  string  $uuid  The UUID of the playlist (required path parameter)
@@ -3845,8 +3845,8 @@ class XtreamApiController extends Controller
             // Upcoming airings first (soonest first), past as a tail. This list is
             // the per-episode recording picker on the TV client's show-detail screen
             // (m3u-tv#204), so a single descending-by-timestamp usort would bury
-            // the next actionable airing behind farther-out ones — the bug being
-            // fixed (#1411). Don't collapse this back to a single usort without
+            // the next actionable airing behind farther-out ones (the bug being
+            // fixed in #1411). Don't collapse this back to a single usort without
             // re-checking that case.
             $now = Carbon::now();
             $upcoming = [];
@@ -3864,16 +3864,9 @@ class XtreamApiController extends Controller
 
             $channels = array_values($group['channel_ids']);
 
-            // next_airing_at: earliest start_time in the future, null if none.
-            $now = Carbon::now();
-            $nextAiringAt = null;
-            foreach ($progs as $p) {
-                if ($p->start_time->gt($now)) {
-                    $nextAiringAt = $nextAiringAt
-                        ? ($p->start_time->lt($nextAiringAt) ? $p->start_time : $nextAiringAt)
-                        : $p->start_time;
-                }
-            }
+            // next_airing_at: earliest upcoming start_time, null if none. $upcoming
+            // is already sorted ascending above, so the first entry is it.
+            $nextAiringAt = $upcoming[0]->start_time ?? null;
 
             $recentEpisodes = array_slice(array_map(function (EpgProgramme $p) use ($channelLookup) {
                 $resolved = $channelLookup[$p->epg_channel_id] ?? null;

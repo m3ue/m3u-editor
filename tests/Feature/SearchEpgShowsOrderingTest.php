@@ -1,19 +1,19 @@
 <?php
 
 /**
- * Regression coverage for #1411 — `search_epg_shows` `recent_episodes` ordering
+ * Regression coverage for #1411 - `search_epg_shows` `recent_episodes` ordering
  * and cap. The TV client's show-detail screen puts a per-episode "Record" button
  * directly on each `recent_episodes` row (m3u-tv#204), so the list is the picker
  * for which upcoming airing to schedule a recording on.
  *
  * Locks in:
- *   1. Upcoming airings appear first, soonest-first — the next actionable airing
+ *   1. Upcoming airings appear first, soonest-first - the next actionable airing
  *      is never pushed off the end by a deep schedule.
  *   2. Past episodes appear as a tail (most-recent-past first), not interleaved
  *      with upcoming ones by raw timestamp.
  *   3. The cap is MAX_RECENT_EPISODES (40), and the *soonest* 40 are returned,
- *      not the 40 farthest in the future — which is what the old single-pass
- *      descending-by-timestamp usort would have produced.
+ *      not the 40 farthest in the future (which is what the old single-pass
+ *      descending-by-timestamp usort would have produced).
  *   4. A show with only past episodes still returns them most-recent-past first
  *      (existing behavior, shouldn't regress).
  */
@@ -75,7 +75,7 @@ beforeEach(function () {
 
     // search_epg_shows itself doesn't talk to the proxy today, but bind a no-op
     // mock so any future controller dependency that does won't blow up the test
-    // — same defensive pattern as XtreamDvrOwnershipTest.
+    // (same defensive pattern as XtreamDvrOwnershipTest)
     $proxy = Mockery::mock(M3uProxyService::class);
     app()->instance(M3uProxyService::class, $proxy);
 
@@ -161,7 +161,7 @@ it('caps recent_episodes at MAX_RECENT_EPISODES and returns the soonest ones, no
     expect($episodes[0]['start_time'])->toBe(now()->addDay()->toIso8601String());
     expect($episodes[39]['start_time'])->toBe(now()->addDays(40)->toIso8601String());
 
-    // Defensive — assert the OLD bug behavior would have produced a different
+    // Defensive: assert the OLD bug behavior would have produced a different
     // last entry, so a regression to the old sort trips this assertion.
     expect($episodes[39]['start_time'])->not->toBe(now()->addDays(45)->toIso8601String());
 });
