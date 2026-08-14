@@ -208,7 +208,7 @@ class MediaServerIntegration extends Model
     /**
      * Whether a string is safe to store/advertise as an Emby publisher
      * writable path: an absolute path (Unix, Windows drive, or UNC), within
-     * length/byte bounds, and free of ".." traversal segments.
+     * length/byte bounds, and free of traversal or ambiguous separators.
      *
      * These paths live on the companion app's (Emby) host, never on
      * m3u-editor's own filesystem, so there is no local root to resolve
@@ -219,17 +219,115 @@ class MediaServerIntegration extends Model
      */
     public static function isSafeWritablePath(string $path): bool
     {
-        if ($path === '' || strlen($path) > 1024 || str_contains($path, "\0")) {
+        return static::parseRemoteAbsolutePath($path) !== null;
+    }
+
+    public static function isPathWithinWritableRoot(string $path, string $writableRoot): bool
+    {
+        $parsedPath = static::parseRemoteAbsolutePath($path);
+        $parsedRoot = static::parseRemoteAbsolutePath($writableRoot);
+
+        if ($parsedPath === null || $parsedRoot === null || $parsedPath['style'] !== $parsedRoot['style']) {
             return false;
         }
 
-        if (preg_match('/^(?:\/|[A-Za-z]:[\\\\\/]|\\\\\\\\)/', $path) !== 1) {
+        if (count($parsedRoot['segments']) > count($parsedPath['segments'])) {
             return false;
         }
 
-        $segments = preg_split('/[\/\\\\]+/', $path);
+        return array_slice($parsedPath['segments'], 0, count($parsedRoot['segments'])) === $parsedRoot['segments'];
+    }
 
-        return ! in_array('..', $segments, true);
+    /**
+     * @return array{style: 'unix'|'windows', segments: list<string>}|null
+     */
+    private static function parseRemoteAbsolutePath(string $path): ?array
+    {
+        if ($path === '' || strlen($path) > 1024 || trim($path) !== $path
+            || preg_match('/[\x00-\x1F\x7F]/', $path) === 1
+            || preg_match('/^[A-Za-z][A-Za-z0-9+.-]*:\/\//', $path) === 1) {
+            return null;
+        }
+
+        if (str_starts_with($path, '\\\\') || str_starts_with($path, '//')) {
+            if (preg_match('/^[\/\\\\]{3}/', $path) === 1) {
+                return null;
+            }
+
+            $body = substr($path, 2);
+            if ($body === '' || preg_match('/[\/\\\\]{2,}/', $body) === 1) {
+                return null;
+            }
+            $body = rtrim($body, '/\\');
+
+            $segments = preg_split('/[\/\\\\]/', $body);
+            if ($segments === false || count($segments) < 2 || static::hasTraversalSegment($segments)
+                || static::hasInvalidWindowsSegment($segments)) {
+                return null;
+            }
+
+            return [
+                'style' => 'windows',
+                'segments' => array_map(mb_strtolower(...), $segments),
+            ];
+        }
+
+        if (preg_match('/^[A-Za-z]:[\/\\\\]/', $path) === 1) {
+            $body = substr($path, 3);
+            if (preg_match('/[\/\\\\]{2,}/', $body) === 1) {
+                return null;
+            }
+            $body = rtrim($body, '/\\');
+
+            $segments = $body === '' ? [] : preg_split('/[\/\\\\]/', $body);
+            if ($segments === false || static::hasTraversalSegment($segments)
+                || static::hasInvalidWindowsSegment($segments)) {
+                return null;
+            }
+
+            return [
+                'style' => 'windows',
+                'segments' => [mb_strtolower(substr($path, 0, 2)), ...array_map(mb_strtolower(...), $segments)],
+            ];
+        }
+
+        if (! str_starts_with($path, '/') || str_contains($path, '\\')) {
+            return null;
+        }
+
+        $body = trim($path, '/');
+        if (preg_match('/\/{2,}/', $path) === 1) {
+            return null;
+        }
+
+        $segments = $body === '' ? [] : explode('/', $body);
+        if (static::hasTraversalSegment($segments)) {
+            return null;
+        }
+
+        return [
+            'style' => 'unix',
+            'segments' => $segments,
+        ];
+    }
+
+    /** @param list<string> $segments */
+    private static function hasTraversalSegment(array $segments): bool
+    {
+        return in_array('.', $segments, true) || in_array('..', $segments, true);
+    }
+
+    /** @param list<string> $segments */
+    private static function hasInvalidWindowsSegment(array $segments): bool
+    {
+        foreach ($segments as $segment) {
+            if (preg_match('/[<>:"|?*]/', $segment) === 1
+                || str_ends_with($segment, '.') || str_ends_with($segment, ' ')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

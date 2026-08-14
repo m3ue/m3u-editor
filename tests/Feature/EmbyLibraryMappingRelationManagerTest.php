@@ -47,6 +47,16 @@ function embySourceSearchOptions($component, ?string $sourceKind, string $search
     return $method->invoke($instance, $sourceKind, $search, $onlyIdentifier);
 }
 
+/** Invokes the relation manager's private compatibleLibraryPathOptions() directly. */
+function embyCompatibleLibraryPathOptions($component, ?string $libraryId): array
+{
+    $instance = $component->instance();
+    $method = new ReflectionMethod($instance, 'compatibleLibraryPathOptions');
+    $method->setAccessible(true);
+
+    return $method->invoke($instance, $libraryId);
+}
+
 it('shows managed library mappings only on authorized Emby integrations', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
@@ -102,6 +112,189 @@ it('creates an owned mapping from eligible sources and companion writable paths'
         ->and($mapping->media_server_integration_id)->toBe($integration->id)
         ->and($mapping->source_identifier)->toBe((string) $group->id)
         ->and($mapping->output_path)->toBe('/srv/emby/managed/movies');
+});
+
+it('derives compatible existing-library destinations from Emby paths and companion roots', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed', 'C:\\Emby\\Managed'],
+        'available_libraries' => [
+            [
+                'id' => 'single',
+                'name' => 'Single',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/managed/movies', '/srv/emby/private'],
+            ],
+            [
+                'id' => 'multiple',
+                'name' => 'Multiple',
+                'type' => 'tvshows',
+                'paths' => ['/srv/emby/managed', 'c:/emby/managed/tv'],
+            ],
+            [
+                'id' => 'none',
+                'name' => 'None',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/private', '/srv/emby/managed2'],
+            ],
+        ],
+    ]);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    expect(embyCompatibleLibraryPathOptions($component, 'single'))->toBe([
+        '/srv/emby/managed/movies' => '/srv/emby/managed/movies',
+    ])->and(embyCompatibleLibraryPathOptions($component, 'multiple'))->toBe([
+        '/srv/emby/managed' => '/srv/emby/managed',
+        'c:/emby/managed/tv' => 'c:/emby/managed/tv',
+    ])->and(embyCompatibleLibraryPathOptions($component, 'none'))->toBe([]);
+});
+
+it('shows only the focused existing-library destination controls', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'library-1',
+            'name' => 'Existing Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/private'],
+        ]],
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->set('mountedActions.0.data.destination_mode', 'existing')
+        ->set('mountedActions.0.data.target_library_id', 'library-1')
+        ->assertMountedActionModalDontSee('Library name')
+        ->assertMountedActionModalDontSee('Library type')
+        ->assertMountedActionModalDontSee('Create and manage this Emby library')
+        ->assertMountedActionModalDontSee('Compatible library path')
+        ->assertMountedActionModalSee('No compatible writable destination is available. Register a writable root in the Emby companion, then refresh this integration.');
+});
+
+it('automatically selects one compatible existing path and asks when several are available', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [
+            [
+                'id' => 'single',
+                'name' => 'Single',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/managed/movies'],
+            ],
+            [
+                'id' => 'multiple',
+                'name' => 'Multiple',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/managed/movies', '/srv/emby/managed/movies-4k'],
+            ],
+        ],
+    ]);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->set('mountedActions.0.data.destination_mode', 'existing')
+        ->set('mountedActions.0.data.target_library_id', 'single')
+        ->assertSet('mountedActions.0.data.output_path', '/srv/emby/managed/movies')
+        ->assertMountedActionModalDontSee('Compatible library path');
+
+    $component->set('mountedActions.0.data.target_library_id', 'multiple')
+        ->assertSet('mountedActions.0.data.output_path', null)
+        ->assertMountedActionModalSee('Compatible library path');
+});
+
+it('derives existing library values instead of accepting redundant submitted fields', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'library-1',
+            'name' => 'Existing Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'destination_mode' => 'existing',
+        'enabled' => true,
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => 'library-1',
+        'target_library_name' => 'Spoofed name',
+        'collection_type' => 'tvshows',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => true,
+        'options' => [
+            'naming' => 'media-year',
+            'nfo' => true,
+            'versions' => true,
+            'cleanup' => 'replace',
+            'refresh' => true,
+        ],
+    ])->assertHasNoActionErrors();
+
+    expect(EmbyLibraryMapping::query()->sole())
+        ->target_library_name->toBe('Existing Movies')
+        ->collection_type->toBe('movies')
+        ->is_managed->toBeFalse();
+});
+
+it('creates a managed library from only its required destination choices', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'destination_mode' => 'new',
+        'enabled' => true,
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => 'spoofed-library',
+        'target_library_name' => 'Managed Movies',
+        'collection_type' => 'movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => false,
+        'options' => [
+            'naming' => 'media-year',
+            'nfo' => true,
+            'versions' => true,
+            'cleanup' => 'replace',
+            'refresh' => true,
+        ],
+    ])->assertHasNoActionErrors();
+
+    expect(EmbyLibraryMapping::query()->sole())
+        ->target_library_id->toBeNull()
+        ->is_managed->toBeTrue();
 });
 
 it('registers companion writable paths before creating the first owned mapping', function () {
@@ -464,6 +657,82 @@ it('edits and deletes an owned mapping through Filament actions', function () {
 
     $component->callAction(TestAction::make('delete')->table($mapping));
     expect(EmbyLibraryMapping::find($mapping->id))->toBeNull();
+});
+
+it('preserves an unavailable existing target on edit and requires a new choice', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [],
+    ]);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => 'missing-library',
+        'target_library_name' => 'Existing Movies',
+        'collection_type' => 'movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => false,
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('edit')->table($mapping))
+        ->assertSet('mountedActions.0.data.destination_mode', 'existing')
+        ->assertSet('mountedActions.0.data.target_library_id', 'missing-library')
+        ->callMountedAction()
+        ->assertHasActionErrors(['target_library_id']);
+
+    expect($mapping->refresh())
+        ->target_library_id->toBe('missing-library')
+        ->output_path->toBe('/srv/emby/managed/movies');
+});
+
+it('does not silently replace a missing saved path when editing an existing target', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'library-1',
+            'name' => 'Existing Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/new-path'],
+        ]],
+    ]);
+    $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => 'library-1',
+        'target_library_name' => 'Existing Movies',
+        'collection_type' => 'movies',
+        'output_path' => '/srv/emby/managed/old-path',
+        'is_managed' => false,
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('edit')->table($mapping), [
+        'destination_mode' => 'existing',
+        'enabled' => true,
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All eligible items',
+        'target_library_id' => 'library-1',
+        'output_path' => '/srv/emby/managed/old-path',
+        'options' => $mapping->options,
+    ])->assertHasActionErrors();
+
+    expect($mapping->refresh()->output_path)->toBe('/srv/emby/managed/old-path');
 });
 
 it('returns no Mapped group options for a live-only custom playlist, for either library type', function () {

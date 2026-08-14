@@ -23,6 +23,7 @@ beforeEach(function () {
         'port' => 8096,
         'ssl' => true,
         'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => ['/srv/emby'],
     ]);
 });
 
@@ -134,7 +135,78 @@ it('reconciles an existing Emby library by stable ID without creating a duplicat
         || $request->method() === 'DELETE');
 });
 
-it('reconciles an existing Emby library by exact managed name and path', function () {
+it('does not drift an existing library when its selected path remains among several paths', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Library/VirtualFolders' => Http::response([[
+            'ItemId' => 'library-1',
+            'Name' => 'Managed Movies',
+            'CollectionType' => 'movies',
+            'Locations' => ['/srv/emby/managed/movies', '/srv/emby/archive/movies'],
+        ]], 200),
+    ]);
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        libraryId: 'library-1',
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['created'])->toBeFalse()
+        ->and($result['drift'])->toBeFalse();
+    Http::assertSentCount(1);
+});
+
+it('matches an existing Windows library path without case or separator drift', function () {
+    $this->integration->update(['emby_publisher_writable_paths' => ['C:\\Emby']]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Library/VirtualFolders' => Http::response([[
+            'ItemId' => 'library-1',
+            'Name' => 'Managed Movies',
+            'CollectionType' => 'movies',
+            'Locations' => ['C:/EMBY/Managed/Movies'],
+        ]], 200),
+    ]);
+
+    $result = MediaServerService::make($this->integration->refresh())->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['c:\\emby\\managed\\movies'],
+        libraryId: 'library-1',
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['drift'])->toBeFalse();
+    Http::assertSentCount(1);
+});
+
+it('keeps drift when the selected path is missing from an existing library', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Library/VirtualFolders' => Http::response([[
+            'ItemId' => 'library-1',
+            'Name' => 'Managed Movies',
+            'CollectionType' => 'movies',
+            'Locations' => ['/srv/emby/archive/movies'],
+        ]], 200),
+    ]);
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        libraryId: 'library-1',
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['drift'])->toBeTrue();
+    Http::assertSentCount(1);
+});
+
+it('keeps drift when the stable target ID is missing despite an exact library', function () {
     Http::preventStrayRequests();
     Http::fake([
         'https://emby.test:8096/Library/VirtualFolders' => Http::response([[
@@ -154,11 +226,33 @@ it('reconciles an existing Emby library by exact managed name and path', functio
 
     expect($result['success'])->toBeTrue()
         ->and($result['created'])->toBeFalse()
-        ->and($result['library']['id'])->toBe('library-2');
+        ->and($result['library'])->toBeNull()
+        ->and($result['drift'])->toBeTrue();
     Http::assertSentCount(1);
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST'
         || $request->method() === 'DELETE');
 });
+
+it('keeps drift when an existing mapping path is unsafe or no longer companion-writable', function (string $path) {
+    Http::preventStrayRequests();
+    Http::fake();
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: [$path],
+        libraryId: 'library-1',
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and($result['created'])->toBeFalse()
+        ->and($result['library'])->toBeNull()
+        ->and($result['drift'])->toBeTrue();
+    Http::assertNothingSent();
+})->with([
+    'unsafe traversal' => ['/srv/emby/managed/../private'],
+    'outside registered root' => ['/mnt/private/movies'],
+]);
 
 it('fails closed when an Emby library name exists at a different path', function () {
     Http::preventStrayRequests();

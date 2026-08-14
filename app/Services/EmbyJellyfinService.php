@@ -186,12 +186,63 @@ class EmbyJellyfinService implements MediaServer
         $validPaths = array_filter($paths, MediaServerIntegration::isSafeWritablePath(...));
 
         if ($paths === [] || count($validPaths) !== count($paths)) {
+            if ($libraryId !== null) {
+                return $this->libraryResult(true, false, 'Existing Emby library mapping path is unsafe.', drift: true);
+            }
+
             return $this->libraryResult(false, false, 'Invalid Emby library path.');
         }
 
+        $writableRoots = $this->integration->getEmbyPublisherWritablePaths();
+        $hasUnwritablePath = false;
+        foreach ($paths as $path) {
+            $isWritable = false;
+            foreach ($writableRoots as $writableRoot) {
+                if (MediaServerIntegration::isPathWithinWritableRoot($path, $writableRoot)) {
+                    $isWritable = true;
+
+                    break;
+                }
+            }
+
+            if (! $isWritable) {
+                $hasUnwritablePath = true;
+
+                break;
+            }
+        }
+        if ($hasUnwritablePath) {
+            if ($libraryId !== null) {
+                return $this->libraryResult(true, false, 'Existing Emby library mapping path is no longer writable.', drift: true);
+            }
+
+            return $this->libraryResult(false, false, 'Emby library path is not companion-writable.');
+        }
+
+        $containsRequestedPaths = function (array $library) use ($paths): bool {
+            foreach ($paths as $path) {
+                $containsPath = false;
+                foreach ($library['paths'] ?? [] as $libraryPath) {
+                    if (is_string($libraryPath)
+                        && MediaServerIntegration::isPathWithinWritableRoot($path, $libraryPath)
+                        && MediaServerIntegration::isPathWithinWritableRoot($libraryPath, $path)) {
+                        $containsPath = true;
+
+                        break;
+                    }
+                }
+
+                if (! $containsPath) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
         $matchesRequest = fn (array $library): bool => $library['name'] === $name
             && $library['type'] === $collectionType
-            && $library['paths'] === $paths;
+            && $containsRequestedPaths($library);
 
         try {
             $existingLibraries = $this->fetchLibraries();
@@ -203,6 +254,10 @@ class EmbyJellyfinService implements MediaServer
                 $drift = ! $matchesRequest($existingLibrary);
 
                 return $this->libraryResult(true, false, 'Existing Emby library found by ID.', $existingLibrary, $drift);
+            }
+
+            if ($libraryId !== null) {
+                return $this->libraryResult(true, false, 'Existing Emby library ID was not found.', drift: true);
             }
 
             $existingLibrary = $existingLibraries->first($matchesRequest);

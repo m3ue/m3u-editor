@@ -141,3 +141,33 @@ it('exposes only validated companion writable paths', function () {
         'C:\\Emby\\Managed',
     ]);
 });
+
+it('recognizes equal and descendant remote paths across supported path styles', function (string $path, string $root) {
+    expect(MediaServerIntegration::isPathWithinWritableRoot($path, $root))->toBeTrue();
+})->with([
+    'equal Unix path' => ['/srv/emby/managed', '/srv/emby/managed/'],
+    'Unix descendant' => ['/srv/emby/managed/movies', '/srv/emby/managed'],
+    'equal Windows drive path' => ['C:\\Emby\\Managed', 'c:/emby/managed/'],
+    'Windows drive descendant' => ['C:/Emby/Managed/Movies', 'c:\\emby\\managed'],
+    'equal UNC path' => ['\\\\NAS\\Emby\\Managed', '//nas/emby/managed/'],
+    'UNC descendant' => ['\\\\NAS\\Emby\\Managed\\TV', '//nas/emby/managed'],
+]);
+
+it('rejects unsafe or unrelated remote path containment', function (string $path, string $root) {
+    expect(MediaServerIntegration::isPathWithinWritableRoot($path, $root))->toBeFalse();
+})->with([
+    'Unix sibling prefix' => ['/srv/emby/managed2', '/srv/emby/managed'],
+    'Windows sibling prefix' => ['C:\\Emby\\Managed2', 'C:\\Emby\\Managed'],
+    'UNC sibling prefix' => ['\\\\NAS\\Emby2\\Movies', '\\\\NAS\\Emby'],
+    'Unix traversal' => ['/srv/emby/managed/../private', '/srv/emby/managed'],
+    'Windows traversal' => ['C:\\Emby\\Managed\\..\\Private', 'C:\\Emby\\Managed'],
+    'relative path' => ['srv/emby/managed', '/srv/emby'],
+    'URL-like path' => ['https://user:secret@example.com/media', '/srv/emby'],
+    'null byte' => ["/srv/emby/managed\0/private", '/srv/emby/managed'],
+    'malformed Unix path' => ['/srv//emby/managed', '/srv/emby'],
+    'malformed drive path' => ['C://Emby/Managed', 'C:/Emby'],
+    'invalid drive segment' => ['C:\\Emby\\Bad|Name', 'C:\\Emby'],
+    'incomplete UNC path' => ['\\\\NAS', '\\\\NAS\\Emby'],
+    'invalid UNC segment' => ['\\\\NAS\\Emby\\Bad?Name', '\\\\NAS\\Emby'],
+    'different Windows drive' => ['D:\\Emby\\Managed', 'C:\\Emby\\Managed'],
+]);
