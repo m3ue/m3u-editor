@@ -239,6 +239,20 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * @param  list<string>  $writableRoots
+     */
+    public static function isPathWithinAnyWritableRoot(string $path, array $writableRoots): bool
+    {
+        foreach ($writableRoots as $writableRoot) {
+            if (static::isPathWithinWritableRoot($path, $writableRoot)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @return array{style: 'unix'|'windows', segments: list<string>}|null
      */
     private static function parseRemoteAbsolutePath(string $path): ?array
@@ -320,9 +334,21 @@ class MediaServerIntegration extends Model
     /** @param list<string> $segments */
     private static function hasInvalidWindowsSegment(array $segments): bool
     {
+        static $reservedNames = [
+            'con', 'prn', 'aux', 'nul',
+            'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9',
+            'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
+        ];
+
         foreach ($segments as $segment) {
-            if (preg_match('/[<>:"|?*]/', $segment) === 1
+            if ($segment === ''
+                || preg_match('/[<>:"|?*]/', $segment) === 1
                 || str_ends_with($segment, '.') || str_ends_with($segment, ' ')) {
+                return true;
+            }
+
+            $baseName = strtolower(explode('.', $segment, 2)[0]);
+            if (in_array($baseName, $reservedNames, true)) {
                 return true;
             }
         }

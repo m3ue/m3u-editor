@@ -196,16 +196,7 @@ class EmbyJellyfinService implements MediaServer
         $writableRoots = $this->integration->getEmbyPublisherWritablePaths();
         $hasUnwritablePath = false;
         foreach ($paths as $path) {
-            $isWritable = false;
-            foreach ($writableRoots as $writableRoot) {
-                if (MediaServerIntegration::isPathWithinWritableRoot($path, $writableRoot)) {
-                    $isWritable = true;
-
-                    break;
-                }
-            }
-
-            if (! $isWritable) {
+            if (! MediaServerIntegration::isPathWithinAnyWritableRoot($path, $writableRoots)) {
                 $hasUnwritablePath = true;
 
                 break;
