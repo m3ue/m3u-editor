@@ -87,109 +87,6 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     {
         return $schema
             ->components([
-                Fieldset::make(__('Source'))
-                    ->schema([
-                        Grid::make(2)->schema([
-                            Select::make('source_kind')
-                                ->label(__('Source type'))
-                                ->options([
-                                    'vod_group' => __('VOD group'),
-                                    'series_category' => __('Series category'),
-                                    'custom_playlist_group' => __('Custom playlist group'),
-                                    'all' => __('All eligible items'),
-                                ])
-                                ->required()
-                                ->helperText(__('Choose the m3u-editor content to publish into this Emby library.'))
-                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('The source controls which eligible movies or TV shows are included.'))
-                                ->live()
-                                ->afterStateUpdated(function (Set $set, ?string $state): void {
-                                    $set('source_identifier', $state === 'all' ? '*' : null);
-                                    $set('source_label', $state === 'all' ? __('All eligible items') : null);
-                                    $set('collection_type', match ($state) {
-                                        'vod_group' => 'movies',
-                                        'series_category' => 'tvshows',
-                                        default => null,
-                                    });
-                                }),
-                            Select::make('source_identifier')
-                                ->label(__('Source'))
-                                ->required()
-                                ->helperText(__('Choose the specific source whose eligible items should be published.'))
-                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('Only content owned by this integration user is available.'))
-                                ->searchable()
-                                ->live()
-                                // Async search rather than a static options() list: vod_group and
-                                // series_category can each span thousands of rows across a user's
-                                // playlists, so loading them all upfront doesn't scale. The search
-                                // results (and the option label shown once a value is selected) also
-                                // append the owning playlist's name for vod_group/series_category —
-                                // group/category names collide across playlists constantly, and
-                                // without it there's no way to tell which playlist's "Action" you're
-                                // actually picking. This is presentation-only: the raw, unsuffixed
-                                // name is still what gets written to source_label below, since
-                                // that's matched verbatim against channels.group/categories.name by
-                                // EmbyPublicationCatalogService.
-                                ->getSearchResultsUsing(fn (Get $get, string $search): array => $this->sourceSearchOptions($get('source_kind'), $search))
-                                ->getOptionLabelUsing(fn (Get $get, ?string $state): ?string => $state === null
-                                    ? null
-                                    : $this->sourceSearchOptions($get('source_kind'), '', $state)[$state] ?? null)
-                                ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
-                                    // For custom_playlist_group, sourceOptions() labels are the
-                                    // CustomPlaylist's own name — never a valid source_label value
-                                    // (that only ever comes from sourceLabelOptions(), which also
-                                    // needs collection_type to know which groups are eligible).
-                                    // Setting it here would populate "Mapped group" with a value
-                                    // that's guaranteed invalid until collection_type is chosen too.
-                                    if ($get('source_kind') === 'custom_playlist_group') {
-                                        $set('source_label', null);
-
-                                        return;
-                                    }
-
-                                    $set('source_label', $this->sourceOptions($get('source_kind'))[$state] ?? null);
-                                }),
-                            Select::make('source_label')
-                                ->label(__('Mapped group'))
-                                ->options(fn (Get $get): array => $this->sourceLabelOptions(
-                                    $get('source_kind'),
-                                    $get('source_identifier'),
-                                    $get('collection_type'),
-                                ))
-                                // Only custom_playlist_group needs a second-level pick here: the
-                                // "Source" select above chose the CustomPlaylist itself, and this
-                                // field is where the specific group/category inside it is chosen —
-                                // it's also the actual value the catalog matches items against for
-                                // that source kind (see EmbyPublicationCatalogService). For every
-                                // other source kind, source_identifier already uniquely identifies
-                                // the group/category, and source_label is auto-populated from it
-                                // (afterStateUpdated above) with the single matching option — so
-                                // it's disabled rather than hidden: still visible for transparency
-                                // and still validated/submitted, just not something the user needs
-                                // to (or can) redundantly re-pick.
-                                ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group' || ! $get('collection_type'))
-                                ->dehydrated()
-                                ->required()
-                                ->helperText(function (Get $get): string {
-                                    if ($get('source_kind') !== 'custom_playlist_group') {
-                                        return __('Automatically set from the source selected above.');
-                                    }
-
-                                    if (! $get('collection_type')) {
-                                        return __('Choose a library type first.');
-                                    }
-
-                                    if ($this->sourceLabelOptions($get('source_kind'), $get('source_identifier'), $get('collection_type')) === []) {
-                                        return $get('collection_type') === 'movies'
-                                            ? __('This custom playlist has no VOD groups available to publish as movies.')
-                                            : __('This custom playlist has no series categories available to publish as TV shows.');
-                                    }
-
-                                    return __('Choose the specific group or category within the custom playlist to publish.');
-                                })
-                                ->searchable(),
-                        ]),
-                    ])
-                    ->columnSpanFull(),
                 Fieldset::make(__('Emby library'))
                     ->schema([
                         Toggle::make('enabled')
@@ -306,6 +203,116 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                     : __('No companion writable destination is available. Register a writable root in the Emby companion, then refresh this integration.'))
                                 ->visible(fn (Get $get): bool => $this->destinationIsUnavailable($get))
                                 ->columnSpanFull(),
+                        ]),
+                    ])
+                    ->columnSpanFull(),
+                Fieldset::make(__('Source'))
+                    ->schema([
+                        Grid::make(2)->schema([
+                            Select::make('source_kind')
+                                ->label(__('Source type'))
+                                ->options([
+                                    'vod_group' => __('VOD group'),
+                                    'series_category' => __('Series category'),
+                                    'custom_playlist_group' => __('Custom playlist group'),
+                                    'all' => __('All eligible items'),
+                                ])
+                                ->required()
+                                ->helperText(__('Choose the m3u-editor content to publish into this Emby library.'))
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('The source controls which eligible movies or TV shows are included.'))
+                                ->live()
+                                ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
+                                    $set('source_identifier', $state === 'all' ? '*' : null);
+                                    $set('source_label', $state === 'all' ? __('All eligible items') : null);
+
+                                    // collection_type is owned by the selected existing library
+                                    // (see target_library_id's afterStateUpdated) once destination_mode
+                                    // is "existing" — guessing it from source_kind here would silently
+                                    // desync "Mapped group"'s options from the library actually chosen.
+                                    if ($get('destination_mode') !== 'existing') {
+                                        $set('collection_type', match ($state) {
+                                            'vod_group' => 'movies',
+                                            'series_category' => 'tvshows',
+                                            default => null,
+                                        });
+                                    }
+                                }),
+                            Select::make('source_identifier')
+                                ->label(__('Source'))
+                                ->required()
+                                ->helperText(__('Choose the specific source whose eligible items should be published.'))
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('Only content owned by this integration user is available.'))
+                                ->searchable()
+                                ->live()
+                                // Async search rather than a static options() list: vod_group and
+                                // series_category can each span thousands of rows across a user's
+                                // playlists, so loading them all upfront doesn't scale. The search
+                                // results (and the option label shown once a value is selected) also
+                                // append the owning playlist's name for vod_group/series_category —
+                                // group/category names collide across playlists constantly, and
+                                // without it there's no way to tell which playlist's "Action" you're
+                                // actually picking. This is presentation-only: the raw, unsuffixed
+                                // name is still what gets written to source_label below, since
+                                // that's matched verbatim against channels.group/categories.name by
+                                // EmbyPublicationCatalogService.
+                                ->getSearchResultsUsing(fn (Get $get, string $search): array => $this->sourceSearchOptions($get('source_kind'), $search))
+                                ->getOptionLabelUsing(fn (Get $get, ?string $state): ?string => $state === null
+                                    ? null
+                                    : $this->sourceSearchOptions($get('source_kind'), '', $state)[$state] ?? null)
+                                ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
+                                    // For custom_playlist_group, sourceOptions() labels are the
+                                    // CustomPlaylist's own name — never a valid source_label value
+                                    // (that only ever comes from sourceLabelOptions(), which also
+                                    // needs collection_type to know which groups are eligible).
+                                    // Setting it here would populate "Mapped group" with a value
+                                    // that's guaranteed invalid until collection_type is chosen too.
+                                    if ($get('source_kind') === 'custom_playlist_group') {
+                                        $set('source_label', null);
+
+                                        return;
+                                    }
+
+                                    $set('source_label', $this->sourceOptions($get('source_kind'))[$state] ?? null);
+                                }),
+                            Select::make('source_label')
+                                ->label(__('Mapped group'))
+                                ->options(fn (Get $get): array => $this->sourceLabelOptions(
+                                    $get('source_kind'),
+                                    $get('source_identifier'),
+                                    $get('collection_type'),
+                                ))
+                                // Only custom_playlist_group needs a second-level pick here: the
+                                // "Source" select above chose the CustomPlaylist itself, and this
+                                // field is where the specific group/category inside it is chosen —
+                                // it's also the actual value the catalog matches items against for
+                                // that source kind (see EmbyPublicationCatalogService). For every
+                                // other source kind, source_identifier already uniquely identifies
+                                // the group/category, and source_label is auto-populated from it
+                                // (afterStateUpdated above) with the single matching option — so
+                                // it's disabled rather than hidden: still visible for transparency
+                                // and still validated/submitted, just not something the user needs
+                                // to (or can) redundantly re-pick.
+                                ->disabled(fn (Get $get): bool => $get('source_kind') !== 'custom_playlist_group' || ! $get('collection_type'))
+                                ->dehydrated()
+                                ->required()
+                                ->helperText(function (Get $get): string {
+                                    if ($get('source_kind') !== 'custom_playlist_group') {
+                                        return __('Automatically set from the source selected above.');
+                                    }
+
+                                    if (! $get('collection_type')) {
+                                        return __('Choose a library type first.');
+                                    }
+
+                                    if ($this->sourceLabelOptions($get('source_kind'), $get('source_identifier'), $get('collection_type')) === []) {
+                                        return $get('collection_type') === 'movies'
+                                            ? __('This custom playlist has no VOD groups available to publish as movies.')
+                                            : __('This custom playlist has no series categories available to publish as TV shows.');
+                                    }
+
+                                    return __('Choose the specific group or category within the custom playlist to publish.');
+                                })
+                                ->searchable(),
                         ]),
                     ])
                     ->columnSpanFull(),
