@@ -181,6 +181,12 @@ class Channel extends Model
             ->withoutEagerLoads();
     }
 
+    /** The DVR recording this VOD channel was integrated from, if any. */
+    public function dvrRecording(): BelongsTo
+    {
+        return $this->belongsTo(DvrRecording::class);
+    }
+
     public function aedProfile(): BelongsTo
     {
         return $this->belongsTo(AedProfile::class);

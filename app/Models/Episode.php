@@ -122,6 +122,12 @@ class Episode extends Model
         return $this->belongsTo(Series::class, 'series_id');
     }
 
+    /** The DVR recording this episode was integrated from, if any. */
+    public function dvrRecording(): BelongsTo
+    {
+        return $this->belongsTo(DvrRecording::class);
+    }
+
     /**
      * Get all STRM file mappings for this episode
      */
