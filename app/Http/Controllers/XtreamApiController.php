@@ -240,7 +240,7 @@ class XtreamApiController extends Controller
      * (bool — whether a Series rule already exists for this title), `series_rule_id` (int|null
      * — the existing rule's id when `has_series_rule` is true, for delete-without-round-trip),
      * `channel_count`, `channels` (array of `{channel_id, channel_name}`), `episode_count`,
-     * `next_airing_at` (ISO 8601 or null), `airing_now` (array — programmes currently
+     * `next_airing_at` (ISO 8601 or null), `airing_now` (array, programmes currently
      * in progress on EPG-mapped channels; empty when none, never null; programmes with
      * an unknown `end_time` are excluded since progress can't be confirmed), and
      * `recent_episodes` (up to MAX_RECENT_EPISODES airings, upcoming first soonest, then
@@ -3830,10 +3830,17 @@ class XtreamApiController extends Controller
         }
 
         // Fetch matching programmes across all mapped EPG channels, including those
-        // that just finished (up to 24 hours ago) for discoverability.
-        $cutoff = Carbon::now()->subHours(24);
+        // that just finished (up to 24 hours ago) for discoverability. Programmes
+        // still in progress right now are also included even if they started more
+        // than 24 hours ago (e.g. a long-running block or marathon entry), so
+        // airing_now below doesn't silently drop them.
+        $now = Carbon::now();
+        $cutoff = $now->copy()->subHours(24);
         $programmes = EpgProgramme::whereIn('epg_channel_id', $epgChannelIds->toArray())
-            ->where('start_time', '>=', $cutoff)
+            ->where(function ($query) use ($cutoff, $now) {
+                $query->where('start_time', '>=', $cutoff)
+                    ->orWhere('end_time', '>', $now);
+            })
             ->whereRaw('LOWER(title) LIKE LOWER(?)', ['%'.$q.'%'])
             ->limit(500)
             ->get();
@@ -3875,7 +3882,6 @@ class XtreamApiController extends Controller
             // the next actionable airing behind farther-out ones (the bug being
             // fixed in #1411). Don't collapse this back to a single usort without
             // re-checking that case.
-            $now = Carbon::now();
             $upcoming = [];
             $past = [];
             foreach ($progs as $p) {
@@ -3908,10 +3914,23 @@ class XtreamApiController extends Controller
             // covers exactly that case). Programmes with a null end_time cannot be
             // confirmed in progress and are excluded. Always emit an array so the
             // client doesn't need a null/empty branch.
-            $airingNowProgs = array_values(array_filter(
-                $past,
-                fn (EpgProgramme $p) => $p->end_time !== null && $p->end_time->gt($now),
-            ));
+            //
+            // Dedupe by resolved channel_id: overlapping/corrected EPG data can list
+            // more than one in-progress programme for the same channel at once, and
+            // $past's most-recent-start-first order means the first match per channel
+            // is the one to keep.
+            $airingNowByChannel = [];
+            foreach ($past as $p) {
+                if ($p->end_time === null || ! $p->end_time->gt($now)) {
+                    continue;
+                }
+
+                $channelKey = $channelLookup[$p->epg_channel_id]['channel_id'] ?? $p->epg_channel_id;
+                if (! isset($airingNowByChannel[$channelKey])) {
+                    $airingNowByChannel[$channelKey] = $p;
+                }
+            }
+            $airingNowProgs = array_values($airingNowByChannel);
             $airingNow = array_map(
                 fn (EpgProgramme $p) => $this->formatEpisodePayload($p, $channelLookup),
                 $airingNowProgs,

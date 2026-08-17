@@ -102,7 +102,7 @@ beforeEach(function () {
 
     // Build a second Channel <-> EpgChannel pair so tests can exercise a show
     // airing simultaneously on multiple channels (regional variants, +1
-    // timeshifts) — exactly the case `airing_now` is built to expose.
+    // timeshifts), exactly the case `airing_now` is built to expose.
     $this->makeChannelPair = function (string $channelId, string $name) {
         $epgChannel = EpgChannel::factory()->create([
             'epg_id' => $this->epg->id,
@@ -400,4 +400,39 @@ it('leaves next_airing_at and recent_episodes ordering untouched by the airing_n
 
     // None are airing - all past/outside the live window.
     expect($response->json('0.airing_now'))->toBe([]);
+});
+
+it('includes a still-running programme in airing_now even when it started more than 24 hours ago', function () {
+    $title = 'Marathon Show';
+    $now = now();
+
+    // Started 30 hours ago (outside the 24h lookback window) but still running
+    // for another hour. The lookback cutoff on start_time must not exclude a
+    // programme that is genuinely in progress right now.
+    ($this->makeProgramme)($title, $now->copy()->subHours(30), $now->copy()->addHour());
+
+    $response = $this->postJson(searchShowsUrl('credential-a', 'password-a', 'marathon'))
+        ->assertOk();
+
+    $airingNow = $response->json('0.airing_now');
+    expect($airingNow)->toHaveCount(1);
+    expect($airingNow[0]['start_time'])->toBe($now->copy()->subHours(30)->toIso8601String());
+});
+
+it('deduplicates airing_now by channel when overlapping EPG data lists two in-progress programmes for the same channel', function () {
+    $title = 'Overlap Show';
+    $now = now();
+
+    // Two overlapping in-progress entries for the same EPG channel (a schedule
+    // correction overlap). Only one row per channel should surface in
+    // airing_now, keeping the most-recently-started of the two.
+    ($this->makeProgramme)($title, $now->copy()->subMinutes(30), $now->copy()->addMinutes(30));
+    ($this->makeProgramme)($title, $now->copy()->subMinutes(5), $now->copy()->addMinutes(55));
+
+    $response = $this->postJson(searchShowsUrl('credential-a', 'password-a', 'overlap'))
+        ->assertOk();
+
+    $airingNow = $response->json('0.airing_now');
+    expect($airingNow)->toHaveCount(1);
+    expect($airingNow[0]['start_time'])->toBe($now->copy()->subMinutes(5)->toIso8601String());
 });
