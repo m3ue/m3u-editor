@@ -20,14 +20,21 @@ Route::post('webhooks/arr/{integration:webhook_secret}', [ArrWebhookController::
     ->name('webhooks.arr');
 
 /*
- * EPG API routes
- */
-
-/*
  * EPG API routes (authenticated - used by the in-app EPG viewer)
+ *
+ * EpgApiController only embeds playable stream URLs for a caller it can verify:
+ * a panel session that owns the playlist, or credentials that resolve to it.
+ * The session branch needs the cookie decrypted and the session loaded, which
+ * the stateless `api` group does not do — hence the session middleware here
+ * (same reasoning as the m3u-proxy player-stream/stop route below). Without it
+ * `Auth::check()` is always false and the in-app EPG viewer silently degrades
+ * to metadata only, hiding the play button.
  */
-
-Route::middleware(['throttle:60,1'])->prefix('epg')->group(function () {
+Route::middleware([
+    EncryptCookies::class,
+    StartSession::class,
+    'throttle:60,1',
+])->prefix('epg')->group(function () {
     Route::get('{uuid}/data', [EpgApiController::class, 'getData'])
         ->name('api.epg.data');
     Route::get('playlist/{uuid}/data', [EpgApiController::class, 'getDataForPlaylist'])
