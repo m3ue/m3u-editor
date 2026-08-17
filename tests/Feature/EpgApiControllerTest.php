@@ -401,17 +401,19 @@ it('gets playable urls for unauthenticated request with matching playlist auth',
 });
 
 /*
- * The in-app EPG viewer authenticates via the panel session cookie, so the EPG
- * routes must load the session. They live in routes/api.php, whose `api` group
- * is stateless — without EncryptCookies + StartSession, `Auth::check()` is
- * always false and every channel comes back with a null `url`, which hides the
- * play button in the playlist EPG view.
+ * The in-app EPG viewer authenticates via the panel session cookie when
+ * fetching playable stream URLs, so `api.epg.playlist.data` must load the
+ * session. It lives in routes/api.php, whose `api` group is stateless -
+ * without EncryptCookies + StartSession, `Auth::check()` is always false
+ * and every channel comes back with a null `url`, which hides the play
+ * button in the playlist EPG view. `api.epg.data` and `api.epg.playlist.groups`
+ * never call `Auth::`, so they intentionally do not carry this middleware.
  *
  * This cannot be covered by a request test: `actingAs()` sets the guard's user
  * directly and passes regardless of which middleware the route declares.
  */
-it('loads the panel session on the epg routes', function (string $routeName) {
-    $route = Route::getRoutes()->getByName($routeName);
+it('loads the panel session on the epg playlist data route', function () {
+    $route = Route::getRoutes()->getByName('api.epg.playlist.data');
 
     expect($route)->not->toBeNull();
 
@@ -420,8 +422,19 @@ it('loads the panel session on the epg routes', function (string $routeName) {
     expect($middleware)
         ->toContain(EncryptCookies::class)
         ->toContain(StartSession::class);
+});
+
+it('does not load the panel session on the other epg routes', function (string $routeName) {
+    $route = Route::getRoutes()->getByName($routeName);
+
+    expect($route)->not->toBeNull();
+
+    $middleware = app(Router::class)->gatherRouteMiddleware($route);
+
+    expect($middleware)
+        ->not->toContain(EncryptCookies::class)
+        ->not->toContain(StartSession::class);
 })->with([
     'api.epg.data',
-    'api.epg.playlist.data',
     'api.epg.playlist.groups',
 ]);
