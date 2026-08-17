@@ -256,3 +256,65 @@ it('withholds the edl url for a recording that has not completed', function () {
 
     expect($response->json('info'))->not->toHaveKey('edl_url');
 });
+
+it('withholds the edl url on get_vod_info from a guest credential that does not own the recording', function () {
+    // VOD library items are playlist-wide, not per-guest, so a second guest with
+    // dvr_enabled can see the same movie. DvrStreamController::edl() scopes by
+    // playlist_auth_id for guest credentials, so advertising an edl_url built
+    // with the other guest's own username/password sends them at a URL that
+    // 404s for a recording they don't own.
+    $otherAuth = PlaylistAuth::create([
+        'name' => 'Other EDL Test Auth',
+        'username' => 'edl-user-2',
+        'password' => 'edl-pass-2',
+        'enabled' => true,
+        'dvr_enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $this->playlist->playlistAuths()->attach($otherAuth);
+
+    $channel = dvrEdlVodChannel($this, $this->recording->id);
+
+    $response = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id], 'edl-user-2', 'edl-pass-2'))->assertOk();
+
+    expect($response->json('info'))->not->toHaveKey('edl_url')
+        ->and($response->json('info'))->not->toHaveKey('dvr_uuid');
+});
+
+it('withholds the edl url on get_series_info from a guest credential that does not own the recording', function () {
+    $otherAuth = PlaylistAuth::create([
+        'name' => 'Other EDL Test Auth',
+        'username' => 'edl-user-2',
+        'password' => 'edl-pass-2',
+        'enabled' => true,
+        'dvr_enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $this->playlist->playlistAuths()->attach($otherAuth);
+
+    $episode = dvrEdlEpisode($this, $this->recording->id);
+
+    $response = $this->getJson(dvrEdlApiUrl('get_series_info', ['series_id' => $episode->series_id], 'edl-user-2', 'edl-pass-2'))->assertOk();
+
+    expect($response->json('episodes.1.0'))->not->toHaveKey('edl_url')
+        ->and($response->json('episodes.1.0'))->not->toHaveKey('dvr_uuid');
+});
+
+it('still emits the edl url on get_vod_info for the owning credential when other guests have dvr access', function () {
+    $otherAuth = PlaylistAuth::create([
+        'name' => 'Other EDL Test Auth',
+        'username' => 'edl-user-2',
+        'password' => 'edl-pass-2',
+        'enabled' => true,
+        'dvr_enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $this->playlist->playlistAuths()->attach($otherAuth);
+
+    $channel = dvrEdlVodChannel($this, $this->recording->id);
+
+    $response = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id]))->assertOk();
+
+    expect($response->json('info.edl_url'))
+        ->toBe(config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
+});

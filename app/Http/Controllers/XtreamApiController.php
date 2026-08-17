@@ -1188,7 +1188,7 @@ class XtreamApiController extends Controller
             );
 
             $dvrGranted = $hasDvrEpisodes
-                && $this->dvrCapabilityGranted($this->resolveDvrPlaylist($playlist), $authMethod, $playlistAuth);
+                && $this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth);
 
             if ($dvrGranted) {
                 $seriesItem->load([
@@ -1272,7 +1272,9 @@ class XtreamApiController extends Controller
                                     : $episode->info['cover_big'];
                             }
 
-                            $episodeEdlUrl = $dvrGranted && $episode->dvrRecording
+                            $episodeEdlUrl = $dvrGranted
+                                && $episode->dvrRecording
+                                && $this->dvrRecordingVisibleToCaller($episode->dvrRecording, $authMethod, $playlistAuth)
                                 ? $this->dvrEdlUrl($episode->dvrRecording, $username, $password)
                                 : null;
 
@@ -1730,9 +1732,9 @@ class XtreamApiController extends Controller
             // screen — same file, so the EDL offsets apply unchanged. Keys are
             // omitted entirely for ordinary VOD, keeping those payloads
             // byte-identical to before.
-            if ($channel->dvr_recording_id && $this->dvrCapabilityGranted($this->resolveDvrPlaylist($playlist), $authMethod, $playlistAuth)) {
+            if ($channel->dvr_recording_id && $this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth)) {
                 $dvrRecording = $channel->dvrRecording()->with(['dvrSetting', 'recordingRule'])->first();
-                $dvrEdlUrl = $dvrRecording
+                $dvrEdlUrl = $dvrRecording && $this->dvrRecordingVisibleToCaller($dvrRecording, $authMethod, $playlistAuth)
                     ? $this->dvrEdlUrl($dvrRecording, $username, $password)
                     : null;
 
@@ -3544,6 +3546,23 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * Whether a specific recording's EDL/DVR metadata may be surfaced to the
+     * caller. DVR recording listings (getDvrRecordings/getDvrRecording) scope
+     * their query by playlist_auth_id, but the VOD/series library items a
+     * recording gets integrated into are playlist-wide, not per-guest - so
+     * advertising edl_url there needs its own ownership check, mirroring the
+     * scoping DvrStreamController::edl() enforces when actually serving it.
+     */
+    private function dvrRecordingVisibleToCaller(DvrRecording $recording, string $authMethod, ?PlaylistAuth $playlistAuth): bool
+    {
+        if ($authMethod === 'playlist_auth') {
+            return $recording->playlist_auth_id === $playlistAuth?->id;
+        }
+
+        return true;
+    }
+
+    /**
      * Single source of truth for whether DVR is usable at all: global config,
      * the effective playlist's DvrSetting, and (for guest credentials) the
      * PlaylistAuth's own dvr_enabled flag. Both feature advertisement and every
@@ -3664,7 +3683,7 @@ class XtreamApiController extends Controller
 
         $query = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->with('channel')
+            ->with(['channel', 'dvrSetting', 'recordingRule'])
             ->orderByDesc('scheduled_start');
 
         if ($status) {
@@ -3699,7 +3718,7 @@ class XtreamApiController extends Controller
         $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
             ->where('uuid', $uuid)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->with('channel')
+            ->with(['channel', 'dvrSetting', 'recordingRule'])
             ->first();
 
         if (! $recording) {
