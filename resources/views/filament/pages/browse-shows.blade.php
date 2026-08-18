@@ -130,21 +130,33 @@
                             @endif
 
                             @if ($show['has_series_rule'])
-                                <div class="absolute top-2 right-2">
-                                    <x-filament::badge color="success">{{ __('Series') }}</x-filament::badge>
+                                <div class="absolute top-2 right-2 inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
+                                    <x-filament::badge color="success" icon="heroicon-s-queue-list" size="sm" class="!bg-emerald-600 !text-white">
+                                        {{ __('Series') }}
+                                    </x-filament::badge>
                                 </div>
                             @elseif ($show['has_once_rule'])
-                                <div class="absolute top-2 right-2">
-                                    <x-filament::badge color="info">{{ __('Scheduled') }}</x-filament::badge>
+                                <div class="absolute top-2 right-2 inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
+                                    <x-filament::badge color="info" icon="heroicon-s-clock" size="sm">
+                                        {{ __('Scheduled') }}
+                                    </x-filament::badge>
                                 </div>
                             @endif
 
-                            <div class="absolute top-2 left-2 flex flex-col gap-1">
+                            <div class="absolute top-2 left-2 flex flex-col items-start gap-1">
                                 @if ($show['flags']['is_new'])
-                                    <x-filament::badge color="success">{{ __('New') }}</x-filament::badge>
+                                    <div class="inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
+                                        <x-filament::badge color="success" icon="heroicon-s-sparkles" size="sm" class="!bg-emerald-600 !text-white">
+                                            {{ __('New') }}
+                                        </x-filament::badge>
+                                    </div>
                                 @endif
                                 @if ($show['flags']['premiere'])
-                                    <x-filament::badge color="warning">{{ __('Premiere') }}</x-filament::badge>
+                                    <div class="inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
+                                        <x-filament::badge color="warning" icon="heroicon-s-star" size="sm">
+                                            {{ __('Premiere') }}
+                                        </x-filament::badge>
+                                    </div>
                                 @endif
                             </div>
                         </button>
