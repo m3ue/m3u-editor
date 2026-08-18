@@ -100,7 +100,12 @@
 
                             @if ($show['has_series_rule'])
                                 <div class="absolute top-2 right-2 inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
-                                    <x-filament::badge color="success" icon="heroicon-s-queue-list" size="sm" class="!bg-emerald-600 !text-white">
+                                    <x-filament::badge
+                                        color="success"
+                                        icon="heroicon-s-queue-list"
+                                        size="sm"
+                                        class="!bg-emerald-600 !text-white"
+                                    >
                                         {{ __('Series') }}
                                     </x-filament::badge>
                                 </div>
@@ -115,7 +120,12 @@
                             <div class="absolute top-2 left-2 flex flex-col items-start gap-1">
                                 @if ($show['flags']['is_new'])
                                     <div class="inline-flex items-center rounded-md bg-gray-900/70 ring-1 ring-white/10 backdrop-blur-sm">
-                                        <x-filament::badge color="success" icon="heroicon-s-sparkles" size="sm" class="!bg-emerald-600 !text-white">
+                                        <x-filament::badge
+                                            color="success"
+                                            icon="heroicon-s-sparkles"
+                                            size="sm"
+                                            class="!bg-emerald-600 !text-white"
+                                        >
                                             {{ __('New') }}
                                         </x-filament::badge>
                                     </div>
