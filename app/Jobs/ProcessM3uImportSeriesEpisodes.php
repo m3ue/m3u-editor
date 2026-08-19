@@ -8,12 +8,14 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\SyncPipelineService;
+use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessM3uImportSeriesEpisodes implements ShouldQueue
@@ -29,6 +31,14 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
      * Each batch is dispatched as a separate job to prevent timeouts.
      */
     public const BATCH_SIZE = 100;
+
+    /**
+     * Cache key prefix for the provider bulk-diff target list.
+     */
+    private function targetCacheKey(): string
+    {
+        return 'series_sync_target_'.($this->playlist_id ?? 'all').'_'.($this->user_id ?? 'all');
+    }
 
     /**
      * Create a new job instance.
@@ -85,12 +95,118 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
     }
 
     /**
+     * Fetch the provider's full series list (bulk get_series, ~1-2s for ~17k series)
+     * and return the local series IDs whose provider last_modified differs from
+     * what we stored (i.e. actually changed since our last fetch), or null when
+     * the bulk cannot be used (fallback to full scan).
+     *
+     * @return array<int>|null Local series IDs to process, or null for full scan
+     */
+    private function diffSeriesAgainstProvider(): ?array
+    {
+        try {
+            $playlist = Playlist::find($this->playlist_id);
+            if (! $playlist || ! $playlist->xtream) {
+                return null;
+            }
+
+            $xtream = XtreamService::make($playlist);
+            if (! $xtream) {
+                return null;
+            }
+
+            $bulk = $xtream->getAllSeries();
+            if (! is_array($bulk) || count($bulk) === 0) {
+                Log::warning('Series bulk diff: provider returned empty list, falling back to full scan');
+
+                return null;
+            }
+
+            // Map provider series_id -> last_modified (unix ts)
+            $providerMap = [];
+            foreach ($bulk as $s) {
+                $id = (string) ($s['series_id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+                $providerMap[$id] = (int) ($s['last_modified'] ?? 0);
+            }
+
+            $local = Series::query()
+                ->where([
+                    ['enabled', true],
+                    ['user_id', $this->user_id],
+                ])
+                ->when($this->playlist_id, function ($query) {
+                    $query->where('playlist_id', $this->playlist_id);
+                })
+                ->select('id', 'source_series_id', 'last_modified', 'last_metadata_fetch')
+                ->get();
+
+            $toProcess = [];
+            foreach ($local as $s) {
+                $sid = (string) $s->source_series_id;
+
+                // Series absent from the provider are kept as-is (no action).
+                if (! isset($providerMap[$sid])) {
+                    continue;
+                }
+
+                $plm = $providerMap[$sid];
+                $llm = $s->last_modified ? strtotime($s->last_modified.' UTC') : 0;
+
+                // Fresh = we fetched after the provider's last change AND we
+                // already have episodes. Anything else needs a (re)visit.
+                $fresh = $s->last_metadata_fetch
+                    && $llm
+                    && $s->last_metadata_fetch >= $s->last_modified
+                    && $plm <= $llm;
+
+                if (! $fresh) {
+                    $toProcess[] = (int) $s->id;
+                }
+            }
+
+            Log::info('Series bulk diff completed', [
+                'provider_series' => count($providerMap),
+                'local_series' => count($local),
+                'to_process' => count($toProcess),
+            ]);
+
+            return $toProcess;
+        } catch (\Throwable $e) {
+            Log::warning('Series bulk diff failed, falling back to full scan: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
      * Dispatch first chain of batch jobs.
      * Uses Bus::chain() with CheckSeriesImportProgress to recursively process series
      * in waves, preventing Redis memory exhaustion.
      */
     private function dispatchBatches(GeneralSettings $settings): void
     {
+        // Optional provider bulk diff: when the playlist is Xtream and no force
+        // refresh is requested, only re-visit series whose provider last_modified
+        // changed since our last fetch (plus new/never-fetched ones). Falls back
+        // to the full scan when the bulk cannot be fetched.
+        $targetIds = null;
+        if (! $this->overwrite_existing && $this->playlist_id && ! $this->all_playlists) {
+            $targetIds = $this->diffSeriesAgainstProvider();
+            if ($targetIds !== null) {
+                // TTL covers the longest possible run; the key is re-written at
+                // the start of every run, so a stale list cannot leak into the
+                // next sync.
+                Cache::put($this->targetCacheKey(), $targetIds, now()->addHours(6));
+            } else {
+                // Bulk diff unavailable (fallback full scan): make sure batch
+                // jobs do not filter on a previous run's target list.
+                Cache::forget($this->targetCacheKey());
+            }
+        }
+
         // Count total series to process
         $totalCount = Series::query()
             ->where([
@@ -99,6 +215,9 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             ])
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
+            })
+            ->when($targetIds !== null, function ($query) use ($targetIds) {
+                $query->whereIn('id', $targetIds);
             })
             ->count();
 
@@ -140,6 +259,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             'total_chains' => $totalChains,
             'user_id' => $this->user_id,
             'playlist_id' => $this->playlist_id,
+            'bulk_diff' => $targetIds !== null,
         ]);
 
         // Build first chain
@@ -201,9 +321,13 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         $startTime = microtime(true);
         $processedCount = 0;
 
+        // Read the bulk-diff target list if present (set during dispatch).
+        $targetIds = Cache::get($this->targetCacheKey());
+
         Log::info("Series Sync: Processing batch {$this->currentBatch}/{$this->totalBatches}", [
             'offset' => $this->batchOffset,
             'batch_size' => self::BATCH_SIZE,
+            'bulk_diff_targets' => $targetIds !== null ? count($targetIds) : null,
         ]);
 
         // Get series IDs for this batch (using offset/limit instead of chunkById)
@@ -214,6 +338,9 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             ])
             ->when($this->playlist_id, function ($query) {
                 $query->where('playlist_id', $this->playlist_id);
+            })
+            ->when($targetIds !== null, function ($query) use ($targetIds) {
+                $query->whereIn('id', $targetIds);
             })
             ->orderBy('id')
             ->skip($this->batchOffset)
@@ -259,6 +386,16 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
     {
         // Get the playlist
         $playlist = $series->playlist;
+
+        // Bulk mode fast path: skip the throttled provider round-trip entirely
+        // for custom series (no Xtream fetch) and for series whose metadata is
+        // still fresh. The throttle slot + 500ms delay would otherwise be paid
+        // for every series in every batch, even when fetchMetadata() has nothing
+        // to do — the main cause of the ~2h30 per-run duration.
+        if (! $dispatchSync && ! $dispatchTmdb
+            && ($series->is_custom || $series->isMetadataFresh($this->overwrite_existing))) {
+            return;
+        }
 
         // In bulk mode (dispatchSync=false), don't trigger per-series sync
         $shouldSync = $dispatchSync && $this->sync_stream_files;

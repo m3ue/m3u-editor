@@ -211,6 +211,19 @@ class Series extends Model
         return ! empty($ids['tmdb']) || ! empty($ids['tvdb']) || ! empty($ids['imdb']);
     }
 
+    /**
+     * Whether this series' provider metadata can be considered fresh, i.e.
+     * we fetched it after the provider's last_modified and episodes exist.
+     * Shared by the model (fetchMetadata) and the bulk-sync job so the
+     * freshness check can happen BEFORE the throttled provider call.
+     */
+    public function isMetadataFresh(bool $refresh = false): bool
+    {
+        return ! $refresh && $this->last_metadata_fetch && $this->last_modified
+            && $this->last_metadata_fetch >= $this->last_modified
+            && $this->episodes()->exists();
+    }
+
     public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true)
     {
         // AIOStreams-backed series are resolved via ResolveAioStreamsSeries, not Xtream.
@@ -219,9 +232,7 @@ class Series extends Model
         }
 
         // Skip the provider call if data is still fresh (unless a forced refresh is requested).
-        $isFresh = ! $refresh && $this->last_metadata_fetch && $this->last_modified
-            && $this->last_metadata_fetch >= $this->last_modified
-            && $this->episodes()->exists();
+        $isFresh = $this->isMetadataFresh($refresh);
 
         try {
             if (! $isFresh) {

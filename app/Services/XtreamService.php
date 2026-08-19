@@ -255,6 +255,17 @@ class XtreamService
         return $this->call($this->makeUrl('get_series', ['category_id' => $catId])) ?? [];
     }
 
+    /**
+     * Fetch the full series list in one bulk call (no category filter).
+     * Used by the bulk-diff path in ProcessM3uImportSeriesEpisodes to compare
+     * provider last_modified against the local DB instead of calling
+     * getSeriesInfo() per series.
+     */
+    public function getAllSeries(int $timeout = 120): array
+    {
+        return $this->call($this->makeUrl('get_series'), $timeout) ?? [];
+    }
+
     public function getVodInfo(string $vodId, int $timeout = 60): array
     {
         return $this->call($this->makeUrl('get_vod_info', ['vod_id' => $vodId]), $timeout) ?? [];
