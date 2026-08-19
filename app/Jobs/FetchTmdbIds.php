@@ -630,8 +630,8 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['year'] = substr($details['release_date'], 0, 4);
                 }
 
-                // Populate rating if not already set
-                if (! empty($details['vote_average']) && empty($info['rating'])) {
+                // Populate rating if not already set, or refresh it when overwriting
+                if (! empty($details['vote_average']) && (empty($info['rating']) || $this->overwriteExisting)) {
                     $info['rating'] = $details['vote_average'];
                 }
 
@@ -957,8 +957,8 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['release_date'] = $details['first_air_date'];
                 }
 
-                // Populate rating if not already set
-                if (! empty($details['vote_average']) && empty($series->rating)) {
+                // Populate rating if not already set, or refresh it when overwriting
+                if (! empty($details['vote_average']) && (empty($series->rating) || $this->overwriteExisting)) {
                     $updateData['rating'] = $details['vote_average'];
                 }
 

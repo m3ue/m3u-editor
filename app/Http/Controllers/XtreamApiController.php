@@ -986,7 +986,7 @@ class XtreamApiController extends Controller
                         'stream_type' => 'movie',
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,
-                        'rating' => $channel->rating ?? '',
+                        'rating' => $channel->info['rating'] ?? $channel->rating ?? '',
                         'rating_5based' => $channel->rating_5based ?? 0,
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
@@ -1721,10 +1721,13 @@ class XtreamApiController extends Controller
                 'duration_secs' => $info['duration_secs'] ?? 0,
                 'duration' => $info['duration'] ?? '00:00:00',
                 'bitrate' => $info['bitrate'] ?? 0,
-                // Both sides can legitimately be absent — DVR-integrated movies
-                // carry neither a channel rating nor a 'rating' key in info,
-                // which made this a 500 for exactly those items.
-                'rating' => $channel->rating ?? $info['rating'] ?? '',
+                // Prefer TMDB's rating (info['rating']) over the raw provider column
+                // when both are present — info['rating'] is exclusively TMDB-origin
+                // (see FetchTmdbIds / AppliesTmdbSelection), so this can never surface
+                // provider data mislabeled as verified. Both sides can legitimately be
+                // absent — DVR-integrated movies carry neither — so the final '' fallback
+                // keeps the prior 500-free behavior for that case.
+                'rating' => $info['rating'] ?? $channel->rating ?? '',
                 'releasedate' => $info['releasedate'] ?? $channel->year,
                 'subtitles' => $info['subtitles'] ?? [],
             ];

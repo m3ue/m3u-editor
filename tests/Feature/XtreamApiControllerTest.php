@@ -436,6 +436,85 @@ it('falls back to VOD metadata when the channel year is missing for get vod info
         ->assertJsonPath('movie_data.year', 2024);
 });
 
+it('prefers TMDB rating from info over provider rating on get vod info when both present', function () {
+    // Regression guard for the precedence flip in XtreamApiController::get_vod_info:
+    // info['rating'] is exclusively TMDB-origin, so when both are set it must win
+    // over the raw provider column. Issue #1435.
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'TMDB Wins Movie',
+        'rating' => 10.0, // Implausible provider rating
+        'last_metadata_fetch' => now(), // Skip metadata fetch in test
+        'info' => [
+            'rating' => 6.5, // Real TMDB rating
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', 6.5)
+        ->assertJsonPath('rating', 6.5);
+});
+
+it('falls back to provider rating on get vod info when info rating is absent', function () {
+    // Regression guard for the fallback path — when only the provider rating is set,
+    // the response must surface that value (not '' or null). `channels.rating` is a
+    // string DB column, so the response carries it as a string — compare loosely.
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Provider Only Movie',
+        'rating' => 7.0,
+        'last_metadata_fetch' => now(),
+        'info' => [],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', fn ($v) => (float) $v === 7.0)
+        ->assertJsonPath('rating', fn ($v) => (float) $v === 7.0);
+});
+
+it('prefers TMDB rating from info over provider rating on get vod streams when both present', function () {
+    // Same precedence flip in the streaming list endpoint.
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'TMDB Wins Streams Movie',
+        'rating' => 10.0, // Provider
+        'info' => ['rating' => 6.5], // TMDB
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'TMDB Wins Streams Movie', 'rating' => 6.5]);
+});
+
+it('falls back to provider rating on get vod streams when info rating is absent', function () {
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Provider Only Streams Movie',
+        'rating' => 7.0,
+        'info' => [],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Provider Only Streams Movie', 'rating' => '7']);
+});
+
 it('returns not found for get vod info when vod is missing', function () {
     $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => 99999]));
     $response->assertStatus(404)
