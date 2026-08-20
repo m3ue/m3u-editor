@@ -26,7 +26,18 @@
             if (! $year && isset($info['releasedate']) && is_string($info['releasedate'])) {
                 $year = substr($info['releasedate'], 0, 4);
             }
-            $rating = $record->rating ?? ($info['rating'] ?? ($movieInfo['rating'] ?? null));
+            // Prefer TMDB-sourced info['rating'] over the raw provider column - mirrors
+            // the precedence fix in XtreamApiController::get_vod_info. Suppress the
+            // rating entirely when TMDB's own vote count is known and below the
+            // configured minimum (issue #1436) - an absent vote count (e.g. movie_data
+            // / DVR-integrated items, which don't carry a vote count at all) is treated
+            // as unknown, not low, and is not suppressed.
+            $rating = $info['rating'] ?? ($record->rating ?? ($movieInfo['rating'] ?? null));
+            $ratingVoteCount = $info['vote_count'] ?? null;
+            $minVoteCount = app(\App\Settings\GeneralSettings::class)->tmdb_min_vote_count ?? 25;
+            if ($ratingVoteCount !== null && $ratingVoteCount < $minVoteCount) {
+                $rating = null;
+            }
             $duration =
                 $info['duration'] ??
                 ($movieInfo['duration'] ?? ($info['duration_secs'] ?? ($movieInfo['duration_secs'] ?? null)));

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Vods\Pages;
 
 use App\Filament\Resources\Vods\VodResource;
+use App\Settings\GeneralSettings;
 use App\Traits\AppliesTmdbSelection;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
@@ -46,8 +47,13 @@ class ViewVod extends ViewRecord
             $parts[] = $info['genre'] ?? $movieData['info']['genre'];
         }
 
-        if (! empty($info['rating']) || ! empty($movieData['info']['rating'] ?? null)) {
-            $parts[] = '★ '.($info['rating'] ?? $movieData['info']['rating']);
+        $subheadingRating = $info['rating'] ?? ($movieData['info']['rating'] ?? null);
+        if (! empty($subheadingRating)) {
+            $voteCount = $info['vote_count'] ?? null;
+            $minVoteCount = app(GeneralSettings::class)->tmdb_min_vote_count ?? 25;
+            if ($voteCount === null || $voteCount >= $minVoteCount) {
+                $parts[] = '★ '.$subheadingRating;
+            }
         }
 
         return implode(' • ', $parts) ?: null;
