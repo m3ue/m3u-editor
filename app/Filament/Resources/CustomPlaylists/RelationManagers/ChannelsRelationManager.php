@@ -120,21 +120,19 @@ class ChannelsRelationManager extends RelationManager
                     default => 'CAST(tags.name AS TEXT)'
                 };
 
-                return $query
-                    ->leftJoin('taggables', function ($join) {
-                        $join->on('channels.id', '=', 'taggables.taggable_id')
-                            ->where('taggables.taggable_type', '=', Channel::class);
-                    })
-                    ->leftJoin('tags', function ($join) use ($ownerRecord) {
-                        $join->on('taggables.tag_id', '=', 'tags.id')
-                            ->where('tags.type', '=', $ownerRecord->uuid);
-                    })
-                    ->orderByRaw("{$orderByClause} {$direction}")
-                    ->select(
-                        'channels.*',
-                        DB::raw("{$orderByClause} as tag_name_sort"),
-                        DB::raw('COALESCE(channel_custom_playlist.sort, channels.sort) as pivot_sort'))
-                    ->distinct();
+                // Order by a correlated subquery rather than joining taggables/tags: one row per
+                // item, so no DISTINCT over json columns (which Postgres cannot compare) and no
+                // duplicate rows for items carrying more than one tag
+                return $query->orderBy(
+                    DB::table('taggables')
+                        ->join('tags', 'taggables.tag_id', '=', 'tags.id')
+                        ->selectRaw($orderByClause)
+                        ->whereColumn('taggables.taggable_id', 'channels.id')
+                        ->where('taggables.taggable_type', Channel::class)
+                        ->where('tags.type', $ownerRecord->uuid)
+                        ->limit(1),
+                    $direction,
+                );
             });
         $defaultColumns = ChannelResource::getTableColumns(showGroup: true, showPlaylist: true);
 

@@ -107,18 +107,19 @@ class SeriesRelationManager extends RelationManager
                     default => 'CAST(tags.name AS TEXT)'
                 };
 
-                return $query
-                    ->leftJoin('taggables', function ($join) {
-                        $join->on('series.id', '=', 'taggables.taggable_id')
-                            ->where('taggables.taggable_type', '=', Series::class);
-                    })
-                    ->leftJoin('tags', function ($join) use ($ownerRecord) {
-                        $join->on('taggables.tag_id', '=', 'tags.id')
-                            ->where('tags.type', '=', $ownerRecord->uuid.'-category');
-                    })
-                    ->orderByRaw("{$orderByClause} {$direction}")
-                    ->select('series.*', DB::raw("{$orderByClause} as tag_name_sort"))
-                    ->distinct();
+                // Order by a correlated subquery rather than joining taggables/tags: one row per
+                // item, so no DISTINCT over json columns (which Postgres cannot compare) and no
+                // duplicate rows for items carrying more than one tag
+                return $query->orderBy(
+                    DB::table('taggables')
+                        ->join('tags', 'taggables.tag_id', '=', 'tags.id')
+                        ->selectRaw($orderByClause)
+                        ->whereColumn('taggables.taggable_id', 'series.id')
+                        ->where('taggables.taggable_type', Series::class)
+                        ->where('tags.type', $ownerRecord->uuid.'-category')
+                        ->limit(1),
+                    $direction,
+                );
             });
         $defaultColumns = SeriesResource::getTableColumns(showCategory: true, showPlaylist: true);
 
