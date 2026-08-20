@@ -29,9 +29,9 @@ class NfoService
         try {
             $metadata = $series->metadata ?? [];
 
-            $tmdbId = $this->getScalarValue($metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null);
-            $tvdbId = $this->getScalarValue($metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null);
-            $imdbId = $this->getScalarValue($metadata['imdb_id'] ?? $metadata['imdb'] ?? null);
+            $tmdbId = $this->getSeriesProviderId($series, 'tmdb');
+            $tvdbId = $this->getSeriesProviderId($series, 'tvdb');
+            $imdbId = $this->getSeriesProviderId($series, 'imdb');
 
             $xml = $this->startXml('tvshow');
 
@@ -61,8 +61,10 @@ class NfoService
             $this->appendGenres($xml, $metadata['genres'] ?? null);
             $this->appendNamedList($xml, 'studio', $metadata['networks'] ?? null);
 
-            $this->appendImage($xml, 'thumb', $metadata['poster_path'] ?? null, useProxy: false, attrs: ['aspect' => 'poster']);
-            $this->appendImage($xml, 'fanart', $metadata['backdrop_path'] ?? null);
+            $poster = $this->getFirstUsableImage($series->cover, $metadata['cover'] ?? null, $metadata['poster_path'] ?? null);
+            $backdrop = $this->getFirstUsableImage($series->backdrop_path, $metadata['backdrop_path'] ?? null);
+            $this->appendImage($xml, 'thumb', $poster, useProxy: false, attrs: ['aspect' => 'poster']);
+            $this->appendImage($xml, 'fanart', $backdrop);
 
             // Unique IDs (important for scrapers)
             if (! empty($tmdbId)) {
@@ -111,11 +113,11 @@ class NfoService
     {
         try {
             $info = $episode->info ?? [];
-            $metadata = $series->metadata ?? [];
 
-            $tmdbId = $this->getScalarValue($info['tmdb_id'] ?? $info['tmdb'] ?? $metadata['tmdb_id'] ?? $metadata['tmdb'] ?? null);
-            $tvdbId = $this->getScalarValue($metadata['tvdb_id'] ?? $metadata['tvdb'] ?? null);
-            $imdbId = $this->getScalarValue($metadata['imdb_id'] ?? $metadata['imdb'] ?? null);
+            $tmdbId = $this->getScalarValue($info['tmdb_id'] ?? $info['tmdb'] ?? null)
+                ?: $this->getSeriesProviderId($series, 'tmdb');
+            $tvdbId = $this->getSeriesProviderId($series, 'tvdb');
+            $imdbId = $this->getSeriesProviderId($series, 'imdb');
 
             $xml = $this->startXml('episodedetails');
 
@@ -497,6 +499,36 @@ class NfoService
 
             return false;
         }
+    }
+
+    /**
+     * Get a usable series provider ID from current fields with legacy metadata fallback.
+     */
+    private function getSeriesProviderId(Series $series, string $provider): mixed
+    {
+        $dedicated = $this->getScalarValue($series->getAttribute("{$provider}_id"));
+        if (! empty($dedicated)) {
+            return $dedicated;
+        }
+
+        $metadata = $series->metadata ?? [];
+
+        return $this->getScalarValue($metadata["{$provider}_id"] ?? $metadata[$provider] ?? null);
+    }
+
+    /**
+     * Return the first non-empty scalar image URL or path.
+     */
+    private function getFirstUsableImage(mixed ...$values): ?string
+    {
+        foreach ($values as $value) {
+            $image = $this->getScalarValue($value);
+            if (is_string($image) && trim($image) !== '') {
+                return $image;
+            }
+        }
+
+        return null;
     }
 
     /**
