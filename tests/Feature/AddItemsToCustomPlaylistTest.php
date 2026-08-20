@@ -283,3 +283,21 @@ it('syncs series to the custom playlist and tags with category name in original 
     expect($this->customPlaylist->series()->where('series.id', $series->id)->exists())->toBeTrue()
         ->and($series->tags->pluck('name')->all())->toContain('Drama');
 });
+
+it('sends a failure notification when the job fails', function () {
+    (new AddItemsToCustomPlaylist(
+        userId: $this->user->id,
+        itemIds: [1],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'select', 'category' => 'Some Tag'],
+        type: 'channel',
+    ))->failed(new Exception('Something went wrong'));
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === 'Failed to add items to custom playlist'
+            && $notification->data['body'] === 'Something went wrong',
+    );
+});

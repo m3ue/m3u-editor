@@ -472,3 +472,21 @@ it('fans a large group out across chunk jobs and notifies on completion', functi
             && $notification->data['title'] === 'Items added to custom playlist',
     );
 });
+
+it('sends a failure notification when the job fails', function () {
+    (new AddGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        groupIds: [1],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'select', 'playlist' => $this->customPlaylist->id],
+        type: 'channel',
+    ))->failed(new Exception('Something went wrong'));
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === 'Failed to add items to custom playlist'
+            && $notification->data['body'] === 'Something went wrong',
+    );
+});
