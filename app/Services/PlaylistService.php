@@ -1080,9 +1080,13 @@ class PlaylistService
 
     /**
      * Fan custom playlist chunk jobs out as a parallel Bus::batch() on the import
-     * queue (same pattern as ProcessChannelScrubber), notifying the user once every
-     * chunk has finished, or as soon as one fails. allowFailures() keeps one failed
-     * chunk from silently cancelling the rest of the batch. Chunk jobs must be
+     * queue (same pattern as ProcessChannelScrubber). allowFailures() keeps one
+     * failed chunk from cancelling the rest of the batch, so the user is notified
+     * exactly once, from finally(), after every chunk has run: then() only fires
+     * when every job succeeds (a permanently failed chunk keeps pending_jobs from
+     * ever reaching 0, so then() would never fire), and catch() fires on the first
+     * failure while other chunks are still running, which would misreport a
+     * partially-successful batch as a total failure. Chunk jobs must be
      * idempotent and conflict-safe, since they run concurrently across workers.
      *
      * @param  array<int, AddItemsToCustomPlaylistChunk|DetachItemsFromCustomPlaylistChunk>  $chunkJobs
@@ -1105,11 +1109,26 @@ class PlaylistService
             ->name($batchName)
             ->onQueue('import')
             ->allowFailures()
-            ->then(function () use ($userId, $completedTitle, $completedBody): void {
-                self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
+            ->catch(function (Batch $batch, Throwable $e): void {
+                Log::error("Custom playlist batch [{$batch->id}] chunk failed: {$e->getMessage()}");
             })
-            ->catch(function (Batch $batch, Throwable $e) use ($userId, $failedTitle): void {
-                self::notifyCustomPlaylistOperation($userId, false, $failedTitle, __('Please view your notifications for details.'), $e->getMessage());
+            ->finally(function (Batch $batch) use ($userId, $completedTitle, $completedBody, $failedTitle): void {
+                if ($batch->failedJobs > 0) {
+                    self::notifyCustomPlaylistOperation(
+                        userId: $userId,
+                        success: false,
+                        title: $failedTitle,
+                        body: __('Please view your notifications for details.'),
+                        databaseBody: __(':failed of :total chunks failed to process. Check the logs for details.', [
+                            'failed' => $batch->failedJobs,
+                            'total' => $batch->totalJobs,
+                        ]),
+                    );
+
+                    return;
+                }
+
+                self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
             })
             ->dispatch();
     }

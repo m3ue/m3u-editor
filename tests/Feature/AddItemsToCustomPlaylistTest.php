@@ -1,17 +1,20 @@
 <?php
 
 use App\Jobs\AddItemsToCustomPlaylist;
+use App\Jobs\AddItemsToCustomPlaylistChunk;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\PlaylistService;
 use Filament\Notifications\DatabaseNotification;
 use Illuminate\Database\Eloquent\Factories\Sequence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Tests\Support\AlwaysFailsBatchJob;
 
 uses(RefreshDatabase::class);
 
@@ -212,6 +215,65 @@ it('handles a selection spanning multiple chunk boundaries', function () {
         DatabaseNotification::class,
         fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'success'
             && $notification->data['title'] === 'Items added to custom playlist',
+    );
+});
+
+it('sends exactly one failure notification once all chunks have run, even if a chunk permanently fails', function () {
+    // then() would never fire here (pending_jobs never reaches 0 once a chunk
+    // fails), and catch() alone would fire before the good chunk finishes writing.
+    // The batch must rely on finally() instead, once every chunk has reported in.
+    //
+    // The sync driver used elsewhere in this file can't exercise this: it executes
+    // jobs inline inside the same DB transaction Bus::batch() uses to dispatch them,
+    // so an exception there rolls back everything (the good chunk's write included)
+    // instead of being recorded and swallowed the way a real worker does. The
+    // database driver defers execution to an explicit queue:work run below, outside
+    // that dispatch-time transaction, matching how a real worker actually behaves.
+    config(['queue.default' => 'database']);
+
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => null,
+    ]);
+
+    PlaylistService::dispatchCustomPlaylistBatch(
+        chunkJobs: [
+            new AddItemsToCustomPlaylistChunk(
+                customPlaylistId: $this->customPlaylist->id,
+                itemIds: [$channel->id],
+            ),
+            new AlwaysFailsBatchJob,
+        ],
+        batchName: 'add-items-to-custom-playlist',
+        userId: $this->user->id,
+        completedTitle: __('Items added to custom playlist'),
+        completedBody: __('The selected items have been added to the chosen custom playlist.'),
+        failedTitle: __('Failed to add items to custom playlist'),
+    );
+
+    // Drain the two queued chunk jobs for real, one at a time
+    $this->artisan('queue:work', ['--queue' => 'import', '--once' => true, '--tries' => 1]);
+    $this->artisan('queue:work', ['--queue' => 'import', '--once' => true, '--tries' => 1]);
+
+    // The good chunk's write must have gone through despite the other chunk failing
+    expect($this->customPlaylist->channels()->where('channels.id', $channel->id)->exists())->toBeTrue();
+
+    $batch = DB::table('job_batches')->where('name', 'add-items-to-custom-playlist')->first();
+    expect($batch->total_jobs)->toBe(2)
+        ->and($batch->failed_jobs)->toBe(1);
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === 'Failed to add items to custom playlist'
+            && $notification->data['body'] === '1 of 2 chunks failed to process. Check the logs for details.',
+    );
+    Notification::assertNotSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'success',
     );
 });
 

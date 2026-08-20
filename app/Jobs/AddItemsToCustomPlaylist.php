@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\CustomPlaylist;
+use App\Models\User;
 use App\Services\PlaylistService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -45,6 +46,7 @@ class AddItemsToCustomPlaylist implements ShouldQueue
      */
     public function handle(): void
     {
+        User::findOrFail($this->userId);
         $playlist = CustomPlaylist::findOrFail($this->customPlaylistId);
 
         $meta = PlaylistService::resolveCustomPlaylistRelationMeta($playlist, $this->type);

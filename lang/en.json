@@ -3335,6 +3335,7 @@
     "Failed to add lineup": "Failed to add lineup",
     "Failed to apply TMDB selection.": "Failed to apply TMDB selection.",
     "Failed to detach items from custom playlist": "Failed to detach items from custom playlist",
+    ":failed of :total chunks failed to process. Check the logs for details.": ":failed of :total chunks failed to process. Check the logs for details.",
     "Failed to fetch TMDB data for this movie.": "Failed to fetch TMDB data for this movie.",
     "Failed to fetch TMDB data for this series.": "Failed to fetch TMDB data for this series.",
     "Failed to fetch lineups": "Failed to fetch lineups",

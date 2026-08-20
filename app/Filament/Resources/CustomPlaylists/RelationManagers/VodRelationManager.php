@@ -123,7 +123,8 @@ class VodRelationManager extends RelationManager
 
                 // Order by a correlated subquery rather than joining taggables/tags: one row per
                 // item, so no DISTINCT over json columns (which Postgres cannot compare) and no
-                // duplicate rows for items carrying more than one tag
+                // duplicate rows for items carrying more than one tag. The inner orderBy makes the
+                // limit(1) pick deterministic when an item carries more than one relevant tag.
                 return $query->orderBy(
                     DB::table('taggables')
                         ->join('tags', 'taggables.tag_id', '=', 'tags.id')
@@ -131,6 +132,7 @@ class VodRelationManager extends RelationManager
                         ->whereColumn('taggables.taggable_id', 'channels.id')
                         ->where('taggables.taggable_type', Channel::class)
                         ->where('tags.type', $ownerRecord->uuid)
+                        ->orderBy('tags.id')
                         ->limit(1),
                     $direction,
                 );

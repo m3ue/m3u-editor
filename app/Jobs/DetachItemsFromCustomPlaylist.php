@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\CustomPlaylist;
+use App\Models\User;
 use App\Services\PlaylistService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -40,6 +41,7 @@ class DetachItemsFromCustomPlaylist implements ShouldQueue
      */
     public function handle(): void
     {
+        User::findOrFail($this->userId);
         CustomPlaylist::findOrFail($this->customPlaylistId);
 
         $chunkJobs = [];
