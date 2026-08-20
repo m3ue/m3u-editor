@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
+use App\Facades\ProxyFacade;
 use App\Models\AedProfile;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -375,7 +376,7 @@ class EpgGenerateController extends Controller
                                     $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
                                 if ($programme['icon']) {
-                                    $icon = $logoProxyEnabled
+                                    $icon = $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($programme['icon'], $epg)
                                         ? LogoProxyController::generateProxyUrl($programme['icon'])
                                         : $programme['icon'];
                                     $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
@@ -384,7 +385,7 @@ class EpgGenerateController extends Controller
                                 if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
                                     foreach ($programme['images'] as $image) {
                                         $rawUrl = $image['url'] ?? '';
-                                        $proxiedUrl = $logoProxyEnabled && $rawUrl
+                                        $proxiedUrl = $logoProxyEnabled && $rawUrl && ! $this->isSchedulesDirectImageUrl($rawUrl, $epg)
                                             ? LogoProxyController::generateProxyUrl($rawUrl)
                                             : $rawUrl;
 
@@ -848,6 +849,42 @@ class EpgGenerateController extends Controller
         } catch (Exception $e) {
             return null;
         }
+    }
+
+    /**
+     * Determine whether an artwork URL is the current EPG's first-party
+     * Schedules Direct image proxy route.
+     */
+    private function isSchedulesDirectImageUrl(string $url, Epg $epg): bool
+    {
+        if (! $epg->isSchedulesDirect()) {
+            return false;
+        }
+
+        $baseUrl = rtrim(ProxyFacade::getBaseUrl(), '/');
+        $base = parse_url($baseUrl);
+        $image = parse_url($url);
+
+        if ($base === false || $image === false
+            || isset($base['user'], $base['pass'], $base['query'], $base['fragment'])
+            || isset($image['user'], $image['pass'], $image['query'], $image['fragment'])) {
+            return false;
+        }
+
+        foreach (['scheme', 'host', 'port'] as $component) {
+            if (($image[$component] ?? null) !== ($base[$component] ?? null)) {
+                return false;
+            }
+        }
+
+        $expectedPath = rtrim($base['path'] ?? '', '/')."/schedules-direct/{$epg->uuid}/image/";
+        $imagePath = $image['path'] ?? '';
+
+        if (! str_starts_with($imagePath, $expectedPath)) {
+            return false;
+        }
+
+        return preg_match('/^[A-Za-z0-9._-]+$/D', substr($imagePath, strlen($expectedPath))) === 1;
     }
 
     /**
