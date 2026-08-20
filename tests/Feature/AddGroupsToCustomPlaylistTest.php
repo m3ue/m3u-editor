@@ -10,7 +10,9 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 
@@ -41,6 +43,10 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
     Notification::fake();
+
+    // The job fans its work out via Bus::batch(); run the batch on the real
+    // sync queue driver so the chunk jobs execute inline against the test database
+    config(['queue.default' => 'sync']);
 
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
@@ -423,4 +429,46 @@ it('still shows a VOD group that is already attached to the custom playlist', fu
     $options = groupOptionsForType($this->playlist, 'vod_groups');
 
     expect($options)->toHaveKey($vodGroup->id);
+});
+
+it('fans a large group out across chunk jobs and notifies on completion', function () {
+    $group = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'name' => 'Big Group',
+        'name_internal' => 'big_group',
+    ]);
+
+    Channel::factory()->count(1200)->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $group->id,
+    ]);
+
+    (new AddGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        groupIds: [$group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original', 'playlist' => $this->customPlaylist->id],
+        type: 'channel',
+    ))->handle();
+
+    expect($this->customPlaylist->channels()->count())->toBe(1200)
+        ->and($this->customPlaylist->channels()->withAnyTags(['Big Group'], $this->customPlaylist->uuid)->count())->toBe(1200);
+
+    // The work must have fanned out as one chunk job per 1000 items, and the
+    // batch must have run every chunk to completion without failures
+    $batch = DB::table('job_batches')->where('name', 'add-groups-to-custom-playlist')->first();
+    expect($batch)->not->toBeNull()
+        ->and($batch->total_jobs)->toBe(2)
+        ->and($batch->pending_jobs)->toBe(0)
+        ->and($batch->failed_jobs)->toBe(0)
+        ->and($batch->finished_at)->not->toBeNull();
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'success'
+            && $notification->data['title'] === 'Items added to custom playlist',
+    );
 });
