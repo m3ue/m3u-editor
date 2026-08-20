@@ -4,6 +4,7 @@ namespace App\Filament\GuestPanel\Resources\Series\Pages;
 
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Filament\GuestPanel\Resources\Series\SeriesResource;
+use App\Support\TmdbRating;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Contracts\Support\Htmlable;
@@ -38,7 +39,7 @@ class ViewSeries extends ViewRecord
             $parts[] = $this->record->genre;
         }
 
-        if ($this->record->rating) {
+        if ($this->record->rating && ! TmdbRating::isVoteCountBelowThreshold($this->record->metadata['vote_count'] ?? null)) {
             $parts[] = '★ '.$this->record->rating;
         }
 

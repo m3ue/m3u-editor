@@ -33,11 +33,7 @@
             // / DVR-integrated items, which don't carry a vote count at all) is treated
             // as unknown, not low, and is not suppressed.
             $rating = $info['rating'] ?? ($record->rating ?? ($movieInfo['rating'] ?? null));
-            $ratingVoteCount = $info['vote_count'] ?? null;
-            $minVoteCount = app(\App\Settings\GeneralSettings::class)->tmdb_min_vote_count ?? 25;
-            if ($ratingVoteCount !== null && $ratingVoteCount < $minVoteCount) {
-                $rating = null;
-            }
+            $rating = \App\Support\TmdbRating::suppressIfLowVotes($rating, $info['vote_count'] ?? null, null);
             $duration =
                 $info['duration'] ??
                 ($movieInfo['duration'] ?? ($info['duration_secs'] ?? ($movieInfo['duration_secs'] ?? null)));

@@ -174,6 +174,7 @@ trait AppliesTmdbSelection
 
             if (! empty($details['vote_average'])) {
                 $info['rating'] = $details['vote_average'];
+                $info['vote_count'] = $details['vote_count'] ?? null;
             }
 
             if (! empty($details['backdrop_url'])) {
@@ -329,6 +330,7 @@ trait AppliesTmdbSelection
 
             if (! empty($details['vote_average']) && empty($series->rating)) {
                 $updateData['rating'] = $details['vote_average'];
+                $seriesMetadata['vote_count'] = $details['vote_count'] ?? null;
             }
 
             if (! empty($details['backdrop_url'])) {

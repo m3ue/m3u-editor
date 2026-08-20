@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Series\Pages;
 
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Filament\Resources\Series\SeriesResource;
+use App\Support\TmdbRating;
 use App\Traits\AppliesTmdbSelection;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
@@ -39,7 +40,7 @@ class ViewSeries extends ViewRecord
             $parts[] = $this->record->genre;
         }
 
-        if ($this->record->rating) {
+        if ($this->record->rating && ! TmdbRating::isVoteCountBelowThreshold($this->record->metadata['vote_count'] ?? null)) {
             $parts[] = '★ '.$this->record->rating;
         }
 

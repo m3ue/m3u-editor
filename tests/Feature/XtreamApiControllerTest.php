@@ -460,9 +460,9 @@ it('prefers TMDB rating from info over provider rating on get vod info when both
 });
 
 it('falls back to provider rating on get vod info when info rating is absent', function () {
-    // Regression guard for the fallback path — when only the provider rating is set,
+    // Regression guard for the fallback path - when only the provider rating is set,
     // the response must surface that value (not '' or null). `channels.rating` is a
-    // string DB column, so the response carries it as a string — compare loosely.
+    // string DB column, so the response carries it as a string - compare loosely.
     $group = Group::factory()->for($this->user)->create();
     $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
         'enabled' => true,
@@ -743,6 +743,141 @@ it('surfaces series rating on get series when vote_count is absent (unknown is n
     $response->assertOk()
         ->assertJsonCount(1)
         ->assertJsonFragment(['name' => 'Unknown Vote Count Series List', 'rating' => '7.5']);
+});
+
+it('suppresses series rating_5based on get series info when tmdb vote_count is below threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Low Votes Series 5Based',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 3],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', '')
+        ->assertJsonPath('info.rating_5based', 0);
+});
+
+it('surfaces series rating_5based on get series info when tmdb vote_count is at or above threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Solid Votes Series 5Based',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 25],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating_5based', fn ($v) => (float) $v === 4.0);
+});
+
+it('suppresses series rating_5based on get series list when tmdb vote_count is below threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Low Votes Series List 5Based',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 3],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Low Votes Series List 5Based', 'rating' => '', 'rating_5based' => 0]);
+});
+
+it('suppresses episode rating on get series info when tmdb vote_count is below threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Series With Low Vote Episode',
+        'metadata' => ['tmdb' => ''],
+    ]);
+
+    $season = Season::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $category->id,
+        'series_id' => $series->id,
+        'season_number' => 1,
+        'episode_count' => 1,
+    ]);
+
+    Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'enabled' => true,
+        'info' => [
+            'rating' => 10.0,
+            'vote_count' => 1,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk();
+    $episodes = $response->json('episodes.1');
+    expect($episodes)->toHaveCount(1);
+    expect($episodes[0]['info']['rating'])->toBe('');
+});
+
+it('surfaces episode rating on get series info when tmdb vote_count is at or above threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Series With Solid Vote Episode',
+        'metadata' => ['tmdb' => ''],
+    ]);
+
+    $season = Season::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $category->id,
+        'series_id' => $series->id,
+        'season_number' => 1,
+        'episode_count' => 1,
+    ]);
+
+    Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'enabled' => true,
+        'info' => [
+            'rating' => 9.0,
+            'vote_count' => 25,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk();
+    $episodes = $response->json('episodes.1');
+    expect($episodes)->toHaveCount(1);
+    expect((float) $episodes[0]['info']['rating'])->toBe(9.0);
 });
 
 it('returns not found for get vod info when vod is missing', function () {

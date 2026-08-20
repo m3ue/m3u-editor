@@ -46,6 +46,7 @@ use App\Services\M3uProxyService;
 use App\Services\VodFileNameService;
 use App\Settings\GeneralSettings;
 use App\Support\SeriesKey;
+use App\Support\TmdbRating;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -935,7 +936,6 @@ class XtreamApiController extends Controller
             $vodFileNameService = app(VodFileNameService::class);
 
             return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService) {
-                $minVoteCount = app(GeneralSettings::class)->tmdb_min_vote_count ?? 25;
                 $num = 0;
                 $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
@@ -987,10 +987,10 @@ class XtreamApiController extends Controller
                         'stream_type' => 'movie',
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,
-                        'rating' => (($channel->info['vote_count'] ?? null) !== null
-                            && $channel->info['vote_count'] < $minVoteCount)
-                            ? ''
-                            : ($channel->info['rating'] ?? $channel->rating ?? ''),
+                        'rating' => TmdbRating::suppressIfLowVotes(
+                            $channel->info['rating'] ?? $channel->rating ?? '',
+                            $channel->info['vote_count'] ?? null
+                        ),
                         'rating_5based' => $channel->rating_5based ?? 0,
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
@@ -1077,7 +1077,6 @@ class XtreamApiController extends Controller
             }
 
             return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid) {
-                $minVoteCount = app(GeneralSettings::class)->tmdb_min_vote_count ?? 25;
                 $num = 0;
                 echo '[';
                 $first = true;
@@ -1127,11 +1126,15 @@ class XtreamApiController extends Controller
                         'genre' => $seriesItem->genre ?? '',
                         'releaseDate' => $seriesItem->release_date ?? '',
                         'last_modified' => (string) ($lastModified),
-                        'rating' => (($seriesItem->metadata['vote_count'] ?? null) !== null
-                            && $seriesItem->metadata['vote_count'] < $minVoteCount)
-                            ? ''
-                            : (string) ($seriesItem->rating ?? 0),
-                        'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
+                        'rating' => (string) TmdbRating::suppressIfLowVotes(
+                            $seriesItem->rating ?? 0,
+                            $seriesItem->metadata['vote_count'] ?? null
+                        ),
+                        'rating_5based' => TmdbRating::suppressIfLowVotes(
+                            round((floatval($seriesItem->rating ?? 0)) / 2, 1),
+                            $seriesItem->metadata['vote_count'] ?? null,
+                            0
+                        ),
                         'backdrop_path' => $backdropPaths,
                         'tmdb' => (string) $tmdb,
                         'tmdb_id' => (int) ($tmdb ?: 0),
@@ -1231,11 +1234,15 @@ class XtreamApiController extends Controller
                 'genre' => $seriesItem->genre ?? '',
                 'releaseDate' => $seriesItem->release_date ?? '',
                 'last_modified' => (string) $lastModified,
-                'rating' => (($seriesItem->metadata['vote_count'] ?? null) !== null
-                    && $seriesItem->metadata['vote_count'] < (app(GeneralSettings::class)->tmdb_min_vote_count ?? 25))
-                    ? ''
-                    : (string) ($seriesItem->rating ?? 0),
-                'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
+                'rating' => (string) TmdbRating::suppressIfLowVotes(
+                    $seriesItem->rating ?? 0,
+                    $seriesItem->metadata['vote_count'] ?? null
+                ),
+                'rating_5based' => TmdbRating::suppressIfLowVotes(
+                    round((floatval($seriesItem->rating ?? 0)) / 2, 1),
+                    $seriesItem->metadata['vote_count'] ?? null,
+                    0
+                ),
                 'backdrop_path' => $backdropPaths,
                 'tmdb' => (string) $tmdb,
                 'tmdb_id' => (int) ($tmdb ?: 0),
@@ -1292,12 +1299,20 @@ class XtreamApiController extends Controller
                                 ? $this->dvrEdlUrl($episode->dvrRecording, $username, $password)
                                 : null;
 
+                            $episodeInfo = $episode->info ?? [];
+                            if (array_key_exists('rating', $episodeInfo)) {
+                                $episodeInfo['rating'] = TmdbRating::suppressIfLowVotes(
+                                    $episodeInfo['rating'],
+                                    $episodeInfo['vote_count'] ?? null
+                                );
+                            }
+
                             $seasonEpisodes[] = [
                                 'id' => (string) $episode->id,
                                 'episode_num' => $episode->episode_num,
                                 'title' => $episode->title ?? "Episode {$episode->episode_num}",
                                 'container_extension' => $containerExtension,
-                                'info' => array_merge($episode->info ?? [], [
+                                'info' => array_merge($episodeInfo, [
                                     'movie_image' => $movieImage ?? null,
                                     'cover_big' => $coverBig ?? null,
                                     'plot' => $episode->plot ?? null,
@@ -1733,15 +1748,15 @@ class XtreamApiController extends Controller
                 'duration' => $info['duration'] ?? '00:00:00',
                 'bitrate' => $info['bitrate'] ?? 0,
                 // Prefer TMDB's rating (info['rating']) over the raw provider column
-                // when both are present — info['rating'] is exclusively TMDB-origin
+                // when both are present - info['rating'] is exclusively TMDB-origin
                 // (see FetchTmdbIds / AppliesTmdbSelection), so this can never surface
                 // provider data mislabeled as verified. Both sides can legitimately be
-                // absent — DVR-integrated movies carry neither — so the final '' fallback
+                // absent - DVR-integrated movies carry neither - so the final '' fallback
                 // keeps the prior 500-free behavior for that case.
-                'rating' => (($info['vote_count'] ?? null) !== null
-                    && $info['vote_count'] < (app(GeneralSettings::class)->tmdb_min_vote_count ?? 25))
-                    ? ''
-                    : ($info['rating'] ?? $channel->rating ?? ''),
+                'rating' => TmdbRating::suppressIfLowVotes(
+                    $info['rating'] ?? $channel->rating ?? '',
+                    $info['vote_count'] ?? null
+                ),
                 'releasedate' => $info['releasedate'] ?? $channel->year,
                 'subtitles' => $info['subtitles'] ?? [],
             ];

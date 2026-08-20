@@ -169,7 +169,7 @@ it('refreshes series rating from TMDB when overwrite is true and metadata alread
     ]);
 
     // Fixture deliberately has hasMetadata=true (plot + cover both set) and a stale
-    // rating of 10.0 — only overwriteExisting can refresh the rating in this state.
+    // rating of 10.0 - only overwriteExisting can refresh the rating in this state.
     $series = Series::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
@@ -481,7 +481,7 @@ it('refreshes VOD rating from TMDB when overwrite is true and metadata already p
     ]);
 
     // Fixture deliberately has hasMetadata=true (plot + cover_big both set) and a stale
-    // rating of 10.0 — this is the path where the top-level skip-bypass via
+    // rating of 10.0 - this is the path where the top-level skip-bypass via
     // overwriteExisting is the only thing letting the rating get refreshed.
     $channel = Channel::factory()->create([
         'playlist_id' => $this->playlist->id,
