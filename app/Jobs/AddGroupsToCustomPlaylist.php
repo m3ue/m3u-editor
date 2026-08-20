@@ -5,13 +5,11 @@ namespace App\Jobs;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
-use App\Models\User;
 use App\Services\PlaylistService;
-use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\DB;
 use Spatie\Tags\Tag;
+use Throwable;
 
 class AddGroupsToCustomPlaylist implements ShouldQueue
 {
@@ -40,18 +38,22 @@ class AddGroupsToCustomPlaylist implements ShouldQueue
 
     /**
      * Execute the job.
+     *
+     * Resolves each group's tag and item IDs up front (tags are created here
+     * because Tag::findOrCreate is not race-safe across parallel workers), then
+     * fans the pivot/tag writes out to parallel AddItemsToCustomPlaylistChunk
+     * jobs via Bus::batch(), so very large groups (100k+ channels) finish
+     * quickly and never exceed a single job's timeout.
      */
     public function handle(): void
     {
         $playlist = CustomPlaylist::findOrFail($this->customPlaylistId);
-        $user = User::findOrFail($this->userId);
 
         $meta = PlaylistService::resolveCustomPlaylistRelationMeta($playlist, $this->type);
         $sharedTag = PlaylistService::resolveSharedTagForMode($playlist, $this->data, $meta['tagType']);
         $mode = $this->data['mode'] ?? 'select';
 
-        $playlistTagIds = $playlist->{$meta['tagFunction']}()->pluck('tags.id')->all();
-
+        $chunkJobs = [];
         foreach ($this->groupIds as $groupId) {
             $group = $meta['isSeries']
                 ? Category::find($groupId)
@@ -72,33 +74,38 @@ class AddGroupsToCustomPlaylist implements ShouldQueue
                 $playlist->attachTag($tag);
             }
 
-            // Chunk through the group's items to avoid memory exhaustion on large groups
-            $group->{$meta['relation']}()->chunkById(1000, function ($items) use ($meta, $playlistTagIds, $tag): void {
-                $ids = $items->pluck('id')->all();
-
-                DB::table($meta['pivotTable'])->insertOrIgnore(
-                    array_map(fn (int $id): array => [
-                        $meta['pivotForeignKey'] => $this->customPlaylistId,
-                        $meta['pivotRelatedKey'] => $id,
-                    ], $ids)
+            // Chunk through the group's items to keep the ID reads memory-bounded on large groups
+            $group->{$meta['relation']}()->chunkById(PlaylistService::CUSTOM_PLAYLIST_CHUNK_SIZE, function ($items) use (&$chunkJobs, $tag): void {
+                $chunkJobs[] = new AddItemsToCustomPlaylistChunk(
+                    customPlaylistId: $this->customPlaylistId,
+                    itemIds: $items->pluck('id')->all(),
+                    tagId: $tag?->id,
+                    type: $this->type,
                 );
-
-                if ($tag) {
-                    PlaylistService::retagItems($meta, $playlistTagIds, $tag, $ids);
-                }
             });
         }
 
-        Notification::make()
-            ->success()
-            ->title(__('Items added to custom playlist'))
-            ->body(__('The selected items have been added to the chosen custom playlist.'))
-            ->broadcast($user);
+        PlaylistService::dispatchCustomPlaylistBatch(
+            chunkJobs: $chunkJobs,
+            batchName: 'add-groups-to-custom-playlist',
+            userId: $this->userId,
+            completedTitle: __('Items added to custom playlist'),
+            completedBody: __('The selected items have been added to the chosen custom playlist.'),
+            failedTitle: __('Failed to add items to custom playlist'),
+        );
+    }
 
-        Notification::make()
-            ->success()
-            ->title(__('Items added to custom playlist'))
-            ->body(__('The selected items have been added to the chosen custom playlist.'))
-            ->sendToDatabase($user);
+    /**
+     * Handle a job failure.
+     */
+    public function failed(Throwable $exception): void
+    {
+        PlaylistService::notifyCustomPlaylistOperation(
+            userId: $this->userId,
+            success: false,
+            title: __('Failed to add items to custom playlist'),
+            body: __('Please view your notifications for details.'),
+            databaseBody: $exception->getMessage(),
+        );
     }
 }

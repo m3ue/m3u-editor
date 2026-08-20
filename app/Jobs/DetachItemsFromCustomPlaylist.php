@@ -3,12 +3,10 @@
 namespace App\Jobs;
 
 use App\Models\CustomPlaylist;
-use App\Models\User;
 use App\Services\PlaylistService;
-use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class DetachItemsFromCustomPlaylist implements ShouldQueue
 {
@@ -35,38 +33,45 @@ class DetachItemsFromCustomPlaylist implements ShouldQueue
 
     /**
      * Execute the job.
+     *
+     * Fans the pivot/tag deletes out to parallel DetachItemsFromCustomPlaylistChunk
+     * jobs via Bus::batch(), so detaching very large selections (100k+ items)
+     * finishes quickly and never exceeds a single job's timeout.
      */
     public function handle(): void
     {
-        $playlist = CustomPlaylist::findOrFail($this->customPlaylistId);
-        $user = User::findOrFail($this->userId);
+        CustomPlaylist::findOrFail($this->customPlaylistId);
 
-        $meta = PlaylistService::resolveCustomPlaylistRelationMeta($playlist, $this->type);
-        $playlistTagIds = $playlist->{$meta['tagFunction']}()->pluck('tags.id')->all();
-
-        foreach (array_chunk($this->itemIds, 2000) as $chunk) {
-            DB::table('taggables')
-                ->where('taggable_type', $meta['itemModel'])
-                ->whereIn('taggable_id', $chunk)
-                ->whereIn('tag_id', $playlistTagIds)
-                ->delete();
-
-            DB::table($meta['pivotTable'])
-                ->where($meta['pivotForeignKey'], $this->customPlaylistId)
-                ->whereIn($meta['pivotRelatedKey'], $chunk)
-                ->delete();
+        $chunkJobs = [];
+        foreach (array_chunk($this->itemIds, PlaylistService::CUSTOM_PLAYLIST_CHUNK_SIZE) as $chunk) {
+            $chunkJobs[] = new DetachItemsFromCustomPlaylistChunk(
+                customPlaylistId: $this->customPlaylistId,
+                itemIds: $chunk,
+                type: $this->type,
+            );
         }
 
-        Notification::make()
-            ->success()
-            ->title(__('Items detached from custom playlist'))
-            ->body(__('The selected items have been detached from the custom playlist.'))
-            ->broadcast($user);
+        PlaylistService::dispatchCustomPlaylistBatch(
+            chunkJobs: $chunkJobs,
+            batchName: 'detach-items-from-custom-playlist',
+            userId: $this->userId,
+            completedTitle: __('Items detached from custom playlist'),
+            completedBody: __('The selected items have been detached from the custom playlist.'),
+            failedTitle: __('Failed to detach items from custom playlist'),
+        );
+    }
 
-        Notification::make()
-            ->success()
-            ->title(__('Items detached from custom playlist'))
-            ->body(__('The selected items have been detached from the custom playlist.'))
-            ->sendToDatabase($user);
+    /**
+     * Handle a job failure.
+     */
+    public function failed(Throwable $exception): void
+    {
+        PlaylistService::notifyCustomPlaylistOperation(
+            userId: $this->userId,
+            success: false,
+            title: __('Failed to detach items from custom playlist'),
+            body: __('Please view your notifications for details.'),
+            databaseBody: $exception->getMessage(),
+        );
     }
 }

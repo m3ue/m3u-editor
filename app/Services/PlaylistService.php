@@ -17,6 +17,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Series;
+use App\Models\User;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Exception;
@@ -33,22 +34,31 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection as SupportCollection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
+use Throwable;
 
 /**
  * Service to handle playlist-related operations.
  */
 class PlaylistService
 {
+    /**
+     * Number of items processed per chunk job when bulk-updating custom playlist
+     * membership and tags.
+     */
+    public const CUSTOM_PLAYLIST_CHUNK_SIZE = 1000;
+
     /**
      * Get the base URL of the application, including port if set
      *
@@ -1022,6 +1032,87 @@ class PlaylistService
     }
 
     /**
+     * Pluck the primary keys of a Filament bulk-action selection without hydrating
+     * models, dropping the table's sort clauses and column selects (eager-load
+     * aggregates, tag-sort joins) so a "select all" over 100k+ rows stays fast
+     * during the request.
+     *
+     * @return array<int>
+     */
+    public static function selectedRecordIds(Builder $recordsQuery): array
+    {
+        $keyName = $recordsQuery->getModel()->getQualifiedKeyName();
+
+        return $recordsQuery
+            ->reorder()
+            ->select($keyName)
+            ->toBase()
+            ->pluck($keyName)
+            ->all();
+    }
+
+    /**
+     * Broadcast a notification about a queued custom playlist operation to the user
+     * and persist it to their database notifications. The database copy can carry a
+     * more detailed body (e.g. an exception message) than the transient broadcast.
+     */
+    public static function notifyCustomPlaylistOperation(int $userId, bool $success, string $title, string $body, ?string $databaseBody = null): void
+    {
+        $user = User::find($userId);
+        if (! $user) {
+            return;
+        }
+
+        Notification::make()
+            ->status($success ? 'success' : 'danger')
+            ->title($title)
+            ->body($body)
+            ->broadcast($user);
+
+        Notification::make()
+            ->status($success ? 'success' : 'danger')
+            ->title($title)
+            ->body($databaseBody ?? $body)
+            ->sendToDatabase($user);
+    }
+
+    /**
+     * Fan custom playlist chunk jobs out as a parallel Bus::batch() on the import
+     * queue (same pattern as ProcessChannelScrubber), notifying the user once every
+     * chunk has finished, or as soon as one fails. allowFailures() keeps one failed
+     * chunk from silently cancelling the rest of the batch. Chunk jobs must be
+     * idempotent and conflict-safe, since they run concurrently across workers.
+     *
+     * @param  array<int, mixed>  $chunkJobs
+     */
+    public static function dispatchCustomPlaylistBatch(
+        array $chunkJobs,
+        string $batchName,
+        int $userId,
+        string $completedTitle,
+        string $completedBody,
+        string $failedTitle,
+    ): void {
+        if ($chunkJobs === []) {
+            self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
+
+            return;
+        }
+
+        Bus::batch($chunkJobs)
+            ->name($batchName)
+            ->onQueue('import')
+            ->allowFailures()
+            ->then(function () use ($userId, $completedTitle, $completedBody): void {
+                self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
+            })
+            ->catch(function (Batch $batch, Throwable $e) use ($userId, $failedTitle): void {
+                self::notifyCustomPlaylistOperation($userId, false, $failedTitle, __('Please view your notifications for details.'), $e->getMessage());
+            })
+            ->dispatch();
+    }
+
+    /**
      * Get the form schema for the "Merge Same ID" action.
      */
     public static function getMergeFormSchema(string $contentType = 'live'): array
@@ -1480,10 +1571,10 @@ class PlaylistService
             ->label('Add to Custom Playlist')
             ->schema(self::getAddToPlaylistSchema($type))
             ->fetchSelectedRecords(false)
-            ->action(function (SupportCollection $itemIds, array $data) use ($type): void {
+            ->action(function (Builder $recordsQuery, array $data) use ($type): void {
                 AddItemsToCustomPlaylist::dispatch(
                     userId: auth()->id(),
-                    itemIds: $itemIds->all(),
+                    itemIds: self::selectedRecordIds($recordsQuery),
                     customPlaylistId: (int) $data['playlist'],
                     data: $data,
                     type: $type,
