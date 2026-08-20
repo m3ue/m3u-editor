@@ -635,6 +635,11 @@ class FetchTmdbIds implements ShouldQueue
                     $info['rating'] = $details['vote_average'];
                 }
 
+                // Persist vote count alongside rating (used by Xtream resolution to gate low-vote scores)
+                if (isset($details['vote_count'])) {
+                    $info['vote_count'] = $details['vote_count'];
+                }
+
                 // Populate backdrop path
                 if (! empty($details['backdrop_url'])) {
                     $info['backdrop_path'] = [$details['backdrop_url']];
@@ -962,6 +967,12 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['rating'] = $details['vote_average'];
                 }
 
+                // Persist vote count alongside rating (used by Xtream resolution to gate low-vote scores)
+                if (isset($details['vote_count'])) {
+                    $metadata['vote_count'] = $details['vote_count'];
+                    $updateData['metadata'] = $metadata;
+                }
+
                 // Populate backdrop path
                 if (! empty($details['backdrop_url'])) {
                     $updateData['backdrop_path'] = json_encode([$details['backdrop_url']]);
@@ -1143,6 +1154,12 @@ class FetchTmdbIds implements ShouldQueue
                     if (! empty($episodeData['vote_average'])) {
                         $info = $updateData['info'] ?? $episode->info ?? [];
                         $info['rating'] = $episodeData['vote_average'];
+                        $updateData['info'] = $info;
+                    }
+
+                    if (isset($episodeData['vote_count'])) {
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $info['vote_count'] = $episodeData['vote_count'];
                         $updateData['info'] = $info;
                     }
 

@@ -246,6 +246,55 @@ it('preserves existing series rating when overwrite is false even if metadata is
     expect((float) $series->rating)->toBe(10.0);
 });
 
+it('persists Series vote_count alongside rating', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/tv*' => Http::response([
+            'results' => [
+                [
+                    'id' => 4592,
+                    'name' => 'ALF',
+                    'first_air_date' => '1986-09-22',
+                    'popularity' => 45.2,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/tv/4592*' => Http::response([
+            'id' => 4592,
+            'name' => 'ALF',
+            'overview' => 'An alien lifestyle.',
+            'poster_path' => '/alf.jpg',
+            'vote_average' => 7.5,
+            'vote_count' => 200,
+        ], 200),
+    ]);
+
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'ALF',
+        'release_date' => '1986-09-22',
+        'tmdb_id' => 4592,
+        'plot' => 'An alien lifestyle.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/alf.jpg',
+        'genre' => null,
+        'metadata' => ['tmdb_id' => 4592],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: null,
+        seriesIds: [$series->id],
+        overwriteExisting: true,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $series->refresh();
+
+    expect($series->metadata['vote_count'])->toBe(200);
+    expect((float) $series->rating)->toBe(7.5);
+});
+
 it('skips items that already have IDs and metadata when overwrite is false', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/movie*' => Http::response([
@@ -512,6 +561,108 @@ it('preserves existing VOD rating when overwrite is false even if metadata is po
     // Regression guard: skip branch runs because hasMetadata=true and !overwrite,
     // so the stale rating must be preserved. (10.0 round-trips through JSON as int 10.)
     expect($channel->info['rating'])->toEqual(10.0);
+});
+
+it('persists VOD vote_count alongside rating', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 603,
+                    'title' => 'The Matrix',
+                    'release_date' => '1999-03-30',
+                    'popularity' => 85.5,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+            'vote_average' => 7.0,
+            'vote_count' => 150,
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'group' => null,
+        'info' => [
+            'tmdb_id' => 603,
+            'plot' => 'A computer hacker learns about the true nature of reality.',
+            'cover_big' => 'https://image.tmdb.org/t/p/w500/matrix.jpg',
+        ],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        seriesIds: null,
+        overwriteExisting: true,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    expect($channel->info['vote_count'])->toBe(150);
+    expect($channel->info['rating'])->toEqual(7.0);
+});
+
+it('does not set vote_count when TMDB response omits it (0 is a valid vote count)', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                [
+                    'id' => 603,
+                    'title' => 'The Matrix',
+                    'release_date' => '1999-03-30',
+                    'popularity' => 85.5,
+                ],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'A computer hacker learns about the true nature of reality.',
+            'poster_path' => '/matrix.jpg',
+            'vote_average' => 6.0,
+            // Deliberately no vote_count key
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'group' => null,
+        'info' => [
+            'tmdb_id' => 603,
+            'plot' => 'A computer hacker learns about the true nature of reality.',
+            'cover_big' => 'https://image.tmdb.org/t/p/w500/matrix.jpg',
+        ],
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        seriesIds: null,
+        overwriteExisting: true,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    // isset returns false for null but we want to verify the key is absent entirely
+    expect(array_key_exists('vote_count', $channel->info))->toBeFalse();
 });
 
 it('handles items with no match gracefully', function () {

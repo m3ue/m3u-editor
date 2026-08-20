@@ -237,6 +237,8 @@ class GeneralSettings extends Settings
 
     public ?int $tmdb_confidence_threshold = 80;
 
+    public ?int $tmdb_min_vote_count = 25;
+
     public ?bool $tmdb_auto_create_groups = false;
 
     // Network broadcast settings

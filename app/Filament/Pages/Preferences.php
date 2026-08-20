@@ -1731,6 +1731,14 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
+                                        TextInput::make('tmdb_min_vote_count')
+                                            ->label(__('Minimum Vote Count'))
+                                            ->placeholder(__('25'))
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->maxValue(10000)
+                                            ->default(25)
+                                            ->helperText(__('Minimum number of TMDB votes required to trust and display that rating. Ratings backed by fewer votes are hidden rather than shown as potentially misleading.')),
                                         Section::make(__('Title Cleaning for TMDB Lookup'))
                                             ->icon('heroicon-m-scissors')
                                             ->description(__('Strip provider prefixes from VOD and Series titles before matching with TMDB. This helps improve matching accuracy by removing common prefixes like "EN - ", "4K-EN - ", "NF - ", etc.'))

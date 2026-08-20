@@ -935,6 +935,7 @@ class XtreamApiController extends Controller
             $vodFileNameService = app(VodFileNameService::class);
 
             return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService) {
+                $minVoteCount = app(GeneralSettings::class)->tmdb_min_vote_count ?? 25;
                 $num = 0;
                 $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
@@ -986,7 +987,10 @@ class XtreamApiController extends Controller
                         'stream_type' => 'movie',
                         'stream_id' => $channel->id,
                         'stream_icon' => $streamIcon,
-                        'rating' => $channel->info['rating'] ?? $channel->rating ?? '',
+                        'rating' => (($channel->info['vote_count'] ?? null) !== null
+                            && $channel->info['vote_count'] < $minVoteCount)
+                            ? ''
+                            : ($channel->info['rating'] ?? $channel->rating ?? ''),
                         'rating_5based' => $channel->rating_5based ?? 0,
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
@@ -1073,6 +1077,7 @@ class XtreamApiController extends Controller
             }
 
             return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid) {
+                $minVoteCount = app(GeneralSettings::class)->tmdb_min_vote_count ?? 25;
                 $num = 0;
                 echo '[';
                 $first = true;
@@ -1122,7 +1127,10 @@ class XtreamApiController extends Controller
                         'genre' => $seriesItem->genre ?? '',
                         'releaseDate' => $seriesItem->release_date ?? '',
                         'last_modified' => (string) ($lastModified),
-                        'rating' => (string) ($seriesItem->rating ?? 0),
+                        'rating' => (($seriesItem->metadata['vote_count'] ?? null) !== null
+                            && $seriesItem->metadata['vote_count'] < $minVoteCount)
+                            ? ''
+                            : (string) ($seriesItem->rating ?? 0),
                         'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
                         'backdrop_path' => $backdropPaths,
                         'tmdb' => (string) $tmdb,
@@ -1223,7 +1231,10 @@ class XtreamApiController extends Controller
                 'genre' => $seriesItem->genre ?? '',
                 'releaseDate' => $seriesItem->release_date ?? '',
                 'last_modified' => (string) $lastModified,
-                'rating' => (string) ($seriesItem->rating ?? 0),
+                'rating' => (($seriesItem->metadata['vote_count'] ?? null) !== null
+                    && $seriesItem->metadata['vote_count'] < (app(GeneralSettings::class)->tmdb_min_vote_count ?? 25))
+                    ? ''
+                    : (string) ($seriesItem->rating ?? 0),
                 'rating_5based' => round((floatval($seriesItem->rating ?? 0)) / 2, 1),
                 'backdrop_path' => $backdropPaths,
                 'tmdb' => (string) $tmdb,
@@ -1727,7 +1738,10 @@ class XtreamApiController extends Controller
                 // provider data mislabeled as verified. Both sides can legitimately be
                 // absent — DVR-integrated movies carry neither — so the final '' fallback
                 // keeps the prior 500-free behavior for that case.
-                'rating' => $info['rating'] ?? $channel->rating ?? '',
+                'rating' => (($info['vote_count'] ?? null) !== null
+                    && $info['vote_count'] < (app(GeneralSettings::class)->tmdb_min_vote_count ?? 25))
+                    ? ''
+                    : ($info['rating'] ?? $channel->rating ?? ''),
                 'releasedate' => $info['releasedate'] ?? $channel->year,
                 'subtitles' => $info['subtitles'] ?? [],
             ];

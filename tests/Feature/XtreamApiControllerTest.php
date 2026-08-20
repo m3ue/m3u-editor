@@ -515,6 +515,236 @@ it('falls back to provider rating on get vod streams when info rating is absent'
         ->assertJsonFragment(['name' => 'Provider Only Streams Movie', 'rating' => '7']);
 });
 
+// Vote count threshold tests — TMDB ratings backed by too few votes are suppressed (issue #1436)
+
+it('suppresses VOD rating on get vod info when tmdb vote_count is below threshold', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Low Votes Movie',
+        'rating' => 8.0,
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'rating' => 6.5,
+            'vote_count' => 3,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', '')
+        ->assertJsonPath('rating', '');
+});
+
+it('surfaces VOD rating on get vod info when tmdb vote_count is at or above threshold', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Enough Votes Movie',
+        'rating' => 8.0,
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'rating' => 6.5,
+            'vote_count' => 25,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', 6.5)
+        ->assertJsonPath('rating', 6.5);
+});
+
+it('surfaces VOD rating on get vod info when vote_count is absent (unknown is not low)', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Unknown Vote Count Movie',
+        'rating' => 8.0,
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'rating' => 6.5,
+            // no vote_count key — simulates a pre-#1436 fetch
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', 6.5)
+        ->assertJsonPath('rating', 6.5);
+});
+
+it('suppresses VOD rating on get vod streams when tmdb vote_count is below threshold', function () {
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Low Votes Streams Movie',
+        'rating' => 8.0,
+        'info' => [
+            'rating' => 6.5,
+            'vote_count' => 3,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Low Votes Streams Movie', 'rating' => '']);
+});
+
+it('surfaces VOD rating on get vod streams when tmdb vote_count is at or above threshold', function () {
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Enough Votes Streams Movie',
+        'rating' => 8.0,
+        'info' => [
+            'rating' => 6.5,
+            'vote_count' => 25,
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Enough Votes Streams Movie', 'rating' => 6.5]);
+});
+
+it('surfaces VOD rating on get vod streams when vote_count is absent', function () {
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Unknown Vote Count Streams Movie',
+        'rating' => 8.0,
+        'info' => [
+            'rating' => 6.5,
+            // no vote_count key
+        ],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Unknown Vote Count Streams Movie', 'rating' => 6.5]);
+});
+
+it('suppresses series rating on get series info when tmdb vote_count is below threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Low Votes Series',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 3],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', '');
+});
+
+it('suppresses series rating on get series when tmdb vote_count is below threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Low Votes Series List',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 3],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Low Votes Series List', 'rating' => '']);
+});
+
+it('surfaces series rating on get series info when tmdb vote_count is at or above threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Solid Votes Series',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 25],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', fn ($v) => (float) $v === 8.0);
+});
+
+it('surfaces series rating on get series info when vote_count is absent (unknown is not low)', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Unknown Vote Count Series',
+        'rating' => 7.5,
+        'metadata' => ['tmdb' => ''],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.rating', fn ($v) => (float) $v === 7.5);
+});
+
+it('surfaces series rating on get series when tmdb vote_count is at or above threshold', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Solid Votes Series List',
+        'rating' => 8.0,
+        'metadata' => ['tmdb' => '', 'vote_count' => 25],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Solid Votes Series List', 'rating' => '8']);
+});
+
+it('surfaces series rating on get series when vote_count is absent (unknown is not low)', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Unknown Vote Count Series List',
+        'rating' => 7.5,
+        'metadata' => ['tmdb' => ''],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series'));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment(['name' => 'Unknown Vote Count Series List', 'rating' => '7.5']);
+});
+
 it('returns not found for get vod info when vod is missing', function () {
     $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => 99999]));
     $response->assertStatus(404)
