@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\AddItemsToCustomPlaylist;
+use App\Jobs\AddItemsToCustomPlaylistChunk;
+use App\Jobs\DetachItemsFromCustomPlaylistChunk;
 use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
@@ -1083,7 +1085,7 @@ class PlaylistService
      * chunk from silently cancelling the rest of the batch. Chunk jobs must be
      * idempotent and conflict-safe, since they run concurrently across workers.
      *
-     * @param  array<int, mixed>  $chunkJobs
+     * @param  array<int, AddItemsToCustomPlaylistChunk|DetachItemsFromCustomPlaylistChunk>  $chunkJobs
      */
     public static function dispatchCustomPlaylistBatch(
         array $chunkJobs,

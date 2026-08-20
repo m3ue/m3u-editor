@@ -74,8 +74,10 @@ class AddGroupsToCustomPlaylist implements ShouldQueue
                 $playlist->attachTag($tag);
             }
 
-            // Chunk through the group's items to keep the ID reads memory-bounded on large groups
-            $group->{$meta['relation']}()->chunkById(PlaylistService::CUSTOM_PLAYLIST_CHUNK_SIZE, function ($items) use (&$chunkJobs, $tag): void {
+            // Chunk through the group's item IDs (key column only, no full models) to keep
+            // the reads memory-bounded on large groups
+            $relation = $group->{$meta['relation']}();
+            $relation->select($relation->getRelated()->getQualifiedKeyName())->chunkById(PlaylistService::CUSTOM_PLAYLIST_CHUNK_SIZE, function ($items) use (&$chunkJobs, $tag): void {
                 $chunkJobs[] = new AddItemsToCustomPlaylistChunk(
                     customPlaylistId: $this->customPlaylistId,
                     itemIds: $items->pluck('id')->all(),
