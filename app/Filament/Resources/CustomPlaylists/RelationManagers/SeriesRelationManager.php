@@ -7,6 +7,7 @@ use App\Filament\Resources\Series\SeriesResource;
 use App\Jobs\AddItemsToCustomPlaylist;
 use App\Jobs\DetachItemsFromCustomPlaylist;
 use App\Models\Series;
+use App\Services\PlaylistService;
 use App\Traits\AppliesTmdbSelection;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
@@ -26,7 +27,6 @@ use Filament\Tables\Grouping\Group;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 
 class SeriesRelationManager extends RelationManager
@@ -253,10 +253,10 @@ class SeriesRelationManager extends RelationManager
                 BulkAction::make('detach')
                     ->label(__('Detach Selected'))
                     ->fetchSelectedRecords(false)
-                    ->action(function (SupportCollection $itemIds) use ($ownerRecord): void {
+                    ->action(function (Builder $recordsQuery) use ($ownerRecord): void {
                         DetachItemsFromCustomPlaylist::dispatch(
                             userId: auth()->id(),
-                            itemIds: $itemIds->all(),
+                            itemIds: PlaylistService::selectedRecordIds($recordsQuery),
                             customPlaylistId: $ownerRecord->id,
                             type: 'series',
                         );
@@ -291,10 +291,10 @@ class SeriesRelationManager extends RelationManager
                             ->required(),
                     ])
                     ->fetchSelectedRecords(false)
-                    ->action(function (SupportCollection $itemIds, array $data) use ($ownerRecord): void {
+                    ->action(function (Builder $recordsQuery, array $data) use ($ownerRecord): void {
                         AddItemsToCustomPlaylist::dispatch(
                             userId: auth()->id(),
-                            itemIds: $itemIds->all(),
+                            itemIds: PlaylistService::selectedRecordIds($recordsQuery),
                             customPlaylistId: $ownerRecord->id,
                             data: ['mode' => 'select', 'category' => $data['category']],
                             type: 'series',
