@@ -349,6 +349,8 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         "{$baseUrl}/schedules-direct/{$epg->uuid}/image/poster-artwork",
         "{$baseUrl}/schedules-direct/{$epg->uuid}/image/backdrop-artwork",
     ];
+    $dotSegmentIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/.";
+    $dotDotSegmentImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/..";
     $untrustedSchedulesDirectImage = "{$baseUrl}/schedules-direct/{$untrustedSchedulesDirectEpg->uuid}/image/untrusted-artwork";
     $externalIcon = 'https://public-artwork.example.test/external-icon.jpg';
     $externalImage = 'https://public-artwork.example.test/external-image.jpg';
@@ -367,6 +369,13 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
                 ['url' => $schedulesDirectImages[0], 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
                 ['url' => $schedulesDirectImages[1], 'type' => 'backdrop', 'width' => 1920, 'height' => 1080, 'orient' => 'L', 'size' => 4],
                 ['url' => $untrustedSchedulesDirectImage, 'type' => 'banner', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ],
+        ],
+        [
+            'title' => 'Dot-segment artwork',
+            'icon' => $dotSegmentIcon,
+            'images' => [
+                ['url' => $dotDotSegmentImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
             ],
         ],
         [
@@ -404,6 +413,8 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         ->and($xpath->query('//programme[title="First-party artwork"]/icon[@src="'.$schedulesDirectImages[0].'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="First-party artwork"]/icon[@src="'.$schedulesDirectImages[1].'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="First-party artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($untrustedSchedulesDirectImage).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Dot-segment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($dotSegmentIcon).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Dot-segment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($dotDotSegmentImage).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Public artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($externalIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Public artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($externalImage).'"]'))->toHaveCount(1);
 });

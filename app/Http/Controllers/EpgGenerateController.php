@@ -884,7 +884,10 @@ class EpgGenerateController extends Controller
             return false;
         }
 
-        return preg_match('/^[A-Za-z0-9._-]+$/D', substr($imagePath, strlen($expectedPath))) === 1;
+        $imageSegment = substr($imagePath, strlen($expectedPath));
+
+        return ! in_array($imageSegment, ['.', '..'], true)
+            && preg_match('/^[A-Za-z0-9._-]+$/D', $imageSegment) === 1;
     }
 
     /**
