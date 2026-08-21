@@ -866,8 +866,8 @@ class EpgGenerateController extends Controller
         $image = parse_url($url);
 
         if ($base === false || $image === false
-            || isset($base['user'], $base['pass'], $base['query'], $base['fragment'])
-            || isset($image['user'], $image['pass'], $image['query'], $image['fragment'])) {
+            || isset($base['user']) || isset($base['pass']) || isset($base['query']) || isset($base['fragment'])
+            || isset($image['user']) || isset($image['pass']) || isset($image['query']) || isset($image['fragment'])) {
             return false;
         }
 

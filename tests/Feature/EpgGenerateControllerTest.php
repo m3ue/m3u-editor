@@ -352,6 +352,13 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
     $dotSegmentIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/.";
     $dotDotSegmentImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/..";
     $untrustedSchedulesDirectImage = "{$baseUrl}/schedules-direct/{$untrustedSchedulesDirectEpg->uuid}/image/untrusted-artwork";
+    $queryIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/query-icon?untrusted=value";
+    $queryImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/query-image?untrusted=value";
+    $fragmentIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/fragment-icon#untrusted";
+    $fragmentImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/fragment-image#untrusted";
+    $userinfoBaseUrl = str_replace('://', '://untrusted@', $baseUrl);
+    $userinfoIcon = "{$userinfoBaseUrl}/schedules-direct/{$epg->uuid}/image/userinfo-icon";
+    $userinfoImage = "{$userinfoBaseUrl}/schedules-direct/{$epg->uuid}/image/userinfo-image";
     $externalIcon = 'https://public-artwork.example.test/external-icon.jpg';
     $externalImage = 'https://public-artwork.example.test/external-image.jpg';
     $date = now()->format('Y-m-d');
@@ -376,6 +383,27 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
             'icon' => $dotSegmentIcon,
             'images' => [
                 ['url' => $dotDotSegmentImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ],
+        ],
+        [
+            'title' => 'Query artwork',
+            'icon' => $queryIcon,
+            'images' => [
+                ['url' => $queryImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ],
+        ],
+        [
+            'title' => 'Fragment artwork',
+            'icon' => $fragmentIcon,
+            'images' => [
+                ['url' => $fragmentImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ],
+        ],
+        [
+            'title' => 'Userinfo artwork',
+            'icon' => $userinfoIcon,
+            'images' => [
+                ['url' => $userinfoImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
             ],
         ],
         [
@@ -415,6 +443,12 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         ->and($xpath->query('//programme[title="First-party artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($untrustedSchedulesDirectImage).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Dot-segment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($dotSegmentIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Dot-segment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($dotDotSegmentImage).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Query artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($queryIcon).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Query artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($queryImage).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Fragment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($fragmentIcon).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Fragment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($fragmentImage).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Userinfo artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($userinfoIcon).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Userinfo artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($userinfoImage).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Public artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($externalIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Public artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($externalImage).'"]'))->toHaveCount(1);
 });
