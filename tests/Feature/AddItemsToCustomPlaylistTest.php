@@ -1,22 +1,33 @@
 <?php
 
 use App\Jobs\AddItemsToCustomPlaylist;
+use App\Jobs\AddItemsToCustomPlaylistChunk;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\PlaylistService;
+use Filament\Notifications\DatabaseNotification;
+use Illuminate\Database\Eloquent\Factories\Sequence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Tests\Support\AlwaysFailsBatchJob;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Notification::fake();
 
+    // The job fans its work out via Bus::batch(); run the batch on the real
+    // sync queue driver so the chunk jobs execute inline against the test database
+    config(['queue.default' => 'sync']);
+
     $this->user = User::factory()->create();
-    $this->playlist = Playlist::factory()->create(['user_id' => $this->user->id]);
+    // Fixture only: created quietly so the source playlist does not kick off a real M3U import
+    $this->playlist = Playlist::factory()->createQuietly(['user_id' => $this->user->id]);
     $this->customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
 });
 
@@ -24,6 +35,7 @@ it('syncs items to the custom playlist pivot', function () {
     $channels = Channel::factory()->count(3)->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
     ]);
 
     (new AddItemsToCustomPlaylist(
@@ -45,6 +57,7 @@ it('creates and attaches a new tag in create mode', function () {
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
     ]);
 
     (new AddItemsToCustomPlaylist(
@@ -63,6 +76,7 @@ it('re-tagging with a new shared tag replaces the previous tag, not accumulates 
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
     ]);
 
     (new AddItemsToCustomPlaylist(
@@ -93,16 +107,19 @@ it('tags each item with its own group name in original mode, not a batch-wide va
     $channelA = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
         'group' => 'Sports',
     ]);
     $channelB = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
         'group' => 'News',
     ]);
     $channelC = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
         'group' => 'Movies',
     ]);
 
@@ -127,6 +144,7 @@ it('does not skip a group literally named "0" in original mode', function () {
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
         'group' => '0',
     ]);
 
@@ -148,6 +166,7 @@ it('does not create a tag for items with no group set in original mode', functio
     $channel = Channel::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
         'group' => null,
     ]);
 
@@ -169,6 +188,7 @@ it('handles a selection spanning multiple chunk boundaries', function () {
     $channels = Channel::factory()->count(1200)->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
+        'group_id' => null,
     ]);
 
     (new AddItemsToCustomPlaylist(
@@ -180,6 +200,123 @@ it('handles a selection spanning multiple chunk boundaries', function () {
     ))->handle();
 
     expect($this->customPlaylist->channels()->count())->toBe(1200);
+
+    // The work must have fanned out as one chunk job per 1000 items, and the
+    // batch must have run every chunk to completion without failures
+    $batch = DB::table('job_batches')->where('name', 'add-items-to-custom-playlist')->first();
+    expect($batch)->not->toBeNull()
+        ->and($batch->total_jobs)->toBe(2)
+        ->and($batch->pending_jobs)->toBe(0)
+        ->and($batch->failed_jobs)->toBe(0)
+        ->and($batch->finished_at)->not->toBeNull();
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'success'
+            && $notification->data['title'] === 'Items added to custom playlist',
+    );
+});
+
+it('sends exactly one failure notification once all chunks have run, even if a chunk permanently fails', function () {
+    // then() would never fire here (pending_jobs never reaches 0 once a chunk
+    // fails), and catch() alone would fire before the good chunk finishes writing.
+    // The batch must rely on finally() instead, once every chunk has reported in.
+    //
+    // The sync driver used elsewhere in this file can't exercise this: it executes
+    // jobs inline inside the same DB transaction Bus::batch() uses to dispatch them,
+    // so an exception there rolls back everything (the good chunk's write included)
+    // instead of being recorded and swallowed the way a real worker does. The
+    // database driver defers execution to an explicit queue:work run below, outside
+    // that dispatch-time transaction, matching how a real worker actually behaves.
+    config(['queue.default' => 'database']);
+
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => null,
+    ]);
+
+    PlaylistService::dispatchCustomPlaylistBatch(
+        chunkJobs: [
+            new AddItemsToCustomPlaylistChunk(
+                customPlaylistId: $this->customPlaylist->id,
+                itemIds: [$channel->id],
+            ),
+            new AlwaysFailsBatchJob,
+        ],
+        batchName: 'add-items-to-custom-playlist',
+        userId: $this->user->id,
+        completedTitle: __('Items added to custom playlist'),
+        completedBody: __('The selected items have been added to the chosen custom playlist.'),
+        failedTitle: __('Failed to add items to custom playlist'),
+    );
+
+    // Drain the two queued chunk jobs for real, one at a time
+    $this->artisan('queue:work', ['--queue' => 'import', '--once' => true, '--tries' => 1]);
+    $this->artisan('queue:work', ['--queue' => 'import', '--once' => true, '--tries' => 1]);
+
+    // The good chunk's write must have gone through despite the other chunk failing
+    expect($this->customPlaylist->channels()->where('channels.id', $channel->id)->exists())->toBeTrue();
+
+    $batch = DB::table('job_batches')->where('name', 'add-items-to-custom-playlist')->first();
+    expect($batch->total_jobs)->toBe(2)
+        ->and($batch->failed_jobs)->toBe(1);
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === 'Failed to add items to custom playlist'
+            && $notification->data['body'] === '1 of 2 chunks failed to process. Check the logs for details.',
+    );
+    Notification::assertNotSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'success',
+    );
+});
+
+it('buckets interleaved group names across the whole selection in original mode', function () {
+    // Alternate the two groups item by item so every 1000-item slice contains both
+    $channels = Channel::factory()
+        ->count(1200)
+        ->state(new Sequence(['group' => 'Sports'], ['group' => 'News']))
+        ->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => null,
+        ]);
+
+    (new AddItemsToCustomPlaylist(
+        userId: $this->user->id,
+        itemIds: $channels->pluck('id')->all(),
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+    ))->handle();
+
+    // One chunk job per group (600 items each), not one per group per slice
+    $batch = DB::table('job_batches')->where('name', 'add-items-to-custom-playlist')->first();
+    expect($batch->total_jobs)->toBe(2)
+        ->and($batch->failed_jobs)->toBe(0)
+        ->and($this->customPlaylist->channels()->count())->toBe(1200)
+        ->and($this->customPlaylist->channels()->withAnyTags(['Sports'], $this->customPlaylist->uuid)->count())->toBe(600)
+        ->and($this->customPlaylist->channels()->withAnyTags(['News'], $this->customPlaylist->uuid)->count())->toBe(600);
+});
+
+it('notifies completion immediately for an empty selection without dispatching a batch', function () {
+    (new AddItemsToCustomPlaylist(
+        userId: $this->user->id,
+        itemIds: [],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'select', 'category' => 'Bulk Tag'],
+        type: 'channel',
+    ))->handle();
+
+    expect(DB::table('job_batches')->count())->toBe(0);
+
+    Notification::assertSentTo($this->user, DatabaseNotification::class);
 });
 
 it('syncs series to the custom playlist and tags with category name in original mode', function () {
@@ -207,4 +344,22 @@ it('syncs series to the custom playlist and tags with category name in original 
 
     expect($this->customPlaylist->series()->where('series.id', $series->id)->exists())->toBeTrue()
         ->and($series->tags->pluck('name')->all())->toContain('Drama');
+});
+
+it('sends a failure notification when the job fails', function () {
+    (new AddItemsToCustomPlaylist(
+        userId: $this->user->id,
+        itemIds: [1],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'select', 'category' => 'Some Tag'],
+        type: 'channel',
+    ))->failed(new Exception('Something went wrong'));
+
+    Notification::assertSentTo(
+        $this->user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === 'Failed to add items to custom playlist'
+            && $notification->data['body'] === 'Something went wrong',
+    );
 });

@@ -1430,7 +1430,7 @@ class Preferences extends SettingsPage
                                             ->helperText(__('When enabled, automatic database backups will be created based on the specified schedule.')),
                                         Group::make()
                                             ->columnSpanFull()
-                                            ->columns(2)
+                                            ->columns(3)
                                             ->schema([
                                                 TextInput::make('auto_backup_database_schedule')
                                                     ->label(__('Backup Schedule'))
@@ -1446,6 +1446,11 @@ class Preferences extends SettingsPage
                                                     ->type('number')
                                                     ->minValue(0)
                                                     ->helperText(__('Specify the maximum number of backups to keep. Enter 0 for no limit.')),
+                                                TextInput::make('auto_backup_database_delete_after_days')
+                                                    ->label(__('Delete Backups After (Days)'))
+                                                    ->type('number')
+                                                    ->minValue(0)
+                                                    ->helperText(__('Automatically delete backups older than this many days. Enter 0 for no limit.')),
                                             ])->hidden(fn ($get) => ! $get('auto_backup_database')),
                                     ]),
                             ]),
@@ -1731,6 +1736,14 @@ class Preferences extends SettingsPage
                                             ->maxValue(100)
                                             ->default(80)
                                             ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
+                                        TextInput::make('tmdb_min_vote_count')
+                                            ->label(__('Minimum Vote Count'))
+                                            ->placeholder(__('25'))
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->maxValue(10000)
+                                            ->default(25)
+                                            ->helperText(__('Minimum number of TMDB votes required to trust and display that rating. Ratings backed by fewer votes are hidden rather than shown as potentially misleading.')),
                                         Section::make(__('Title Cleaning for TMDB Lookup'))
                                             ->icon('heroicon-m-scissors')
                                             ->description(__('Strip provider prefixes from VOD and Series titles before matching with TMDB. This helps improve matching accuracy by removing common prefixes like "EN - ", "4K-EN - ", "NF - ", etc.'))

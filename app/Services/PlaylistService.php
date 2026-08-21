@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\AddItemsToCustomPlaylist;
+use App\Jobs\AddItemsToCustomPlaylistChunk;
+use App\Jobs\DetachItemsFromCustomPlaylistChunk;
 use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
@@ -17,6 +19,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Series;
+use App\Models\User;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Exception;
@@ -33,22 +36,31 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Enums\Width;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection as SupportCollection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
+use Throwable;
 
 /**
  * Service to handle playlist-related operations.
  */
 class PlaylistService
 {
+    /**
+     * Number of items processed per chunk job when bulk-updating custom playlist
+     * membership and tags.
+     */
+    public const CUSTOM_PLAYLIST_CHUNK_SIZE = 1000;
+
     /**
      * Get the base URL of the application, including port if set
      *
@@ -1022,6 +1034,106 @@ class PlaylistService
     }
 
     /**
+     * Pluck the primary keys of a Filament bulk-action selection without hydrating
+     * models, dropping the table's sort clauses and column selects (eager-load
+     * aggregates, tag-sort joins) so a "select all" over 100k+ rows stays fast
+     * during the request.
+     *
+     * @return array<int>
+     */
+    public static function selectedRecordIds(Builder $recordsQuery): array
+    {
+        $keyName = $recordsQuery->getModel()->getQualifiedKeyName();
+
+        return $recordsQuery
+            ->reorder()
+            ->select($keyName)
+            ->toBase()
+            ->pluck($keyName)
+            ->all();
+    }
+
+    /**
+     * Broadcast a notification about a queued custom playlist operation to the user
+     * and persist it to their database notifications. The database copy can carry a
+     * more detailed body (e.g. an exception message) than the transient broadcast.
+     */
+    public static function notifyCustomPlaylistOperation(int $userId, bool $success, string $title, string $body, ?string $databaseBody = null): void
+    {
+        $user = User::find($userId);
+        if (! $user) {
+            return;
+        }
+
+        Notification::make()
+            ->status($success ? 'success' : 'danger')
+            ->title($title)
+            ->body($body)
+            ->broadcast($user);
+
+        Notification::make()
+            ->status($success ? 'success' : 'danger')
+            ->title($title)
+            ->body($databaseBody ?? $body)
+            ->sendToDatabase($user);
+    }
+
+    /**
+     * Fan custom playlist chunk jobs out as a parallel Bus::batch() on the import
+     * queue (same pattern as ProcessChannelScrubber). allowFailures() keeps one
+     * failed chunk from cancelling the rest of the batch, so the user is notified
+     * exactly once, from finally(), after every chunk has run: then() only fires
+     * when every job succeeds (a permanently failed chunk keeps pending_jobs from
+     * ever reaching 0, so then() would never fire), and catch() fires on the first
+     * failure while other chunks are still running, which would misreport a
+     * partially-successful batch as a total failure. Chunk jobs must be
+     * idempotent and conflict-safe, since they run concurrently across workers.
+     *
+     * @param  array<int, AddItemsToCustomPlaylistChunk|DetachItemsFromCustomPlaylistChunk>  $chunkJobs
+     */
+    public static function dispatchCustomPlaylistBatch(
+        array $chunkJobs,
+        string $batchName,
+        int $userId,
+        string $completedTitle,
+        string $completedBody,
+        string $failedTitle,
+    ): void {
+        if ($chunkJobs === []) {
+            self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
+
+            return;
+        }
+
+        Bus::batch($chunkJobs)
+            ->name($batchName)
+            ->onQueue('import')
+            ->allowFailures()
+            ->catch(function (Batch $batch, Throwable $e): void {
+                Log::error("Custom playlist batch [{$batch->id}] chunk failed: {$e->getMessage()}");
+            })
+            ->finally(function (Batch $batch) use ($userId, $completedTitle, $completedBody, $failedTitle): void {
+                if ($batch->failedJobs > 0) {
+                    self::notifyCustomPlaylistOperation(
+                        userId: $userId,
+                        success: false,
+                        title: $failedTitle,
+                        body: __('Please view your notifications for details.'),
+                        databaseBody: __(':failed of :total chunks failed to process. Check the logs for details.', [
+                            'failed' => $batch->failedJobs,
+                            'total' => $batch->totalJobs,
+                        ]),
+                    );
+
+                    return;
+                }
+
+                self::notifyCustomPlaylistOperation($userId, true, $completedTitle, $completedBody);
+            })
+            ->dispatch();
+    }
+
+    /**
      * Get the form schema for the "Merge Same ID" action.
      */
     public static function getMergeFormSchema(string $contentType = 'live'): array
@@ -1480,10 +1592,10 @@ class PlaylistService
             ->label('Add to Custom Playlist')
             ->schema(self::getAddToPlaylistSchema($type))
             ->fetchSelectedRecords(false)
-            ->action(function (SupportCollection $itemIds, array $data) use ($type): void {
+            ->action(function (Builder $recordsQuery, array $data) use ($type): void {
                 AddItemsToCustomPlaylist::dispatch(
                     userId: auth()->id(),
-                    itemIds: $itemIds->all(),
+                    itemIds: self::selectedRecordIds($recordsQuery),
                     customPlaylistId: (int) $data['playlist'],
                     data: $data,
                     type: $type,

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\CreateBackup;
 use App\Settings\GeneralSettings;
+use Carbon\Carbon;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackup;
@@ -37,9 +38,9 @@ class RunScheduledBackups extends Command
             if ($isDue) {
                 $this->info('Running scheduled backups...');
 
-                // Check if we'll be over the max backups after execution
                 $max = $settings->auto_backup_database_max_backups;
-                if ($max && $max > 0) {
+                $deleteAfterDays = $settings->auto_backup_database_delete_after_days;
+                if ($max > 0 || $deleteAfterDays > 0) {
                     $data = [];
                     foreach (FilamentSpatieLaravelBackup::getDisks() as $disk) {
                         $data = array_merge($data, FilamentSpatieLaravelBackup::getBackupDestinationData($disk));
@@ -47,17 +48,28 @@ class RunScheduledBackups extends Command
 
                     // Order by backup date
                     $data = collect($data)->sortByDesc('date');
-                    if ($data->count() >= $max) {
+
+                    // Determine which backups should be deleted for exceeding the max backups count...
+                    $toDelete = collect();
+                    if ($max > 0 && $data->count() >= $max) {
                         $toDelete = $data->slice($max - 1);
-                        foreach ($toDelete as $record) {
-                            $this->info("Deleting old backup: {$record['path']}");
-                            SpatieBackupDestination::create($record['disk'], config('backup.backup.name'))
-                                ->backups()
-                                ->first(function (Backup $backup) use ($record) {
-                                    return $backup->path() === $record['path'];
-                                })
-                                ->delete();
-                        }
+                    }
+
+                    // ...and which should be deleted for being older than the configured retention period
+                    if ($deleteAfterDays > 0) {
+                        $cutoff = now()->subDays($deleteAfterDays);
+                        $expired = $data->filter(fn ($record) => Carbon::parse($record['date'])->lt($cutoff));
+                        $toDelete = $toDelete->merge($expired)->unique('path');
+                    }
+
+                    foreach ($toDelete as $record) {
+                        $this->info("Deleting old backup: {$record['path']}");
+                        SpatieBackupDestination::create($record['disk'], config('backup.backup.name'))
+                            ->backups()
+                            ->first(function (Backup $backup) use ($record) {
+                                return $backup->path() === $record['path'];
+                            })
+                            ->delete();
                     }
                 }
 

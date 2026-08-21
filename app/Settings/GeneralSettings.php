@@ -212,6 +212,8 @@ class GeneralSettings extends Settings
 
     public ?int $auto_backup_database_max_backups = 5;
 
+    public ?int $auto_backup_database_delete_after_days = 0;
+
     // Provider request delay options
     public ?bool $enable_provider_request_delay = false;
 
@@ -236,6 +238,8 @@ class GeneralSettings extends Settings
     public ?string $tmdb_language = 'en-US';
 
     public ?int $tmdb_confidence_threshold = 80;
+
+    public ?int $tmdb_min_vote_count = 25;
 
     public ?bool $tmdb_auto_create_groups = false;
 

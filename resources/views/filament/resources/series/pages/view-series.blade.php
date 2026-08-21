@@ -20,6 +20,7 @@
         $auth = $this->getAuth();
         $username = $auth['username'] ?? null;
         $password = $auth['password'] ?? null;
+        $seriesRatingSuppressed = \App\Support\TmdbRating::isVoteCountBelowThreshold($record->metadata['vote_count'] ?? null);
     @endphp
 
     @if ($backdropUrl)
@@ -63,7 +64,7 @@
                         @if ($record->genre)
                             <span class="rounded-full bg-white/10 px-3 py-1">{{ $record->genre }}</span>
                         @endif
-                        @if ($record->rating)
+                        @if ($record->rating && ! $seriesRatingSuppressed)
                             <span class="flex items-center gap-1 rounded-full bg-yellow-500/20 px-3 py-1 text-yellow-300">
                                 <x-heroicon-s-star class="h-4 w-4" />
                                 {{ $record->rating }}
@@ -189,7 +190,7 @@
                         @if ($record->genre)
                             <span class="rounded bg-gray-200 px-2 py-1 dark:bg-gray-700">{{ $record->genre }}</span>
                         @endif
-                        @if ($record->rating)
+                        @if ($record->rating && ! $seriesRatingSuppressed)
                             <span class="flex items-center gap-1 rounded bg-yellow-100 px-2 py-1 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300">
                                 <x-heroicon-s-star class="h-3 w-3" />
                                 {{ $record->rating }}
@@ -349,7 +350,7 @@
                                         @endif
 
                                         <div class="flex items-center gap-2 pt-1">
-                                            @if (! empty($info['rating']))
+                                            @if (! empty($info['rating']) && ! \App\Support\TmdbRating::isVoteCountBelowThreshold($info['vote_count'] ?? null))
                                                 <span class="inline-flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
                                                     <x-heroicon-s-star class="h-3 w-3" />
                                                     {{ $info['rating'] }}

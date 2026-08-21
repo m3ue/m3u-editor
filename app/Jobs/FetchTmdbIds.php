@@ -630,9 +630,14 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['year'] = substr($details['release_date'], 0, 4);
                 }
 
-                // Populate rating if not already set
-                if (! empty($details['vote_average']) && empty($info['rating'])) {
+                // Populate rating if not already set, or refresh it when overwriting
+                if (! empty($details['vote_average']) && (empty($info['rating']) || $this->overwriteExisting)) {
                     $info['rating'] = $details['vote_average'];
+                }
+
+                // Persist vote count alongside rating (used by Xtream resolution to gate low-vote scores)
+                if (isset($details['vote_count'])) {
+                    $info['vote_count'] = $details['vote_count'];
                 }
 
                 // Populate backdrop path
@@ -957,9 +962,15 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['release_date'] = $details['first_air_date'];
                 }
 
-                // Populate rating if not already set
-                if (! empty($details['vote_average']) && empty($series->rating)) {
+                // Populate rating if not already set, or refresh it when overwriting
+                if (! empty($details['vote_average']) && (empty($series->rating) || $this->overwriteExisting)) {
                     $updateData['rating'] = $details['vote_average'];
+                }
+
+                // Persist vote count alongside rating (used by Xtream resolution to gate low-vote scores)
+                if (isset($details['vote_count'])) {
+                    $metadata['vote_count'] = $details['vote_count'];
+                    $updateData['metadata'] = $metadata;
                 }
 
                 // Populate backdrop path
@@ -1143,6 +1154,12 @@ class FetchTmdbIds implements ShouldQueue
                     if (! empty($episodeData['vote_average'])) {
                         $info = $updateData['info'] ?? $episode->info ?? [];
                         $info['rating'] = $episodeData['vote_average'];
+                        $updateData['info'] = $info;
+                    }
+
+                    if (isset($episodeData['vote_count'])) {
+                        $info = $updateData['info'] ?? $episode->info ?? [];
+                        $info['vote_count'] = $episodeData['vote_count'];
                         $updateData['info'] = $info;
                     }
 

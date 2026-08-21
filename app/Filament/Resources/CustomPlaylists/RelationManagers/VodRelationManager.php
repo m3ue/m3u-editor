@@ -9,6 +9,7 @@ use App\Jobs\AddItemsToCustomPlaylist;
 use App\Jobs\DetachItemsFromCustomPlaylist;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
+use App\Services\PlaylistService;
 use App\Traits\AppliesTmdbSelection;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
@@ -29,7 +30,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 
 class VodRelationManager extends RelationManager
@@ -121,18 +121,21 @@ class VodRelationManager extends RelationManager
                     default => 'CAST(tags.name AS TEXT)'
                 };
 
-                return $query
-                    ->leftJoin('taggables', function ($join) {
-                        $join->on('channels.id', '=', 'taggables.taggable_id')
-                            ->where('taggables.taggable_type', '=', Channel::class);
-                    })
-                    ->leftJoin('tags', function ($join) use ($ownerRecord) {
-                        $join->on('taggables.tag_id', '=', 'tags.id')
-                            ->where('tags.type', '=', $ownerRecord->uuid);
-                    })
-                    ->orderByRaw("{$orderByClause} {$direction}")
-                    ->select('channels.*', DB::raw("{$orderByClause} as tag_name_sort"))
-                    ->distinct();
+                // Order by a correlated subquery rather than joining taggables/tags: one row per
+                // item, so no DISTINCT over json columns (which Postgres cannot compare) and no
+                // duplicate rows for items carrying more than one tag. The inner orderBy makes the
+                // limit(1) pick deterministic when an item carries more than one relevant tag.
+                return $query->orderBy(
+                    DB::table('taggables')
+                        ->join('tags', 'taggables.tag_id', '=', 'tags.id')
+                        ->selectRaw($orderByClause)
+                        ->whereColumn('taggables.taggable_id', 'channels.id')
+                        ->where('taggables.taggable_type', Channel::class)
+                        ->where('tags.type', $ownerRecord->uuid)
+                        ->orderBy('tags.id')
+                        ->limit(1),
+                    $direction,
+                );
             });
         $defaultColumns = VodResource::getTableColumns(showGroup: true, showPlaylist: true);
 
@@ -375,10 +378,10 @@ class VodRelationManager extends RelationManager
                 BulkAction::make('detach')
                     ->label(__('Detach Selected'))
                     ->fetchSelectedRecords(false)
-                    ->action(function (SupportCollection $itemIds) use ($ownerRecord): void {
+                    ->action(function (Builder $recordsQuery) use ($ownerRecord): void {
                         DetachItemsFromCustomPlaylist::dispatch(
                             userId: auth()->id(),
-                            itemIds: $itemIds->all(),
+                            itemIds: PlaylistService::selectedRecordIds($recordsQuery),
                             customPlaylistId: $ownerRecord->id,
                             type: 'vod',
                         );
@@ -413,10 +416,10 @@ class VodRelationManager extends RelationManager
                             ->required(),
                     ])
                     ->fetchSelectedRecords(false)
-                    ->action(function (SupportCollection $itemIds, array $data) use ($ownerRecord): void {
+                    ->action(function (Builder $recordsQuery, array $data) use ($ownerRecord): void {
                         AddItemsToCustomPlaylist::dispatch(
                             userId: auth()->id(),
-                            itemIds: $itemIds->all(),
+                            itemIds: PlaylistService::selectedRecordIds($recordsQuery),
                             customPlaylistId: $ownerRecord->id,
                             data: ['mode' => 'select', 'category' => $data['group']],
                             type: 'vod',
