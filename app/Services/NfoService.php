@@ -29,9 +29,9 @@ class NfoService
         try {
             $metadata = $series->metadata ?? [];
 
-            $tmdbId = $this->getSeriesProviderId($series, 'tmdb');
-            $tvdbId = $this->getSeriesProviderId($series, 'tvdb');
-            $imdbId = $this->getSeriesProviderId($series, 'imdb');
+            $tmdbId = $this->getSeriesProviderId($series, 'tmdb', $metadata);
+            $tvdbId = $this->getSeriesProviderId($series, 'tvdb', $metadata);
+            $imdbId = $this->getSeriesProviderId($series, 'imdb', $metadata);
 
             $xml = $this->startXml('tvshow');
 
@@ -113,11 +113,12 @@ class NfoService
     {
         try {
             $info = $episode->info ?? [];
+            $metadata = $series->metadata ?? [];
 
             $tmdbId = $this->getScalarValue($info['tmdb_id'] ?? $info['tmdb'] ?? null)
-                ?: $this->getSeriesProviderId($series, 'tmdb');
-            $tvdbId = $this->getSeriesProviderId($series, 'tvdb');
-            $imdbId = $this->getSeriesProviderId($series, 'imdb');
+                ?: $this->getSeriesProviderId($series, 'tmdb', $metadata);
+            $tvdbId = $this->getSeriesProviderId($series, 'tvdb', $metadata);
+            $imdbId = $this->getSeriesProviderId($series, 'imdb', $metadata);
 
             $xml = $this->startXml('episodedetails');
 
@@ -503,28 +504,34 @@ class NfoService
 
     /**
      * Get a usable series provider ID from current fields with legacy metadata fallback.
+     * Deliberately treats falsy dedicated values (0, '') as unset so placeholder data
+     * still falls back to legacy metadata - see NfoServiceTest "keeps legacy metadata
+     * as a fallback". This intentionally differs from Series::getMovieDbIds()'s ??-based
+     * fallback, which serves query scoping/UI code where 0 is a legitimate stored value.
      */
-    private function getSeriesProviderId(Series $series, string $provider): mixed
+    private function getSeriesProviderId(Series $series, string $provider, array $metadata): mixed
     {
         $dedicated = $this->getScalarValue($series->getAttribute("{$provider}_id"));
         if (! empty($dedicated)) {
             return $dedicated;
         }
 
-        $metadata = $series->metadata ?? [];
-
         return $this->getScalarValue($metadata["{$provider}_id"] ?? $metadata[$provider] ?? null);
     }
 
     /**
      * Return the first non-empty scalar image URL or path.
+     * Array values are scanned element by element so a blank entry doesn't
+     * mask a usable one later in the same array.
      */
     private function getFirstUsableImage(mixed ...$values): ?string
     {
         foreach ($values as $value) {
-            $image = $this->getScalarValue($value);
-            if (is_string($image) && trim($image) !== '') {
-                return $image;
+            foreach (is_array($value) ? $value : [$value] as $candidate) {
+                $image = $this->getScalarValue($candidate);
+                if (is_string($image) && trim($image) !== '') {
+                    return $image;
+                }
             }
         }
 
