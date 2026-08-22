@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
-use App\Facades\ProxyFacade;
 use App\Models\AedProfile;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -854,6 +853,13 @@ class EpgGenerateController extends Controller
     /**
      * Determine whether an artwork URL is the current EPG's first-party
      * Schedules Direct image proxy route.
+     *
+     * Matched on path shape alone (not host/scheme/port): the cached URL is
+     * built by SchedulesDirectService::buildImageUrl() during the queued
+     * import job, while this is evaluated during a live HTTP request, and
+     * those two contexts can legitimately resolve the app's base URL
+     * differently (e.g. APP_URL vs. the request's actual Host header).
+     * The epg-scoped uuid in the path already makes the match unambiguous.
      */
     private function isSchedulesDirectImageUrl(string $url, Epg $epg): bool
     {
@@ -861,33 +867,22 @@ class EpgGenerateController extends Controller
             return false;
         }
 
-        $baseUrl = rtrim(ProxyFacade::getBaseUrl(), '/');
-        $base = parse_url($baseUrl);
-        $image = parse_url($url);
+        $parts = parse_url($url);
 
-        if ($base === false || $image === false
-            || isset($base['user']) || isset($base['pass']) || isset($base['query']) || isset($base['fragment'])
-            || isset($image['user']) || isset($image['pass']) || isset($image['query']) || isset($image['fragment'])) {
+        if ($parts === false
+            || isset($parts['user']) || isset($parts['pass'])
+            || isset($parts['query']) || isset($parts['fragment'])
+            || ! isset($parts['path'])) {
             return false;
         }
 
-        foreach (['scheme', 'host', 'port'] as $component) {
-            if (($image[$component] ?? null) !== ($base[$component] ?? null)) {
-                return false;
-            }
-        }
+        $pattern = '#/schedules-direct/'.preg_quote($epg->uuid, '#').'/image/([A-Za-z0-9._-]+)$#D';
 
-        $expectedPath = rtrim($base['path'] ?? '', '/')."/schedules-direct/{$epg->uuid}/image/";
-        $imagePath = $image['path'] ?? '';
-
-        if (! str_starts_with($imagePath, $expectedPath)) {
+        if (preg_match($pattern, $parts['path'], $matches) !== 1) {
             return false;
         }
 
-        $imageSegment = substr($imagePath, strlen($expectedPath));
-
-        return ! in_array($imageSegment, ['.', '..'], true)
-            && preg_match('/^[A-Za-z0-9._-]+$/D', $imageSegment) === 1;
+        return ! in_array($matches[1], ['.', '..'], true);
     }
 
     /**

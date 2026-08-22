@@ -453,6 +453,73 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         ->and($xpath->query('//programme[title="Public artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($externalImage).'"]'))->toHaveCount(1);
 });
 
+test('cached Schedules Direct artwork built on a different host than the serving request is still recognized as first-party', function () {
+    // Regression test for the bug this feature originally shipped with: artwork URLs are built by
+    // SchedulesDirectService::buildImageUrl() during the queued import job (where the base URL is forced to
+    // config('app.url')), then re-evaluated here during a live HTTP request (where the base URL reflects the
+    // request's actual Host header). Those two can legitimately differ on a self-hosted deployment reached via
+    // a LAN IP, reverse proxy, or tunnel, so the match must not depend on host/scheme/port.
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+        'enable_logo_proxy' => true,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'source_type' => EpgSourceType::SCHEDULES_DIRECT,
+        'is_cached' => true,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.schedules-direct-mismatched-host',
+        'display_name' => 'Schedules Direct Mismatched Host Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'schedules-direct-mismatched-host-channel',
+        'title' => 'Schedules Direct Mismatched Host Channel',
+        'channel' => 1,
+    ]);
+
+    // Built with a different host/scheme/port than whatever the test request resolves to.
+    $mismatchedHostIcon = "https://queue-internal.example:8443/schedules-direct/{$epg->uuid}/image/mismatched-host-artwork";
+    $date = now()->format('Y-m-d');
+    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
+
+    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
+        'cache_created' => time(),
+        'cache_version' => 'v2',
+    ], JSON_THROW_ON_ERROR));
+    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", json_encode([
+        'channel' => 'source.schedules-direct-mismatched-host',
+        'programme' => [
+            'start' => now()->startOfDay()->addHour()->toISOString(),
+            'stop' => now()->startOfDay()->addHours(2)->toISOString(),
+            'title' => 'Mismatched host artwork',
+            'subtitle' => '',
+            'desc' => '',
+            'category' => '',
+            'rating' => '',
+            'new' => false,
+            'icon' => $mismatchedHostIcon,
+            'images' => [],
+        ],
+    ], JSON_THROW_ON_ERROR)."\n");
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[title="Mismatched host artwork"]/icon[@src="'.$mismatchedHostIcon.'"]'))->toHaveCount(1);
+});
+
 test('legacy scalar episode numbers emit only valid xmltv namespace identities', function () {
     $user = User::factory()->create();
     $playlist = Playlist::factory()->for($user)->create([
