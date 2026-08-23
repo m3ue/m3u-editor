@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\PlaylistUrlService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -242,6 +243,10 @@ class PlaylistProfile extends Model
      */
     public function transformChannelUrl(Channel $channel): string
     {
+        if ($resolved = $this->resolveInternalUrl($channel)) {
+            return $resolved;
+        }
+
         $originalUrl = $channel->url_custom ?? $channel->url ?? '';
 
         return $this->transformUrl($originalUrl);
@@ -252,9 +257,77 @@ class PlaylistProfile extends Model
      */
     public function transformEpisodeUrl(Episode $episode): string
     {
+        if ($resolved = $this->resolveInternalUrl($episode)) {
+            return $resolved;
+        }
+
         $originalUrl = $episode->url ?? '';
 
         return $this->transformUrl($originalUrl);
+    }
+
+    /**
+     * When this profile's URL points at another playlist hosted by THIS
+     * m3u-editor instance (e.g. a user importing a provider as a plain M3U
+     * playlist and then using that playlist's own auto-generated Xtream
+     * credentials as a "secondary" profile), resolve directly to the
+     * matching channel/episode on the target playlist and return its real
+     * upstream URL.
+     *
+     * Without this, the generic transformUrl() string-swap would send the
+     * request back through this app's own Xtream stream controller with the
+     * SOURCE playlist's channel/episode PK, which the TARGET playlist has no
+     * way to resolve (PKs are playlist-local) - an extra hop that also
+     * requires PK-to-PK translation via source_id.
+     *
+     * Returns null for the common case (profile holds direct remote
+     * provider credentials, or a genuinely different, non-local provider
+     * URL), leaving the existing string-swap path completely unaffected.
+     */
+    private function resolveInternalUrl(Channel|Episode $model): ?string
+    {
+        if (! $this->url || ! str_starts_with(rtrim($this->url, '/'), rtrim(url('/'), '/'))) {
+            return null;
+        }
+
+        $isEpisode = $model instanceof Episode;
+
+        // Channel's provider-native ID column is `source_id`; Episode's is
+        // `source_episode_id` - they are not interchangeable columns.
+        $sourceId = $isEpisode ? $model->source_episode_id : $model->source_id;
+        if (! $sourceId) {
+            return null;
+        }
+
+        $targetPlaylist = Playlist::where('uuid', $this->password)->first();
+        if (! $targetPlaylist || $targetPlaylist->id === $this->playlist_id) {
+            return null;
+        }
+
+        $targetModel = $isEpisode
+            ? Episode::where('playlist_id', $targetPlaylist->id)
+                ->where('source_episode_id', $sourceId)
+                ->where('enabled', true)
+                ->first()
+            : $targetPlaylist->channels()
+                ->where('source_id', $sourceId)
+                ->where('enabled', true)
+                ->first();
+
+        if (! $targetModel) {
+            Log::warning('Could not resolve internal profile URL to target playlist', [
+                'profile_id' => $this->id,
+                'model_type' => $isEpisode ? 'episode' : 'channel',
+                'source_id' => $sourceId,
+                'target_playlist_id' => $targetPlaylist->id,
+            ]);
+
+            return null;
+        }
+
+        return $isEpisode
+            ? PlaylistUrlService::getEpisodeUrl($targetModel, $targetPlaylist)
+            : PlaylistUrlService::getChannelUrl($targetModel, $targetPlaylist);
     }
 
     /**
@@ -263,12 +336,9 @@ class PlaylistProfile extends Model
      * Replaces the playlist's primary credentials with this profile's credentials.
      * If the profile has a custom URL, the entire base URL is replaced as well.
      *
-     * When the profile's password is another playlist's UUID (indirection through
-     * m3u-editor's own Xtream API), the stream ID in the URL is the SOURCE
-     * playlist's channel PK. m3u-editor will authenticate the request as the
-     * TARGET playlist (via the UUID), so the stream ID must be the target
-     * playlist's channel PK. resolveProviderStreamId() maps it across the
-     * shared source_id.
+     * Only reached for direct-to-provider profiles; profiles pointing at a
+     * locally-hosted playlist are resolved by resolveInternalUrl() before this
+     * is ever called (see transformChannelUrl()/transformEpisodeUrl()).
      */
     public function transformUrl(string $originalUrl): string
     {
@@ -314,14 +384,6 @@ class PlaylistProfile extends Model
             $streamType = $matches[1];
             $streamIdAndExtension = $matches[2];
 
-            // If the profile's password is another playlist's UUID (indirection
-            // through m3u-editor's own Xtream API), map the stream ID to that
-            // playlist's channel PK via the shared source_id.
-            $resolvedStreamId = $this->resolveProviderStreamId($streamIdAndExtension);
-            if ($resolvedStreamId !== null) {
-                $streamIdAndExtension = $resolvedStreamId;
-            }
-
             $transformedUrl = "{$profileUrl}/{$streamType}/{$profileUsername}/{$profilePassword}/{$streamIdAndExtension}";
 
             Log::debug('Profile URL transformation matched', [
@@ -351,85 +413,5 @@ class PlaylistProfile extends Model
         ]);
 
         return $originalUrl;
-    }
-
-    /**
-     * Resolve a stream ID from a pool playlist URL to the correct channel PK
-     * for the playlist that this profile's credentials authenticate against.
-     *
-     * When a pool playlist connects through m3u-editor's own Xtream API, the
-     * stream ID in the channel URL is the SOURCE playlist's channel PK (e.g.
-     * 1918159 from playlist 73). The profile's password is the TARGET
-     * playlist's UUID (e.g. playlist 77). m3u-editor will authenticate the
-     * transformed URL as the TARGET playlist, so the stream ID must be that
-     * playlist's channel PK.
-     *
-     * The same logical channel exists in both playlists with a shared
-     * source_id (an MD5 set during M3U import). We map: source PK → source
-     * channel → source_id → target channel → target PK.
-     *
-     * If the profile's password is not a playlist UUID (direct-to-provider
-     * setup), or the chain cannot be resolved, returns null and the stream ID
-     * passes through unchanged.
-     */
-    private function resolveProviderStreamId(string $streamIdAndExtension): ?string
-    {
-        // Extract numeric ID and optional extension (e.g. "1918159.ts" → [1918159, ".ts"])
-        if (! preg_match('/^(\d+)(\..+)?$/', $streamIdAndExtension, $matches)) {
-            return null;
-        }
-
-        $numericId = (int) $matches[1];
-        $extension = $matches[2] ?? '';
-
-        // The profile's password is the target playlist's UUID in the indirection setup.
-        $targetPlaylist = Playlist::where('uuid', $this->password)->first();
-        if (! $targetPlaylist || $targetPlaylist->id === $this->playlist_id) {
-            return null;
-        }
-
-        // The stream ID is the SOURCE playlist's channel PK. Find that source channel.
-        $sourceChannel = Channel::find($numericId);
-        if (! $sourceChannel || ! $sourceChannel->source_id) {
-            return null;
-        }
-
-        $sourceId = $sourceChannel->source_id;
-
-        // If the source channel already belongs to the target playlist, no remap needed.
-        if ($sourceChannel->playlist_id === $targetPlaylist->id) {
-            return null;
-        }
-
-        // Find the corresponding channel in the target playlist by the shared source_id.
-        $targetChannel = $targetPlaylist->channels()
-            ->where('source_id', $sourceId)
-            ->where('enabled', true)
-            ->first();
-
-        if (! $targetChannel) {
-            Log::warning('Could not map provider stream ID across playlists', [
-                'profile_id' => $this->id,
-                'source_stream_id' => $numericId,
-                'source_id' => $sourceId,
-                'target_playlist_id' => $targetPlaylist->id,
-            ]);
-
-            return null;
-        }
-
-        if ($targetChannel->id === $numericId) {
-            return null;
-        }
-
-        Log::debug('Mapped provider stream ID across playlists', [
-            'profile_id' => $this->id,
-            'source_stream_id' => $numericId,
-            'source_id' => $sourceId,
-            'target_playlist_id' => $targetPlaylist->id,
-            'target_channel_id' => $targetChannel->id,
-        ]);
-
-        return $targetChannel->id.$extension;
     }
 }

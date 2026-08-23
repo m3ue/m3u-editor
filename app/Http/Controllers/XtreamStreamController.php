@@ -168,6 +168,8 @@ class XtreamStreamController extends Controller
                 ->where('enabled', true)
                 ->first();
 
+            // Intentionally does not log the channel's URL - for M3U-sourced channels
+            // it embeds the upstream provider's plaintext credentials.
             Log::debug('getValidatedStreamFromPlaylist lookup', [
                 'stream_id' => $streamId,
                 'stream_type' => $streamType,
@@ -177,7 +179,6 @@ class XtreamStreamController extends Controller
                 'playlist_name' => $playlist->name ?? null,
                 'channel_found' => $channel !== null,
                 'channel_id' => $channel->id ?? null,
-                'channel_url' => $channel->url ?? null,
             ]);
 
             return $channel;
