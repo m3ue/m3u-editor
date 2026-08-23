@@ -17,6 +17,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redirect;
 
 class XtreamStreamController extends Controller
@@ -167,7 +168,7 @@ class XtreamStreamController extends Controller
                 ->where('enabled', true)
                 ->first();
 
-            \Illuminate\Support\Facades\Log::debug('getValidatedStreamFromPlaylist lookup', [
+            Log::debug('getValidatedStreamFromPlaylist lookup', [
                 'stream_id' => $streamId,
                 'stream_type' => $streamType,
                 'playlist_type' => get_class($playlist),
