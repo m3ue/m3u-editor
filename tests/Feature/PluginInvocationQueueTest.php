@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Plugins\PluginHookDispatcher;
 use App\Plugins\PluginManager;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
@@ -51,24 +52,33 @@ it('isolates plugin invocations on a dedicated long-running queue worker', funct
     expect($job->connection)->toBe('plugin')
         ->and($job->queue)->toBe('plugin-invocations');
 
-    expect(property_exists($job, 'timeout'))->toBeTrue()
-        ->and($job->timeout)->toBe(21600)
-        ->and(property_exists($job, 'tries'))->toBeTrue()
-        ->and($job->tries)->toBe(1)
+    expect(property_exists($job, 'timeout'))->toBeFalse()
+        ->and(property_exists($job, 'tries'))->toBeFalse()
         ->and(property_exists($job, 'failOnTimeout'))->toBeTrue()
         ->and($job->failOnTimeout)->toBeTrue();
 
     expect($connection)->toBeArray()
         ->and($connection['driver'])->toBe('redis')
         ->and($connection['queue'])->toBe('plugin-invocations')
-        ->and($connection['retry_after'])->toBeGreaterThan($job->timeout);
+        ->and($connection['retry_after'])->toBe(21905);
 
     expect($supervisor)->toBeArray()
         ->and($supervisor['connection'])->toBe('plugin')
         ->and($supervisor['queue'])->toBe(['plugin-invocations'])
         ->and($supervisor['timeout'])->toBe(21600)
         ->and($supervisor['tries'])->toBe(1)
+        ->and($connection['retry_after'])->toBeGreaterThan($supervisor['timeout'])
         ->and(config('horizon.defaults.m3u-editor-queue.queue'))->not->toContain('plugin-invocations');
+});
+
+it('documents every dedicated plugin supervisor tuning default', function () {
+    $environment = file_get_contents(base_path('.env.example'));
+
+    expect($environment)
+        ->toContain('# HORIZON_PLUGIN_MAX_PROCESSES=1')
+        ->toContain('# HORIZON_PLUGIN_MAX_TIME=3600')
+        ->toContain('# HORIZON_PLUGIN_MAX_JOBS=50')
+        ->toContain('# HORIZON_PLUGIN_MEMORY=256');
 });
 
 it('routes manually queued plugin actions through the dedicated worker', function () {
@@ -170,4 +180,61 @@ it('routes resumed stale plugin runs through the dedicated worker', function () 
             && $job->options['existing_run_id'] === $run->id
             && $job->options['resume'] === true;
     });
+
+    expect($run->fresh()->status)->toBe('pending');
+});
+
+it('atomically claims a resumable run before dispatching it once', function () {
+    Queue::fake();
+
+    $plugin = createPluginForInvocationQueueTests();
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => 'failed',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+        'progress_message' => 'Failed during scan.',
+        'started_at' => now()->subHour(),
+        'finished_at' => now(),
+    ]);
+
+    $pluginManager = app(PluginManager::class);
+    $pluginManager->resumeRun($run);
+    $pluginManager->resumeRun($run->fresh());
+
+    Queue::assertPushed(ExecutePluginInvocation::class, 1);
+
+    expect($run->fresh()->status)->toBe('pending');
+});
+
+it('releases a resume claim when dispatch fails', function () {
+    $plugin = createPluginForInvocationQueueTests();
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => 'stale',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+        'progress_message' => 'Waiting for operator.',
+        'started_at' => now()->subHours(7),
+        'stale_at' => now(),
+        'finished_at' => now(),
+    ]);
+
+    Bus::shouldReceive('dispatch')
+        ->once()
+        ->andThrow(new RuntimeException('Queue unavailable.'));
+
+    expect(fn () => app(PluginManager::class)->resumeRun($run))
+        ->toThrow(RuntimeException::class, 'Queue unavailable.');
+
+    $run->refresh();
+
+    expect($run->status)->toBe('stale')
+        ->and($run->progress_message)->toBe('Waiting for operator.');
 });

@@ -20,12 +20,15 @@ use App\Plugins\Support\PluginValidationResult;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use PharData;
 use RuntimeException;
 use Throwable;
@@ -1018,48 +1021,96 @@ class PluginManager
 
     public function resumeRun(PluginRun $run, ?int $userId = null): PluginRun
     {
-        $plugin = $run->plugin()->firstOrFail();
+        return Cache::lock("plugins:resume-run:{$run->id}", 30)->block(5, function () use ($run, $userId): PluginRun {
+            $claimedRun = PluginRun::query()->findOrFail($run->id);
 
-        if (! in_array($run->status, ['cancelled', 'stale', 'failed'], true)) {
-            return $run->fresh();
-        }
+            if (! in_array($claimedRun->status, ['cancelled', 'stale', 'failed'], true)) {
+                return $claimedRun;
+            }
 
-        dispatch(new ExecutePluginInvocation(
-            pluginId: $plugin->id,
-            invocationType: $run->invocation_type,
-            name: $run->action ?? $run->hook ?? throw new RuntimeException('Run cannot be resumed without an action or hook name.'),
-            payload: $run->payload ?? [],
-            options: [
-                'trigger' => $run->trigger,
-                'dry_run' => $run->dry_run,
-                'user_id' => $userId ?? $run->user_id,
-                'existing_run_id' => $run->id,
-                'resume' => true,
-            ],
-        ));
+            if (! in_array($claimedRun->invocation_type, ['action', 'hook'], true)) {
+                throw new RuntimeException('Run cannot be resumed with an invalid invocation type.');
+            }
 
-        return $run->fresh();
+            $name = $claimedRun->invocation_type === 'action' ? $claimedRun->action : $claimedRun->hook;
+            if (! is_string($name) || $name === '') {
+                throw new RuntimeException('Run cannot be resumed without an action or hook name.');
+            }
+
+            $plugin = $claimedRun->plugin()->firstOrFail();
+            $originalStatus = $claimedRun->status;
+            $originalProgressMessage = $claimedRun->progress_message;
+
+            $claimedRun->update([
+                'status' => 'pending',
+                'progress_message' => 'Run queued and waiting for the worker to resume.',
+            ]);
+
+            try {
+                Bus::dispatch(new ExecutePluginInvocation(
+                    pluginId: $plugin->id,
+                    invocationType: $claimedRun->invocation_type,
+                    name: $name,
+                    payload: $claimedRun->payload ?? [],
+                    options: [
+                        'trigger' => $claimedRun->trigger,
+                        'dry_run' => $claimedRun->dry_run,
+                        'user_id' => $userId ?? $claimedRun->user_id,
+                        'existing_run_id' => $claimedRun->id,
+                        'resume' => true,
+                    ],
+                ));
+            } catch (Throwable $exception) {
+                PluginRun::query()
+                    ->whereKey($claimedRun->id)
+                    ->where('status', 'pending')
+                    ->update([
+                        'status' => $originalStatus,
+                        'progress_message' => $originalProgressMessage,
+                    ]);
+
+                throw $exception;
+            }
+
+            return $claimedRun->fresh();
+        });
     }
 
-    public function recoverStaleRuns(int $minutes = 15): int
+    public function recoverStaleRuns(?int $heartbeatMinutes = null, ?int $minimumRuntimeMinutes = null): int
     {
+        $heartbeatMinutes ??= (int) config('plugins.stale_run.heartbeat_minutes', 15);
+        $minimumRuntimeMinutes ??= (int) config('plugins.stale_run.minimum_runtime_minutes', 365);
+
+        if ($heartbeatMinutes < 1) {
+            throw new InvalidArgumentException('Heartbeat expiry minutes must be at least 1.');
+        }
+
+        if ($minimumRuntimeMinutes < 1) {
+            throw new InvalidArgumentException('Minimum runtime minutes must be at least 1.');
+        }
+
+        $heartbeatCutoff = now()->subMinutes($heartbeatMinutes);
+        $runtimeCutoff = now()->subMinutes($minimumRuntimeMinutes);
         $staleRuns = PluginRun::query()
             ->where('status', 'running')
-            ->where(function ($query) use ($minutes) {
+            ->whereNotNull('started_at')
+            ->where('started_at', '<', $runtimeCutoff)
+            ->where(function ($query) use ($heartbeatCutoff) {
                 $query
-                    ->where(function ($heartbeatQuery) use ($minutes) {
+                    ->where(function ($heartbeatQuery) use ($heartbeatCutoff) {
                         $heartbeatQuery
                             ->whereNotNull('last_heartbeat_at')
-                            ->where('last_heartbeat_at', '<', now()->subMinutes($minutes));
+                            ->where('last_heartbeat_at', '<', $heartbeatCutoff);
                     })
-                    ->orWhere(function ($legacyQuery) use ($minutes) {
+                    ->orWhere(function ($legacyQuery) use ($heartbeatCutoff) {
                         $legacyQuery
                             ->whereNull('last_heartbeat_at')
-                            ->whereNotNull('started_at')
-                            ->where('started_at', '<', now()->subMinutes($minutes));
+                            ->where('started_at', '<', $heartbeatCutoff);
                     });
             })
-            ->get();
+            ->lazyById();
+
+        $recovered = 0;
 
         foreach ($staleRuns as $run) {
             $summary = $run->progress_message ?: $run->summary ?: 'Run lost its heartbeat and was marked stale.';
@@ -1086,9 +1137,11 @@ class PluginManager
                     ],
                 ],
             ]);
+
+            $recovered++;
         }
 
-        return $staleRuns->count();
+        return $recovered;
     }
 
     private function pluginPaths(): array

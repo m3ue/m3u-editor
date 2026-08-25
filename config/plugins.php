@@ -19,6 +19,11 @@ return [
 
     'run_retention_days' => (int) env('PLUGIN_RUN_RETENTION_DAYS', 7),
 
+    'stale_run' => [
+        'heartbeat_minutes' => (int) env('PLUGIN_STALE_HEARTBEAT_MINUTES', 15),
+        'minimum_runtime_minutes' => (int) env('PLUGIN_STALE_MINIMUM_RUNTIME_MINUTES', 365),
+    ],
+
     'directories' => [
         base_path('plugins'),
     ],

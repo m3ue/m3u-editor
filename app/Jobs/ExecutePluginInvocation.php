@@ -11,10 +11,6 @@ class ExecutePluginInvocation implements ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 60 * 60 * 6;
-
-    public int $tries = 1;
-
     public bool $failOnTimeout = true;
 
     public function __construct(

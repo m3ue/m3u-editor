@@ -1038,7 +1038,7 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
             'progress' => 42,
             'progress_message' => 'Still working through checkpoint 3.',
             'last_heartbeat_at' => now()->subMinutes(20),
-            'started_at' => now()->subMinutes(25),
+            'started_at' => now()->subMinutes(370),
             'run_state' => [
                 'resume' => [
                     'last_step' => 'checkpoint-3',
@@ -1088,6 +1088,64 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
     } finally {
         cleanupReviewFixturePlugin($pluginId);
     }
+});
+
+it('requires heartbeat expiry and the configured minimum runtime before marking runs stale', function () {
+    $pluginId = 'stale-runtime-fixture-'.Str::lower(Str::random(6));
+    $pluginManager = app(PluginManager::class);
+    $installed = installFixturePluginForTests($pluginId, trust: true, enabled: true);
+    $plugin = $installed['plugin'];
+
+    try {
+        $sixHourRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => now()->subMinutes(20),
+            'started_at' => now()->subMinutes(360),
+        ]);
+
+        expect(config('plugins.stale_run.heartbeat_minutes'))->toBe(15)
+            ->and(config('plugins.stale_run.minimum_runtime_minutes'))->toBe(365)
+            ->and($pluginManager->recoverStaleRuns())->toBe(0)
+            ->and($sixHourRun->fresh()->status)->toBe('running');
+
+        $this->artisan('plugins:recover-stale-runs', [
+            '--minutes' => 15,
+            '--minimum-runtime' => 359,
+        ])
+            ->assertSuccessful()
+            ->expectsOutput('Recovered 1 stale plugin run(s).');
+
+        expect($sixHourRun->fresh()->status)->toBe('stale');
+    } finally {
+        cleanupReviewFixturePlugin($pluginId);
+    }
+});
+
+it('validates stale recovery CLI overrides', function () {
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => 0,
+        '--minimum-runtime' => 365,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Heartbeat expiry minutes must be at least 1.');
+
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => 15,
+        '--minimum-runtime' => 0,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Minimum runtime minutes must be at least 1.');
+
+    config()->set('plugins.stale_run.minimum_runtime_minutes', 0);
+
+    expect(fn () => app(PluginManager::class)->recoverStaleRuns())
+        ->toThrow(InvalidArgumentException::class, 'Minimum runtime minutes must be at least 1.');
 });
 
 it('rejects zip archive entries that contain symlinks', function () {
