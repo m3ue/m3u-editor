@@ -79,6 +79,16 @@ return [
             'after_commit' => false,
         ],
 
+        'plugin' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => 'plugin-invocations',
+            // Plugin invocations may run for six hours and must not be released while still running.
+            'retry_after' => 60 * 365 + 5,
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
     ],
 
     /*
