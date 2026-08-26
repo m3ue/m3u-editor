@@ -7,6 +7,7 @@ use App\Models\PluginRun;
 use App\Models\User;
 use App\Plugins\PluginHookDispatcher;
 use App\Plugins\PluginManager;
+use Carbon\Carbon;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
@@ -182,6 +183,62 @@ it('routes resumed stale plugin runs through the dedicated worker', function () 
     });
 
     expect($run->fresh()->status)->toBe('pending');
+});
+
+it('starts resumed plugin runs with a fresh execution age', function () {
+    $resumedAt = Carbon::parse('2026-08-26 12:00:00');
+    Carbon::setTestNow($resumedAt);
+
+    try {
+        $plugin = createPluginForInvocationQueueTests();
+        $run = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'stale',
+            'invocation_type' => 'action',
+            'action' => 'resume_scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress' => 42,
+            'last_heartbeat_at' => $resumedAt->copy()->subMinutes(20),
+            'started_at' => $resumedAt->copy()->subMinutes(366),
+            'run_state' => [
+                'resume' => [
+                    'last_step' => 'checkpoint-3',
+                ],
+            ],
+        ]);
+
+        $pluginManager = app(PluginManager::class);
+        $resumedRun = (new ReflectionMethod($pluginManager, 'prepareRun'))->invoke(
+            $pluginManager,
+            $plugin,
+            [
+                'trigger' => 'manual',
+                'invocation_type' => 'action',
+                'action' => 'resume_scan',
+                'payload' => [],
+                'dry_run' => true,
+                'user_id' => null,
+            ],
+            [
+                'existing_run_id' => $run->id,
+                'resume' => true,
+            ],
+        );
+
+        expect($resumedRun->started_at)->toEqual($resumedAt)
+            ->and($resumedRun->last_heartbeat_at)->toEqual($resumedAt)
+            ->and($resumedRun->progress)->toBe(42)
+            ->and($resumedRun->run_state)->toBe([
+                'resume' => [
+                    'last_step' => 'checkpoint-3',
+                ],
+            ])
+            ->and($pluginManager->recoverStaleRuns(15, 365))->toBe(0);
+    } finally {
+        Carbon::setTestNow();
+    }
 });
 
 it('atomically claims a resumable run before dispatching it once', function () {

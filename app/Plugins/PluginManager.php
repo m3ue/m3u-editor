@@ -1398,7 +1398,7 @@ class PluginManager
             'stale_at' => null,
             'finished_at' => null,
             'last_heartbeat_at' => now(),
-            'started_at' => $run->started_at ?? now(),
+            'started_at' => now(),
         ]);
 
         return $run->fresh();
