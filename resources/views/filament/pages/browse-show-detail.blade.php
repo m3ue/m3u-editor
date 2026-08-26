@@ -70,7 +70,11 @@
                             <div class="flex min-w-0 items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                                 <span class="truncate font-medium text-gray-700 dark:text-gray-300">{{ $airing['channel_name'] }}</span>
                                 <span aria-hidden="true">&middot;</span>
-                                <span class="flex-shrink-0">{{ $airing['start_time_human'] }}</span>
+                                <span class="flex-shrink-0"
+                                    >{{ $airing['start_time_human'] }}
+                                    @if ($airing['end_time_human'] ?? null) -{{ $airing['end_time_human'] }}@endif
+                                    @if ($airing['duration_human'] ?? null) ({{ $airing['duration_human'] }})@endif
+                                </span>
                             </div>
                             <x-filament::button size="xs" color="gray" wire:click="recordOnce({{ $airing['id'] }})">
                                 {{ __('Record') }}

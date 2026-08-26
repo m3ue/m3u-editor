@@ -18,6 +18,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -78,12 +79,15 @@ class DvrRecordingRuleResource extends Resource
 
                 Select::make('dvr_setting_id')
                     ->label(__('DVR Setting (Playlist)'))
-                    ->options(fn () => DvrSetting::with('playlist')
+                    ->options(fn () => DvrSetting::with(['playlist', 'customPlaylist', 'mergedPlaylist'])
                         ->where('user_id', Auth::id())
+                        ->where('enabled', true)
                         ->get()
-                        ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->playlist?->name ?? "DVR #{$s->id}"]))
+                        ->mapWithKeys(fn (DvrSetting $s) => [$s->id => $s->owner()?->name ?? "DVR #{$s->id}"]))
                     ->required()
-                    ->searchable(),
+                    ->searchable()
+                    ->live()
+                    ->afterStateUpdated(fn (Set $set) => $set('channel_id', null)),
 
                 Select::make('type')
                     ->label(__('Rule Type'))
@@ -113,11 +117,20 @@ class DvrRecordingRuleResource extends Resource
 
                 Select::make('channel_id')
                     ->label(__('Channel'))
-                    ->options(fn () => Channel::query()
-                        ->where('user_id', Auth::id())
-                        ->orderBy('title')
-                        ->pluck('title', 'id')
-                        ->prepend(__('From Original Source'), 0))
+                    ->options(function (Get $get): array {
+                        $dvrSetting = DvrSetting::find($get('dvr_setting_id'));
+
+                        if (! $dvrSetting) {
+                            return [];
+                        }
+
+                        return Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
+                            ->orderBy('title')
+                            ->pluck('title', 'id')
+                            ->prepend(__('From Original Source'), 0)
+                            ->all();
+                    })
+                    ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id'))
                     ->searchable()
                     ->nullable()
                     ->helperText(fn (Get $get): ?string => self::isRuleType($get('type'), DvrRuleType::Series)

@@ -15,6 +15,7 @@ use App\Models\EpgProgramme;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
 use App\Support\EpgProgrammeNormalizer;
+use Carbon\CarbonInterface;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Grid;
@@ -717,6 +718,7 @@ class GuestBrowseShows extends Page
 
         $airings = $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone, $episodeIsNewMap) {
             $startTime = $p->start_time?->timezone($timezone);
+            $endTime = $p->end_time?->timezone($timezone);
 
             [$season, $episode, $subtitle, $description] = $this->parseSeasonEpisode($p);
 
@@ -730,6 +732,8 @@ class GuestBrowseShows extends Page
                 'start_time' => $startTime?->format('Y-m-d H:i'),
                 'start_time_human' => $startTime?->format('D M j, g:ia'),
                 'end_time' => $p->end_time?->format('Y-m-d H:i'),
+                'end_time_human' => $endTime?->format('g:ia'),
+                'duration_human' => $this->formatDuration($startTime, $endTime),
                 'season' => $season,
                 'episode' => $episode,
                 'subtitle' => $subtitle,
@@ -766,6 +770,27 @@ class GuestBrowseShows extends Page
             'has_series_rule' => $seriesRuleExists,
             'airings' => $airings,
         ];
+    }
+
+    private function formatDuration(?CarbonInterface $startTime, ?CarbonInterface $endTime): ?string
+    {
+        if (! $startTime || ! $endTime) {
+            return null;
+        }
+
+        $minutes = (int) $startTime->diffInMinutes($endTime);
+        $hours = intdiv($minutes, 60);
+        $remainingMinutes = $minutes % 60;
+
+        if ($hours > 0 && $remainingMinutes > 0) {
+            return "{$hours}hr {$remainingMinutes}min";
+        }
+
+        if ($hours > 0) {
+            return "{$hours}hr";
+        }
+
+        return "{$remainingMinutes}min";
     }
 
     /**

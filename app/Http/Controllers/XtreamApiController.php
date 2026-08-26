@@ -1178,10 +1178,18 @@ class XtreamApiController extends Controller
             $isDvrSeries = $seriesItem->import_batch_no === 'dvr';
 
             // fetchMetadata() handles its own freshness check internally (comparing last_modified
-            // against last_metadata_fetch). It returns null when no fetch was needed, false on
-            // failure, or an episode count on success.
+            // against last_metadata_fetch), returning false on failure or true otherwise. When
+            // auto_fetch_series_metadata is disabled, the user has opted out of eager sync-time
+            // fetching in favor of on-demand requests, so those requests should be a live
+            // passthrough to the provider rather than served from a stale sync-time cache -
+            // force refresh and skip the TMDB dispatch, which is unrelated to episode freshness
+            // and shouldn't be re-triggered on every client request.
             if (! $isMediaServerSeries && ! $isDvrSeries) {
-                $results = $seriesItem->fetchMetadata(sync: false);
+                $results = $seriesItem->fetchMetadata(
+                    refresh: ! $playlist->auto_fetch_series_metadata,
+                    sync: false,
+                    dispatchTmdb: (bool) $playlist->auto_fetch_series_metadata,
+                );
                 if ($results !== null && $results !== false) {
                     // Provider returned new data — reload the model with fresh relations
                     $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
@@ -1697,13 +1705,20 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'VOD not found'], 404);
             }
 
-            // Check if VOD metadata has been fetched
             if (! $channel->last_metadata_fetch) {
-                // No metadata, fetch it!
+                // No metadata yet - fetch it, and fail the request if that doesn't work.
                 $results = $channel->fetchMetadata();
                 if ($results === false) {
                     return response()->json(['error' => 'Failed to fetch VOD metadata'], 500);
                 }
+            } elseif (! $playlist->auto_fetch_vod_metadata) {
+                // auto_fetch_vod_metadata is disabled, meaning the user has opted out of
+                // eager sync-time fetching in favor of on-demand requests - so this request
+                // should be a live passthrough to the provider rather than served from a
+                // one-time cached fetch. Skip the TMDB dispatch (unrelated to freshness, and
+                // shouldn't be re-triggered on every client request), and don't fail the
+                // request if the live call errors - fall back to the cached data instead.
+                $channel->fetchMetadata(refresh: true, skipTmdb: true);
             }
 
             // Build info section - use channel's info field if available, otherwise build from channel data

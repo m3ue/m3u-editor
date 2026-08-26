@@ -203,6 +203,27 @@ it('openShowDetail loads airings in selected show detail', function () {
             && count($detail['airings']) === 2);
 });
 
+it('openShowDetail includes formatted end time and duration for each airing', function () {
+    $start = now()->addHours(2)->startOfHour();
+    EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'The Wire',
+        'start_time' => $start,
+        'end_time' => $start->copy()->addMinutes(90),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('keyword', 'The Wire')
+        ->call('search')
+        ->call('openShowDetail', 'The Wire')
+        ->assertSet('selectedShowDetail', function (?array $detail) {
+            $airing = $detail['airings'][0] ?? null;
+
+            return $airing !== null
+                && $airing['end_time_human'] !== null
+                && $airing['duration_human'] === '1hr 30min';
+        });
+});
+
 it('closeShowDetail clears selectedShowTitle and selectedShowDetail', function () {
     Livewire::test(BrowseShows::class)
         ->call('openShowDetail', 'Breaking Bad')
