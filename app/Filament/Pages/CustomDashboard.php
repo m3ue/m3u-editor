@@ -2,6 +2,10 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\Epgs\EpgResource;
+use App\Filament\Resources\Playlists\PlaylistResource;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Pages\Dashboard;
 
 class CustomDashboard extends Dashboard
@@ -15,7 +19,7 @@ class CustomDashboard extends Dashboard
 
     public function getHeading(): string
     {
-        return ''; // Return empty string to hide heading
+        return 'M3U Editor'; // Return the app name
     }
 
     /**
@@ -30,10 +34,63 @@ class CustomDashboard extends Dashboard
         ];
     }
 
-    protected function getActions(): array
+    protected function getHeaderActions(): array
     {
-        return [
-            //
+        $user = auth()->user();
+        $isAdmin = $user?->isAdmin() ?? false;
+
+        $actions = [
+            Action::make('new_playlist')
+                ->label(__('New Playlist'))
+                ->icon('heroicon-m-plus')
+                ->url(PlaylistResource::getUrl('create'))
+                ->color('primary'),
+            Action::make('playlists')
+                ->label(__('Playlists'))
+                ->icon('heroicon-m-play-pause')
+                ->url(PlaylistResource::getUrl())
+                ->color('gray'),
+            Action::make('epgs')
+                ->label(__('EPGs'))
+                ->icon('heroicon-m-calendar-days')
+                ->url(EpgResource::getUrl())
+                ->color('gray'),
         ];
+
+        $additionalActions = [];
+        if ($user?->canUseProxy() && config('proxy.proxy_integration_enabled', true)) {
+            $additionalActions[] = Action::make('stream_monitor')
+                ->label(__('Stream Monitor'))
+                ->icon('heroicon-m-arrows-right-left')
+                ->url(M3uProxyStreamMonitor::getUrl())
+                ->color('gray');
+        }
+
+        if ($isAdmin) {
+            $additionalActions[] = Action::make('backups')
+                ->label(__('Backups'))
+                ->icon('heroicon-m-archive-box')
+                ->url(Backups::getUrl())
+                ->color('gray');
+            $additionalActions[] = Action::make('logs')
+                ->label(__('Logs'))
+                ->icon('heroicon-m-document-text')
+                ->url(LogViewer::getUrl())
+                ->color('gray');
+            $additionalActions[] = Action::make('settings')
+                ->label(__('Settings'))
+                ->icon('heroicon-m-cog-6-tooth')
+                ->url(Preferences::getUrl())
+                ->color('gray');
+        }
+
+        if (! empty($additionalActions)) {
+            $actions[] = ActionGroup::make($additionalActions)
+                ->label(__('More'))
+                ->color('gray')
+                ->button();
+        }
+
+        return $actions;
     }
 }

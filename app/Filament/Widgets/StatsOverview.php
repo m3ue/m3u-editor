@@ -4,10 +4,9 @@ namespace App\Filament\Widgets;
 
 use App\Enums\SyncRunStatus;
 use App\Filament\Resources\Channels\ChannelResource;
-use App\Filament\Resources\EpgChannels\EpgChannelResource;
+use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
-use App\Filament\Resources\Vods\VodResource;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Cache;
@@ -99,7 +98,7 @@ class StatsOverview extends BaseWidget
                 ]))
                 ->descriptionIcon('heroicon-m-signal')
                 ->chart($stats->channel_trend)
-                ->color($enabledPct < 50 ? 'warning' : 'success')
+                ->color('primary')
                 ->url(ChannelResource::getUrl()),
 
             Stat::make(__('EPG Coverage'), $mappedPct.'%')
@@ -114,7 +113,7 @@ class StatsOverview extends BaseWidget
                     $mappedPct < 75 => 'warning',
                     default => 'success',
                 })
-                ->url(EpgChannelResource::getUrl()),
+                ->url(EpgMapResource::getUrl()),
 
             Stat::make(__('VOD Channels'), number_format($stats->vod_channels))
                 ->description(__(':series series, :fetched with episodes', [
@@ -122,8 +121,7 @@ class StatsOverview extends BaseWidget
                     'fetched' => number_format($stats->series_with_episodes),
                 ]))
                 ->descriptionIcon('heroicon-m-film')
-                ->color('info')
-                ->url(VodResource::getUrl()),
+                ->color('info'),
         ];
 
         if ($isAdmin) {

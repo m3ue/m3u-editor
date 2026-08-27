@@ -26,6 +26,13 @@ class SystemHealthWidget extends Widget
         return Cache::remember('dashboard_system_health', 30, function () {
             $checks = [];
 
+            $updateAvailable = $this->safe(fn () => VersionServiceProvider::updateAvailable(), false);
+            $checks[] = [
+                'label' => __('Version'),
+                'ok' => ! $updateAvailable,
+                'detail' => $updateAvailable ? __('Update available') : __('Up to date'),
+            ];
+
             $databaseOk = $this->safe(fn () => DB::connection()->getPdo() !== null);
             $checks[] = [
                 'label' => __('Database'),
@@ -46,24 +53,20 @@ class SystemHealthWidget extends Widget
                 ];
             }
 
-            // The queue tables only exist when a database queue driver is configured.
-            if ($this->safe(fn () => DB::getSchemaBuilder()->hasTable('jobs'), false)) {
-                $pendingJobs = $this->safe(fn () => DB::table('jobs')->count(), 0);
-                $checks[] = [
-                    'label' => __('Queued jobs'),
-                    'ok' => $pendingJobs < 500,
-                    'detail' => number_format($pendingJobs),
-                ];
-            }
-
-            if ($this->safe(fn () => DB::getSchemaBuilder()->hasTable('failed_jobs'), false)) {
-                $failedJobs = $this->safe(fn () => DB::table('failed_jobs')->count(), 0);
-                $checks[] = [
-                    'label' => __('Failed jobs'),
-                    'ok' => $failedJobs === 0,
-                    'detail' => number_format($failedJobs),
-                ];
-            }
+            // Debug mode. A production instance left with APP_DEBUG=true leaks
+            // stack traces and config on any error - a real, stable config-health
+            // signal that never needs to be live.
+            $debug = (bool) config('app.debug');
+            $isProduction = app()->environment('production');
+            $checks[] = [
+                'label' => __('Debug mode'),
+                'ok' => ! ($debug && $isProduction),
+                'detail' => match (true) {
+                    ! $debug => __('Disabled'),
+                    $isProduction => __('Enabled'),
+                    default => __('Enabled (:env)', ['env' => app()->environment()]),
+                },
+            ];
 
             $free = $this->safe(fn () => (int) disk_free_space(base_path()), 0);
             $total = $this->safe(fn () => (int) disk_total_space(base_path()), 0);
@@ -74,13 +77,6 @@ class SystemHealthWidget extends Widget
                 'detail' => $freePct !== null
                     ? __(':size free (:percent%)', ['size' => Number::fileSize($free, precision: 1), 'percent' => $freePct])
                     : __('Unknown'),
-            ];
-
-            $updateAvailable = $this->safe(fn () => VersionServiceProvider::updateAvailable(), false);
-            $checks[] = [
-                'label' => __('Version'),
-                'ok' => ! $updateAvailable,
-                'detail' => $updateAvailable ? __('Update available') : __('Up to date'),
             ];
 
             return [

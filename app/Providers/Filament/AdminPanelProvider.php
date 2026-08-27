@@ -54,7 +54,6 @@ use App\Filament\Widgets\HelpLinksWidget;
 use App\Filament\Widgets\LibraryGrowthChart;
 use App\Filament\Widgets\M3uTvWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
-use App\Filament\Widgets\QuickActionsWidget;
 use App\Filament\Widgets\RecentViewerActivityWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
@@ -294,8 +293,7 @@ class AdminPanelProvider extends PanelProvider
             })
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
-                // Ordering is driven by each widget's $sort property, not this array.
-                QuickActionsWidget::class,
+                // Ordering is driven by this array.
                 UpdateNoticeWidget::class,
                 M3uTvWidget::class,
                 StatsOverview::class,

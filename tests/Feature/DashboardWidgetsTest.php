@@ -11,7 +11,6 @@ use App\Filament\Widgets\HelpLinksWidget;
 use App\Filament\Widgets\LibraryGrowthChart;
 use App\Filament\Widgets\NeedsAttentionWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
-use App\Filament\Widgets\QuickActionsWidget;
 use App\Filament\Widgets\RecentViewerActivityWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
@@ -43,6 +42,27 @@ it('renders the dashboard page for an admin without errors', function () {
     $this->actingAs($admin);
 
     Livewire::test(CustomDashboard::class)->assertOk();
+});
+
+it('exposes quick actions in the dashboard header, gated by role', function () {
+    // Non-admin, no proxy/DVR: only the always-on shortcuts.
+    $this->actingAs(User::factory()->create());
+
+    Livewire::test(CustomDashboard::class)
+        ->assertActionExists('new_playlist')
+        ->assertActionExists('playlists')
+        ->assertActionExists('epgs')
+        ->assertActionDoesNotExist('backups')
+        ->assertActionDoesNotExist('settings');
+
+    // Admin: the "More" group adds the admin-only shortcuts.
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test(CustomDashboard::class)
+        ->assertActionExists('new_playlist')
+        ->assertActionExists('backups')
+        ->assertActionExists('logs')
+        ->assertActionExists('settings');
 });
 
 it('gates admin-only widgets', function () {
@@ -181,7 +201,6 @@ it('renders every custom dashboard widget view for an admin', function () {
     $this->actingAs($admin);
 
     foreach ([
-        QuickActionsWidget::class,
         NeedsAttentionWidget::class,
         ActiveStreamsWidget::class,
         RecentViewerActivityWidget::class,
@@ -194,20 +213,42 @@ it('renders every custom dashboard widget view for an admin', function () {
     }
 });
 
-it('caps system health queued-job checks with cheap queries', function () {
+it('renders system health rows each with a non-empty detail', function () {
     $admin = User::factory()->admin()->create();
     $this->actingAs($admin);
 
-    $checks = collect(invade(app(SystemHealthWidget::class))->getViewData()['checks'])
-        ->keyBy('label');
+    $checks = collect(invade(app(SystemHealthWidget::class))->getViewData()['checks'])->keyBy('label');
 
     expect($checks->keys())
         ->toContain('Database')
-        ->toContain('Failed jobs');
+        ->toContain('Disk free')
+        ->toContain('Version');
 
-    // Every row must carry a non-empty detail so the info column never renders blank,
-    // including the "0" counts that a falsy check would have hidden.
-    expect($checks->get('Redis')['detail'])->not->toBeEmpty()
-        ->and((string) $checks->get('Queued jobs')['detail'])->not->toBe('')
-        ->and((string) $checks->get('Failed jobs')['detail'])->not->toBe('');
+    // The info column must never render blank (a falsy string like "0" would have
+    // been hidden by the old `@if ($check['detail'])` check).
+    $checks->each(fn (array $check) => expect((string) $check['detail'])->not->toBe(''));
+});
+
+it('flags debug mode only when it is on in production', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    $row = fn () => collect(invade(app(SystemHealthWidget::class))->getViewData()['checks'])
+        ->firstWhere('label', 'Debug mode');
+
+    config(['app.debug' => false]);
+    app()->detectEnvironment(fn () => 'production');
+    Cache::forget('dashboard_system_health');
+    expect($row()['ok'])->toBeTrue()
+        ->and($row()['detail'])->toBe('Disabled');
+
+    config(['app.debug' => true]);
+    app()->detectEnvironment(fn () => 'production');
+    Cache::forget('dashboard_system_health');
+    expect($row()['ok'])->toBeFalse()
+        ->and($row()['detail'])->toBe('Enabled');
+
+    config(['app.debug' => true]);
+    app()->detectEnvironment(fn () => 'local');
+    Cache::forget('dashboard_system_health');
+    expect($row()['ok'])->toBeTrue();
 });
