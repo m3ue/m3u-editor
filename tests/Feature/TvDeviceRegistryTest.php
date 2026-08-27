@@ -5,6 +5,7 @@ use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvDevice;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -102,6 +103,41 @@ it('tells a revoked device to log out and does not resurrect the row', function 
     $device = TvDevice::firstWhere('device_id', 'device-abc');
     expect($device->revoked_at)->not->toBeNull()
         ->and($device->device_name)->toBe('Revoked Phone');
+});
+
+it('survives losing the insert race for a brand-new device instead of 500-ing', function () {
+    // Simulate a second concurrent notifications call inserting the row in the
+    // gap between firstOrNew() and save(): slip a conflicting row in on the
+    // model's "creating" event so the real save() hits the unique index.
+    TvDevice::creating(function (TvDevice $model): void {
+        static $raced = false;
+
+        if ($raced || $model->device_id !== 'race-abc') {
+            return;
+        }
+
+        $raced = true;
+        DB::table('tv_devices')->insert([
+            'device_id' => $model->device_id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    $this->getJson(notificationsUrl([
+        'device_id' => 'race-abc',
+        'device_name' => 'Racer',
+        'platform' => 'ios',
+        'app_version' => '1.1.2',
+    ]))->assertOk()->assertJsonPath('device_revoked', false);
+
+    expect(TvDevice::where('device_id', 'race-abc')->count())->toBe(1);
+
+    // The losing writer falls back to updating the row that won.
+    $device = TvDevice::firstWhere('device_id', 'race-abc');
+    expect($device->device_name)->toBe('Racer')
+        ->and($device->platform)->toBe('ios')
+        ->and($device->last_seen_at)->not->toBeNull();
 });
 
 it('stores device_id and device_name from a push subscribe call', function () {

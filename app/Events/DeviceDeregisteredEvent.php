@@ -14,6 +14,12 @@ use Illuminate\Queue\SerializesModels;
  * Rides the same `tv.{type}.{uuid}[.{authId}]` channel the app is already
  * subscribed to; the client filters on `device_id` so only the revoked device
  * reacts. Force-logout only - the underlying credential is untouched.
+ *
+ * Deliberately does not use App\Events\Concerns\BroadcastsToEntitledTvChannels:
+ * that trait fans a broadcast out to every PlaylistAuth entitled to a playlist,
+ * whereas a revoke targets one known install whose own `playlist_auth_id` (or
+ * lack of one) already tells us the single channel it listens on. The
+ * owner/admin channels are included so an admin-paired device is reachable too.
  */
 class DeviceDeregisteredEvent implements ShouldBroadcast
 {
@@ -26,9 +32,18 @@ class DeviceDeregisteredEvent implements ShouldBroadcast
         public readonly ?int $playlistAuthId = null,
     ) {}
 
-    public static function forDevice(TvDevice $device): self
+    /**
+     * Builds the event for a device, or null when the row has no resolvable
+     * notifiable (nothing to broadcast to). Mirrors the nullable factory
+     * pattern used by DvrRecordingStatusEvent.
+     */
+    public static function forDevice(TvDevice $device): ?self
     {
         $notifiable = $device->notifiable;
+
+        if ($notifiable === null) {
+            return null;
+        }
 
         return new self(
             deviceId: $device->device_id,

@@ -12,6 +12,7 @@ use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -132,7 +133,17 @@ class TvApiController extends Controller
 
         $device->fill($attributes);
         $device->last_seen_at = now();
-        $device->save();
+
+        try {
+            $device->save();
+        } catch (UniqueConstraintViolationException) {
+            // A concurrent notifications call for this same brand-new device
+            // won the INSERT race (device_id is unique). The row exists now, so
+            // update it in place instead of 500-ing this request.
+            TvDevice::query()
+                ->where('device_id', $deviceId)
+                ->update($attributes + ['last_seen_at' => now()]);
+        }
 
         return false;
     }

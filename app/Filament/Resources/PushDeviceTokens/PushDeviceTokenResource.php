@@ -274,16 +274,32 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
             return;
         }
 
-        if ($device->notifiable !== null) {
-            DeviceDeregisteredEvent::dispatch(
-                $device->device_id,
-                $device->notifiable->getMorphClass(),
-                $device->notifiable->uuid,
-                $device->playlist_auth_id,
-            );
+        $event = DeviceDeregisteredEvent::forDevice($device);
+
+        if ($event !== null) {
+            event($event);
         }
 
-        PushDeviceToken::where('device_id', $device->device_id)->delete();
+        PushDeviceToken::query()
+            ->where(function (Builder $query) use ($device): void {
+                $query->where('device_id', $device->device_id);
+
+                // Legacy fallback: push tokens registered before the app sent
+                // `device_id` (pre-1.1.2) have it NULL, so the precise match
+                // misses them and the device keeps getting push despite the
+                // "signed out" copy. Sweep those by the coarser identity we do
+                // have. A sibling device on the same auth + platform that also
+                // predates `device_id` would be caught too; it re-registers
+                // (with a `device_id`) on its next launch.
+                $query->orWhere(function (Builder $legacy) use ($device): void {
+                    $legacy->whereNull('device_id')
+                        ->where('notifiable_type', $device->notifiable_type)
+                        ->where('notifiable_id', $device->notifiable_id)
+                        ->where('platform', $device->platform)
+                        ->where('playlist_auth_id', $device->playlist_auth_id);
+                });
+            })
+            ->delete();
 
         $device->update(['revoked_at' => now()]);
     }

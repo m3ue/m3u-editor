@@ -64,6 +64,38 @@ it('revokes a device: tombstones the row, broadcasts a logout, drops its push to
     Event::assertDispatched(DeviceDeregisteredEvent::class, fn ($event) => $event->deviceId === 'device-abc');
 });
 
+it('also drops a legacy push token that predates device_id when revoking', function () {
+    Event::fake([DeviceDeregisteredEvent::class]);
+
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => 'device-abc',
+        'app_version' => '1.1.2',
+        'platform' => 'ios',
+        'playlist_auth_id' => null,
+    ]);
+
+    // Registered on an older build: no device_id, matchable only by identity.
+    $legacyToken = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => null,
+        'platform' => 'ios',
+        'playlist_auth_id' => null,
+    ]);
+
+    // A token for a different platform must survive.
+    $unrelatedToken = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => null,
+        'platform' => 'android',
+        'playlist_auth_id' => null,
+    ]);
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->callAction(TestAction::make('deregister')->table($device));
+
+    expect(PushDeviceToken::find($legacyToken->id))->toBeNull()
+        ->and(PushDeviceToken::find($unrelatedToken->id))->not->toBeNull();
+});
+
 it('disables Revoke for devices on an app version older than the deregister minimum', function () {
     $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
 
