@@ -17,6 +17,8 @@ use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables\Columns\IconColumn;
@@ -214,6 +216,13 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     )),
             ])
             ->recordActions([
+                DeleteAction::make()
+                    ->label(__('Delete'))
+                    ->icon('heroicon-o-trash')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->modalHeading(__('Delete device record'))
+                    ->modalDescription(__('Removes this row from the registry only. It does not sign the device out - if the M3U TV app is still running it stays connected and will re-add itself on its next sync. Use Revoke to force a sign-out.')),
+
                 Action::make('deregister')
                     ->label(__('Revoke'))
                     ->icon('heroicon-o-signal-slash')
@@ -259,6 +268,9 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                                 ->body($skipped > 0 ? __(':count skipped (older app or already revoked)', ['count' => $skipped]) : null)
                                 ->send();
                         }),
+                    DeleteBulkAction::make()
+                        ->label(__('Delete selected'))
+                        ->modalDescription(__('Removes the selected rows from the registry only. Devices still running the app are not signed out and will re-add themselves on their next sync.')),
                 ]),
             ]);
     }

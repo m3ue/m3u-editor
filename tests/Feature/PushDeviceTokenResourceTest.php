@@ -104,6 +104,29 @@ it('disables Revoke for devices on an app version older than the deregister mini
         ->assertActionDisabled(TestAction::make('deregister')->table($legacy));
 });
 
+it('can hard-delete a device row without broadcasting a logout', function () {
+    Event::fake([DeviceDeregisteredEvent::class]);
+
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->callAction(TestAction::make('delete')->table($device));
+
+    expect(TvDevice::find($device->id))->toBeNull();
+    Event::assertNotDispatched(DeviceDeregisteredEvent::class);
+});
+
+it('allows deleting an already-revoked or legacy-version device', function () {
+    $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create();
+    $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->assertActionEnabled(TestAction::make('delete')->table($revoked))
+        ->assertActionEnabled(TestAction::make('delete')->table($legacy));
+});
+
 it('filters to revoked devices', function () {
     $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create();
     $active = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
