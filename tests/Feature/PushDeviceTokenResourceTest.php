@@ -1,11 +1,14 @@
 <?php
 
+use App\Events\DeviceDeregisteredEvent;
 use App\Filament\Resources\PushDeviceTokens\Pages\ListPushDeviceTokens;
 use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
 use App\Models\Playlist;
 use App\Models\PushDeviceToken;
+use App\Models\TvDevice;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -29,10 +32,10 @@ it('blocks non-admin users from reaching the list page', function () {
 });
 
 it('lists devices across every user\'s playlists, not just the admin\'s own', function () {
-    $ownDevice = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create();
+    $ownDevice = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
 
     $otherPlaylist = Playlist::factory()->for(User::factory()->create())->create();
-    $otherDevice = PushDeviceToken::factory()->for($otherPlaylist, 'notifiable')->create();
+    $otherDevice = TvDevice::factory()->for($otherPlaylist, 'notifiable')->create();
 
     Livewire::test(ListPushDeviceTokens::class)
         ->assertOk()
@@ -40,22 +43,52 @@ it('lists devices across every user\'s playlists, not just the admin\'s own', fu
         ->assertCanSeeTableRecords([$ownDevice, $otherDevice]);
 });
 
-it('can revoke (delete) a device from the table', function () {
-    $device = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create();
+it('revokes a device: tombstones the row, broadcasts a logout, drops its push token', function () {
+    Event::fake([DeviceDeregisteredEvent::class]);
+
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => 'device-abc',
+        'app_version' => '1.1.2',
+    ]);
+    $pushToken = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => 'device-abc',
+    ]);
 
     Livewire::test(ListPushDeviceTokens::class)
         ->loadTable()
-        ->callAction(TestAction::make('delete')->table($device));
+        ->callAction(TestAction::make('deregister')->table($device));
 
-    expect(PushDeviceToken::find($device->id))->toBeNull();
+    expect($device->fresh()->revoked_at)->not->toBeNull()
+        ->and(PushDeviceToken::find($pushToken->id))->toBeNull();
+
+    Event::assertDispatched(DeviceDeregisteredEvent::class, fn ($event) => $event->deviceId === 'device-abc');
+});
+
+it('disables Revoke for devices on an app version older than the deregister minimum', function () {
+    $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->assertActionDisabled(TestAction::make('deregister')->table($legacy));
+});
+
+it('filters to revoked devices', function () {
+    $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create();
+    $active = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->filterTable('revoked')
+        ->assertCanSeeTableRecords([$revoked])
+        ->assertCanNotSeeTableRecords([$active]);
 });
 
 it('filters to stale devices past the prune window', function () {
     config(['services.push_relay.stale_days' => 60]);
 
-    $stale = PushDeviceToken::factory()->for($this->playlist, 'notifiable')
+    $stale = TvDevice::factory()->for($this->playlist, 'notifiable')
         ->create(['last_seen_at' => now()->subDays(61)]);
-    $fresh = PushDeviceToken::factory()->for($this->playlist, 'notifiable')
+    $fresh = TvDevice::factory()->for($this->playlist, 'notifiable')
         ->create(['last_seen_at' => now()->subDays(1)]);
 
     Livewire::test(ListPushDeviceTokens::class)
@@ -63,4 +96,10 @@ it('filters to stale devices past the prune window', function () {
         ->filterTable('stale')
         ->assertCanSeeTableRecords([$stale])
         ->assertCanNotSeeTableRecords([$fresh]);
+});
+
+it('renames the first tab to Registered Devices', function () {
+    $tabs = Livewire::test(ListPushDeviceTokens::class)->instance()->getTabs();
+
+    expect($tabs['devices']->getLabel())->toBe('Registered Devices');
 });

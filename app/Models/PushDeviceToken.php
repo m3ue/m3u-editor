@@ -16,6 +16,8 @@ class PushDeviceToken extends Model
         'notifiable_type',
         'notifiable_id',
         'token',
+        'device_id',
+        'device_name',
         'platform',
         'playlist_auth_id',
         'last_seen_at',

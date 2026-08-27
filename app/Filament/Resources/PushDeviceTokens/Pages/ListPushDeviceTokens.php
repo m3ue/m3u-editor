@@ -31,7 +31,7 @@ class ListPushDeviceTokens extends ListRecords
     {
         return $this->activeTab === 'pairing'
             ? __('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.')
-            : __('Mobile devices registered to receive push notifications through the relay. Devices are added automatically when the app registers for push, and pruned automatically after :days days without a check-in.', ['days' => config('services.push_relay.stale_days', 60)]);
+            : __('Every M3U TV app install that has talked to this server, across all platforms. Rows are added automatically the first time a device syncs and pruned automatically after :days days without contact. "Last seen" is the last successful sync or call-home.', ['days' => config('services.push_relay.stale_days', 60)]);
     }
 
     public function getHeaderActions(): array
@@ -61,7 +61,7 @@ class ListPushDeviceTokens extends ListRecords
         $tabs = [];
 
         if (PushDeviceTokenResource::isPushRelayEnabled()) {
-            $tabs['devices'] = Tab::make(__('Devices'));
+            $tabs['devices'] = Tab::make(__('Registered Devices'));
         }
 
         if (PushDeviceTokenResource::isDevicePairingEnabled()) {

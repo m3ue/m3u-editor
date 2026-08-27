@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PushDeviceTokens;
 
+use App\Events\DeviceDeregisteredEvent;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\PushDeviceTokens\Pages\ListPushDeviceTokens;
 use App\Models\CustomPlaylist;
@@ -9,26 +10,30 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PushDeviceToken;
+use App\Models\TvDevice;
 use App\Settings\GeneralSettings;
 use BackedEnum;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
+use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteAction;
-use Filament\Actions\DeleteBulkAction;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 
 class PushDeviceTokenResource extends Resource implements CopilotResource
 {
     use HasCopilotSupport;
 
-    protected static ?string $model = PushDeviceToken::class;
+    protected static ?string $model = TvDevice::class;
 
     protected static string|BackedEnum|null $navigationIcon = null;
 
@@ -54,7 +59,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
 
     protected static ?int $navigationSort = 6;
 
-    protected static ?string $recordTitleAttribute = 'token';
+    protected static ?string $recordTitleAttribute = 'device_name';
 
     /**
      * Admin-only resource (see canAccess()) — every registered device across
@@ -73,7 +78,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
     }
 
     /**
-     * Push relay device registrations (the "Devices" tab).
+     * Push relay device registrations (the "Registered Devices" tab).
      */
     public static function isPushRelayEnabled(): bool
     {
@@ -100,6 +105,11 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
         }
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['notifiable.user', 'pushToken']);
+    }
+
     public static function table(Table $table): Table
     {
         return $table->persistFiltersInSession()
@@ -113,6 +123,14 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
             ->defaultPaginationPageOption(25)
             ->emptyStateIcon('heroicon-o-device-phone-mobile')
             ->columns([
+                TextColumn::make('device_name')
+                    ->label(__('Name'))
+                    ->placeholder(__('Unknown device'))
+                    ->description(fn (TvDevice $record): ?string => $record->isRevoked() ? __('Revoked') : null)
+                    ->searchable()
+                    ->sortable()
+                    ->wrap(),
+
                 TextColumn::make('notifiable.user.name')
                     ->label(__('Owner'))
                     ->searchable(query: function (Builder $query, string $search): Builder {
@@ -132,63 +150,63 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     ->sortable()
                     ->wrap(),
 
-                TextColumn::make('notifiable_type')
-                    ->label(__('Playlist Type'))
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'playlist', Playlist::class => 'Playlist',
-                        'custom_playlist', CustomPlaylist::class => 'Custom Playlist',
-                        'merged_playlist', MergedPlaylist::class => 'Merged Playlist',
-                        'alias', PlaylistAlias::class => 'Playlist Alias',
-                        default => class_basename($state),
-                    })
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'playlist', Playlist::class => 'primary',
-                        'custom_playlist', CustomPlaylist::class => 'info',
-                        'merged_playlist', MergedPlaylist::class => 'warning',
-                        'alias', PlaylistAlias::class => 'gray',
-                        default => 'gray',
-                    }),
-
                 TextColumn::make('platform')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'ios' => 'gray',
-                        'android' => 'success',
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'androidtv' => 'Android TV',
+                        'tvos' => 'tvOS',
+                        'ios' => 'iOS',
+                        'macos' => 'macOS',
+                        null, '' => __('Unknown'),
+                        default => ucfirst($state),
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'ios', 'macos' => 'gray',
+                        'android', 'androidtv' => 'success',
+                        'windows' => 'info',
                         default => 'gray',
                     })
                     ->sortable(),
 
-                TextColumn::make('token')
-                    ->label(__('Token'))
-                    ->formatStateUsing(fn (string $state): string => '••••'.substr($state, -6))
+                TextColumn::make('app_version')
+                    ->label(__('App version'))
+                    ->placeholder(__('Unknown'))
+                    ->badge()
+                    ->color(fn (TvDevice $record): string => $record->supportsRemoteDeregister() ? 'gray' : 'warning')
+                    ->toggleable(),
+
+                IconColumn::make('pushToken')
+                    ->label(__('Push'))
+                    ->state(fn (TvDevice $record): bool => $record->pushToken !== null)
+                    ->boolean()
                     ->toggleable(),
 
                 TextColumn::make('last_seen_at')
-                    ->label(__('Last Check-in'))
+                    ->label(__('Last seen'))
                     ->since()
                     ->sortable()
                     ->color(fn (?Carbon $state): ?string => $state?->lt(now()->subDays(config('services.push_relay.stale_days', 60))) ? 'danger' : null),
 
                 TextColumn::make('created_at')
+                    ->label(__('First paired'))
                     ->since()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                SelectFilter::make('notifiable_type')
-                    ->label(__('Playlist Type'))
-                    ->options([
-                        'playlist' => 'Playlist',
-                        'custom_playlist' => 'Custom Playlist',
-                        'merged_playlist' => 'Merged Playlist',
-                        'alias' => 'Playlist Alias',
-                    ]),
                 SelectFilter::make('platform')
                     ->options([
-                        'ios' => 'iOS',
                         'android' => 'Android',
+                        'androidtv' => 'Android TV',
+                        'ios' => 'iOS',
+                        'tvos' => 'tvOS',
+                        'macos' => 'macOS',
+                        'windows' => 'Windows',
+                        'linux' => 'Linux',
                     ]),
+                Filter::make('revoked')
+                    ->label(__('Revoked'))
+                    ->query(fn (Builder $query): Builder => $query->whereNotNull('revoked_at')),
                 Filter::make('stale')
                     ->label(__('Stale (past prune window)'))
                     ->query(fn (Builder $query): Builder => $query->where(
@@ -196,18 +214,78 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     )),
             ])
             ->recordActions([
-                DeleteAction::make()
+                Action::make('deregister')
                     ->label(__('Revoke'))
+                    ->icon('heroicon-o-signal-slash')
+                    ->color('danger')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->requiresConfirmation()
                     ->modalHeading(__('Revoke device'))
-                    ->modalDescription(__('This device will stop receiving push notifications until it re-registers with the app. This action cannot be undone.'))
-                    ->button()->hiddenLabel()->size('sm'),
+                    ->modalDescription(__('The M3U TV app on this device will be signed out and returned to the pairing screen. The credential itself keeps working, so the device (or another) can pair again. This cannot be undone.'))
+                    ->disabled(fn (TvDevice $record): bool => $record->isRevoked() || ! $record->supportsRemoteDeregister())
+                    ->tooltip(fn (TvDevice $record): ?string => match (true) {
+                        $record->isRevoked() => __('Already revoked'),
+                        ! $record->supportsRemoteDeregister() => __('Requires M3U TV :version or newer', ['version' => TvDevice::MIN_DEREGISTER_VERSION]),
+                        default => null,
+                    })
+                    ->action(fn (TvDevice $record) => static::revokeDevice($record)),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make()
-                        ->label(__('Revoke selected')),
+                    BulkAction::make('deregister')
+                        ->label(__('Revoke selected'))
+                        ->icon('heroicon-o-signal-slash')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalHeading(__('Revoke selected devices'))
+                        ->action(function (Collection $records): void {
+                            $revoked = 0;
+                            $skipped = 0;
+
+                            foreach ($records as $record) {
+                                if ($record->isRevoked() || ! $record->supportsRemoteDeregister()) {
+                                    $skipped++;
+
+                                    continue;
+                                }
+
+                                static::revokeDevice($record);
+                                $revoked++;
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__(':count devices revoked', ['count' => $revoked]))
+                                ->body($skipped > 0 ? __(':count skipped (older app or already revoked)', ['count' => $skipped]) : null)
+                                ->send();
+                        }),
                 ]),
             ]);
+    }
+
+    /**
+     * Tombstone the registry row, tell the device to sign out over the socket
+     * it is already subscribed to, and drop any linked push registration so it
+     * stops receiving notifications immediately.
+     */
+    public static function revokeDevice(TvDevice $device): void
+    {
+        if ($device->isRevoked()) {
+            return;
+        }
+
+        if ($device->notifiable !== null) {
+            DeviceDeregisteredEvent::dispatch(
+                $device->device_id,
+                $device->notifiable->getMorphClass(),
+                $device->notifiable->uuid,
+                $device->playlist_auth_id,
+            );
+        }
+
+        PushDeviceToken::where('device_id', $device->device_id)->delete();
+
+        $device->update(['revoked_at' => now()]);
     }
 
     public static function getRelations(): array
