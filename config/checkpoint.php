@@ -347,6 +347,15 @@ return [
         '56d4b412ca84', // stream_id_custom sortable
         '40377b7d003c', // name_custom sortable
 
+        // LibraryGrowthChart dashboard widget: $bucket is
+        // "CASE WHEN created_at IS NULL OR created_at < ? THEN 'base' ELSE <expr> END"
+        // where <expr> is dateExpr('created_at') — one of three compile-time SQL
+        // literals chosen by match() on the PDO driver name. 'created_at' is a
+        // hardcoded literal; the only runtime value ($start) is passed as a bound
+        // ? placeholder. No request/user input reaches the interpolated SQL.
+        '4b62ac19b9b5', // channels query (live/vod split)
+        '71f612830296', // series + episodes queries (COUNT(*) per bucket)
+
         // ── XSS — controlled server-side rendering ───────────────────────────
         // regex-tester.blade.php: {!! !!} renders output from a Livewire
         // component method — content is generated server-side, not from raw
