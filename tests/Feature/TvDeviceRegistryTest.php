@@ -5,9 +5,16 @@ use App\Models\PlaylistAuth;
 use App\Models\PushDeviceToken;
 use App\Models\TvDevice;
 use App\Models\User;
+use Illuminate\Routing\Middleware\ThrottleRequestsWithRedis;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
+    // The tv/* route group is throttled (60/min per IP). The limiter state is
+    // shared across a whole test run, so leave it out here - these tests
+    // exercise endpoint behaviour, not the rate limiter. (Matches the pattern
+    // in PlaylistAuthNotificationScopeTest / RequesterLifecycleNotificationTest.)
+    $this->withoutMiddleware(ThrottleRequestsWithRedis::class);
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
 

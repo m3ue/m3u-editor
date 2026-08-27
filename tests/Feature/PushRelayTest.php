@@ -125,6 +125,22 @@ it('deletes a token when the relay reports a provider-confirmed invalid registra
         ->and($valid->fresh())->not->toBeNull();
 });
 
+it('deletes a token when the relay reports a dead token with a 410', function () {
+    mockPushRelaySettings();
+    Http::fakeSequence()
+        ->push(['detail' => 'FCM rejected push (UNREGISTERED): The registration token is not registered.'], 410)
+        ->push(['sent' => true]);
+
+    $invalid = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-dead']);
+    $valid = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create(['token' => 'tok-live']);
+
+    (new SendPushNotificationRelay($this->playlist->getMorphClass(), $this->playlist->id, 'Title'))->handle(app(PushRelayService::class));
+
+    Http::assertSentCount(2);
+    expect($invalid->fresh())->toBeNull()
+        ->and($valid->fresh())->not->toBeNull();
+});
+
 it('keeps a token retryable when the relay reports a transient provider failure', function () {
     mockPushRelaySettings();
     Http::fake(['push-relay.example.com/*' => Http::response(['detail' => 'FCM upstream timeout'], 502)]);
