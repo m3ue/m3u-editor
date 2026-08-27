@@ -47,17 +47,18 @@ use App\Filament\Resources\StreamProfiles\StreamProfileResource;
 use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
-use App\Filament\Widgets\DiscordWidget;
-use App\Filament\Widgets\DocumentsWidget;
-use App\Filament\Widgets\DonateCrypto;
+use App\Filament\Widgets\ActiveStreamsWidget;
+use App\Filament\Widgets\ContentBreakdownChart;
 use App\Filament\Widgets\DvrStorageOverviewWidget;
-use App\Filament\Widgets\KoFiWidget;
+use App\Filament\Widgets\HelpLinksWidget;
+use App\Filament\Widgets\LibraryGrowthChart;
 use App\Filament\Widgets\M3uTvWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
-use App\Filament\Widgets\QueueDashboardWidget;
-use App\Filament\Widgets\SharedStreamStatsWidget;
+use App\Filament\Widgets\QuickActionsWidget;
+use App\Filament\Widgets\RecentViewerActivityWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
+use App\Filament\Widgets\UpcomingRecordingsWidget;
 use App\Filament\Widgets\UpdateNoticeWidget;
 use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
@@ -90,7 +91,6 @@ use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
-use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -294,20 +294,20 @@ class AdminPanelProvider extends PanelProvider
             })
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
+                // Ordering is driven by each widget's $sort property, not this array.
+                QuickActionsWidget::class,
                 UpdateNoticeWidget::class,
-                AccountWidget::class,
-                DocumentsWidget::class,
-                DiscordWidget::class,
                 M3uTvWidget::class,
-                // PayPalDonateWidget::class,
-                KoFiWidget::class,
-                QueueDashboardWidget::class,
-                PluginsOverviewWidget::class,
-                DvrStorageOverviewWidget::class,
-                // DonateCrypto::class,
                 StatsOverview::class,
-                // SharedStreamStatsWidget::class,
-                // SystemHealthWidget::class,
+                HelpLinksWidget::class,
+                ContentBreakdownChart::class,
+                LibraryGrowthChart::class,
+                SystemHealthWidget::class,
+                DvrStorageOverviewWidget::class,
+                UpcomingRecordingsWidget::class,
+                ActiveStreamsWidget::class,
+                RecentViewerActivityWidget::class,
+                PluginsOverviewWidget::class,
             ])
             ->plugins(array_filter([
                 FilamentSpatieLaravelBackupPlugin::make()

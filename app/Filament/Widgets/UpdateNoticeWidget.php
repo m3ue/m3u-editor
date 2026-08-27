@@ -10,8 +10,6 @@ class UpdateNoticeWidget extends Widget
 {
     protected string $view = 'filament.widgets.update-notice-widget';
 
-    public static ?int $sort = -5;
-
     public array $versionData = [];
 
     public bool $updateAvailable = false;

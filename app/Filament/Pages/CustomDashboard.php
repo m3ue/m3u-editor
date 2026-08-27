@@ -18,6 +18,18 @@ class CustomDashboard extends Dashboard
         return ''; // Return empty string to hide heading
     }
 
+    /**
+     * Two-column magazine grid: full-width widgets span both columns, charts and
+     * list widgets pair up side by side.
+     */
+    public function getColumns(): int|array
+    {
+        return [
+            'default' => 1,
+            'md' => 2,
+        ];
+    }
+
     protected function getActions(): array
     {
         return [
