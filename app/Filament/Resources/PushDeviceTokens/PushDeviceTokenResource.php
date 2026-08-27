@@ -2,14 +2,12 @@
 
 namespace App\Filament\Resources\PushDeviceTokens;
 
-use App\Events\DeviceDeregisteredEvent;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\PushDeviceTokens\Pages\ListPushDeviceTokens;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
-use App\Models\PushDeviceToken;
 use App\Models\TvDevice;
 use App\Settings\GeneralSettings;
 use BackedEnum;
@@ -64,7 +62,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
     protected static ?string $recordTitleAttribute = 'device_name';
 
     /**
-     * Admin-only resource (see canAccess()) — every registered device across
+     * Admin-only resource (see canAccess()) - every registered device across
      * every user is visible here, unlike Playlist Viewers which scopes to the
      * signed-in user's own playlists.
      */
@@ -221,32 +219,85 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-trash')
                     ->button()->hiddenLabel()->size('sm')
                     ->modalHeading(__('Delete device record'))
-                    ->modalDescription(__('Removes this row from the registry only. It does not sign the device out - if the M3U TV app is still running it stays connected and will re-add itself on its next sync. Use Revoke to force a sign-out.')),
+                    ->modalDescription(__('Removes this row from the registry only. It does not sign the device out - if the M3U TV app is still running it stays connected and will re-add itself on its next sync. Use Log out or Revoke access to sign it out.')),
 
-                Action::make('deregister')
-                    ->label(__('Revoke'))
+                Action::make('logout')
+                    ->label(__('Log out'))
                     ->icon('heroicon-o-signal-slash')
-                    ->color('danger')
+                    ->color('warning')
                     ->button()->hiddenLabel()->size('sm')
                     ->requiresConfirmation()
-                    ->modalHeading(__('Revoke device'))
-                    ->modalDescription(__('The M3U TV app on this device will be signed out and returned to the pairing screen. The credential itself keeps working, so the device (or another) can pair again. This cannot be undone.'))
+                    ->modalHeading(__('Log out device'))
+                    ->modalDescription(__('The M3U TV app on this device will be signed out and returned to the pairing screen. The credential keeps working, so the device can pair again straight away. Use Revoke access instead to also block it from pairing again.'))
                     ->disabled(fn (TvDevice $record): bool => $record->isRevoked() || ! $record->supportsRemoteDeregister())
                     ->tooltip(fn (TvDevice $record): ?string => match (true) {
-                        $record->isRevoked() => __('Already revoked'),
+                        $record->isRevoked() => __('Device is revoked - restore access first'),
                         ! $record->supportsRemoteDeregister() => __('Requires M3U TV :version or newer', ['version' => TvDevice::MIN_DEREGISTER_VERSION]),
                         default => null,
                     })
-                    ->action(fn (TvDevice $record) => static::revokeDevice($record)),
+                    ->action(fn (TvDevice $record) => $record->logOut()),
+
+                Action::make('revoke')
+                    ->label(__('Revoke access'))
+                    ->icon('heroicon-o-lock-closed')
+                    ->color('danger')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->requiresConfirmation()
+                    ->visible(fn (TvDevice $record): bool => ! $record->isRevoked())
+                    ->modalHeading(__('Revoke device access'))
+                    ->modalDescription(__('The M3U TV app on this device will be signed out and blocked from pairing again with this playlist. The credential itself keeps working on other devices. Use Restore access to lift this later.'))
+                    ->disabled(fn (TvDevice $record): bool => ! $record->supportsRemoteDeregister())
+                    ->tooltip(fn (TvDevice $record): ?string => $record->supportsRemoteDeregister()
+                        ? null
+                        : __('Requires M3U TV :version or newer', ['version' => TvDevice::MIN_DEREGISTER_VERSION]))
+                    ->action(fn (TvDevice $record) => $record->revokeAccess()),
+
+                Action::make('restore')
+                    ->label(__('Restore access'))
+                    ->icon('heroicon-o-lock-open')
+                    ->color('success')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->requiresConfirmation()
+                    ->visible(fn (TvDevice $record): bool => $record->isRevoked())
+                    ->modalHeading(__('Restore device access'))
+                    ->modalDescription(__('This device will be allowed to pair again. It stays signed out until someone re-pairs it in the app.'))
+                    ->action(fn (TvDevice $record) => $record->restoreAccess()),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([
-                    BulkAction::make('deregister')
-                        ->label(__('Revoke selected'))
+                    BulkAction::make('logout')
+                        ->label(__('Log out selected'))
                         ->icon('heroicon-o-signal-slash')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading(__('Log out selected devices'))
+                        ->action(function (Collection $records): void {
+                            $done = 0;
+                            $skipped = 0;
+
+                            foreach ($records as $record) {
+                                if ($record->isRevoked() || ! $record->supportsRemoteDeregister()) {
+                                    $skipped++;
+
+                                    continue;
+                                }
+
+                                $record->logOut();
+                                $done++;
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__(':count devices signed out', ['count' => $done]))
+                                ->body($skipped > 0 ? __(':count skipped (older app or revoked)', ['count' => $skipped]) : null)
+                                ->send();
+                        }),
+                    BulkAction::make('revoke')
+                        ->label(__('Revoke access for selected'))
+                        ->icon('heroicon-o-lock-closed')
                         ->color('danger')
                         ->requiresConfirmation()
-                        ->modalHeading(__('Revoke selected devices'))
+                        ->modalHeading(__('Revoke access for selected devices'))
                         ->action(function (Collection $records): void {
                             $revoked = 0;
                             $skipped = 0;
@@ -258,7 +309,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                                     continue;
                                 }
 
-                                static::revokeDevice($record);
+                                $record->revokeAccess();
                                 $revoked++;
                             }
 
@@ -268,52 +319,34 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                                 ->body($skipped > 0 ? __(':count skipped (older app or already revoked)', ['count' => $skipped]) : null)
                                 ->send();
                         }),
+                    BulkAction::make('restore')
+                        ->label(__('Restore access for selected'))
+                        ->icon('heroicon-o-lock-open')
+                        ->color('success')
+                        ->requiresConfirmation()
+                        ->modalHeading(__('Restore access for selected devices'))
+                        ->action(function (Collection $records): void {
+                            $restored = 0;
+
+                            foreach ($records as $record) {
+                                if (! $record->isRevoked()) {
+                                    continue;
+                                }
+
+                                $record->restoreAccess();
+                                $restored++;
+                            }
+
+                            Notification::make()
+                                ->success()
+                                ->title(__(':count devices restored', ['count' => $restored]))
+                                ->send();
+                        }),
                     DeleteBulkAction::make()
                         ->label(__('Delete selected'))
                         ->modalDescription(__('Removes the selected rows from the registry only. Devices still running the app are not signed out and will re-add themselves on their next sync.')),
                 ]),
             ]);
-    }
-
-    /**
-     * Tombstone the registry row, tell the device to sign out over the socket
-     * it is already subscribed to, and drop any linked push registration so it
-     * stops receiving notifications immediately.
-     */
-    public static function revokeDevice(TvDevice $device): void
-    {
-        if ($device->isRevoked()) {
-            return;
-        }
-
-        $event = DeviceDeregisteredEvent::forDevice($device);
-
-        if ($event !== null) {
-            event($event);
-        }
-
-        PushDeviceToken::query()
-            ->where(function (Builder $query) use ($device): void {
-                $query->where('device_id', $device->device_id);
-
-                // Legacy fallback: push tokens registered before the app sent
-                // `device_id` (pre-1.1.2) have it NULL, so the precise match
-                // misses them and the device keeps getting push despite the
-                // "signed out" copy. Sweep those by the coarser identity we do
-                // have. A sibling device on the same auth + platform that also
-                // predates `device_id` would be caught too; it re-registers
-                // (with a `device_id`) on its next launch.
-                $query->orWhere(function (Builder $legacy) use ($device): void {
-                    $legacy->whereNull('device_id')
-                        ->where('notifiable_type', $device->notifiable_type)
-                        ->where('notifiable_id', $device->notifiable_id)
-                        ->where('platform', $device->platform)
-                        ->where('playlist_auth_id', $device->playlist_auth_id);
-                });
-            })
-            ->delete();
-
-        $device->update(['revoked_at' => now()]);
     }
 
     public static function getRelations(): array

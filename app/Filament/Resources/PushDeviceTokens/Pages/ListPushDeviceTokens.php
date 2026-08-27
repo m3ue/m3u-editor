@@ -31,7 +31,7 @@ class ListPushDeviceTokens extends ListRecords
     {
         return $this->activeTab === 'pairing'
             ? __('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.')
-            : __('Every M3U TV app install that has talked to this server, across all platforms. Rows are added automatically the first time a device syncs and pruned automatically after :days days without contact. "Last seen" is the last successful sync or call-home.', ['days' => config('services.push_relay.stale_days', 60)]);
+            : __('Every M3U TV app install that has talked to this server, across all platforms. Rows are added automatically the first time a device syncs and pruned automatically after :days days without contact - except revoked devices, which are kept until you delete them. "Last seen" is the last successful sync or call-home.', ['days' => config('services.push_relay.stale_days', 60)]);
     }
 
     public function getHeaderActions(): array
@@ -73,7 +73,7 @@ class ListPushDeviceTokens extends ListRecords
 
     /**
      * Uppercases and re-inserts the dash so "xkqp9f3t", "xkqp 9f3t", and
-     * "XKQP-9F3T" all normalize to the same stored format — only the 8
+     * "XKQP-9F3T" all normalize to the same stored format - only the 8
      * alphanumeric characters are actually meaningful to the user.
      */
     private static function normalizeUserCode(?string $state): string

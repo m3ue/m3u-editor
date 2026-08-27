@@ -43,7 +43,7 @@ it('lists devices across every user\'s playlists, not just the admin\'s own', fu
         ->assertCanSeeTableRecords([$ownDevice, $otherDevice]);
 });
 
-it('revokes a device: tombstones the row, broadcasts a logout, drops its push token', function () {
+it('logs a device out: broadcasts a logout and drops its push token, without revoking', function () {
     Event::fake([DeviceDeregisteredEvent::class]);
 
     $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create([
@@ -56,12 +56,61 @@ it('revokes a device: tombstones the row, broadcasts a logout, drops its push to
 
     Livewire::test(ListPushDeviceTokens::class)
         ->loadTable()
-        ->callAction(TestAction::make('deregister')->table($device));
+        ->callAction(TestAction::make('logout')->table($device));
+
+    expect($device->fresh()->revoked_at)->toBeNull()
+        ->and(PushDeviceToken::find($pushToken->id))->toBeNull();
+
+    Event::assertDispatched(DeviceDeregisteredEvent::class, fn ($event) => $event->deviceId === 'device-abc');
+});
+
+it('revokes a device: marks it revoked, broadcasts a logout, drops its push token', function () {
+    Event::fake([DeviceDeregisteredEvent::class]);
+
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => 'device-abc',
+        'app_version' => '1.1.2',
+    ]);
+    $pushToken = PushDeviceToken::factory()->for($this->playlist, 'notifiable')->create([
+        'device_id' => 'device-abc',
+    ]);
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->callAction(TestAction::make('revoke')->table($device));
 
     expect($device->fresh()->revoked_at)->not->toBeNull()
         ->and(PushDeviceToken::find($pushToken->id))->toBeNull();
 
     Event::assertDispatched(DeviceDeregisteredEvent::class, fn ($event) => $event->deviceId === 'device-abc');
+});
+
+it('restores a revoked device so it can pair again', function () {
+    $device = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create([
+        'app_version' => '1.1.2',
+    ]);
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->callAction(TestAction::make('restore')->table($device));
+
+    expect($device->fresh()->revoked_at)->toBeNull();
+});
+
+it('swaps Revoke access for Restore access once a device is revoked', function () {
+    $active = TvDevice::factory()->for($this->playlist, 'notifiable')->create([
+        'app_version' => '1.1.2',
+    ]);
+    $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create([
+        'app_version' => '1.1.2',
+    ]);
+
+    Livewire::test(ListPushDeviceTokens::class)
+        ->loadTable()
+        ->assertActionVisible(TestAction::make('revoke')->table($active))
+        ->assertActionHidden(TestAction::make('restore')->table($active))
+        ->assertActionVisible(TestAction::make('restore')->table($revoked))
+        ->assertActionHidden(TestAction::make('revoke')->table($revoked));
 });
 
 it('also drops a legacy push token that predates device_id when revoking', function () {
@@ -90,18 +139,19 @@ it('also drops a legacy push token that predates device_id when revoking', funct
 
     Livewire::test(ListPushDeviceTokens::class)
         ->loadTable()
-        ->callAction(TestAction::make('deregister')->table($device));
+        ->callAction(TestAction::make('revoke')->table($device));
 
     expect(PushDeviceToken::find($legacyToken->id))->toBeNull()
         ->and(PushDeviceToken::find($unrelatedToken->id))->not->toBeNull();
 });
 
-it('disables Revoke for devices on an app version older than the deregister minimum', function () {
+it('disables Log out and Revoke for devices on an app version older than the deregister minimum', function () {
     $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
 
     Livewire::test(ListPushDeviceTokens::class)
         ->loadTable()
-        ->assertActionDisabled(TestAction::make('deregister')->table($legacy));
+        ->assertActionDisabled(TestAction::make('logout')->table($legacy))
+        ->assertActionDisabled(TestAction::make('revoke')->table($legacy));
 });
 
 it('can hard-delete a device row without broadcasting a logout', function () {
