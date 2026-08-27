@@ -17,10 +17,13 @@ use App\Providers\VersionServiceProvider;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Facades\Cache;
 
+/**
+ * Deliberately NOT registered in AdminPanelProvider yet. The alert panel is
+ * kept for a future round once it can be dismissed; right now it is always on
+ * screen and gets in the way. Add it to the panel's widgets() array to enable.
+ */
 class NeedsAttentionWidget extends Widget
 {
-    protected static ?int $sort = 0;
-
     protected int|string|array $columnSpan = 'full';
 
     protected string $view = 'filament.widgets.needs-attention-widget';

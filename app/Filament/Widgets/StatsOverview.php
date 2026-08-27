@@ -7,6 +7,7 @@ use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
+use App\Filament\Widgets\Concerns\FormatsDateColumn;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Cache;
@@ -14,6 +15,8 @@ use Illuminate\Support\Facades\DB;
 
 class StatsOverview extends BaseWidget
 {
+    use FormatsDateColumn;
+
     /**
      * Cache duration in seconds (5 minutes).
      */
@@ -216,20 +219,6 @@ class StatsOverview extends BaseWidget
             0 => [0, 0],
             1 => [0, $rows[0]],
             default => $rows,
-        };
-    }
-
-    /**
-     * A driver-portable expression that formats a timestamp column to a
-     * "YYYY-MM-DD" text value. Used only for GROUP BY day here, but kept as
-     * text (not a date type) so it stays safe to reuse in any context.
-     */
-    protected function dateExpr(string $column): string
-    {
-        return match (DB::connection()->getDriverName()) {
-            'pgsql' => "to_char({$column}, 'YYYY-MM-DD')",
-            'sqlite' => "strftime('%Y-%m-%d', {$column})",
-            default => "DATE_FORMAT({$column}, '%Y-%m-%d')",
         };
     }
 }

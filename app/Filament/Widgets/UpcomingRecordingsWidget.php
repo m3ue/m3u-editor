@@ -47,7 +47,7 @@ class UpcomingRecordingsWidget extends BaseWidget
 
                 TextColumn::make('channel.title')
                     ->label(__('Channel'))
-                    ->state(fn (DvrRecording $record): string => $record->channel?->title ?? $record->channel?->name ?? '—')
+                    ->state(fn (DvrRecording $record): string => $record->channel?->title ?? $record->channel?->name ?? __('N/A'))
                     ->limit(30),
 
                 TextColumn::make('scheduled_start')

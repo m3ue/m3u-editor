@@ -349,7 +349,7 @@ return [
 
         // LibraryGrowthChart dashboard widget: $bucket is
         // "CASE WHEN created_at IS NULL OR created_at < ? THEN 'base' ELSE <expr> END"
-        // where <expr> is dateExpr('created_at') — one of three compile-time SQL
+        // where <expr> is dateExpr('created_at'), one of three compile-time SQL
         // literals chosen by match() on the PDO driver name. 'created_at' is a
         // hardcoded literal; the only runtime value ($start) is passed as a bound
         // ? placeholder. No request/user input reaches the interpolated SQL.

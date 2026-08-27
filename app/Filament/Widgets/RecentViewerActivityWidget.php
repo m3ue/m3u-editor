@@ -5,6 +5,7 @@ namespace App\Filament\Widgets;
 use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
 use App\Models\ViewerWatchProgress;
 use Filament\Widgets\Widget;
+use Illuminate\Support\Facades\Cache;
 
 class RecentViewerActivityWidget extends Widget
 {
@@ -19,27 +20,29 @@ class RecentViewerActivityWidget extends Widget
 
     protected function getViewData(): array
     {
-        $rows = ViewerWatchProgress::query()
-            ->with([
-                'viewer:id,name',
-                'channel:id,title,name,logo',
-                'episode:id,title,series_id,season,episode_num,cover',
-                'episode.series:id,name,cover',
-            ])
-            ->whereNotNull('last_watched_at')
-            ->orderByDesc('last_watched_at')
-            ->limit(8)
-            ->get()
-            ->map(fn (ViewerWatchProgress $progress) => [
-                'viewer' => $progress->viewer?->name ?? __('Unknown'),
-                'title' => $progress->content_title,
-                'type' => $progress->content_type,
-                'completed' => (bool) $progress->completed,
-                'percent' => $progress->duration_seconds > 0
-                    ? min(100, (int) round($progress->position_seconds / $progress->duration_seconds * 100))
-                    : null,
-                'when' => $progress->last_watched_at?->diffForHumans(),
-            ]);
+        $rows = Cache::remember('dashboard_recent_viewer_activity', 60, function () {
+            return ViewerWatchProgress::query()
+                ->with([
+                    'viewer:id,name',
+                    'channel:id,title,name,logo',
+                    'episode:id,title,series_id,season,episode_num,cover',
+                    'episode.series:id,name,cover',
+                ])
+                ->whereNotNull('last_watched_at')
+                ->orderByDesc('last_watched_at')
+                ->limit(8)
+                ->get()
+                ->map(fn (ViewerWatchProgress $progress) => [
+                    'viewer' => $progress->viewer?->name ?? __('Unknown'),
+                    'title' => $progress->content_title,
+                    'type' => $progress->content_type,
+                    'completed' => (bool) $progress->completed,
+                    'percent' => $progress->duration_seconds > 0
+                        ? min(100, (int) round($progress->position_seconds / $progress->duration_seconds * 100))
+                        : null,
+                    'when' => $progress->last_watched_at?->diffForHumans(),
+                ]);
+        });
 
         return [
             'rows' => $rows,

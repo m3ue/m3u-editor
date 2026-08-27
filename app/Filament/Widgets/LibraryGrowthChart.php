@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Widgets\Concerns\FormatsDateColumn;
 use Carbon\CarbonImmutable;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Support\Facades\Cache;
@@ -9,6 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 class LibraryGrowthChart extends ChartWidget
 {
+    use FormatsDateColumn;
+
     protected ?string $pollingInterval = null;
 
     protected int|string|array $columnSpan = 1;
@@ -125,18 +128,5 @@ class LibraryGrowthChart extends ChartWidget
             ],
             'plugins' => ['legend' => ['display' => true]],
         ];
-    }
-
-    /**
-     * A driver-portable expression that formats a timestamp column to a
-     * "YYYY-MM-DD" text value (not a date type).
-     */
-    protected function dateExpr(string $column): string
-    {
-        return match (DB::connection()->getDriverName()) {
-            'pgsql' => "to_char({$column}, 'YYYY-MM-DD')",
-            'sqlite' => "strftime('%Y-%m-%d', {$column})",
-            default => "DATE_FORMAT({$column}, '%Y-%m-%d')",
-        };
     }
 }
