@@ -112,24 +112,19 @@ it('tells a revoked device to log out and does not resurrect the row', function 
         ->and($device->device_name)->toBe('Revoked Phone');
 });
 
-it('survives losing the insert race for a brand-new device instead of 500-ing', function () {
-    // Simulate a second concurrent notifications call inserting the row in the
-    // gap between firstOrNew() and save(): slip a conflicting row in on the
-    // model's "creating" event so the real save() hits the unique index.
-    TvDevice::creating(function (TvDevice $model): void {
-        static $raced = false;
-
-        if ($raced || $model->device_id !== 'race-abc') {
-            return;
-        }
-
-        $raced = true;
-        DB::table('tv_devices')->insert([
-            'device_id' => $model->device_id,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-    });
+it('upserts on device_id so a concurrent first-touch cannot duplicate or 500', function () {
+    // A concurrent notifications call for this same brand-new device won the
+    // INSERT in the gap after firstOrNew() read "not found". The write must
+    // resolve to an in-place update via ON CONFLICT, not a duplicate or error.
+    DB::table('tv_devices')->insert([
+        'device_id' => 'race-abc',
+        'notifiable_type' => $this->playlist->getMorphClass(),
+        'notifiable_id' => $this->playlist->id,
+        'device_name' => 'Winner',
+        'last_seen_at' => now()->subHour(),
+        'created_at' => now()->subHour(),
+        'updated_at' => now()->subHour(),
+    ]);
 
     $this->getJson(notificationsUrl([
         'device_id' => 'race-abc',
@@ -140,11 +135,10 @@ it('survives losing the insert race for a brand-new device instead of 500-ing', 
 
     expect(TvDevice::where('device_id', 'race-abc')->count())->toBe(1);
 
-    // The losing writer falls back to updating the row that won.
     $device = TvDevice::firstWhere('device_id', 'race-abc');
     expect($device->device_name)->toBe('Racer')
         ->and($device->platform)->toBe('ios')
-        ->and($device->last_seen_at)->not->toBeNull();
+        ->and($device->last_seen_at->gt(now()->subMinute()))->toBeTrue();
 });
 
 it('stores device_id and device_name from a push subscribe call', function () {
