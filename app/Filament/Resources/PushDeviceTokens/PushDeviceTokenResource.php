@@ -245,7 +245,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     ->requiresConfirmation()
                     ->visible(fn (TvDevice $record): bool => ! $record->isRevoked())
                     ->modalHeading(__('Revoke device access'))
-                    ->modalDescription(__('The M3U TV app on this device will be signed out and blocked from pairing again with this playlist. The credential itself keeps working on other devices. Use Restore access to lift this later.'))
+                    ->modalDescription(__('The M3U TV app on this device will be signed out and blocked from pairing again with this playlist. The credential itself keeps working on other devices. Use Restore access, or delete the device row, to allow access again.'))
                     ->disabled(fn (TvDevice $record): bool => ! $record->supportsRemoteDeregister())
                     ->tooltip(fn (TvDevice $record): ?string => $record->supportsRemoteDeregister()
                         ? null
