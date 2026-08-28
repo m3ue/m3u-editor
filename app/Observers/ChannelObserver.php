@@ -9,6 +9,7 @@ use App\Models\DvrRecording;
 use App\Models\Group;
 use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class ChannelObserver
 {
@@ -31,6 +32,29 @@ class ChannelObserver
 
         if ($defaultProfileId !== null) {
             $channel->stream_profile_id = $defaultProfileId;
+        }
+    }
+
+    /**
+     * Handle the Channel "saving" event.
+     *
+     * Merged groups are pass-through containers, not real groups - a channel may
+     * only ever be assigned to one of their children. Bulk imports via
+     * Channel::upsert() bypass model events, but those paths only ever target
+     * provider groups, which are never merged.
+     */
+    public function saving(Channel $channel): void
+    {
+        if ($channel->group_id === null || ! $channel->isDirty('group_id')) {
+            return;
+        }
+
+        $targetIsMerged = Group::query()
+            ->whereKey($channel->group_id)
+            ->value('is_merged');
+
+        if ($targetIsMerged) {
+            throw new InvalidArgumentException('Channels cannot be assigned to a merged group; assign them to one of its child groups instead.');
         }
     }
 

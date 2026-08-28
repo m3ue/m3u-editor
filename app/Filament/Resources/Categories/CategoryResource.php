@@ -16,6 +16,7 @@ use App\Models\Category;
 use App\Models\Playlist;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -202,7 +203,7 @@ class CategoryResource extends Resource implements CopilotResource
                                 ->live()
                                 ->label(__('Category'))
                                 ->helperText(__('Select the category you would like to move the series to.'))
-                                ->options(fn (Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get, $record) => Category::query()->assignableTarget()->where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
                                 ->searchable(),
                         ])
                         ->action(function ($record, array $data): void {
@@ -349,6 +350,7 @@ class CategoryResource extends Resource implements CopilotResource
                                 ->helperText(__('Select the category you would like to move the series to.'))
                                 ->options(
                                     fn () => Category::query()
+                                        ->assignableTarget()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id()])
                                         ->get(['name', 'id', 'playlist_id'])
@@ -390,6 +392,7 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the category series to another category.'))
                         ->modalSubmitActionLabel(__('Move now')),
+                    MergedGroupService::addToMergedCategoryBulkAction(),
                     BulkAction::make('process')
                         ->label(__('Fetch Series Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')

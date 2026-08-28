@@ -16,6 +16,7 @@ use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -181,7 +182,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ->live()
                                 ->label(__('Group'))
                                 ->helperText(__('Select the group you would like to move the channels to.'))
-                                ->options(fn (Get $get, $record) => Group::where([
+                                ->options(fn (Get $get, $record) => Group::query()->assignableTarget()->where([
                                     'type' => 'live',
                                     'user_id' => auth()->id(),
                                     'playlist_id' => $record->playlist_id,
@@ -404,6 +405,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ->helperText(__('Select the group you would like to move the channels to.'))
                                 ->options(
                                     fn () => Group::query()
+                                        ->assignableTarget()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id(), 'type' => 'live'])
                                         ->get(['name', 'id', 'playlist_id'])
@@ -446,6 +448,7 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the group channels to the another group.'))
                         ->modalSubmitActionLabel(__('Move now')),
+                    MergedGroupService::addToMergedGroupBulkAction('live'),
                     BulkAction::make('set-stream-profile')
                         ->label(__('Set Stream Profile'))
                         ->schema([
