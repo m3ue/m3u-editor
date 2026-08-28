@@ -34,6 +34,7 @@ use Filament\Forms;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
@@ -43,6 +44,7 @@ use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -760,6 +762,59 @@ class EpgResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->default(false),
                         ]),
+                ]),
+
+            Section::make(__('EPG Processing'))
+                ->description(__('Reduce the EPG to channels retained by an existing preprocessed playlist.'))
+                ->columns(2)
+                ->schema([
+                    Toggle::make('preprocess')
+                        ->label(__('Preprocess EPG'))
+                        ->helperText(__('When enabled, only channels currently imported by the selected playlist after its live group, prefix, or regex filters will be retained.'))
+                        ->live()
+                        ->inline(false)
+                        ->default(false)
+                        ->afterStateUpdated(function (Set $set, bool $state): void {
+                            if (! $state) {
+                                $set('preprocess_playlist_id', null);
+                                $set('preprocess_display_name_filter', false);
+                                $set('preprocess_display_name_prefixes', null);
+                            }
+                        }),
+                    Select::make('preprocess_playlist_id')
+                        ->label(__('Playlist processing source'))
+                        ->relationship(
+                            name: 'preprocessPlaylist',
+                            titleAttribute: 'name',
+                            modifyQueryUsing: fn (Builder $query): Builder => $query
+                                ->where('user_id', auth()->id())
+                                ->where('import_prefs->preprocess', true)
+                                ->whereNotNull('synced'),
+                        )
+                        ->searchable()
+                        ->preload()
+                        ->required(fn (Get $get): bool => (bool) $get('preprocess'))
+                        ->visible(fn (Get $get): bool => (bool) $get('preprocess'))
+                        ->helperText(__('Only synchronized playlists with Preprocess playlist enabled are available. Resync the playlist after changing its processing filters.')),
+                    Toggle::make('preprocess_display_name_filter')
+                        ->label(__('Filter XMLTV display names by prefix'))
+                        ->helperText(__('Additionally require each retained XMLTV channel to have a display-name beginning with one of the configured prefixes.'))
+                        ->live()
+                        ->inline(false)
+                        ->default(false)
+                        ->visible(fn (Get $get): bool => (bool) $get('preprocess'))
+                        ->afterStateUpdated(function (Set $set, bool $state): void {
+                            if (! $state) {
+                                $set('preprocess_display_name_prefixes', null);
+                            }
+                        }),
+                    TagsInput::make('preprocess_display_name_prefixes')
+                        ->label(__('XMLTV display-name prefixes'))
+                        ->helperText(__('Press [tab] or [return] to add a prefix, for example ES| or LAT|. Matching is case-insensitive.'))
+                        ->placeholder(__('Add a prefix'))
+                        ->splitKeys(['Tab', 'Return'])
+                        ->required(fn (Get $get): bool => (bool) $get('preprocess_display_name_filter'))
+                        ->visible(fn (Get $get): bool => (bool) $get('preprocess') && (bool) $get('preprocess_display_name_filter')),
                 ]),
 
             Section::make(__('Scheduling'))

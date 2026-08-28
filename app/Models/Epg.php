@@ -19,6 +19,11 @@ class Epg extends Model
 {
     use HasFactory;
 
+    protected $attributes = [
+        'preprocess' => false,
+        'preprocess_display_name_filter' => false,
+    ];
+
     /**
      * The attributes that should be cast to native types.
      *
@@ -43,6 +48,10 @@ class Epg extends Model
         'sd_metadata' => 'array',
         'sd_debug' => 'boolean',
         'is_merged' => 'boolean',
+        'preprocess' => 'boolean',
+        'preprocess_playlist_id' => 'integer',
+        'preprocess_display_name_filter' => 'boolean',
+        'preprocess_display_name_prefixes' => 'array',
         'auto_resync_on_failure' => 'boolean',
         'auto_resync_retries' => 'integer',
         'resync_attempt' => 'integer',
@@ -130,6 +139,11 @@ class Epg extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function preprocessPlaylist(): BelongsTo
+    {
+        return $this->belongsTo(Playlist::class, 'preprocess_playlist_id');
     }
 
     public function channels(): HasMany

@@ -140,7 +140,7 @@ class EpgCacheService
     {
         // Get the content
         $filePath = null;
-        if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT || ($epg->url && str_starts_with($epg->url, 'http'))) {
+        if ($epg->preprocess || $epg->source_type === EpgSourceType::SCHEDULES_DIRECT || ($epg->url && str_starts_with($epg->url, 'http'))) {
             $filePath = Storage::disk('local')->path($epg->file_path);
         } elseif ($epg->uploads && Storage::disk('local')->exists($epg->uploads)) {
             $filePath = Storage::disk('local')->path($epg->uploads);

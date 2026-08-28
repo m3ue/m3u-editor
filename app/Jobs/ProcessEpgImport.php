@@ -9,6 +9,7 @@ use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Job;
 use App\Services\SchedulesDirectService;
+use App\Services\EpgPlaylistPreprocessor;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
@@ -87,7 +88,7 @@ class ProcessEpgImport implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(SchedulesDirectService $service): void
+    public function handle(SchedulesDirectService $service, EpgPlaylistPreprocessor $epgPlaylistPreprocessor): void
     {
         if (! $this->force) {
             // Don't update if currently processing
@@ -258,6 +259,18 @@ class ProcessEpgImport implements ShouldQueue
 
             // Update progress
             $epg->update(['progress' => 5]); // set to 5% to start
+
+            if ($filePath && $epg->preprocess) {
+                $preprocessingResult = $epgPlaylistPreprocessor->preprocess($epg, $filePath);
+                $filePath = $preprocessingResult['path'];
+                Log::info('EPG preprocessed using playlist processing results.', [
+                    'epg_id' => $epg->id,
+                    'playlist_id' => $epg->preprocess_playlist_id,
+                    'playlist_channels' => $preprocessingResult['playlist_channels'],
+                    'channels' => $preprocessingResult['channels'],
+                    'programmes' => $preprocessingResult['programmes'],
+                ]);
+            }
 
             // If we have XML data, let's process it
             if ($filePath) {
@@ -555,7 +568,7 @@ class ProcessEpgImport implements ShouldQueue
 
     private function resolveEpgSourceFilePath(Epg $epg): ?string
     {
-        if ($epg->isMerged() || $epg->source_type === EpgSourceType::SCHEDULES_DIRECT || ($epg->url && str_starts_with($epg->url, 'http'))) {
+        if ($epg->preprocess || $epg->isMerged() || $epg->source_type === EpgSourceType::SCHEDULES_DIRECT || ($epg->url && str_starts_with($epg->url, 'http'))) {
             return Storage::disk('local')->exists($epg->file_path)
                 ? Storage::disk('local')->path($epg->file_path)
                 : null;
