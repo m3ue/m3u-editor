@@ -539,7 +539,7 @@ class PlaylistService
         if (! $playlist) {
             $alias = PlaylistAlias::where('username', $username)
                 ->where('password', $password)
-                ->with(['user', 'playlist', 'customPlaylist'])
+                ->with(['user', 'playlist', 'customPlaylist', 'mergedPlaylist'])
                 ->first();
 
             if ($alias) {
@@ -603,6 +603,7 @@ class PlaylistService
                                 'user',
                                 'playlist',
                                 'customPlaylist',
+                                'mergedPlaylist',
                             ])->where('uuid', $password)
                                 ->firstOrFail();
 

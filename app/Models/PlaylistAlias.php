@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
 use App\Jobs\UpdateXtreamStats;
+use App\Pivots\MergedPlaylistPivot;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -188,6 +189,11 @@ class PlaylistAlias extends Model
         return $this->belongsTo(CustomPlaylist::class);
     }
 
+    public function mergedPlaylist(): BelongsTo
+    {
+        return $this->belongsTo(MergedPlaylist::class);
+    }
+
     /**
      * Determine whether this alias auth credential is expired.
      */
@@ -215,7 +221,11 @@ class PlaylistAlias extends Model
             $this->load('customPlaylist');
         }
 
-        return $this->playlist ?? $this->customPlaylist;
+        if (! $this->relationLoaded('mergedPlaylist') && $this->merged_playlist_id) {
+            $this->load('mergedPlaylist');
+        }
+
+        return $this->playlist ?? $this->customPlaylist ?? $this->mergedPlaylist;
     }
 
     /**
@@ -338,6 +348,11 @@ class PlaylistAlias extends Model
 
     public function groupTags()
     {
+        // Merged playlists have no per-playlist custom tags; only custom playlists do.
+        if ($this->merged_playlist_id) {
+            return collect();
+        }
+
         $effectivePlaylist = $this->getEffectivePlaylist();
         if (! $effectivePlaylist) {
             return collect();
@@ -351,6 +366,11 @@ class PlaylistAlias extends Model
      */
     public function categories()
     {
+        // MergedPlaylist exposes groups but not a categories() relationship.
+        if ($this->merged_playlist_id) {
+            return collect();
+        }
+
         $effectivePlaylist = $this->getEffectivePlaylist();
         if (! $effectivePlaylist) {
             return collect();
@@ -361,6 +381,10 @@ class PlaylistAlias extends Model
 
     public function categoryTags()
     {
+        if ($this->merged_playlist_id) {
+            return collect();
+        }
+
         $effectivePlaylist = $this->getEffectivePlaylist();
         if (! $effectivePlaylist) {
             return collect();
@@ -371,6 +395,29 @@ class PlaylistAlias extends Model
 
     public function channels(): BelongsToMany|HasManyThrough
     {
+        if ($this->merged_playlist_id) {
+            // Merged playlists pull their channels through the merged_playlist_playlist
+            // pivot, honouring the per-source include_live / include_vod toggles. This
+            // mirrors MergedPlaylist::channels() with the local key pointed at the alias.
+            //
+            // Pass 2: per-alias group/category filtering is not applied for merged
+            // aliases yet - see getAllowedLiveGroupNames() usage in the standard branch.
+            return $this->hasManyThrough(
+                Channel::class,
+                MergedPlaylistPivot::class,
+                'merged_playlist_id', // Foreign key on merged_playlist_playlist
+                'playlist_id', // Foreign key on Channel table
+                'merged_playlist_id', // Local key on PlaylistAlias table
+                'playlist_id' // Local key on merged_playlist_playlist
+            )->where(function ($query): void {
+                $query->where(function ($q): void {
+                    $q->where('channels.is_vod', false)->where('merged_playlist_playlist.include_live', true);
+                })->orWhere(function ($q): void {
+                    $q->where('channels.is_vod', true)->where('merged_playlist_playlist.include_vod', true);
+                });
+            });
+        }
+
         if ($this->custom_playlist_id) {
             $relation = $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id')
                 ->withPivot(['channel_number']);
@@ -455,6 +502,18 @@ class PlaylistAlias extends Model
 
     public function series(): BelongsToMany|HasManyThrough
     {
+        if ($this->merged_playlist_id) {
+            // Pass 2: per-alias category filtering is not applied for merged aliases yet.
+            return $this->hasManyThrough(
+                Series::class,
+                MergedPlaylistPivot::class,
+                'merged_playlist_id', // Foreign key on merged_playlist_playlist
+                'playlist_id', // Foreign key on Series table
+                'merged_playlist_id', // Local key on PlaylistAlias table
+                'playlist_id' // Local key on merged_playlist_playlist
+            )->where('merged_playlist_playlist.include_series', true);
+        }
+
         if ($this->custom_playlist_id) {
             $relation = $this->belongsToMany(Series::class, 'series_custom_playlist', 'custom_playlist_id', 'series_id', 'custom_playlist_id', 'id');
 

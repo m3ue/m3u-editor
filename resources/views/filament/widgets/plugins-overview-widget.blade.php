@@ -1,23 +1,18 @@
-<x-filament-widgets::widget class="fi-filament-info-widget">
-    <x-filament::section>
-        <div class="w-full space-y-4">
-            {{-- Header --}}
-            <div class="flex items-center justify-between">
-                <h2 class="flex items-center gap-2 text-base leading-6 font-semibold text-gray-950 dark:text-white">
-                    <x-filament::icon icon="heroicon-s-puzzle-piece" class="h-5 w-5 text-gray-400 dark:text-gray-500" />
-                    {{ __('Plugins') }}
-                </h2>
+<x-filament-widgets::widget>
+    <x-filament::section icon="heroicon-o-puzzle-piece" icon-color="gray" :heading="__('Plugins')">
+        <x-slot name="afterHeader">
+            <x-filament::button
+                color="gray"
+                tag="a"
+                size="sm"
+                href="{{ route('filament.admin.pages.plugins-dashboard') }}"
+                icon="heroicon-m-arrow-top-right-on-square"
+            >
+                {{ __('Manage') }}
+            </x-filament::button>
+        </x-slot>
 
-                <x-filament::button
-                    color="gray"
-                    tag="a"
-                    href="{{ route('filament.admin.pages.plugins-dashboard') }}"
-                    icon="heroicon-m-arrow-top-right-on-square"
-                >
-                    {{ __('Manage') }}
-                </x-filament::button>
-            </div>
-
+        <div class="space-y-4">
             {{-- Stats --}}
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 @foreach ([

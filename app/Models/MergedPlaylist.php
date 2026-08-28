@@ -85,6 +85,30 @@ class MergedPlaylist extends Model
             ->withPivot(['include_live', 'include_vod', 'include_series']);
     }
 
+    /**
+     * Source playlists that expose an Xtream API URL, shaped for the PlaylistAlias
+     * credential-swap form. Mirrors CustomPlaylist::getSourcePlaylistsForAlias().
+     *
+     * @return array<int, array{id: int, name: string, url: string}>
+     */
+    public function getSourcePlaylistsForAlias(): array
+    {
+        return $this->playlists()
+            ->get()
+            ->map(function (Playlist $playlist): array {
+                $url = $playlist->xtream_config['url'] ?? null;
+
+                return [
+                    'id' => $playlist->id,
+                    'name' => $playlist->name,
+                    'url' => $url ? rtrim($url, '/') : null,
+                ];
+            })
+            ->filter(fn (array $config): bool => $config['url'] !== null)
+            ->values()
+            ->toArray();
+    }
+
     public function channels(): HasManyThrough
     {
         return $this->hasManyThrough(

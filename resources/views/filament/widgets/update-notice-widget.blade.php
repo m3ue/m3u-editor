@@ -53,6 +53,7 @@
                 <x-filament::button
                     color="{{ $versionData['updateAvailable'] ? 'danger' : 'gray' }}"
                     tag="a"
+                    size="sm"
                     href="https://github.com/{{ $versionData['repo'] }}/releases"
                     icon="heroicon-m-arrow-top-right-on-square"
                     icon-alias="panels::widgets.filament-info.open-documentation-button"
@@ -65,8 +66,9 @@
                     <x-filament::button
                         class="mt-2"
                         color="gray"
-                        icon="heroicon-o-list-bullet"
+                        icon="heroicon-m-newspaper"
                         tag="a"
+                        size="sm"
                         href="{{ \App\Filament\Pages\ReleaseLogs::getUrl() }}"
                     >
                         {{ __('Release logs') }}

@@ -8,7 +8,8 @@ use Filament\Widgets\Widget;
 
 class DvrStorageOverviewWidget extends Widget
 {
-    protected int|string|array $columnSpan = 'full';
+    // protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
 
     protected string $view = 'filament.widgets.dvr-storage-overview-widget';
 

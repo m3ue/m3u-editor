@@ -279,7 +279,18 @@ class Epg extends Model
             ->where('epg_channels.epg_id', $this->id)
             ->pluck('playlist_aliases.id');
 
-        $ids = $idsFromPlaylist->concat($idsFromCustomPlaylist)->unique()->values()->all();
+        $idsFromMergedPlaylist = PlaylistAlias::join('merged_playlist_playlist', 'merged_playlist_playlist.merged_playlist_id', '=', 'playlist_aliases.merged_playlist_id')
+            ->join('channels', 'channels.playlist_id', '=', 'merged_playlist_playlist.playlist_id')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+            ->where('epg_channels.epg_id', $this->id)
+            ->pluck('playlist_aliases.id');
+
+        $ids = $idsFromPlaylist
+            ->concat($idsFromCustomPlaylist)
+            ->concat($idsFromMergedPlaylist)
+            ->unique()
+            ->values()
+            ->all();
 
         return $ids ? PlaylistAlias::whereIn('id', $ids)->get() : collect();
     }

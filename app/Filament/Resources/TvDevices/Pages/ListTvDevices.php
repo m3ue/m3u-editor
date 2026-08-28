@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\PushDeviceTokens\Pages;
+namespace App\Filament\Resources\TvDevices\Pages;
 
 use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Models\DeviceAuthorization;
 use App\Models\PlaylistAuth;
 use Filament\Actions\Action;
@@ -20,9 +20,9 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
-class ListPushDeviceTokens extends ListRecords
+class ListTvDevices extends ListRecords
 {
-    protected static string $resource = PushDeviceTokenResource::class;
+    protected static string $resource = TvDeviceResource::class;
 
     /** @var array<string, mixed> */
     public ?array $data = [];
@@ -31,7 +31,7 @@ class ListPushDeviceTokens extends ListRecords
     {
         return $this->activeTab === 'pairing'
             ? __('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.')
-            : __('Mobile devices registered to receive push notifications through the relay. Devices are added automatically when the app registers for push, and pruned automatically after :days days without a check-in.', ['days' => config('services.push_relay.stale_days', 60)]);
+            : __('Every M3U TV app install that has talked to this server, across all platforms. Rows are added automatically the first time a device syncs and pruned automatically after :days days without contact - except revoked devices, which are kept until you delete them. "Last seen" is the last successful sync or call-home.', ['days' => config('services.push_relay.stale_days', 60)]);
     }
 
     public function getHeaderActions(): array
@@ -60,11 +60,11 @@ class ListPushDeviceTokens extends ListRecords
     {
         $tabs = [];
 
-        if (PushDeviceTokenResource::isPushRelayEnabled()) {
-            $tabs['devices'] = Tab::make(__('Devices'));
+        if (TvDeviceResource::isPushRelayEnabled()) {
+            $tabs['devices'] = Tab::make(__('Registered Devices'));
         }
 
-        if (PushDeviceTokenResource::isDevicePairingEnabled()) {
+        if (TvDeviceResource::isDevicePairingEnabled()) {
             $tabs['pairing'] = Tab::make(__('Device Pairing'));
         }
 
@@ -73,7 +73,7 @@ class ListPushDeviceTokens extends ListRecords
 
     /**
      * Uppercases and re-inserts the dash so "xkqp9f3t", "xkqp 9f3t", and
-     * "XKQP-9F3T" all normalize to the same stored format — only the 8
+     * "XKQP-9F3T" all normalize to the same stored format - only the 8
      * alphanumeric characters are actually meaningful to the user.
      */
     private static function normalizeUserCode(?string $state): string
@@ -136,7 +136,7 @@ class ListPushDeviceTokens extends ListRecords
 
     public function approve(): void
     {
-        if (! PushDeviceTokenResource::isDevicePairingEnabled()) {
+        if (! TvDeviceResource::isDevicePairingEnabled()) {
             return;
         }
 

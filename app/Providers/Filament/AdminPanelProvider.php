@@ -39,25 +39,25 @@ use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
 use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Filament\Resources\PostProcesses\PostProcessResource;
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
 use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
 use App\Filament\Resources\StreamProfiles\StreamProfileResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
-use App\Filament\Widgets\DiscordWidget;
-use App\Filament\Widgets\DocumentsWidget;
-use App\Filament\Widgets\DonateCrypto;
+use App\Filament\Widgets\ActiveStreamsWidget;
+use App\Filament\Widgets\ContentBreakdownChart;
 use App\Filament\Widgets\DvrStorageOverviewWidget;
-use App\Filament\Widgets\KoFiWidget;
+use App\Filament\Widgets\HelpLinksWidget;
+use App\Filament\Widgets\LibraryGrowthChart;
 use App\Filament\Widgets\M3uTvWidget;
 use App\Filament\Widgets\PluginsOverviewWidget;
-use App\Filament\Widgets\QueueDashboardWidget;
-use App\Filament\Widgets\SharedStreamStatsWidget;
+use App\Filament\Widgets\RecentViewerActivityWidget;
 use App\Filament\Widgets\StatsOverview;
 use App\Filament\Widgets\SystemHealthWidget;
+use App\Filament\Widgets\UpcomingRecordingsWidget;
 use App\Filament\Widgets\UpdateNoticeWidget;
 use App\Http\Middleware\DashboardMiddleware;
 // use App\Filament\Widgets\PayPalDonateWidget;
@@ -90,7 +90,6 @@ use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
-use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -197,7 +196,7 @@ class AdminPanelProvider extends PanelProvider
                                 ->icon('heroicon-s-shield-check')
                                 ->items([
                                     ...(config('auth.auto_login') ? [] : UserResource::getNavigationItems()),
-                                    ...(($settings['push_relay_enabled'] || $settings['device_pairing_enabled']) ? PushDeviceTokenResource::getNavigationItems() : []),
+                                    ...(($settings['push_relay_enabled'] || $settings['device_pairing_enabled']) ? TvDeviceResource::getNavigationItems() : []),
                                     ...Preferences::getNavigationItems(),
                                 ]),
                         ] : []),
@@ -294,20 +293,19 @@ class AdminPanelProvider extends PanelProvider
             })
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
+                // Ordering is driven by this array.
                 UpdateNoticeWidget::class,
-                AccountWidget::class,
-                DocumentsWidget::class,
-                DiscordWidget::class,
                 M3uTvWidget::class,
-                // PayPalDonateWidget::class,
-                KoFiWidget::class,
-                QueueDashboardWidget::class,
-                PluginsOverviewWidget::class,
-                DvrStorageOverviewWidget::class,
-                // DonateCrypto::class,
                 StatsOverview::class,
-                // SharedStreamStatsWidget::class,
-                // SystemHealthWidget::class,
+                HelpLinksWidget::class,
+                ContentBreakdownChart::class,
+                LibraryGrowthChart::class,
+                SystemHealthWidget::class,
+                DvrStorageOverviewWidget::class,
+                UpcomingRecordingsWidget::class,
+                ActiveStreamsWidget::class,
+                RecentViewerActivityWidget::class,
+                PluginsOverviewWidget::class,
             ])
             ->plugins(array_filter([
                 FilamentSpatieLaravelBackupPlugin::make()

@@ -762,7 +762,7 @@ class AppServiceProvider extends ServiceProvider
                         $playlistAlias->generateShortUrl();
                     }
                 }
-                if ($playlistAlias->isDirty(['playlist_id', 'custom_playlist_id'])) {
+                if ($playlistAlias->isDirty(['playlist_id', 'custom_playlist_id', 'merged_playlist_id'])) {
                     // The alias now points at a different playlist/custom playlist, so its
                     // cached EPG XML (generated against the previous target) is stale.
                     EpgCacheService::clearPlaylistEpgCacheFile($playlistAlias);

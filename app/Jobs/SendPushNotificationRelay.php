@@ -79,11 +79,20 @@ class SendPushNotificationRelay implements ShouldQueue
                     $this->pushData(),
                 );
             } catch (Throwable $e) {
-                if ($this->isInvalidTokenFailure($e)) {
+                $pruned = $this->isInvalidTokenFailure($e);
+                if ($pruned) {
                     $device->delete();
                 }
 
-                Log::warning("Push relay delivery failed for device token {$device->id}: {$e->getMessage()}");
+                // Log the full relay response body - $e->getMessage() truncates
+                // it, which hides the FCM errorCode/reason we need to diagnose
+                // why a token is failing.
+                $body = $e instanceof RequestException && $e->response !== null
+                    ? trim((string) $e->response->body())
+                    : $e->getMessage();
+                $action = $pruned ? 'pruned' : 'kept';
+
+                Log::warning("Push relay delivery failed for device token {$device->id} ({$action}): {$body}");
             }
         }
     }
@@ -95,9 +104,20 @@ class SendPushNotificationRelay implements ShouldQueue
         }
 
         $status = $exception->response->status();
+
+        // The relay reports a permanently dead token (app uninstalled, token
+        // rotated) as a 410 Gone - prune it so we stop retrying every broadcast.
+        // A plain 404 stays non-fatal: it usually means a misrouted relay URL,
+        // not a bad token.
+        if ($status === 410) {
+            return true;
+        }
+
+        // Fallback for older relay deployments that collapse every FCM error
+        // into a 502 and only distinguish by the message text.
         $detail = strtolower((string) data_get($exception->response->json(), 'detail', $exception->response->body()));
 
-        if ($status !== 502 || ! str_starts_with($detail, 'fcm rejected push:')) {
+        if ($status !== 502 || ! str_starts_with($detail, 'fcm rejected push')) {
             return false;
         }
 

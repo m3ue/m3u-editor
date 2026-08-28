@@ -16,7 +16,7 @@ use App\Filament\CopilotTools\NetworkContentPinTool;
 use App\Filament\CopilotTools\SearchDocsTool;
 use App\Filament\CopilotTools\VodContentSearchTool;
 use App\Filament\Resources\Assets\AssetResource;
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Jobs\RestartQueue;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
@@ -1037,7 +1037,7 @@ class Preferences extends SettingsPage
                                             ->label(__('Get the app'))
                                             ->color('gray')
                                             ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->url('https://github.com/m3ue/m3u-tv/releases')
+                                            ->url(config('dev.tv_releases_url'))
                                             ->openUrlInNewTab(true),
                                     ])
                                     ->schema([
@@ -1053,7 +1053,7 @@ class Preferences extends SettingsPage
                                         Action::make(__('Manage Devices'))
                                             ->label(__('Manage Devices'))
                                             ->icon('heroicon-o-device-phone-mobile')
-                                            ->url(PushDeviceTokenResource::getUrl())
+                                            ->url(TvDeviceResource::getUrl())
                                             ->hidden(fn (Get $get): bool => ! (bool) $get('push_relay_enabled')),
                                         Action::make('test_push_relay')
                                             ->label(__('Send Push Notification'))
@@ -1131,7 +1131,7 @@ class Preferences extends SettingsPage
                                         Action::make(__('Pair a Device'))
                                             ->label(__('Pair a Device'))
                                             ->icon('heroicon-o-qr-code')
-                                            ->url(PushDeviceTokenResource::getUrl(parameters: ['tab' => 'pairing']))
+                                            ->url(TvDeviceResource::getUrl(parameters: ['tab' => 'pairing']))
                                             ->hidden(fn (Get $get): bool => ! (bool) $get('device_pairing_enabled') || ! (bool) $get('app_output_enabled')),
                                     ])
                                     ->schema([

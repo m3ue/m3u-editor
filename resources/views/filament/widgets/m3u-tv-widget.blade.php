@@ -46,6 +46,7 @@
                 <x-filament::button
                     color="gray"
                     tag="a"
+                    size="sm"
                     href="{{ config('dev.tv_releases_url') }}"
                     icon="heroicon-m-arrow-top-right-on-square"
                     rel="noopener noreferrer"
@@ -57,6 +58,7 @@
                     class="mt-2"
                     color="gray"
                     tag="a"
+                    size="sm"
                     href="/preferences?tab=tv-app%3A%3Adata%3A%3Atab"
                     icon="heroicon-m-device-phone-mobile"
                 >
