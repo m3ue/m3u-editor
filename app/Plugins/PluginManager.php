@@ -666,9 +666,10 @@ class PluginManager
         string $action,
         array $payload = [],
         array $options = [],
-    ): PluginRun {
-        $this->recoverStaleRuns();
-        $actingUser = isset($options['user_id']) ? User::find($options['user_id']) : null;
+    ): ?PluginRun {
+        if (! ($options['existing_run_id'] ?? null)) {
+            $this->recoverStaleRuns();
+        }
 
         $run = $this->prepareRun($plugin, [
             'trigger' => $options['trigger'] ?? 'manual',
@@ -678,6 +679,12 @@ class PluginManager
             'dry_run' => (bool) ($options['dry_run'] ?? false),
             'user_id' => $options['user_id'] ?? null,
         ], $options);
+
+        if (! $run) {
+            return null;
+        }
+
+        $actingUser = isset($options['user_id']) ? User::find($options['user_id']) : null;
 
         try {
             Validator::make($payload, $this->schemaMapper->actionRules($plugin, $action))->validate();
@@ -711,8 +718,10 @@ class PluginManager
         string $hook,
         array $payload = [],
         array $options = [],
-    ): PluginRun {
-        $this->recoverStaleRuns();
+    ): ?PluginRun {
+        if (! ($options['existing_run_id'] ?? null)) {
+            $this->recoverStaleRuns();
+        }
 
         $run = $this->prepareRun($plugin, [
             'trigger' => $options['trigger'] ?? 'hook',
@@ -722,6 +731,10 @@ class PluginManager
             'dry_run' => (bool) ($options['dry_run'] ?? true),
             'user_id' => $options['user_id'] ?? null,
         ], $options);
+
+        if (! $run) {
+            return null;
+        }
 
         try {
             $instance = $this->instantiate($plugin);
@@ -1145,9 +1158,13 @@ class PluginManager
         return $recovered;
     }
 
-    public function failPendingResumedRun(Plugin $plugin, int $runId): ?PluginRun
-    {
-        return DB::transaction(function () use ($plugin, $runId): ?PluginRun {
+    public function failPendingResumedRun(
+        Plugin $plugin,
+        int $runId,
+        string $invocationType,
+        string $name,
+    ): ?PluginRun {
+        return DB::transaction(function () use ($plugin, $runId, $invocationType, $name): ?PluginRun {
             $run = PluginRun::query()
                 ->where('extension_plugin_id', $plugin->id)
                 ->where('status', 'pending')
@@ -1155,6 +1172,10 @@ class PluginManager
                 ->find($runId);
 
             if (! $run) {
+                return null;
+            }
+
+            if (! $this->runMatchesInvocation($run, $invocationType, $name)) {
                 return null;
             }
 
@@ -1383,7 +1404,7 @@ class PluginManager
         }
     }
 
-    private function prepareRun(Plugin $plugin, array $attributes, array $options = []): PluginRun
+    private function prepareRun(Plugin $plugin, array $attributes, array $options = []): ?PluginRun
     {
         $existingRunId = $options['existing_run_id'] ?? null;
 
@@ -1391,38 +1412,60 @@ class PluginManager
             return $this->startRun($plugin, $attributes);
         }
 
-        $run = PluginRun::query()
-            ->where('extension_plugin_id', $plugin->id)
-            ->findOrFail($existingRunId);
+        return DB::transaction(function () use ($plugin, $attributes, $options, $existingRunId): ?PluginRun {
+            $run = PluginRun::query()
+                ->where('extension_plugin_id', $plugin->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->find($existingRunId);
 
-        $resumeMessage = ($options['resume'] ?? false)
-            ? 'Run resumed from its last saved checkpoint.'
-            : ($run->summary ?: 'Run restarted.');
+            $invocationType = $attributes['invocation_type'] ?? null;
+            $name = is_string($invocationType) ? ($attributes[$invocationType] ?? null) : null;
 
-        $run->logs()->create([
-            'level' => 'info',
-            'message' => $resumeMessage,
-            'context' => [
-                'resume' => (bool) ($options['resume'] ?? false),
-            ],
-        ]);
+            if (! $run
+                || ! is_string($invocationType)
+                || ! is_string($name)
+                || ! $this->runMatchesInvocation($run, $invocationType, $name)
+            ) {
+                return null;
+            }
 
-        $run->update([
-            ...$attributes,
-            'status' => 'running',
-            'summary' => $resumeMessage,
-            'result' => null,
-            'progress_message' => $resumeMessage,
-            'cancel_requested' => false,
-            'cancel_requested_at' => null,
-            'cancelled_at' => null,
-            'stale_at' => null,
-            'finished_at' => null,
-            'last_heartbeat_at' => now(),
-            'started_at' => now(),
-        ]);
+            $resumeMessage = ($options['resume'] ?? false)
+                ? 'Run resumed from its last saved checkpoint.'
+                : ($run->summary ?: 'Run restarted.');
 
-        return $run->fresh();
+            $run->update([
+                ...$attributes,
+                'status' => 'running',
+                'summary' => $resumeMessage,
+                'result' => null,
+                'progress_message' => $resumeMessage,
+                'cancel_requested' => false,
+                'cancel_requested_at' => null,
+                'cancelled_at' => null,
+                'stale_at' => null,
+                'finished_at' => null,
+                'last_heartbeat_at' => now(),
+                'started_at' => now(),
+            ]);
+
+            $run->logs()->create([
+                'level' => 'info',
+                'message' => $resumeMessage,
+                'context' => [
+                    'resume' => (bool) ($options['resume'] ?? false),
+                ],
+            ]);
+
+            return $run->fresh();
+        });
+    }
+
+    private function runMatchesInvocation(PluginRun $run, string $invocationType, string $name): bool
+    {
+        return in_array($invocationType, ['action', 'hook'], true)
+            && $run->invocation_type === $invocationType
+            && $run->{$invocationType} === $name;
     }
 
     private function startRun(Plugin $plugin, array $attributes): PluginRun

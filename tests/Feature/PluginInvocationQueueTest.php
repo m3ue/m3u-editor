@@ -5,8 +5,17 @@ use App\Jobs\ExecutePluginInvocation;
 use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Models\User;
+use App\Plugins\Contracts\PluginInterface;
 use App\Plugins\PluginHookDispatcher;
+use App\Plugins\PluginIntegrityService;
+use App\Plugins\PluginMalwareScanner;
 use App\Plugins\PluginManager;
+use App\Plugins\PluginManifestLoader;
+use App\Plugins\PluginSchemaManager;
+use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginValidator;
+use App\Plugins\Support\PluginActionResult;
+use App\Plugins\Support\PluginExecutionContext;
 use Carbon\Carbon;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Bus;
@@ -43,6 +52,18 @@ function createPluginForInvocationQueueTests(array $overrides = []): Plugin
         'validation_status' => 'valid',
         'integrity_status' => 'verified',
     ], $overrides));
+}
+
+function mockPluginManagerForInvocationQueueTests(): PluginManager
+{
+    return Mockery::mock(PluginManager::class, [
+        app(PluginValidator::class),
+        app(PluginSchemaMapper::class),
+        app(PluginManifestLoader::class),
+        app(PluginIntegrityService::class),
+        app(PluginSchemaManager::class),
+        app(PluginMalwareScanner::class),
+    ])->makePartial();
 }
 
 it('fails resumed pending runs when the plugin is no longer eligible', function (array $overrides): void {
@@ -152,6 +173,183 @@ it('keeps ineligible fresh and missing-plugin invocations as silent no-ops', fun
     (new ExecutePluginInvocation($plugin->id + 100000, 'action', 'resume_scan'))->handle(app(PluginManager::class));
 
     expect(PluginRun::query()->count())->toBe(0);
+});
+
+it('executes only one duplicate resumed job after the first reaches a terminal status', function (): void {
+    $plugin = createPluginForInvocationQueueTests();
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => 'pending',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+    ]);
+    $pluginInstance = Mockery::mock(PluginInterface::class);
+    $pluginInstance->shouldReceive('runAction')
+        ->once()
+        ->andReturn(PluginActionResult::success('Resume completed.'));
+    $pluginManager = mockPluginManagerForInvocationQueueTests();
+    $pluginManager->shouldReceive('instantiate')
+        ->once()
+        ->andReturn($pluginInstance);
+    $job = new ExecutePluginInvocation(
+        $plugin->id,
+        'action',
+        'resume_scan',
+        options: ['existing_run_id' => $run->id, 'resume' => true],
+    );
+
+    $job->handle($pluginManager);
+    $job->handle($pluginManager);
+
+    expect($run->fresh()->status)->toBe('completed')
+        ->and($run->logs()->where('message', 'Run resumed from its last saved checkpoint.')->count())->toBe(1);
+});
+
+it('does not execute a resumed job for a non-pending run', function (string $status): void {
+    $plugin = createPluginForInvocationQueueTests();
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => $status,
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+        'summary' => 'Original summary.',
+        'started_at' => now()->subHours(7),
+        'last_heartbeat_at' => now()->subHour(),
+    ]);
+    $pluginManager = mockPluginManagerForInvocationQueueTests();
+    $pluginManager->shouldNotReceive('instantiate');
+
+    (new ExecutePluginInvocation(
+        $plugin->id,
+        'action',
+        'resume_scan',
+        options: ['existing_run_id' => $run->id, 'resume' => true],
+    ))->handle($pluginManager);
+
+    expect($run->fresh()->status)->toBe($status)
+        ->and($run->fresh()->summary)->toBe('Original summary.')
+        ->and($run->logs()->count())->toBe(0);
+})->with(['completed', 'failed', 'cancelled', 'stale', 'running']);
+
+it('does not execute a resumed job when its invocation does not match the persisted run', function (
+    string $persistedInvocationType,
+    string $persistedName,
+    string $jobInvocationType,
+    string $jobName,
+): void {
+    $plugin = createPluginForInvocationQueueTests();
+    $run = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => 'pending',
+        'invocation_type' => $persistedInvocationType,
+        $persistedInvocationType => $persistedName,
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+        'progress_message' => 'Waiting for a worker.',
+    ]);
+    $pluginManager = mockPluginManagerForInvocationQueueTests();
+    $pluginManager->shouldNotReceive('instantiate');
+
+    (new ExecutePluginInvocation(
+        $plugin->id,
+        $jobInvocationType,
+        $jobName,
+        options: ['existing_run_id' => $run->id, 'resume' => true],
+    ))->handle($pluginManager);
+
+    expect($run->fresh()->status)->toBe('pending')
+        ->and($run->fresh()->progress_message)->toBe('Waiting for a worker.')
+        ->and($run->logs()->count())->toBe(0);
+})->with([
+    'invocation type' => ['action', 'resume_scan', 'hook', 'resume_scan'],
+    'invalid invocation type' => ['action', 'resume_scan', 'invalid', 'resume_scan'],
+    'action name' => ['action', 'resume_scan', 'action', 'different_action'],
+    'hook name' => ['hook', 'playlist.synced', 'hook', 'playlist.updated'],
+]);
+
+it('does not execute a resumed job for another plugin or a missing run', function (): void {
+    $plugin = createPluginForInvocationQueueTests();
+    $otherPlugin = createPluginForInvocationQueueTests();
+    $crossPluginRun = PluginRun::query()->create([
+        'extension_plugin_id' => $otherPlugin->id,
+        'status' => 'pending',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+    ]);
+    $pluginManager = mockPluginManagerForInvocationQueueTests();
+    $pluginManager->shouldNotReceive('instantiate');
+
+    (new ExecutePluginInvocation(
+        $plugin->id,
+        'action',
+        'resume_scan',
+        options: ['existing_run_id' => $crossPluginRun->id, 'resume' => true],
+    ))->handle($pluginManager);
+    (new ExecutePluginInvocation(
+        $plugin->id,
+        'action',
+        'resume_scan',
+        options: ['existing_run_id' => 100000, 'resume' => true],
+    ))->handle($pluginManager);
+
+    expect($crossPluginRun->fresh()->status)->toBe('pending')
+        ->and($crossPluginRun->logs()->count())->toBe(0);
+});
+
+it('allows only one claimant to transition a pending resumed run', function (): void {
+    $claimedAt = Carbon::parse('2026-08-28 14:00:00');
+    Carbon::setTestNow($claimedAt);
+
+    try {
+        $plugin = createPluginForInvocationQueueTests();
+        $run = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'resume_scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'started_at' => $claimedAt->copy()->subHours(7),
+            'last_heartbeat_at' => $claimedAt->copy()->subHour(),
+        ]);
+        $pluginManager = app(PluginManager::class);
+        $prepareRun = new ReflectionMethod($pluginManager, 'prepareRun');
+        $attributes = [
+            'trigger' => 'manual',
+            'invocation_type' => 'action',
+            'action' => 'resume_scan',
+            'payload' => [],
+            'dry_run' => true,
+            'user_id' => null,
+        ];
+        $options = [
+            'existing_run_id' => $run->id,
+            'resume' => true,
+        ];
+
+        $winner = $prepareRun->invoke($pluginManager, $plugin, $attributes, $options);
+        $loser = $prepareRun->invoke($pluginManager, $plugin, $attributes, $options);
+
+        expect($winner)->toBeInstanceOf(PluginRun::class)
+            ->and($loser)->toBeNull()
+            ->and($run->fresh()->status)->toBe('running')
+            ->and($run->fresh()->started_at)->toEqual($claimedAt)
+            ->and($run->fresh()->last_heartbeat_at)->toEqual($claimedAt)
+            ->and($run->logs()->where('message', 'Run resumed from its last saved checkpoint.')->count())->toBe(1);
+    } finally {
+        Carbon::setTestNow();
+    }
 });
 
 it('isolates plugin invocations on a dedicated long-running queue worker', function () {
@@ -295,6 +493,8 @@ it('routes resumed stale plugin runs through the dedicated worker', function () 
 });
 
 it('starts resumed plugin runs with a fresh execution age', function () {
+    Queue::fake();
+
     $resumedAt = Carbon::parse('2026-08-26 12:00:00');
     Carbon::setTestNow($resumedAt);
 
@@ -318,28 +518,35 @@ it('starts resumed plugin runs with a fresh execution age', function () {
             ],
         ]);
 
-        $pluginManager = app(PluginManager::class);
-        $resumedRun = (new ReflectionMethod($pluginManager, 'prepareRun'))->invoke(
-            $pluginManager,
-            $plugin,
-            [
-                'trigger' => 'manual',
-                'invocation_type' => 'action',
-                'action' => 'resume_scan',
-                'payload' => [],
-                'dry_run' => true,
-                'user_id' => null,
-            ],
-            [
-                'existing_run_id' => $run->id,
-                'resume' => true,
-            ],
-        );
+        app(PluginManager::class)->resumeRun($run);
 
-        expect($resumedRun->started_at)->toEqual($resumedAt)
-            ->and($resumedRun->last_heartbeat_at)->toEqual($resumedAt)
-            ->and($resumedRun->progress)->toBe(42)
-            ->and($resumedRun->run_state)->toBe([
+        $queuedJob = null;
+        Queue::assertPushed(ExecutePluginInvocation::class, function (ExecutePluginInvocation $job) use (&$queuedJob): bool {
+            $queuedJob = $job;
+
+            return true;
+        });
+
+        $claimedRun = null;
+        $pluginInstance = Mockery::mock(PluginInterface::class);
+        $pluginInstance->shouldReceive('runAction')
+            ->once()
+            ->andReturnUsing(function (string $action, array $payload, PluginExecutionContext $context) use (&$claimedRun): PluginActionResult {
+                $claimedRun = $context->run->fresh();
+
+                return PluginActionResult::success('Resume completed.');
+            });
+        $pluginManager = mockPluginManagerForInvocationQueueTests();
+        $pluginManager->shouldReceive('instantiate')
+            ->once()
+            ->andReturn($pluginInstance);
+        $queuedJob->handle($pluginManager);
+
+        expect($claimedRun)->toBeInstanceOf(PluginRun::class)
+            ->and($claimedRun->started_at)->toEqual($resumedAt)
+            ->and($claimedRun->last_heartbeat_at)->toEqual($resumedAt)
+            ->and($claimedRun->progress)->toBe(42)
+            ->and($claimedRun->run_state)->toBe([
                 'resume' => [
                     'last_step' => 'checkpoint-3',
                 ],

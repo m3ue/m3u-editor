@@ -26,6 +26,12 @@ class ExecutePluginInvocation implements ShouldQueue
 
     public function handle(PluginManager $pluginManager): void
     {
+        if (array_key_exists('existing_run_id', $this->options)
+            && ! in_array($this->invocationType, ['action', 'hook'], true)
+        ) {
+            return;
+        }
+
         $plugin = Plugin::find($this->pluginId);
         if (! $plugin
             || ! $plugin->enabled
@@ -36,7 +42,12 @@ class ExecutePluginInvocation implements ShouldQueue
             || ! $plugin->hasVerifiedIntegrity()
         ) {
             if ($plugin && array_key_exists('existing_run_id', $this->options)) {
-                $pluginManager->failPendingResumedRun($plugin, (int) $this->options['existing_run_id']);
+                $pluginManager->failPendingResumedRun(
+                    $plugin,
+                    (int) $this->options['existing_run_id'],
+                    $this->invocationType,
+                    $this->name,
+                );
             }
 
             return;
