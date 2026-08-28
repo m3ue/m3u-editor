@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\PushDeviceTokens\Pages;
+namespace App\Filament\Resources\TvDevices\Pages;
 
 use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Models\DeviceAuthorization;
 use App\Models\PlaylistAuth;
 use Filament\Actions\Action;
@@ -20,9 +20,9 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 
-class ListPushDeviceTokens extends ListRecords
+class ListTvDevices extends ListRecords
 {
-    protected static string $resource = PushDeviceTokenResource::class;
+    protected static string $resource = TvDeviceResource::class;
 
     /** @var array<string, mixed> */
     public ?array $data = [];
@@ -60,11 +60,11 @@ class ListPushDeviceTokens extends ListRecords
     {
         $tabs = [];
 
-        if (PushDeviceTokenResource::isPushRelayEnabled()) {
+        if (TvDeviceResource::isPushRelayEnabled()) {
             $tabs['devices'] = Tab::make(__('Registered Devices'));
         }
 
-        if (PushDeviceTokenResource::isDevicePairingEnabled()) {
+        if (TvDeviceResource::isDevicePairingEnabled()) {
             $tabs['pairing'] = Tab::make(__('Device Pairing'));
         }
 
@@ -136,7 +136,7 @@ class ListPushDeviceTokens extends ListRecords
 
     public function approve(): void
     {
-        if (! PushDeviceTokenResource::isDevicePairingEnabled()) {
+        if (! TvDeviceResource::isDevicePairingEnabled()) {
             return;
         }
 

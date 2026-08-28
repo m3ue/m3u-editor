@@ -1,8 +1,8 @@
 <?php
 
 use App\Events\DeviceDeregisteredEvent;
-use App\Filament\Resources\PushDeviceTokens\Pages\ListPushDeviceTokens;
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\Pages\ListTvDevices;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Models\Playlist;
 use App\Models\PushDeviceToken;
 use App\Models\TvDevice;
@@ -18,16 +18,16 @@ beforeEach(function () {
 });
 
 it('is only accessible to admins', function () {
-    expect(PushDeviceTokenResource::canAccess())->toBeTrue();
+    expect(TvDeviceResource::canAccess())->toBeTrue();
 
     $this->actingAs(User::factory()->create());
-    expect(PushDeviceTokenResource::canAccess())->toBeFalse();
+    expect(TvDeviceResource::canAccess())->toBeFalse();
 });
 
 it('blocks non-admin users from reaching the list page', function () {
     $this->actingAs(User::factory()->create());
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->assertForbidden();
 });
 
@@ -37,7 +37,7 @@ it('lists devices across every user\'s playlists, not just the admin\'s own', fu
     $otherPlaylist = Playlist::factory()->for(User::factory()->create())->create();
     $otherDevice = TvDevice::factory()->for($otherPlaylist, 'notifiable')->create();
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->assertOk()
         ->loadTable()
         ->assertCanSeeTableRecords([$ownDevice, $otherDevice]);
@@ -54,7 +54,7 @@ it('logs a device out: broadcasts a logout and drops its push token, without rev
         'device_id' => 'device-abc',
     ]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->callAction(TestAction::make('logout')->table($device));
 
@@ -75,7 +75,7 @@ it('revokes a device: marks it revoked, broadcasts a logout, drops its push toke
         'device_id' => 'device-abc',
     ]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->callAction(TestAction::make('revoke')->table($device));
 
@@ -90,7 +90,7 @@ it('restores a revoked device so it can pair again', function () {
         'app_version' => '1.1.2',
     ]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->callAction(TestAction::make('restore')->table($device));
 
@@ -105,7 +105,7 @@ it('swaps Revoke access for Restore access once a device is revoked', function (
         'app_version' => '1.1.2',
     ]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->assertActionVisible(TestAction::make('revoke')->table($active))
         ->assertActionHidden(TestAction::make('restore')->table($active))
@@ -137,7 +137,7 @@ it('also drops a legacy push token that predates device_id when revoking', funct
         'playlist_auth_id' => null,
     ]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->callAction(TestAction::make('revoke')->table($device));
 
@@ -148,7 +148,7 @@ it('also drops a legacy push token that predates device_id when revoking', funct
 it('disables Log out and Revoke for devices on an app version older than the deregister minimum', function () {
     $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->assertActionDisabled(TestAction::make('logout')->table($legacy))
         ->assertActionDisabled(TestAction::make('revoke')->table($legacy));
@@ -159,7 +159,7 @@ it('can hard-delete a device row without broadcasting a logout', function () {
 
     $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->callAction(TestAction::make('delete')->table($device));
 
@@ -171,7 +171,7 @@ it('allows deleting an already-revoked or legacy-version device', function () {
     $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create();
     $legacy = TvDevice::factory()->legacyVersion()->for($this->playlist, 'notifiable')->create();
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->assertActionEnabled(TestAction::make('delete')->table($revoked))
         ->assertActionEnabled(TestAction::make('delete')->table($legacy));
@@ -181,7 +181,7 @@ it('filters to revoked devices', function () {
     $revoked = TvDevice::factory()->revoked()->for($this->playlist, 'notifiable')->create();
     $active = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->filterTable('revoked')
         ->assertCanSeeTableRecords([$revoked])
@@ -196,7 +196,7 @@ it('filters to stale devices past the prune window', function () {
     $fresh = TvDevice::factory()->for($this->playlist, 'notifiable')
         ->create(['last_seen_at' => now()->subDays(1)]);
 
-    Livewire::test(ListPushDeviceTokens::class)
+    Livewire::test(ListTvDevices::class)
         ->loadTable()
         ->filterTable('stale')
         ->assertCanSeeTableRecords([$stale])
@@ -204,7 +204,7 @@ it('filters to stale devices past the prune window', function () {
 });
 
 it('renames the first tab to Registered Devices', function () {
-    $tabs = Livewire::test(ListPushDeviceTokens::class)->instance()->getTabs();
+    $tabs = Livewire::test(ListTvDevices::class)->instance()->getTabs();
 
     expect($tabs['devices']->getLabel())->toBe('Registered Devices');
 });

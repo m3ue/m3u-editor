@@ -1,6 +1,6 @@
 <?php
 
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
@@ -41,7 +41,7 @@ use Illuminate\Support\Facades\Route;
 // Vanity URL for Device Pairing — short and easy to type from a phone/computer
 // while looking at a TV. Forwards ?code= through if present (e.g. from a QR link).
 Route::get('/pdt', function () {
-    return redirect(PushDeviceTokenResource::getUrl('index', array_filter([
+    return redirect(TvDeviceResource::getUrl('index', array_filter([
         'tab' => 'pairing',
         'code' => request()->query('code'),
     ])));

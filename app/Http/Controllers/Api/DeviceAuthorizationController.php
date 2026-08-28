@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Filament\Resources\PushDeviceTokens\PushDeviceTokenResource;
+use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Http\Controllers\Controller;
 use App\Models\DeviceAuthorization;
 use App\Services\DeviceCodeGeneratorService;
@@ -23,7 +23,7 @@ class DeviceAuthorizationController extends Controller
      */
     public function requestCode(Request $request): JsonResponse
     {
-        abort_unless(PushDeviceTokenResource::isDevicePairingEnabled(), 404);
+        abort_unless(TvDeviceResource::isDevicePairingEnabled(), 404);
 
         $deviceAuth = DeviceAuthorization::create([
             'device_code' => DeviceCodeGeneratorService::generateDeviceCode(),
@@ -52,7 +52,7 @@ class DeviceAuthorizationController extends Controller
      */
     public function poll(Request $request): JsonResponse
     {
-        abort_unless(PushDeviceTokenResource::isDevicePairingEnabled(), 404);
+        abort_unless(TvDeviceResource::isDevicePairingEnabled(), 404);
 
         $data = $request->validate([
             'device_code' => ['required', 'string'],

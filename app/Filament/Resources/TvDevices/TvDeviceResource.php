@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\PushDeviceTokens;
+namespace App\Filament\Resources\TvDevices;
 
 use App\Filament\Concerns\HasCopilotSupport;
-use App\Filament\Resources\PushDeviceTokens\Pages\ListPushDeviceTokens;
+use App\Filament\Resources\TvDevices\Pages\ListTvDevices;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
@@ -29,7 +29,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 
-class PushDeviceTokenResource extends Resource implements CopilotResource
+class TvDeviceResource extends Resource implements CopilotResource
 {
     use HasCopilotSupport;
 
@@ -58,6 +58,10 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
     }
 
     protected static ?int $navigationSort = 6;
+
+    // Kept short and stable across the PushDeviceToken -> TvDevice rename so the
+    // admin URL stays /devices rather than following the class name.
+    protected static ?string $slug = 'devices';
 
     protected static ?string $recordTitleAttribute = 'device_name';
 
@@ -230,10 +234,10 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     ->modalHeading(__('Log out device'))
                     ->modalDescription(__('The M3U TV app on this device will be signed out and returned to the pairing screen. The credential keeps working, so the device can pair again straight away. Use Revoke access instead to also block it from pairing again.'))
                     ->disabled(fn (TvDevice $record): bool => $record->isRevoked() || ! $record->supportsRemoteDeregister())
-                    ->tooltip(fn (TvDevice $record): ?string => match (true) {
+                    ->tooltip(fn (TvDevice $record): string => match (true) {
                         $record->isRevoked() => __('Device is revoked - restore access first'),
                         ! $record->supportsRemoteDeregister() => __('Requires M3U TV :version or newer', ['version' => TvDevice::MIN_DEREGISTER_VERSION]),
-                        default => null,
+                        default => __('Sign this device out. It can pair again right away.'),
                     })
                     ->action(fn (TvDevice $record) => $record->logOut()),
 
@@ -247,8 +251,8 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
                     ->modalHeading(__('Revoke device access'))
                     ->modalDescription(__('The M3U TV app on this device will be signed out and blocked from pairing again with this playlist. The credential itself keeps working on other devices. Use Restore access, or delete the device row, to allow access again.'))
                     ->disabled(fn (TvDevice $record): bool => ! $record->supportsRemoteDeregister())
-                    ->tooltip(fn (TvDevice $record): ?string => $record->supportsRemoteDeregister()
-                        ? null
+                    ->tooltip(fn (TvDevice $record): string => $record->supportsRemoteDeregister()
+                        ? __('Sign out and block this device from pairing again.')
                         : __('Requires M3U TV :version or newer', ['version' => TvDevice::MIN_DEREGISTER_VERSION]))
                     ->action(fn (TvDevice $record) => $record->revokeAccess()),
 
@@ -359,7 +363,7 @@ class PushDeviceTokenResource extends Resource implements CopilotResource
     public static function getPages(): array
     {
         return [
-            'index' => ListPushDeviceTokens::route('/'),
+            'index' => ListTvDevices::route('/'),
         ];
     }
 }
