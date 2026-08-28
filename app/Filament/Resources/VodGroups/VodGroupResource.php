@@ -4,6 +4,7 @@ namespace App\Filament\Resources\VodGroups;
 
 use App\Facades\SortFacade;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Resources\Groups\RelationManagers\ChildGroupsRelationManager;
 use App\Filament\Resources\VodGroups\Pages\EditVodGroup;
 use App\Filament\Resources\VodGroups\Pages\ListVodGroups;
 use App\Filament\Resources\VodGroups\RelationManagers\VodRelationManager;
@@ -12,7 +13,6 @@ use App\Jobs\GroupFindAndReplaceReset;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
-use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
@@ -40,10 +40,11 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class VodGroupResource extends Resource implements CopilotResource
 {
@@ -94,9 +95,15 @@ class VodGroupResource extends Resource implements CopilotResource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('vod_channels')
+                $query->with('parent')
+                    ->withCount('vod_channels')
                     ->withCount('enabled_vod_channels')
-                    ->where('type', 'vod');
+                    ->withCount('children')
+                    ->withCount([
+                        'descendantChannels as descendant_vod_channels_count' => fn (Builder $subQuery) => $subQuery->where('channels.is_vod', true),
+                        'descendantChannels as enabled_descendant_vod_channels_count' => fn (Builder $subQuery) => $subQuery->where('channels.is_vod', true)->where('channels.enabled', true),
+                    ])
+                    ->where('groups.type', 'vod');
             })
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
@@ -142,7 +149,12 @@ class VodGroupResource extends Resource implements CopilotResource
                     ->sortable(),
                 TextColumn::make('vod_channels_count')
                     ->label(__('VOD Channels'))
-                    ->description(fn (Group $record): string => "Enabled: {$record->enabled_vod_channels_count}")
+                    ->state(fn (Group $record): int => $record->is_merged
+                        ? (int) $record->descendant_vod_channels_count
+                        : (int) $record->vod_channels_count)
+                    ->description(fn (Group $record): string => 'Enabled: '.($record->is_merged
+                        ? (int) $record->enabled_descendant_vod_channels_count
+                        : (int) $record->enabled_vod_channels_count))
                     ->toggleable()
                     ->sortable(),
                 IconColumn::make('custom')
@@ -156,6 +168,35 @@ class VodGroupResource extends Resource implements CopilotResource
                         '0' => 'danger',
                         '' => 'danger',
                     })->toggleable()->sortable(),
+                IconColumn::make('is_merged')
+                    ->label(__('Merged Group'))
+                    ->boolean()
+                    ->tooltip(fn (Group $record): ?string => $record->is_merged ? __('This group combines the groups merged into it.') : null)
+                    ->toggleable()
+                    ->sortable(),
+                TextColumn::make('parent.name')
+                    ->label(__('Parent'))
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable()
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy(
+                            DB::table('groups as parent_groups')
+                                ->select('parent_groups.name')
+                                ->whereColumn('parent_groups.id', 'groups.parent_id'),
+                            $direction,
+                        );
+                    })
+                    ->toggleable(),
+                TextColumn::make('children_count')
+                    ->label(__('Children'))
+                    ->state(fn (Group $record): ?int => $record->is_merged ? (int) $record->children_count : null)
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('created_at')
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
@@ -166,15 +207,16 @@ class VodGroupResource extends Resource implements CopilotResource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                // SelectFilter::make('playlist')
-                //     ->relationship('playlist', 'name')
-                //     ->multiple()
-                //     ->preload()
-                //     ->searchable(),
+                TernaryFilter::make('is_merged')
+                    ->label(__('Merged groups'))
+                    ->placeholder(__('All groups'))
+                    ->trueLabel(__('Merged groups only'))
+                    ->falseLabel(__('Exclude merged groups')),
             ])
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'vod'),
+                    MergedGroupService::manageChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
@@ -793,6 +835,7 @@ class VodGroupResource extends Resource implements CopilotResource
     {
         return [
             VodRelationManager::class,
+            ChildGroupsRelationManager::class,
         ];
     }
 

@@ -28,11 +28,8 @@ use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Epgs\EpgResource;
 use App\Filament\Resources\Groups\GroupResource;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
-use App\Filament\Resources\MergedCategories\MergedCategoryResource;
 use App\Filament\Resources\MergedEpgs\MergedEpgResource;
-use App\Filament\Resources\MergedGroups\MergedGroupResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
-use App\Filament\Resources\MergedVodGroups\MergedVodGroupResource;
 use App\Filament\Resources\Networks\NetworkResource;
 use App\Filament\Resources\PersonalAccessTokens\PersonalAccessTokenResource;
 use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
@@ -234,21 +231,18 @@ class AdminPanelProvider extends PanelProvider
                         NavigationGroup::make(fn () => __('Live Channels'))
                             ->icon('heroicon-m-tv')
                             ->items([
-                                ...MergedGroupResource::getNavigationItems(),
                                 ...GroupResource::getNavigationItems(),
                                 ...ChannelResource::getNavigationItems(),
                             ]),
                         NavigationGroup::make(fn () => __('VOD Channels'))
                             ->icon('heroicon-m-film')
                             ->items([
-                                ...MergedVodGroupResource::getNavigationItems(),
                                 ...VodGroupResource::getNavigationItems(),
                                 ...VodResource::getNavigationItems(),
                             ]),
                         NavigationGroup::make(fn () => __('Series'))
                             ->icon('heroicon-m-play')
                             ->items([
-                                ...MergedCategoryResource::getNavigationItems(),
                                 ...CategoryResource::getNavigationItems(),
                                 ...SeriesResource::getNavigationItems(),
                             ]),

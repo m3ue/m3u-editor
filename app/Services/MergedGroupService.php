@@ -2,12 +2,20 @@
 
 namespace App\Services;
 
+use App\Filament\Tables\MergedCategoryChildrenTable;
+use App\Filament\Tables\MergedGroupChildrenTable;
 use App\Models\Category;
 use App\Models\Group;
+use App\Models\Playlist;
+use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
+use Filament\Actions\CreateAction;
+use Filament\Forms\Components\ModalTableSelect;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
 /**
@@ -92,6 +100,199 @@ class MergedGroupService
         }
 
         return (int) Category::query()->where('parent_id', $merged->id)->count();
+    }
+
+    /**
+     * A "New Merged Group" list-header action for the live/VOD Group resources. Creates
+     * a container Group (is_merged, custom) that other groups can be merged into; it then
+     * appears in the same table alongside the provider groups.
+     */
+    public static function createMergedGroupAction(string $type): CreateAction
+    {
+        return CreateAction::make('createMerged')
+            ->label(__('New Merged Group'))
+            ->icon('heroicon-o-rectangle-group')
+            ->slideOver()
+            ->schema([
+                Select::make('playlist_id')
+                    ->label(__('Playlist'))
+                    ->options(fn (): array => Playlist::query()
+                        ->where('user_id', auth()->id())
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->required()
+                    ->searchable(),
+                TextInput::make('name')
+                    ->label(__('Name'))
+                    ->required()
+                    ->maxLength(255)
+                    ->helperText(__('The group-title clients see for every channel in the merged groups.')),
+                TextInput::make('sort_order')
+                    ->label(__('Sort Order'))
+                    ->numeric()
+                    ->default(0),
+            ])
+            ->using(fn (array $data, string $model): Model => $model::create([
+                ...$data,
+                'user_id' => auth()->id(),
+                'custom' => true,
+                'is_merged' => true,
+                'type' => $type,
+                'name_internal' => $data['name'],
+            ]))
+            ->successNotification(
+                Notification::make()
+                    ->success()
+                    ->title(__('Merged group created'))
+                    ->body(__('Use "Manage Groups" on its row to merge groups into it.')),
+            );
+    }
+
+    /**
+     * Series-category equivalent of {@see createMergedGroupAction()}.
+     */
+    public static function createMergedCategoryAction(): CreateAction
+    {
+        return CreateAction::make('createMerged')
+            ->label(__('New Merged Category'))
+            ->icon('heroicon-o-rectangle-group')
+            ->slideOver()
+            ->schema([
+                Select::make('playlist_id')
+                    ->label(__('Playlist'))
+                    ->options(fn (): array => Playlist::query()
+                        ->where('user_id', auth()->id())
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->required()
+                    ->searchable(),
+                TextInput::make('name')
+                    ->label(__('Name'))
+                    ->required()
+                    ->maxLength(255)
+                    ->helperText(__('The category clients see for every series in the merged categories.')),
+                TextInput::make('sort_order')
+                    ->label(__('Sort Order'))
+                    ->numeric()
+                    ->default(0),
+            ])
+            ->using(fn (array $data, string $model): Model => $model::create([
+                ...$data,
+                'user_id' => auth()->id(),
+                'is_merged' => true,
+                'name_internal' => $data['name'],
+            ]))
+            ->successNotification(
+                Notification::make()
+                    ->success()
+                    ->title(__('Merged category created'))
+                    ->body(__('Use "Manage Categories" on its row to merge categories into it.')),
+            );
+    }
+
+    /**
+     * A per-row "Manage Groups" action for the live/VOD Group resources, shown only on
+     * merged group rows. Opens a slide-over ModalTableSelect for picking which groups
+     * are merged into this one; deselecting a group releases it.
+     */
+    public static function manageChildrenAction(?Group $ownerRecord = null): Action
+    {
+        // Row actions inject the row as $record; relation-manager header actions do not,
+        // so callers there pass the owner record in explicitly.
+        $resolve = fn (?Group $injected): Group => $ownerRecord ?? $injected;
+
+        return Action::make('manageChildren')
+            ->label(__('Manage Groups'))
+            ->icon('heroicon-o-squares-plus')
+            ->visible(fn (?Group $record = null): bool => (bool) $resolve($record)?->is_merged)
+            ->slideOver()
+            ->fillForm(fn (?Group $record = null): array => [
+                'children' => $resolve($record)->children()->pluck('id')->all(),
+            ])
+            ->schema([
+                ModalTableSelect::make('children')
+                    ->label(__('Groups to merge'))
+                    ->tableConfiguration(MergedGroupChildrenTable::class)
+                    ->multiple()
+                    ->tableArguments(function (?Group $record = null) use ($resolve): array {
+                        $merged = $resolve($record);
+
+                        return [
+                            'playlist_id' => $merged->playlist_id,
+                            'type' => $merged->type,
+                            'merged_group_id' => $merged->id,
+                        ];
+                    })
+                    ->getOptionLabelsUsing(fn (array $values): array => Group::whereIn('id', $values)->pluck('name', 'id')->all())
+                    ->selectAction(fn (Action $action) => $action
+                        ->label(__('Select groups'))
+                        ->modalHeading(__('Search groups'))
+                        ->button()),
+            ])
+            ->action(function (array $data, ?Group $record = null) use ($resolve): void {
+                $merged = $resolve($record);
+                $count = self::syncGroupChildren($merged, $data['children'] ?? []);
+
+                Notification::make()
+                    ->success()
+                    ->title(__('Merged group updated'))
+                    ->body(trans_choice(':count group merged into :name|:count groups merged into :name', $count, [
+                        'count' => $count,
+                        'name' => $merged->name,
+                    ]))
+                    ->send();
+            });
+    }
+
+    /**
+     * Series-category equivalent of {@see manageChildrenAction()}.
+     */
+    public static function manageCategoryChildrenAction(?Category $ownerRecord = null): Action
+    {
+        $resolve = fn (?Category $injected): Category => $ownerRecord ?? $injected;
+
+        return Action::make('manageChildren')
+            ->label(__('Manage Categories'))
+            ->icon('heroicon-o-squares-plus')
+            ->visible(fn (?Category $record = null): bool => (bool) $resolve($record)?->is_merged)
+            ->slideOver()
+            ->fillForm(fn (?Category $record = null): array => [
+                'children' => $resolve($record)->children()->pluck('id')->all(),
+            ])
+            ->schema([
+                ModalTableSelect::make('children')
+                    ->label(__('Categories to merge'))
+                    ->tableConfiguration(MergedCategoryChildrenTable::class)
+                    ->multiple()
+                    ->tableArguments(function (?Category $record = null) use ($resolve): array {
+                        $merged = $resolve($record);
+
+                        return [
+                            'playlist_id' => $merged->playlist_id,
+                            'merged_category_id' => $merged->id,
+                        ];
+                    })
+                    ->getOptionLabelsUsing(fn (array $values): array => Category::whereIn('id', $values)->pluck('name', 'id')->all())
+                    ->selectAction(fn (Action $action) => $action
+                        ->label(__('Select categories'))
+                        ->modalHeading(__('Search categories'))
+                        ->button()),
+            ])
+            ->action(function (array $data, ?Category $record = null) use ($resolve): void {
+                $merged = $resolve($record);
+                $count = self::syncCategoryChildren($merged, $data['children'] ?? []);
+
+                Notification::make()
+                    ->success()
+                    ->title(__('Merged category updated'))
+                    ->body(trans_choice(':count category merged into :name|:count categories merged into :name', $count, [
+                        'count' => $count,
+                        'name' => $merged->name,
+                    ]))
+                    ->send();
+            });
     }
 
     /**
