@@ -45,6 +45,115 @@ function createPluginForInvocationQueueTests(array $overrides = []): Plugin
     ], $overrides));
 }
 
+it('fails resumed pending runs when the plugin is no longer eligible', function (array $overrides): void {
+    $failedAt = Carbon::parse('2026-08-28 12:00:00');
+    Carbon::setTestNow($failedAt);
+
+    try {
+        $plugin = createPluginForInvocationQueueTests($overrides);
+        $run = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'resume_scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress' => 42,
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+            'last_heartbeat_at' => $failedAt->copy()->subMinute(),
+            'run_state' => [
+                'resume' => [
+                    'last_step' => 'checkpoint-3',
+                ],
+            ],
+        ]);
+
+        (new ExecutePluginInvocation(
+            $plugin->id,
+            'action',
+            'resume_scan',
+            options: ['existing_run_id' => $run->id],
+        ))->handle(app(PluginManager::class));
+
+        $run->refresh();
+
+        expect($run->status)->toBe('failed')
+            ->and($run->summary)->toBe('The resumed invocation could not start because the plugin is no longer eligible.')
+            ->and($run->progress_message)->toBe($run->summary)
+            ->and($run->progress)->toBe(42)
+            ->and($run->run_state)->toBe([
+                'resume' => [
+                    'last_step' => 'checkpoint-3',
+                ],
+            ])
+            ->and($run->last_heartbeat_at)->toEqual($failedAt)
+            ->and($run->finished_at)->toEqual($failedAt)
+            ->and($run->result)->toBe([
+                'status' => 'failed',
+                'success' => false,
+                'summary' => $run->summary,
+                'data' => [],
+            ])
+            ->and($run->logs()->count())->toBe(1)
+            ->and($run->logs()->first()->level)->toBe('error')
+            ->and($run->logs()->first()->message)->toBe($run->summary);
+    } finally {
+        Carbon::setTestNow();
+    }
+})->with([
+    'disabled' => [['enabled' => false]],
+    'uninstalled' => [['installation_status' => 'uninstalled']],
+    'unavailable' => [['available' => false]],
+    'invalid' => [['validation_status' => 'invalid']],
+    'untrusted' => [['trust_state' => 'pending_review']],
+    'integrity-unverified' => [['integrity_status' => 'unknown']],
+]);
+
+it('does not overwrite another plugin or non-pending resumed run when the plugin is ineligible', function (): void {
+    $plugin = createPluginForInvocationQueueTests(['enabled' => false]);
+    $otherPlugin = createPluginForInvocationQueueTests();
+    $crossPluginRun = PluginRun::query()->create([
+        'extension_plugin_id' => $otherPlugin->id,
+        'status' => 'pending',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+    ]);
+    $terminalRun = PluginRun::query()->create([
+        'extension_plugin_id' => $plugin->id,
+        'status' => 'stale',
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+    ]);
+
+    $job = new ExecutePluginInvocation($plugin->id, 'action', 'resume_scan');
+    $job->options = ['existing_run_id' => $crossPluginRun->id];
+    $job->handle(app(PluginManager::class));
+    $job->options = ['existing_run_id' => $terminalRun->id];
+    $job->handle(app(PluginManager::class));
+
+    expect($crossPluginRun->fresh()->status)->toBe('pending')
+        ->and($crossPluginRun->logs()->count())->toBe(0)
+        ->and($terminalRun->fresh()->status)->toBe('stale')
+        ->and($terminalRun->logs()->count())->toBe(0);
+});
+
+it('keeps ineligible fresh and missing-plugin invocations as silent no-ops', function (): void {
+    $plugin = createPluginForInvocationQueueTests(['enabled' => false]);
+
+    (new ExecutePluginInvocation($plugin->id, 'action', 'resume_scan'))->handle(app(PluginManager::class));
+    (new ExecutePluginInvocation($plugin->id, 'action', 'resume_scan', options: ['existing_run_id' => 100000]))->handle(app(PluginManager::class));
+    (new ExecutePluginInvocation($plugin->id + 100000, 'action', 'resume_scan'))->handle(app(PluginManager::class));
+
+    expect(PluginRun::query()->count())->toBe(0);
+});
+
 it('isolates plugin invocations on a dedicated long-running queue worker', function () {
     $job = new ExecutePluginInvocation(1, 'action', 'health_check');
     $connection = config('queue.connections.plugin');

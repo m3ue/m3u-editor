@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
@@ -1142,6 +1143,26 @@ class PluginManager
         }
 
         return $recovered;
+    }
+
+    public function failPendingResumedRun(Plugin $plugin, int $runId): ?PluginRun
+    {
+        return DB::transaction(function () use ($plugin, $runId): ?PluginRun {
+            $run = PluginRun::query()
+                ->where('extension_plugin_id', $plugin->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->find($runId);
+
+            if (! $run) {
+                return null;
+            }
+
+            return $this->failRun(
+                $run,
+                'The resumed invocation could not start because the plugin is no longer eligible.',
+            );
+        });
     }
 
     private function pluginPaths(): array

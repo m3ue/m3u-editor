@@ -35,6 +35,10 @@ class ExecutePluginInvocation implements ShouldQueue
             || ! $plugin->isTrusted()
             || ! $plugin->hasVerifiedIntegrity()
         ) {
+            if ($plugin && array_key_exists('existing_run_id', $this->options)) {
+                $pluginManager->failPendingResumedRun($plugin, (int) $this->options['existing_run_id']);
+            }
+
             return;
         }
 
