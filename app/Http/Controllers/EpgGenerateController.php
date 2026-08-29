@@ -896,6 +896,7 @@ class EpgGenerateController extends Controller
     {
         // Get the content
         $filePath = null;
+        $error = null;
         if ($epg->url && str_starts_with($epg->url, 'http')) {
             $localPath = Storage::disk('local')->path($epg->file_path);
             if (! file_exists($localPath)) {
@@ -908,11 +909,19 @@ class EpgGenerateController extends Controller
             $filePath = Storage::disk('local')->path($epg->uploads);
         } elseif ($epg->url) {
             $filePath = $epg->url;
+        } elseif ($epg->isSchedulesDirect()) {
+            $localPath = Storage::disk('local')->path($epg->file_path);
+            if (file_exists($localPath)) {
+                $filePath = $localPath;
+            } else {
+                Log::warning("SchedulesDirect EPG source file not found on disk for EPG \"{$epg->name}\": {$localPath}");
+                $error = 'SchedulesDirect EPG source file is missing from local storage. Please sync the EPG and try again.';
+            }
         }
 
         if (! $filePath) {
             // Send notification
-            $error = 'Invalid EPG file. Unable to read or download an associated EPG file. Please check the URL or uploaded file and try again.';
+            $error ??= 'Invalid EPG file. Unable to read or download an associated EPG file. Please check the URL or uploaded file and try again.';
             Notification::make()
                 ->danger()
                 ->title("Error generating epg data for playlist \"{$playlist->name}\" using EPG \"{$epg->name}\"")
