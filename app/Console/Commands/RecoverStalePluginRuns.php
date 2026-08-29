@@ -19,13 +19,13 @@ class RecoverStalePluginRuns extends Command
         $minimumRuntimeMinutes = $this->option('minimum-runtime');
 
         if ($heartbeatMinutes !== null && filter_var($heartbeatMinutes, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
-            $this->error('Heartbeat expiry minutes must be at least 1.');
+            $this->error('Heartbeat expiry minutes must be a whole number of at least 1.');
 
             return self::FAILURE;
         }
 
         if ($minimumRuntimeMinutes !== null && filter_var($minimumRuntimeMinutes, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
-            $this->error('Minimum runtime minutes must be at least 1.');
+            $this->error('Minimum runtime minutes must be a whole number of at least 1.');
 
             return self::FAILURE;
         }

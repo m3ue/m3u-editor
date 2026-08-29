@@ -73,6 +73,7 @@ class LogsRelationManager extends RelationManager
                                 'failed' => 'danger',
                                 'running' => 'warning',
                                 'stale' => 'warning',
+                                'pending' => 'info',
                                 'cancelled' => 'gray',
                                 default => 'gray',
                             })

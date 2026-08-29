@@ -83,6 +83,7 @@ class RunsRelationManager extends RelationManager
                                 'failed' => 'danger',
                                 'running' => 'warning',
                                 'stale' => 'warning',
+                                'pending' => 'info',
                                 'cancelled' => 'gray',
                                 default => 'gray',
                             }),
@@ -125,6 +126,7 @@ class RunsRelationManager extends RelationManager
             ->filters([
                 SelectFilter::make('status')
                     ->options([
+                        'pending' => 'Pending',
                         'running' => 'Running',
                         'completed' => 'Completed',
                         'failed' => 'Failed',

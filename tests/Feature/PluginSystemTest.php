@@ -1163,25 +1163,83 @@ it('uses heartbeat expiry authoritatively and minimum runtime for legacy stale r
     }
 });
 
-it('validates stale recovery CLI overrides', function () {
+it('rejects explicit stale recovery overrides that are not a positive whole number', function () {
     $this->artisan('plugins:recover-stale-runs', [
         '--minutes' => 0,
         '--minimum-runtime' => 365,
     ])
         ->assertFailed()
-        ->expectsOutputToContain('Heartbeat expiry minutes must be at least 1.');
+        ->expectsOutputToContain('Heartbeat expiry minutes must be a whole number of at least 1.');
+
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => '2.5',
+        '--minimum-runtime' => 365,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Heartbeat expiry minutes must be a whole number of at least 1.');
 
     $this->artisan('plugins:recover-stale-runs', [
         '--minutes' => 15,
         '--minimum-runtime' => 0,
     ])
         ->assertFailed()
-        ->expectsOutputToContain('Minimum runtime minutes must be at least 1.');
+        ->expectsOutputToContain('Minimum runtime minutes must be a whole number of at least 1.');
 
-    config()->set('plugins.stale_run.minimum_runtime_minutes', 0);
+    expect(fn () => app(PluginManager::class)->recoverStaleRuns(0))
+        ->toThrow(InvalidArgumentException::class, 'Heartbeat expiry minutes must be a whole number of at least 1.');
+});
 
-    expect(fn () => app(PluginManager::class)->recoverStaleRuns())
-        ->toThrow(InvalidArgumentException::class, 'Minimum runtime minutes must be at least 1.');
+it('falls back to the default when a stale_run config value is blank or non-numeric', function () {
+    // A templated .env line left empty casts to 0; a typo leaves a non-numeric string.
+    // Neither may throw - recoverStaleRuns() runs every minute and on every plugin page mount.
+    config()->set('plugins.stale_run.heartbeat_minutes', 0);
+    config()->set('plugins.stale_run.minimum_runtime_minutes', 'not-a-number');
+
+    expect(app(PluginManager::class)->recoverStaleRuns())->toBe(0);
+
+    $this->artisan('plugins:recover-stale-runs')
+        ->assertSuccessful()
+        ->expectsOutputToContain('Recovered 0 stale plugin run(s).');
+});
+
+it('recovers resumed runs that were queued but never claimed by a worker', function () {
+    $pluginId = 'stale-pending-fixture-'.Str::lower(Str::random(6));
+    $installed = installFixturePluginForTests($pluginId, trust: true, enabled: true);
+    $plugin = $installed['plugin'];
+
+    try {
+        $orphanedPendingRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+            'started_at' => now()->subMinutes(400),
+        ]);
+        $orphanedPendingRun->forceFill(['updated_at' => now()->subMinutes(370)])->saveQuietly();
+
+        $freshPendingRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+            'started_at' => now()->subMinutes(400),
+        ]);
+
+        expect(app(PluginManager::class)->recoverStaleRuns())->toBe(1)
+            ->and($orphanedPendingRun->fresh()->status)->toBe('stale')
+            ->and($orphanedPendingRun->fresh()->summary)->toBe('Run was queued to resume but no worker picked it up. Marked stale so it can be resumed again.')
+            ->and($freshPendingRun->fresh()->status)->toBe('pending');
+    } finally {
+        cleanupReviewFixturePlugin($pluginId);
+    }
 });
 
 it('rejects zip archive entries that contain symlinks', function () {

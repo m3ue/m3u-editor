@@ -1092,33 +1092,50 @@ class PluginManager
 
     public function recoverStaleRuns(?int $heartbeatMinutes = null, ?int $minimumRuntimeMinutes = null): int
     {
-        $heartbeatMinutes ??= (int) config('plugins.stale_run.heartbeat_minutes', 15);
-        $minimumRuntimeMinutes ??= (int) config('plugins.stale_run.minimum_runtime_minutes', 365);
-
-        if ($heartbeatMinutes < 1) {
-            throw new InvalidArgumentException('Heartbeat expiry minutes must be at least 1.');
-        }
-
-        if ($minimumRuntimeMinutes < 1) {
-            throw new InvalidArgumentException('Minimum runtime minutes must be at least 1.');
-        }
+        $heartbeatMinutes = $this->resolveStaleThresholdMinutes(
+            $heartbeatMinutes,
+            'plugins.stale_run.heartbeat_minutes',
+            15,
+            'Heartbeat expiry minutes must be a whole number of at least 1.',
+        );
+        $minimumRuntimeMinutes = $this->resolveStaleThresholdMinutes(
+            $minimumRuntimeMinutes,
+            'plugins.stale_run.minimum_runtime_minutes',
+            365,
+            'Minimum runtime minutes must be a whole number of at least 1.',
+        );
 
         $heartbeatCutoff = now()->subMinutes($heartbeatMinutes);
         $runtimeCutoff = now()->subMinutes($minimumRuntimeMinutes);
         $staleRuns = PluginRun::query()
-            ->where('status', 'running')
-            ->whereNotNull('started_at')
             ->where(function ($query) use ($heartbeatCutoff, $runtimeCutoff) {
                 $query
-                    ->where(function ($heartbeatQuery) use ($heartbeatCutoff) {
-                        $heartbeatQuery
-                            ->whereNotNull('last_heartbeat_at')
-                            ->where('last_heartbeat_at', '<', $heartbeatCutoff);
+                    // Running invocations that have stopped checking in.
+                    ->where(function ($runningQuery) use ($heartbeatCutoff, $runtimeCutoff) {
+                        $runningQuery
+                            ->where('status', 'running')
+                            ->whereNotNull('started_at')
+                            ->where(function ($ageQuery) use ($heartbeatCutoff, $runtimeCutoff) {
+                                $ageQuery
+                                    ->where(function ($heartbeatQuery) use ($heartbeatCutoff) {
+                                        $heartbeatQuery
+                                            ->whereNotNull('last_heartbeat_at')
+                                            ->where('last_heartbeat_at', '<', $heartbeatCutoff);
+                                    })
+                                    ->orWhere(function ($legacyQuery) use ($runtimeCutoff) {
+                                        $legacyQuery
+                                            ->whereNull('last_heartbeat_at')
+                                            ->where('started_at', '<', $runtimeCutoff);
+                                    });
+                            });
                     })
-                    ->orWhere(function ($legacyQuery) use ($runtimeCutoff) {
-                        $legacyQuery
-                            ->whereNull('last_heartbeat_at')
-                            ->where('started_at', '<', $runtimeCutoff);
+                    // Resumed invocations that were queued but never claimed by a worker. The
+                    // dedicated plugin worker runs one job at a time for up to the maximum
+                    // runtime, so anything still pending past that window is orphaned.
+                    ->orWhere(function ($pendingQuery) use ($runtimeCutoff) {
+                        $pendingQuery
+                            ->where('status', 'pending')
+                            ->where('updated_at', '<', $runtimeCutoff);
                     });
             })
             ->lazyById();
@@ -1126,12 +1143,18 @@ class PluginManager
         $recovered = 0;
 
         foreach ($staleRuns as $run) {
-            $summary = $run->progress_message ?: $run->summary ?: 'Run lost its heartbeat and was marked stale.';
+            $wasPending = $run->status === 'pending';
+            $summary = $wasPending
+                ? 'Run was queued to resume but no worker picked it up. Marked stale so it can be resumed again.'
+                : ($run->progress_message ?: $run->summary ?: 'Run lost its heartbeat and was marked stale.');
 
             $run->logs()->create([
                 'level' => 'warning',
-                'message' => 'Run heartbeat expired. Marking the run as stale so an operator can resume or rerun it.',
+                'message' => $wasPending
+                    ? 'Resumed run was never claimed by a worker. Marking it stale so an operator can resume or rerun it.'
+                    : 'Run heartbeat expired. Marking the run as stale so an operator can resume or rerun it.',
                 'context' => [
+                    'previous_status' => $run->status,
                     'last_heartbeat_at' => optional($run->last_heartbeat_at)->toDateTimeString(),
                 ],
             ]);
@@ -1155,6 +1178,34 @@ class PluginManager
         }
 
         return $recovered;
+    }
+
+    /**
+     * Resolve a stale-recovery threshold in minutes.
+     *
+     * An explicit caller-supplied value (CLI option or direct call) must be a positive
+     * integer or it is rejected. A value that falls back to config is sanitised instead:
+     * this method runs every minute on a schedule and on every plugin admin page mount,
+     * so a blank or misconfigured setting must degrade to the documented default rather
+     * than throw and take those surfaces down.
+     */
+    private function resolveStaleThresholdMinutes(
+        ?int $explicit,
+        string $configKey,
+        int $default,
+        string $rejectionMessage,
+    ): int {
+        if ($explicit !== null) {
+            if ($explicit < 1) {
+                throw new InvalidArgumentException($rejectionMessage);
+            }
+
+            return $explicit;
+        }
+
+        $configured = config($configKey, $default);
+
+        return is_numeric($configured) && (int) $configured >= 1 ? (int) $configured : $default;
     }
 
     public function failPendingResumedRun(

@@ -81,10 +81,14 @@ return [
 
         'plugin' => [
             'driver' => 'redis',
+            // Dedicated queue key, not a dedicated Redis server - shares the same Redis
+            // connection as the default queue unless REDIS_QUEUE_CONNECTION is set.
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => 'plugin-invocations',
-            // Plugin invocations may run for six hours and must not be released while still running.
-            'retry_after' => 60 * 365 + 5,
+            // Must stay longer than the plugin supervisor's job 'timeout' in config/horizon.php
+            // (6h by default) so a running plugin invocation is never released to a second
+            // worker mid-run. 305s of head-room, matching the margin on the redis connection above.
+            'retry_after' => 60 * 60 * 6 + 305,
             'block_for' => null,
             'after_commit' => false,
         ],

@@ -215,7 +215,8 @@ return [
             'maxJobs' => $horizonIntEnv('HORIZON_PLUGIN_MAX_JOBS', 50),
             'memory' => $horizonIntEnv('HORIZON_PLUGIN_MEMORY', 256),
             'tries' => 1,
-            'timeout' => 60 * 60 * 6,
+            // Must stay shorter than the 'plugin' connection retry_after in config/queue.php.
+            'timeout' => $horizonIntEnv('HORIZON_PLUGIN_TIMEOUT', 60 * 60 * 6),
             'nice' => 5,
         ],
 
