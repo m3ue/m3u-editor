@@ -1090,14 +1090,14 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
     }
 });
 
-it('requires heartbeat expiry and the configured minimum runtime before marking runs stale', function () {
+it('uses heartbeat expiry authoritatively and minimum runtime for legacy stale runs', function () {
     $pluginId = 'stale-runtime-fixture-'.Str::lower(Str::random(6));
     $pluginManager = app(PluginManager::class);
     $installed = installFixturePluginForTests($pluginId, trust: true, enabled: true);
     $plugin = $installed['plugin'];
 
     try {
-        $sixHourRun = PluginRun::query()->create([
+        $expiredHeartbeatRun = PluginRun::query()->create([
             'extension_plugin_id' => $plugin->id,
             'status' => 'running',
             'invocation_type' => 'action',
@@ -1106,13 +1106,49 @@ it('requires heartbeat expiry and the configured minimum runtime before marking 
             'dry_run' => true,
             'payload' => [],
             'last_heartbeat_at' => now()->subMinutes(20),
+            'started_at' => now()->subMinutes(10),
+        ]);
+        $freshHeartbeatRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => now(),
+            'started_at' => now()->subMinutes(370),
+        ]);
+        $youngLegacyRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => null,
             'started_at' => now()->subMinutes(360),
+        ]);
+        $staleLegacyRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => null,
+            'started_at' => now()->subMinutes(370),
         ]);
 
         expect(config('plugins.stale_run.heartbeat_minutes'))->toBe(15)
             ->and(config('plugins.stale_run.minimum_runtime_minutes'))->toBe(365)
-            ->and($pluginManager->recoverStaleRuns())->toBe(0)
-            ->and($sixHourRun->fresh()->status)->toBe('running');
+            ->and($pluginManager->recoverStaleRuns())->toBe(2)
+            ->and($expiredHeartbeatRun->fresh()->status)->toBe('stale')
+            ->and($freshHeartbeatRun->fresh()->status)->toBe('running')
+            ->and($youngLegacyRun->fresh()->status)->toBe('running')
+            ->and($staleLegacyRun->fresh()->status)->toBe('stale');
 
         $this->artisan('plugins:recover-stale-runs', [
             '--minutes' => 15,
@@ -1121,7 +1157,7 @@ it('requires heartbeat expiry and the configured minimum runtime before marking 
             ->assertSuccessful()
             ->expectsOutput('Recovered 1 stale plugin run(s).');
 
-        expect($sixHourRun->fresh()->status)->toBe('stale');
+        expect($youngLegacyRun->fresh()->status)->toBe('stale');
     } finally {
         cleanupReviewFixturePlugin($pluginId);
     }

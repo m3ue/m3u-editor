@@ -1108,18 +1108,17 @@ class PluginManager
         $staleRuns = PluginRun::query()
             ->where('status', 'running')
             ->whereNotNull('started_at')
-            ->where('started_at', '<', $runtimeCutoff)
-            ->where(function ($query) use ($heartbeatCutoff) {
+            ->where(function ($query) use ($heartbeatCutoff, $runtimeCutoff) {
                 $query
                     ->where(function ($heartbeatQuery) use ($heartbeatCutoff) {
                         $heartbeatQuery
                             ->whereNotNull('last_heartbeat_at')
                             ->where('last_heartbeat_at', '<', $heartbeatCutoff);
                     })
-                    ->orWhere(function ($legacyQuery) use ($heartbeatCutoff) {
+                    ->orWhere(function ($legacyQuery) use ($runtimeCutoff) {
                         $legacyQuery
                             ->whereNull('last_heartbeat_at')
-                            ->where('started_at', '<', $heartbeatCutoff);
+                            ->where('started_at', '<', $runtimeCutoff);
                     });
             })
             ->lazyById();
