@@ -679,7 +679,7 @@ class ProcessM3uImport implements ShouldQueue
                             'source_id' => $item->stream_id, // source ID for the channel
                             'channel' => $item->num ?? null,
                             'catchup' => $item->tv_archive ?? null,
-                            'shift' => $item->tv_archive_duration ?? 0,
+                            'shift' => (int) ($item->tv_archive_duration ?? 0) * 24,
                             // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
                         ];
                         if ($autoSort) {
@@ -980,10 +980,12 @@ class ProcessM3uImport implements ShouldQueue
                                     }
                                 }
 
-                                // Catch-up window (in hours, matching Xtream's tv_archive_duration).
-                                // Providers use different attributes for this: 'timeshift'/'tvg-shift' are
-                                // already in hours, while 'catchup-days'/'tvg-rec' express it in days.
-                                // Check in precedence order and stop at the first one present.
+                                // Catch-up window in hours. Providers use different attributes for this:
+                                // 'timeshift'/'tvg-shift' are already in hours, while 'catchup-days'/
+                                // 'tvg-rec' express it in days. Xtream's 'tv_archive_duration' is also
+                                // days (see XtreamApiController::resolveTvArchiveDuration, #1389) and is
+                                // converted days→hours at the Xtream ingest site. Check in precedence
+                                // order and stop at the first one present.
                                 foreach ([
                                     'timeshift' => 1,
                                     'tvg-shift' => 1,
