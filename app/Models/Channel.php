@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -168,6 +169,16 @@ class Channel extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(Group::class);
+    }
+
+    /**
+     * TMDB-computed dynamic groups this channel belongs to.
+     * Inverse of DynamicGroup::channels() on the polymorphic
+     * `dynamic_group_items` pivot table.
+     */
+    public function dynamicGroups(): MorphToMany
+    {
+        return $this->morphToMany(DynamicGroup::class, 'item', 'dynamic_group_items');
     }
 
     public function streamFileSetting(): BelongsTo

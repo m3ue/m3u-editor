@@ -17,6 +17,35 @@ class TmdbService
 {
     protected const BASE_URL = 'https://api.themoviedb.org/3';
 
+    /**
+     * Curated TMDB network id → label map used by the "by TV Network" dynamic
+     * group source. TMDB v3 has no network-list or network-search endpoint, so
+     * the user picks from this static set rather than typing an unknown id.
+     * Ids are TMDB's network ids (https://www.themoviedb.org/network/<id>).
+     */
+    public const TV_NETWORKS = [
+        49 => 'HBO',
+        213 => 'Netflix',
+        1024 => 'Amazon Prime Video',
+        2739 => 'Disney+',
+        2552 => 'Apple TV+',
+        453 => 'Hulu',
+        3186 => 'HBO Max',
+        4330 => 'Paramount+',
+        3353 => 'Peacock',
+        174 => 'AMC',
+        88 => 'FX',
+        67 => 'Showtime',
+        2 => 'ABC',
+        6 => 'NBC',
+        16 => 'CBS',
+        19 => 'FOX',
+        4 => 'BBC One',
+        56 => 'Cartoon Network',
+        13 => 'Nickelodeon',
+        54 => 'Disney Channel',
+    ];
+
     protected ?string $apiKey;
 
     protected string $language;
@@ -2001,6 +2030,48 @@ class TmdbService
                     ->all();
             } catch (\Exception $e) {
                 Log::error('TMDB: getUpcomingMovies error', ['error' => $e->getMessage()]);
+
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Fetch movies currently in theatres ("now playing"). Mirrors
+     * getUpcomingMovies() — endpoint `/movie/now_playing`, same cache TTL
+     * (1 hr) since theatre lineups shift on the same order of magnitude.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getNowPlayingMovies(int $page = 1): array
+    {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $cacheKey = "tmdb_now_playing_movies_{$page}_{$this->language}";
+
+        return Cache::remember($cacheKey, now()->addHours(1), function () use ($page) {
+            $this->waitForRateLimit();
+
+            try {
+                $response = Http::timeout(15)->get(self::BASE_URL.'/movie/now_playing', [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'page' => $page,
+                ]);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                return collect($response->json()['results'] ?? [])
+                    ->map(fn ($item) => $this->normalizeDiscoverResult($item, 'movie'))
+                    ->filter(fn ($item) => $item['tmdb_id'] > 0)
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                Log::error('TMDB: getNowPlayingMovies error', ['error' => $e->getMessage()]);
 
                 return [];
             }

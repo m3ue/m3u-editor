@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -72,6 +73,16 @@ class Series extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    /**
+     * TMDB-computed dynamic groups this series belongs to.
+     * Inverse of DynamicGroup::series() on the polymorphic
+     * `dynamic_group_items` pivot table.
+     */
+    public function dynamicGroups(): MorphToMany
+    {
+        return $this->morphToMany(DynamicGroup::class, 'item', 'dynamic_group_items');
     }
 
     public function streamFileSetting(): BelongsTo

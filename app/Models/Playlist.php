@@ -70,6 +70,7 @@ class Playlist extends Model
         'sort_alpha_config' => 'array',
         'channel_enable_rules' => 'array',
         'auto_sync_to_custom_config' => 'array',
+        'dynamic_groups_config' => 'array',
         'emby_config' => 'array',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
@@ -256,6 +257,11 @@ class Playlist extends Model
     public function sourceCategories(): HasMany
     {
         return $this->hasMany(SourceCategory::class);
+    }
+
+    public function dynamicGroups(): HasMany
+    {
+        return $this->hasMany(DynamicGroup::class);
     }
 
     public function mergedPlaylists(): BelongsToMany

@@ -5183,5 +5183,21 @@
     "veryfast": "sehr schnell",
     "vs.": "vs.",
     "your-api-key-here": "Ihr-API-Schlüssel-hier",
-    "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist": "yt-dlp-Formatauswahl, gefolgt von optionalen Flags. Beispiel: bestvideo+bestaudio/best --no-playlist"
+    "yt-dlp format selector followed by optional flags. Example: bestvideo+bestaudio/best --no-playlist": "yt-dlp-Formatauswahl, gefolgt von optionalen Flags. Beispiel: bestvideo+bestaudio/best --no-playlist",
+    "Add dynamic group": "Add dynamic group",
+    "By Streaming Service": "By Streaming Service",
+    "By TV Network": "By TV Network",
+    "Coming Soon": "Coming Soon",
+    "Dynamic Groups (TMDB)": "Dynamic Groups (TMDB)",
+    "In Theatres": "In Theatres",
+    "Popular": "Popular",
+    "Region": "Region",
+    "Streaming Service": "Streaming Service",
+    "TV Network": "TV Network",
+    "This Week": "This Week",
+    "Time Window": "Time Window",
+    "Today": "Today",
+    "Top Genre": "Top Genre",
+    "Trending": "Trending",
+    "VOD (Movies)": "VOD (Movies)"
 }
