@@ -99,6 +99,68 @@ it('returns five TV candidates by default with TV year and normalized query para
         ]);
 });
 
+it('rejects malformed movie and TV candidate IDs without follow-up requests', function (string $mediaType, mixed $id) {
+    $isMovie = $mediaType === 'movie';
+    $result = $isMovie
+        ? [
+            'id' => $id,
+            'title' => 'Synthetic Movie',
+            'original_title' => 'Original Movie',
+            'release_date' => '2024-01-01',
+            'overview' => 'Synthetic movie overview',
+        ]
+        : [
+            'id' => $id,
+            'name' => 'Synthetic Series',
+            'original_name' => 'Original Series',
+            'first_air_date' => '2021-02-03',
+            'overview' => 'Synthetic series overview',
+        ];
+    $searchUrl = "https://api.themoviedb.org/3/search/{$mediaType}";
+
+    Http::preventStrayRequests();
+    Http::fake([
+        "{$searchUrl}*" => Http::response(
+            json_encode(['results' => [$result]], JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR),
+            headers: ['Content-Type' => 'application/json'],
+        ),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $candidates = $isMovie
+        ? $service->searchMovieCandidates('Synthetic Movie')
+        : $service->searchTvSeriesCandidates('Synthetic Series');
+
+    expect($candidates)->toBe([]);
+    Http::assertSentCount(1);
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), $searchUrl));
+})->with([
+    'movie integer-like float' => ['movie', 123.0],
+    'movie fractional float' => ['movie', 1.5],
+    'movie integer numeric string' => ['movie', '123'],
+    'movie decimal numeric string' => ['movie', '1.5'],
+    'movie exponent numeric string' => ['movie', '1e3'],
+    'movie null' => ['movie', null],
+    'movie true' => ['movie', true],
+    'movie false' => ['movie', false],
+    'movie array' => ['movie', [123]],
+    'movie object' => ['movie', (object) ['id' => 123]],
+    'movie zero' => ['movie', 0],
+    'movie negative integer' => ['movie', -1],
+    'TV integer-like float' => ['tv', 123.0],
+    'TV fractional float' => ['tv', 1.5],
+    'TV integer numeric string' => ['tv', '123'],
+    'TV decimal numeric string' => ['tv', '1.5'],
+    'TV exponent numeric string' => ['tv', '1e3'],
+    'TV null' => ['tv', null],
+    'TV true' => ['tv', true],
+    'TV false' => ['tv', false],
+    'TV array' => ['tv', [123]],
+    'TV object' => ['tv', (object) ['id' => 123]],
+    'TV zero' => ['tv', 0],
+    'TV negative integer' => ['tv', -1],
+]);
+
 it('returns an empty candidate list for unconfigured, blank, failed, malformed, and exceptional searches', function () {
     $unconfigured = new GeneralSettings;
     $unconfigured->tmdb_api_key = null;

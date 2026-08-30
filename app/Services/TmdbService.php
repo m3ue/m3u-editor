@@ -127,11 +127,11 @@ class TmdbService
 
             $candidates = [];
             foreach (array_slice($results, 0, $limit) as $result) {
-                if (! is_array($result) || ! is_numeric($result['id'] ?? null) || (int) $result['id'] < 1) {
+                if (! is_array($result) || ! is_int($result['id'] ?? null) || $result['id'] < 1) {
                     return [];
                 }
 
-                $candidate = ['tmdb_id' => (int) $result['id']];
+                $candidate = ['tmdb_id' => $result['id']];
                 foreach ($fields as $field) {
                     if (! array_key_exists($field, $result)
                         || ($result[$field] !== null && ! is_scalar($result[$field]))) {
