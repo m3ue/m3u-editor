@@ -46,6 +46,109 @@ class TmdbService
     }
 
     /**
+     * Search for bounded movie candidates without loading related resources.
+     *
+     * @return list<array{tmdb_id: int, title: mixed, original_title: mixed, release_date: mixed, overview: mixed}>
+     */
+    public function searchMovieCandidates(string $title, ?int $year = null, int $limit = 5): array
+    {
+        return $this->searchCandidates(
+            'movie',
+            $title,
+            $year,
+            $limit,
+            ['title', 'original_title', 'release_date', 'overview'],
+            'year',
+        );
+    }
+
+    /**
+     * Search for bounded TV candidates without loading related resources.
+     *
+     * @return list<array{tmdb_id: int, name: mixed, original_name: mixed, first_air_date: mixed, overview: mixed}>
+     */
+    public function searchTvSeriesCandidates(string $name, ?int $year = null, int $limit = 5): array
+    {
+        return $this->searchCandidates(
+            'tv',
+            $name,
+            $year,
+            $limit,
+            ['name', 'original_name', 'first_air_date', 'overview'],
+            'first_air_date_year',
+        );
+    }
+
+    /**
+     * @param  list<string>  $fields
+     * @return list<array<string, mixed>>
+     */
+    private function searchCandidates(
+        string $mediaType,
+        string $query,
+        ?int $year,
+        int $limit,
+        array $fields,
+        string $yearKey,
+    ): array {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $normalizedQuery = $this->normalizeTitle($query);
+        if ($normalizedQuery === '') {
+            return [];
+        }
+
+        $limit = max(1, min(10, $limit));
+
+        try {
+            $this->waitForRateLimit();
+
+            $params = [
+                'api_key' => $this->apiKey,
+                'query' => $normalizedQuery,
+                'language' => $this->language,
+                'include_adult' => false,
+            ];
+            if ($year !== null) {
+                $params[$yearKey] = $year;
+            }
+
+            $response = Http::timeout(15)->get(self::BASE_URL."/search/{$mediaType}", $params);
+            if (! $response->successful()) {
+                return [];
+            }
+
+            $results = $response->json('results', []);
+            if (! is_array($results) || ! array_is_list($results)) {
+                return [];
+            }
+
+            $candidates = [];
+            foreach (array_slice($results, 0, $limit) as $result) {
+                if (! is_array($result) || ! is_numeric($result['id'] ?? null) || (int) $result['id'] < 1) {
+                    return [];
+                }
+
+                $candidate = ['tmdb_id' => (int) $result['id']];
+                foreach ($fields as $field) {
+                    if (! array_key_exists($field, $result)
+                        || ($result[$field] !== null && ! is_scalar($result[$field]))) {
+                        return [];
+                    }
+                    $candidate[$field] = $result[$field];
+                }
+                $candidates[] = $candidate;
+            }
+
+            return $candidates;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * Search for a movie by title and optionally year.
      *
      * @param  string  $title  The movie title to search for
