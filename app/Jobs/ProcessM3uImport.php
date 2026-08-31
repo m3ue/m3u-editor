@@ -1520,26 +1520,29 @@ class ProcessM3uImport implements ShouldQueue
         // FindReplace phase can see (and rewrite) series titles before STRM filenames are
         // generated. See SYNC_RUN_SUMMARY.md for full pipeline ordering rationale.
         if ($seriesCategories) {
-            $categoryCount = $seriesCategories->count();
-            $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
-                if (! $this->preprocess || $this->shouldIncludeSeries($category['category_name'] ?? '')) {
-                    // Check if category is auto-enabled
-                    $autoEnable = (bool) ($this->playlist->enable_series
-                        || $this->enabledCategories->contains($category['category_name'] ?? ''));
+            $seriesCategoriesToImport = $seriesCategories
+                ->filter(fn (array $category): bool => ! $this->preprocess
+                    || $this->shouldIncludeSeries($category['category_name'] ?? ''))
+                ->values();
+            $categoryCount = $seriesCategoriesToImport->count();
 
-                    // Create a job for each series category
-                    $jobs[] = new ProcessM3uImportSeriesChunk(
-                        [
-                            'categoryId' => $category['category_id'],
-                            'categoryName' => $category['category_name'],
-                            'playlistId' => $playlistId,
-                        ],
-                        $categoryCount,
-                        $batchNo,
-                        $index,
-                        $autoEnable
-                    );
-                }
+            $seriesCategoriesToImport->each(function (array $category, int $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
+                // Check if category is auto-enabled
+                $autoEnable = (bool) ($this->playlist->enable_series
+                    || $this->enabledCategories->contains($category['category_name'] ?? ''));
+
+                // Create a job for each series category
+                $jobs[] = new ProcessM3uImportSeriesChunk(
+                    [
+                        'categoryId' => $category['category_id'],
+                        'categoryName' => $category['category_name'],
+                        'playlistId' => $playlistId,
+                    ],
+                    $categoryCount,
+                    $batchNo,
+                    $index,
+                    $autoEnable
+                );
             });
         }
 
@@ -1553,6 +1556,7 @@ class ProcessM3uImport implements ShouldQueue
             isNew: $this->isNew,
             runningLiveImport: $liveStreamsEnabled,
             runningVodImport: $vodStreamsEnabled,
+            runningSeriesImport: $seriesCategories !== null,
             syncRunId: $this->syncRunId,
         );
 

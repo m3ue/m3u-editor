@@ -28,6 +28,8 @@ class ProcessM3uImportComplete implements ShouldQueue
 {
     use Queueable;
 
+    public bool $runningSeriesImport = false;
+
     // Don't retry the job on failure
     public $tries = 1;
 
@@ -63,7 +65,10 @@ class ProcessM3uImportComplete implements ShouldQueue
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
         public ?int $syncRunId = null,
+        bool $runningSeriesImport = false,
     ) {
+        $this->runningSeriesImport = $runningSeriesImport;
+
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
         $this->invalidateImportThreshold = config('dev.invalidate_import_threshold', 100);
@@ -358,6 +363,9 @@ class ProcessM3uImportComplete implements ShouldQueue
         }
         if ($this->runningVodImport) {
             $update['vod_progress'] = 100; // Only set if VOD import was run
+        }
+        if ($this->runningSeriesImport) {
+            $update['series_progress'] = 100; // Only set if Series import was run
         }
         $playlist->update($update);
 
