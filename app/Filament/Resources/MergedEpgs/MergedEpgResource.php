@@ -354,7 +354,7 @@ class MergedEpgResource extends Resource implements CopilotResource
                 ->minItems(2)
                 ->hintIcon(
                     'heroicon-s-information-circle',
-                    tooltip: 'Select 2 or more source EPGs to merge into a single EPG output. Duplicates will be ignored based on channel name and number.',
+                    tooltip: __('Select 2 or more source EPGs to merge into a single EPG output. Duplicates will be ignored based on channel name and number.'),
                 )
                 ->helperText(__('Drag to re-order the assigned EPG sources. The first will be given the highest priority.')),
 

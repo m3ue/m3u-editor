@@ -289,7 +289,7 @@ class Preferences extends SettingsPage
                                                     ->label(__('Suppress success notifications'))
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, success and informational notifications from background tasks (e.g. sync started or completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                        tooltip: __('When enabled, success and informational notifications from background tasks (e.g. sync started or completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.')
                                                     )
                                                     ->helperText(__('Hide success and informational notifications from background tasks (errors and warnings are always shown).')),
                                             ]),
@@ -570,7 +570,7 @@ class Preferences extends SettingsPage
                                             ->live()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'If you would like the proxied streams to use a different base URL than the configured app url. Useful for local network access or when using a TLD for access, but prefer LAN address for streaming.'
+                                                tooltip: __('If you would like the proxied streams to use a different base URL than the configured app url. Useful for local network access or when using a TLD for access, but prefer LAN address for streaming.')
                                             )
                                             ->disabled(fn () => ! empty(config('proxy.url_override')))
                                             ->hint(fn () => ! empty(config('proxy.url_override')) ? 'Already set by environment variable!' : null)
@@ -590,7 +590,7 @@ class Preferences extends SettingsPage
                                             ->columnSpanFull()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'When enabled, the application will resolve the public-facing proxy URL using the incoming request host/scheme instead of the APP_URL or the configured Override URL (if set).'
+                                                tooltip: __('When enabled, the application will resolve the public-facing proxy URL using the incoming request host/scheme instead of the APP_URL or the configured Override URL (if set).')
                                             )
                                             ->helperText(__('Useful for multi-host access (VPN/Tailscale/etc.)'))
                                             ->default(false),
@@ -600,7 +600,7 @@ class Preferences extends SettingsPage
                                             ->columnSpanFull()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'When a playlist has a connection limit and it\'s reached, enabling this will automatically stop the oldest active stream to make room for the new request. This is useful for single-connection providers where you want instant channel switching. Note: This may cause issues if multiple clients share the same playlist - the newest request always wins.'
+                                                tooltip: __('When a playlist has a connection limit and it\'s reached, enabling this will automatically stop the oldest active stream to make room for the new request. This is useful for single-connection providers where you want instant channel switching. Note: This may cause issues if multiple clients share the same playlist - the newest request always wins.')
                                             )
                                             ->default(false)
                                             ->helperText(__('Enable to allow new stream requests to automatically stop the oldest stream when a playlist reaches its connection limit. Disabled by default.')),
@@ -610,7 +610,7 @@ class Preferences extends SettingsPage
                                             ->columnSpanFull()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'This is useful for Plex which need HTTPS for logo images. When using a domain with HTTPS for the frontend, but proxy URL override points to a local HTTP address, Plex may not load the logos due to HTTPS requirements. By enabling this option you can keep the stream proxy override for local access while logos still use the HTTPS domain URL that Plex requires.'
+                                                tooltip: __('This is useful for Plex which need HTTPS for logo images. When using a domain with HTTPS for the frontend, but proxy URL override points to a local HTTP address, Plex may not load the logos due to HTTPS requirements. By enabling this option you can keep the stream proxy override for local access while logos still use the HTTPS domain URL that Plex requires.')
                                             )
                                             ->disabled(fn () => config('proxy.url_override_include_logos') !== null)
                                             ->hint(fn () => config('proxy.url_override_include_logos') !== null ? 'Already set by environment variable!' : null)
@@ -671,7 +671,7 @@ class Preferences extends SettingsPage
                                             ->live()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'This should be the LAN address of the editor for the proxy to access. The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.'
+                                                tooltip: __('This should be the LAN address of the editor for the proxy to access. The resolver URL is used for advanced failover logic, webhook registration for pooled providers, and Network Broadcasting features. This URL should point to the m3u-editor instance that the proxy can access.')
                                             )
                                             ->prefixIcon('heroicon-m-link')
                                             ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
@@ -703,7 +703,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'When enabled, the proxy will make a call to the editor to determine which failover to use based on available capacity. When disabled, a list of failover URLs will be sent to the proxy and it will loop through them without any capacity checks when a stream failure occurs.'
+                                                tooltip: __('When enabled, the proxy will make a call to the editor to determine which failover to use based on available capacity. When disabled, a list of failover URLs will be sent to the proxy and it will loop through them without any capacity checks when a stream failure occurs.')
                                             )
                                             ->live()
                                             ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
@@ -726,7 +726,7 @@ class Preferences extends SettingsPage
                                                     ->live()
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
-                                                        tooltip: 'When enabled, playlists returning specific HTTP status codes will be temporarily marked as invalid during failover resolution. This enables account-level failover by skipping all channels from a failing playlist/account.'
+                                                        tooltip: __('When enabled, playlists returning specific HTTP status codes will be temporarily marked as invalid during failover resolution. This enables account-level failover by skipping all channels from a failing playlist/account.')
                                                     )
                                                     ->helperText(__('Mark playlists as temporarily unavailable when specific HTTP errors are encountered during failover.')),
 
@@ -788,7 +788,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.'
+                                                tooltip: __('When enabled, the proxy will monitor live streams for silent audio. If silence is detected for the configured number of consecutive checks, a failover is triggered.')
                                             )
                                             ->helperText(__('Automatically trigger failover when a stream\'s audio goes silent. Disabled by default.')),
 
@@ -803,7 +803,7 @@ class Preferences extends SettingsPage
                                                     ->suffix('dB')
                                                     ->hintIcon(
                                                         'heroicon-m-question-mark-circle',
-                                                        tooltip: 'Audio level below which audio is considered silent. -50 dB is a good default; raise to -40 dB for stricter detection.'
+                                                        tooltip: __('Audio level below which audio is considered silent. -50 dB is a good default; raise to -40 dB for stricter detection.')
                                                     )
                                                     ->helperText(__('Audio level (in dB) below which audio is considered silent. Default: -50 dB.')),
 
@@ -1194,7 +1194,7 @@ class Preferences extends SettingsPage
                                             ->required()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Lower values (1-2) are safer but slower. Set to 1 to process requests sequentially.'
+                                                tooltip: __('Lower values (1-2) are safer but slower. Set to 1 to process requests sequentially.')
                                             )
                                             ->minValue(1)
                                             ->default(2)
@@ -1205,7 +1205,7 @@ class Preferences extends SettingsPage
                                             ->required()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.'
+                                                tooltip: __('Recommended: 500-2000ms. Higher values reduce load on provider but increase sync time.')
                                             )
                                             ->columnSpan(1)
                                             ->minValue(100)
@@ -1242,7 +1242,7 @@ class Preferences extends SettingsPage
                                             ->columnSpan(1)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Some providers frequently remove and re-add groups/categories, which can lead to channels be removed during sync. This setting helps prevent large-scale removals by canceling the sync if the defined number of channels would be removed.'
+                                                tooltip: __('Some providers frequently remove and re-add groups/categories, which can lead to channels be removed during sync. This setting helps prevent large-scale removals by canceling the sync if the defined number of channels would be removed.')
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_threshold')))
@@ -1257,7 +1257,7 @@ class Preferences extends SettingsPage
                                             ->columnSpan(1)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Cancel the sync if this many series would be removed. Helps protect against provider API responses that omit series data temporarily.'
+                                                tooltip: __('Cancel the sync if this many series would be removed. Helps protect against provider API responses that omit series data temporarily.')
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_series_threshold')))
@@ -1272,7 +1272,7 @@ class Preferences extends SettingsPage
                                             ->columnSpan(1)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Cancel the sync if this many groups or categories would be removed. Useful for catching provider outages that drop entire category lists.'
+                                                tooltip: __('Cancel the sync if this many groups or categories would be removed. Useful for catching provider outages that drop entire category lists.')
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_group_threshold')))
@@ -1294,7 +1294,7 @@ class Preferences extends SettingsPage
                                             ->searchable()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Category level or per-Series.'
+                                                tooltip: __('Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Category level or per-Series.')
                                             )
                                             ->options(function () {
                                                 return StreamFileSetting::where('user_id', auth()->id())
@@ -1323,7 +1323,7 @@ class Preferences extends SettingsPage
                                             ->searchable()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Group level or per-VOD channel.'
+                                                tooltip: __('Stream File Settings can be created and managed in Playlist > Stream File Settings. Settings can be overridden at the Group level or per-VOD channel.')
                                             )
                                             ->options(function () {
                                                 return StreamFileSetting::where('user_id', auth()->id())
@@ -1388,7 +1388,7 @@ class Preferences extends SettingsPage
                                             ->downloadable()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Used when a channel logo is missing. Clear to use the default placeholder.'
+                                                tooltip: __('Used when a channel logo is missing. Clear to use the default placeholder.')
                                             )
                                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 300x300px for best results.<br/>Default image: <img src="'.url('/placeholder.png').'" alt="Default Logo Placeholder" style="width:80px; height:80px; margin-top:5px;">')),
                                         FileUpload::make('episode_placeholder_url')
@@ -1401,7 +1401,7 @@ class Preferences extends SettingsPage
                                             ->downloadable()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Used when an episode preview image is missing. Clear to use the default placeholder.'
+                                                tooltip: __('Used when an episode preview image is missing. Clear to use the default placeholder.')
                                             )
                                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 600x400px for best results.<br/>Default image: <img src="'.url('/episode-placeholder.png').'" alt="Default Episode Placeholder" style="width:120px; height:80px; margin-top:5px;">')),
                                         FileUpload::make('vod_series_poster_placeholder_url')
@@ -1414,7 +1414,7 @@ class Preferences extends SettingsPage
                                             ->downloadable()
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Used when VOD/Series poster or cover images are missing. Clear to use the default placeholder.'
+                                                tooltip: __('Used when VOD/Series poster or cover images are missing. Clear to use the default placeholder.')
                                             )
                                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 600x900px for best results.<br/>Default image: <img src="'.url('/vod-series-poster-placeholder.png').'" alt="Default VOD/Series Poster Placeholder" style="width:80px; height:120px; margin-top:5px;">')),
                                     ]),
@@ -1808,7 +1808,7 @@ class Preferences extends SettingsPage
                                             ->default(20)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: 'Applies to every request m3u-editor makes to an AIOStreams instance (manifest, catalog, stream, and meta lookups combined), per integration. Keep this low if you use a shared/hosted AIOStreams instance you don\'t control the server-side rate limits for — AIOStreams\' own defaults for the addon endpoints it exposes range from ~40 to ~360 requests/minute depending on endpoint, so the default here is still well below the strictest of those.'
+                                                tooltip: __('Applies to every request m3u-editor makes to an AIOStreams instance (manifest, catalog, stream, and meta lookups combined), per integration. Keep this low if you use a shared/hosted AIOStreams instance you don\'t control the server-side rate limits for — AIOStreams\' own defaults for the addon endpoints it exposes range from ~40 to ~360 requests/minute depending on endpoint, so the default here is still well below the strictest of those.')
                                             )
                                             ->helperText(__('Maximum combined AIOStreams requests per minute, per integration. Lower is safer for hosted/shared instances.')),
                                         TextInput::make('aiostreams_max_failover_candidates')

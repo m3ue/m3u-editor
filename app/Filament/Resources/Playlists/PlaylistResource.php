@@ -810,7 +810,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                         ->hintIcon(
                             'heroicon-m-exclamation-triangle',
-                            tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
+                            tooltip: __('Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.')
                         )
                         ->hidden(fn ($get): bool => ! $get('edit_uuid'))
                         ->required(),
@@ -942,7 +942,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'Alternative Xtream API URLs to try if the primary URL fails during a sync operation. Stream URLs will be automatically updated to the resolved URL.',
+                                    tooltip: __('Alternative Xtream API URLs to try if the primary URL fails during a sync operation. Stream URLs will be automatically updated to the resolved URL.'),
                                 )
                                 ->helperText(__('Alternative Xtream API URLs. If the primary URL fails during a sync, these will be tried in order (same credentials are used for all URLs).'))
                                 ->simple(
@@ -1078,7 +1078,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->columnSpan(1)
                                         ->hintIcon(
                                             'heroicon-s-information-circle',
-                                            tooltip: 'This is the format that will be used for the imported streams. If you change this later, the playlist will need to be synced for the changes to be applied.',
+                                            tooltip: __('This is the format that will be used for the imported streams. If you change this later, the playlist will need to be synced for the changes to be applied.'),
                                         )
                                         ->options([
                                             'ts' => 'MPEG-TS (.ts)',
@@ -1183,7 +1183,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->label(__('Bypass Provider Connection Limits'))
                                         ->hintIcon(
                                             'heroicon-m-question-mark-circle',
-                                            tooltip: 'Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.'
+                                            tooltip: __('Only the "Available Streams" setting (Output tab) will determine when 503 errors are returned. Enable this if you use stream pooling or if your provider allows more connections than reported.')
                                         )
                                         ->helperText(__('When enabled, the proxy will attempt to start streams even if the provider\'s reported connection limit has been reached.'))
                                         ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
@@ -1200,7 +1200,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->label(__('Enable Provider Affinity'))
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, the proxy will remember which provider profile a client was assigned to and prefer it on subsequent requests. This prevents unnecessary profile switches during channel changes.'
+                                    tooltip: __('When enabled, the proxy will remember which provider profile a client was assigned to and prefer it on subsequent requests. This prevents unnecessary profile switches during channel changes.')
                                 )
                                 ->helperText(__('Remember which provider profile a client was assigned to and prefer it on subsequent requests.'))
                                 ->visible(fn (Get $get): bool => (bool) $get('profiles_enabled'))
@@ -1594,7 +1594,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'This may slow down the import process but can help with larger playlists that time out when fetching all items at once.'
+                            tooltip: __('This may slow down the import process but can help with larger playlists that time out when fetching all items at once.')
                         )
                         ->hidden(fn (Get $get): bool => ! $get('xtream'))
                         ->inline(true)
@@ -1974,7 +1974,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->label(__('Probe Live streams after sync'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Required for fast channel switching when using the emby-xtream plugin.'
+                            tooltip: __('Required for fast channel switching when using the emby-xtream plugin.')
                         )
                         ->helperText(__('When enabled, live channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
                         ->live()
@@ -2113,7 +2113,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Recommend leaving this disabled unless you are including Series in the M3U output or syncing stream files. When accessing via the Xtream API, metadata will be automatically fetched.'
+                            tooltip: __('Recommend leaving this disabled unless you are including Series in the M3U output or syncing stream files. When accessing via the Xtream API, metadata will be automatically fetched.')
                         )
                         ->default(false)
                         ->helperText(__('Fetches episode metadata for enabled series after each sync. Required for stream file sync.')),
@@ -2122,7 +2122,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Requires "Fetch metadata" to be enabled. Stream files will be generated after metadata has been fully fetched.'
+                            tooltip: __('Requires "Fetch metadata" to be enabled. Stream files will be generated after metadata has been fully fetched.')
                         )
                         ->default(false)
                         ->helperText(__('Generates .strm files for enabled series after metadata fetch completes. Requires "Fetch metadata" to be enabled.')),
@@ -2131,7 +2131,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
+                            tooltip: __('Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.')
                         )
                         ->default(false)
                         ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
@@ -2149,7 +2149,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enable this to automatically fetch metadata for enabled VOD channels. When accessing via the Xtream API, metadata will be automatically fetched.'
+                            tooltip: __('Enable this to automatically fetch metadata for enabled VOD channels. When accessing via the Xtream API, metadata will be automatically fetched.')
                         )
                         ->default(false)
                         ->helperText(__('This will only fetch metadata for enabled VOD channels.')),
@@ -2158,7 +2158,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enable this to automatically sync stream files for enabled VOD channels.'
+                            tooltip: __('Enable this to automatically sync stream files for enabled VOD channels.')
                         )
                         ->default(false)
                         ->helperText(__('This will only sync stream files for enabled VOD channels.')),
@@ -2167,7 +2167,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enable this to output your enabled VOD channels in the M3U file.'
+                            tooltip: __('Enable this to output your enabled VOD channels in the M3U file.')
                         )
                         ->default(false)
                         ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
@@ -2229,7 +2229,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->placeholder('/^BBC\\s*One$/i')
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Each pattern matches channels by title or name, grouping them as master + failovers. The highest-scoring match becomes the master. Use PHP regex syntax, e.g. /^CCTV[-]?1$/i'
+                                    tooltip: __('Each pattern matches channels by title or name, grouping them as master + failovers. The highest-scoring match becomes the master. Use PHP regex syntax, e.g. /^CCTV[-]?1$/i')
                                 )
                                 ->helperText(__('Regex patterns for failover grouping. Useful when the same channel has different names within and across providers.'))
                                 ->splitKeys(['Tab', 'Return']),
@@ -2248,7 +2248,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: '⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.'
+                                    tooltip: __('⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.')
                                 )
                                 ->helperText(__('When enabled, channels with higher resolution will be prioritized as master.')),
                             Toggle::make('auto_merge_config.force_complete_remerge')
@@ -2257,7 +2257,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'This will re-evaluate ALL existing failover relationships on each sync.'
+                                    tooltip: __('This will re-evaluate ALL existing failover relationships on each sync.')
                                 )
                                 ->helperText(__('When enabled, all channels will be re-evaluated during merge, including existing failover relationships.')),
                             Toggle::make('auto_merge_config.new_channels_only')
@@ -2265,7 +2265,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'When enabled, only newly synced channels will be merged. Disable to re-process all channels on each sync.'
+                                    tooltip: __('When enabled, only newly synced channels will be merged. Disable to re-process all channels on each sync.')
                                 )
                                 ->default(true),
                             Toggle::make('auto_merge_deactivate_failover')
@@ -2273,7 +2273,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'When enabled, channels that become failovers will be automatically disabled.'
+                                    tooltip: __('When enabled, channels that become failovers will be automatically disabled.')
                                 )
                                 ->default(false),
                             Toggle::make('auto_merge_config.prefer_catchup_as_primary')
@@ -2281,7 +2281,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'When enabled, channels with catch-up enabled will be selected as the master when available.'
+                                    tooltip: __('When enabled, channels with catch-up enabled will be selected as the master when available.')
                                 )
                                 ->default(false),
                             Toggle::make('auto_merge_config.exclude_disabled_groups')
@@ -2289,7 +2289,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'Channels from disabled groups will never be selected as master, only as failovers.'
+                                    tooltip: __('Channels from disabled groups will never be selected as master, only as failovers.')
                                 )
                                 ->default(false),
                             Toggle::make('auto_merge_config.scrubber_aware_master_selection')
@@ -2297,7 +2297,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-exclamation-triangle',
-                                    tooltip: 'When enabled, channels confirmed dead by the scrubber are excluded from master selection. Leave disabled to allow all channels to be eligible as master (default behavior).'
+                                    tooltip: __('When enabled, channels confirmed dead by the scrubber are excluded from master selection. Leave disabled to allow all channels to be eligible as master (default behavior).')
                                 )
                                 ->helperText(__('When enabled, channels confirmed dead by the scrubber are excluded from master selection.'))
                                 ->default(false),
@@ -2781,7 +2781,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->native(false)
                                 ->required()
-                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: '"New Groups Only" automatically syncs any group flagged as new (first import or re-added) into the Custom Playlist, without needing to select them manually.')
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('"New Groups Only" automatically syncs any group flagged as new (first import or re-added) into the Custom Playlist, without needing to select them manually.'))
                                 ->visible(fn (Get $get): bool => $get('type') !== 'series_categories')
                                 ->afterStateUpdated(fn (Set $set) => $set('groups', []))
                                 ->columnSpan(2),
@@ -2847,7 +2847,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ])
                                 ->default('full_sync')
                                 ->required()
-                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: '"Sync" adds new channels and removes channels no longer in the source group. "Add only" never removes channels from the Custom Playlist.')
+                                ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('"Sync" adds new channels and removes channels no longer in the source group. "Add only" never removes channels from the Custom Playlist.'))
                                 ->columnSpan(4),
                             Select::make('mode')
                                 ->label(__('Group Assignment'))
@@ -2942,7 +2942,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.'
+                            tooltip: __('You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing channel sort order customization for this playlist.')
                         )
                         ->inline(false)
                         ->default(true)
@@ -2952,7 +2952,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing group sort order customization for this playlist.'
+                            tooltip: __('You will need to re-sync your playlist, or wait for the next scheduled sync, if changing this. This will overwrite any existing group sort order customization for this playlist.')
                         )
                         ->inline(false)
                         ->default(true)
@@ -2967,7 +2967,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false)
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).'
+                                    tooltip: __('When enabled, catch-up attributes will be stripped from M3U output and Xtream API responses (tv_archive, tv_archive_duration, has_archive).')
                                 )
                                 ->helperText(__('Strip all catch-up related attributes from the playlist output and Xtream API. Useful when your provider\'s catch-up doesn\'t work or is unreliable.')),
                             Toggle::make('disable_m3u_xtream_format')
@@ -2976,7 +2976,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false)
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                                    tooltip: __('When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.')
                                 )
                                 ->afterStateHydrated(function (Toggle $component) {
                                     if (config('app.disable_m3u_xtream_format', false)) {
@@ -2992,7 +2992,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default(false)
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'This can be used by clients to better categorize channels.'
+                                    tooltip: __('This can be used by clients to better categorize channels.')
                                 )
                                 ->helperText(__('When enabled, a <tvg-type> tag will be included in the M3U output based on the channel type (live, vod, series).')),
 
@@ -3013,7 +3013,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'When enabled, the incrementing channel number always replaces the number provided by the source feed, instead of only filling in missing numbers.'
+                            tooltip: __('When enabled, the incrementing channel number always replaces the number provided by the source feed, instead of only filling in missing numbers.')
                         )
                         ->helperText(__('Always assign an incrementing channel number, overriding any number provided by the source.')),
                     TextInput::make('channel_start')
@@ -3059,7 +3059,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->columnSpan(1)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.'
+                            tooltip: __('Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.')
                         )
                         ->rules(['min:0'])
                         ->type('number')
@@ -3161,7 +3161,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->nullable()
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.'
+                                    tooltip: __('Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.')
                                 )
                                 ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
                                 ->placeholder(__('Leave empty for direct stream proxying')),
@@ -3297,7 +3297,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 })
                 ->hintIcon(
                     'heroicon-m-question-mark-circle',
-                    tooltip: 'Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.'
+                    tooltip: __('Only unassigned auths are available. Each auth can only be assigned to one playlist at a time. You will also be able to access the Xtream API using any assigned auths.')
                 )
                 ->helperText(__('Simple authentication for playlist access.'))
                 ->afterStateUpdated(function ($state, $record) {
@@ -3739,7 +3739,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             ])
                             ->hintIcon(
                                 'heroicon-s-information-circle',
-                                tooltip: 'Select the channel attributes to match channels between the source and target playlists. Channels will be matched based on these attributes. If multiple attributes are selected, all must match for a channel to be considered the same.',
+                                tooltip: __('Select the channel attributes to match channels between the source and target playlists. Channels will be matched based on these attributes. If multiple attributes are selected, all must match for a channel to be considered the same.'),
                             )
                             ->multiple()
                             ->required()
@@ -3750,7 +3750,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->live()
                             ->hintIcon(
                                 'heroicon-s-information-circle',
-                                tooltip: 'If enabled, missing channels will be created in the target playlist. If disabled, only existing matched channels will be updated.',
+                                tooltip: __('If enabled, missing channels will be created in the target playlist. If disabled, only existing matched channels will be updated.'),
                             )
                             ->default(false),
                         Toggle::make('all_attributes')
@@ -3758,7 +3758,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->live()
                             ->hintIcon(
                                 'heroicon-s-information-circle',
-                                tooltip: 'If enabled, all channel attributes will be copied to the target playlist. If disabled, only the selected attributes below will be copied.',
+                                tooltip: __('If enabled, all channel attributes will be copied to the target playlist. If disabled, only the selected attributes below will be copied.'),
                             )
                             ->default(true),
                         Select::make('channel_attributes')
@@ -3783,7 +3783,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->label(__('Overwrite Existing Attributes'))
                             ->hintIcon(
                                 'heroicon-s-information-circle',
-                                tooltip: 'If enabled, existing custom attributes in the target playlist will be overwritten. If disabled, only empty custom attributes will be updated.',
+                                tooltip: __('If enabled, existing custom attributes in the target playlist will be overwritten. If disabled, only empty custom attributes will be updated.'),
                             )
                             ->default(true),
                     ])

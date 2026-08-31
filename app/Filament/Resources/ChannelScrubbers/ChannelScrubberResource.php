@@ -325,7 +325,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                         ->label(__('Parallel processing'))
                         ->hintIcon(
                             'heroicon-s-information-circle',
-                            tooltip: 'Dispatches jobs simultaneously instead of sequentially. Leave off if you encounter issues or run into provider limitations.',
+                            tooltip: __('Dispatches jobs simultaneously instead of sequentially. Leave off if you encounter issues or run into provider limitations.'),
                         )
                         ->helperText(__('Process in parallel rather than one-at-a-time for significantly faster results.'))
                         ->default(false),
@@ -338,7 +338,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                         ->required()
                         ->hintIcon(
                             'heroicon-s-information-circle',
-                            tooltip: 'How long to wait for each stream to respond before marking it dead. Lower values are faster but may produce false positives on slow providers.',
+                            tooltip: __('How long to wait for each stream to respond before marking it dead. Lower values are faster but may produce false positives on slow providers.'),
                         )
                         ->helperText(__('Seconds to wait per stream (3-30). Streams that do not respond within this window are marked dead.')),
                 ]),
@@ -355,7 +355,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->label(__('Scan all channels (including disabled)'))
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'By default, only enabled channels are checked. Enabling this will also scan disabled channels. ',
+                                    tooltip: __('By default, only enabled channels are checked. Enabling this will also scan disabled channels. '),
                                 )
                                 ->helperText(__('Warning: this can result in a very large number of connections to the provider and significantly longer run times.'))
                                 ->live()
@@ -368,7 +368,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->label(__('Disable dead channels'))
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'Channels that fail the probe will be disabled. Turn off to run the scrubber in read-only mode — dead links are logged but no channels are changed.',
+                                    tooltip: __('Channels that fail the probe will be disabled. Turn off to run the scrubber in read-only mode — dead links are logged but no channels are changed.'),
                                 )
                                 ->helperText(__('Automatically disable channels whose stream URL is unreachable.'))
                                 ->default(true),
@@ -376,7 +376,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->label(__('Re-enable live channels'))
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'Only useful when scanning all channels (including disabled). Channels that were previously disabled but are now responding will be re-enabled.',
+                                    tooltip: __('Only useful when scanning all channels (including disabled). Channels that were previously disabled but are now responding will be re-enabled.'),
                                 )
                                 ->helperText(__('Re-enable disabled channels that are found to be live. Requires "Scan all channels" to be on.'))
                                 ->default(false)
@@ -385,7 +385,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->label(__('Keep failover channels hidden'))
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'When re-enabling live channels, channels that are disabled because they are configured as failovers will be logged as live but left disabled.',
+                                    tooltip: __('When re-enabling live channels, channels that are disabled because they are configured as failovers will be logged as live but left disabled.'),
                                 )
                                 ->helperText(__('Prevents the scrubber from undoing auto-merge failover deactivation while still counting live failover channels as live.'))
                                 ->default(true)
@@ -395,7 +395,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->columnSpanFull()
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: 'After a successful scrubber scan, dispatch the playlist native auto-merge job so failovers can be rebuilt using fresh scan results.',
+                                    tooltip: __('After a successful scrubber scan, dispatch the playlist native auto-merge job so failovers can be rebuilt using fresh scan results.'),
                                 )
                                 ->helperText(__('Runs native auto-merge after this scrubber completes when playlist auto-merge is enabled.'))
                                 ->hidden(function (Get $get): ?string {

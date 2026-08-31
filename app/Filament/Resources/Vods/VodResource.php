@@ -1628,7 +1628,7 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(__('tvc-guide-stationid'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Gracenote station ID is a unique identifier for a TV channel in the Gracenote database. It is used to associate the channel with its metadata, such as program listings and other information.'
+                            tooltip: __('Gracenote station ID is a unique identifier for a TV channel in the Gracenote database. It is used to associate the channel with its metadata, such as program listings and other information.')
                         )
                         ->columnSpan(1)
                         ->helperText(__('Gracenote station ID'))
@@ -1644,7 +1644,7 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(__('timeshift'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Time-shift is features that enable you to access content that has already been broadcast or is currently being broadcast, but at a different time than the original schedule. Time-shift allows you to pause, rewind, or fast-forward live TV, giving you more control over your viewing experience. Your provider must support this feature for it to work.'
+                            tooltip: __('Time-shift is features that enable you to access content that has already been broadcast or is currently being broadcast, but at a different time than the original schedule. Time-shift allows you to pause, rewind, or fast-forward live TV, giving you more control over your viewing experience. Your provider must support this feature for it to work.')
                         )
                         ->type('number')
                         ->placeholder(0)
@@ -1684,7 +1684,7 @@ class VodResource extends Resource implements CopilotResource
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->hintIcon(
                             icon: fn (Get $get) => $get('is_custom') ? null : 'heroicon-m-question-mark-circle',
-                            tooltip: fn (Get $get) => $get('is_custom') ? null : 'The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.'
+                            tooltip: fn (Get $get) => $get('is_custom') ? null : __('The original URL from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.')
                         )
                         ->formatStateUsing(fn ($record) => $record?->url)
                         ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
@@ -1696,7 +1696,7 @@ class VodResource extends Resource implements CopilotResource
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Override the provider URL with your own custom URL. This URL will be used instead of the provider URL.'
+                            tooltip: __('Override the provider URL with your own custom URL. This URL will be used instead of the provider URL.')
                         )
                         ->helperText(__('Leave empty to use provider URL.'))
                         ->rules(['min:1'])
@@ -1709,7 +1709,7 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(__('tvg-logo'))
                         ->hintIcon(
                             icon: fn (Get $get) => $get('is_custom') ? null : 'heroicon-m-question-mark-circle',
-                            tooltip: fn (Get $get) => $get('is_custom') ? null : 'The original logo from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.'
+                            tooltip: fn (Get $get) => $get('is_custom') ? null : __('The original logo from the playlist provider. This is read-only and cannot be modified. This URL is automatically updated on Playlist sync.')
                         )
                         ->formatStateUsing(fn ($record) => $record?->logo_internal)
                         ->disabled(fn (Get $get) => ! $get('is_custom')) // make it read-only but copyable for non-custom channels
@@ -1728,7 +1728,7 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(__('tvg-logo'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Override the provider logo with your own custom logo. This logo will be used instead of the provider logo.'
+                            tooltip: __('Override the provider logo with your own custom logo. This logo will be used instead of the provider logo.')
                         )
                         ->helperText(__('Leave empty to use provider logo.'))
                         ->rules(['min:1'])
@@ -1744,7 +1744,7 @@ class VodResource extends Resource implements CopilotResource
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Use m3u editor proxy to access this channel.'
+                            tooltip: __('Use m3u editor proxy to access this channel.')
                         )
                         ->formatStateUsing(fn ($record) => $record?->getProxyUrl())
                         ->helperText(__('m3u editor proxy url.'))
@@ -1826,7 +1826,7 @@ class VodResource extends Resource implements CopilotResource
                         ->hint(__('tvg-shift'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'The "tvg-shift" attribute is used in your generated M3U playlist to shift the EPG (Electronic Program Guide) time for specific channels by a certain number of hours. This allows for adjusting the EPG data for individual channels rather than applying a global shift.'
+                            tooltip: __('The "tvg-shift" attribute is used in your generated M3U playlist to shift the EPG (Electronic Program Guide) time for specific channels by a certain number of hours. This allows for adjusting the EPG data for individual channels rather than applying a global shift.')
                         )
                         ->columnSpan(1)
                         ->placeholder(__('0'))

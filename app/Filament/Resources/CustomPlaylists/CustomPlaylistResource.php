@@ -306,7 +306,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->helperText(__('Value must be between 3 and 36 characters.'))
                         ->hintIcon(
                             'heroicon-m-exclamation-triangle',
-                            tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
+                            tooltip: __('Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.')
                         )
                         ->hidden(fn ($get): bool => ! $get('edit_uuid'))
                         ->required(),
@@ -326,7 +326,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->default(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.'
+                            tooltip: __('When enabled, the provider\'s original stream URL will be used directly in M3U output instead of the internal Xtream-format URL.')
                         )
                         ->afterStateHydrated(function (Toggle $component) {
                             if (config('app.disable_m3u_xtream_format', false)) {
@@ -342,7 +342,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->default(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'This can be used by clients to better categorize channels.'
+                            tooltip: __('This can be used by clients to better categorize channels.')
                         )
                         ->helperText(__('When enabled, a <tvg-type> tag will be included in the M3U output based on the channel type (live, vod, series).')),
                     Grid::make()
@@ -354,7 +354,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.'
+                                    tooltip: __('Enable this to output your enabled series in the M3U file. It is recommended to enable the "Fetch metadata" option when enabled, otherwise you will need to manually fetch metadata for each series.')
                                 )
                                 ->default(false)
                                 ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
@@ -363,7 +363,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->inline(false)
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Enable this to output your enabled VOD channels in the M3U file.'
+                                    tooltip: __('Enable this to output your enabled VOD channels in the M3U file.')
                                 )
                                 ->default(false)
                                 ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
@@ -388,7 +388,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'When enabled, the incrementing channel number always replaces the number provided by the source feed, instead of only filling in missing numbers.'
+                                    tooltip: __('When enabled, the incrementing channel number always replaces the number provided by the source feed, instead of only filling in missing numbers.')
                                 )
                                 ->helperText(__('Always assign an incrementing channel number, overriding any number provided by the source.')),
                             TextInput::make('channel_start')
@@ -507,7 +507,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                         ->columnSpanfull()
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'This value is also used when generating the Xtream API user info response.'
+                            tooltip: __('This value is also used when generating the Xtream API user info response.')
                         )
                         ->rules(['min:1'])
                         ->type('number')
@@ -581,7 +581,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->nullable()
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.'
+                                    tooltip: __('Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.')
                                 )
                                 ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
                                 ->placeholder(__('Leave empty for direct stream proxying')),

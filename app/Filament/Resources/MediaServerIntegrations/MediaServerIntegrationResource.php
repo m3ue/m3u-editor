@@ -481,7 +481,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 ->label(__('Torrent/NZB Title Parsing'))
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Recommended for TorBox and other remote WebDAV services. Groups individual episode downloads into proper series.'
+                                    tooltip: __('Recommended for TorBox and other remote WebDAV services. Groups individual episode downloads into proper series.')
                                 )
                                 ->helperText(__('Smart parsing of torrent-style filenames.'))
                                 ->default(false),

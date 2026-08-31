@@ -330,7 +330,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
                 ->hintIcon(
                     'heroicon-m-exclamation-triangle',
-                    tooltip: 'Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.'
+                    tooltip: __('Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.')
                 )
                 ->hidden(fn ($get): bool => ! $get('edit_uuid'))
                 ->required(),
@@ -426,7 +426,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->defaultItems(0)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'The credential(s) URL will be used to match the provider for credential swap. If a URL in the source playlist matches a credential URL, the credentials will be swapped with the ones defined here.'
+                            tooltip: __('The credential(s) URL will be used to match the provider for credential swap. If a URL in the source playlist matches a credential URL, the credentials will be swapped with the ones defined here.')
                         )
                         ->maxItems(fn (Get $get) => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true) ? null : 1)
                         ->minItems(1)
@@ -559,7 +559,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->columnSpanfull()
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: 'Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.'
+                            tooltip: __('Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.')
                         )
                         ->rules(['min:0'])
                         ->type('number')
@@ -633,7 +633,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->nullable()
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: 'Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.'
+                                    tooltip: __('Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.')
                                 )
                                 ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
                                 ->placeholder(__('Leave empty for direct stream proxying')),
