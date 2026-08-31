@@ -58,6 +58,88 @@ it('calculates series progress from the filtered categories', function () {
         && $job->index === 0);
 });
 
+it('leaves series progress alone when no categories survive the filter', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create([
+        'xtream' => true,
+        'enable_channels' => false,
+        'enable_vod_channels' => false,
+        'enable_series' => true,
+        'import_prefs' => [
+            'preprocess' => true,
+            'import_via_category' => true,
+            'selected_categories' => ['Not Offered By Provider'],
+            'included_vod_group_prefixes' => ['unused'],
+        ],
+        'xtream_config' => [
+            'url' => 'http://xtream.test',
+            'username' => 'user',
+            'password' => 'pass',
+            'import_options' => ['series'],
+        ],
+    ]));
+
+    Http::preventStrayRequests();
+    Http::fake([
+        '*action=get_series_categories*' => Http::response([
+            ['category_id' => 1, 'category_name' => 'Excluded Before'],
+            ['category_id' => 2, 'category_name' => 'Excluded After'],
+        ]),
+        '*player_api.php*' => Http::response([
+            'user_info' => ['auth' => 1],
+            'server_info' => [],
+        ]),
+    ]);
+    Bus::fake();
+
+    (new ProcessM3uImport($playlist, force: true))->handle();
+
+    expect($playlist->fresh()->errors)->toBeNull();
+    Bus::assertNotDispatched(ProcessM3uImportSeriesChunk::class);
+    Bus::assertChained([
+        fn (ProcessM3uImportComplete $job): bool => $job->runningSeriesImport === false,
+    ]);
+});
+
+it('skips malformed series category entries without failing the import', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create([
+        'xtream' => true,
+        'enable_channels' => false,
+        'enable_vod_channels' => false,
+        'enable_series' => true,
+        'import_prefs' => [
+            'preprocess' => false,
+        ],
+        'xtream_config' => [
+            'url' => 'http://xtream.test',
+            'username' => 'user',
+            'password' => 'pass',
+            'import_options' => ['series'],
+        ],
+    ]));
+
+    Http::preventStrayRequests();
+    Http::fake([
+        '*action=get_series_categories*' => Http::response([
+            ['category_id' => 1, 'category_name' => 'Real Category'],
+            null,
+            false,
+        ]),
+        '*player_api.php*' => Http::response([
+            'user_info' => ['auth' => 1],
+            'server_info' => [],
+        ]),
+    ]);
+    Bus::fake();
+
+    (new ProcessM3uImport($playlist, force: true))->handle();
+
+    expect($playlist->fresh()->errors)->toBeNull();
+    Bus::assertDispatched(ProcessM3uImportSeriesChunk::class, fn (ProcessM3uImportSeriesChunk $job): bool => (int) $job->payload['categoryId'] === 1
+        && $job->batchCount === 1);
+});
+
 it('marks series progress complete when the series import finishes', function () {
     config(['dev.disable_sync_logs' => true]);
 

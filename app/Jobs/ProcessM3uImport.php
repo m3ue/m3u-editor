@@ -575,7 +575,12 @@ class ProcessM3uImport implements ShouldQueue
 
                     return;
                 }
-                $seriesCategories = collect($seriesCategoriesResponse->json());
+                // Some panels return a 200 with malformed entries (null/scalar elements)
+                // mixed into the category list. Drop anything that isn't a category array so
+                // downstream loops and job builders can rely on the shape.
+                $seriesCategories = collect($seriesCategoriesResponse->json())
+                    ->filter(fn ($category): bool => is_array($category))
+                    ->values();
             } else {
                 $seriesCategories = null;
             }
@@ -1519,14 +1524,15 @@ class ProcessM3uImport implements ShouldQueue
         // exist in the DB by the time the SyncPipeline is built. This guarantees the
         // FindReplace phase can see (and rewrite) series titles before STRM filenames are
         // generated. See SYNC_RUN_SUMMARY.md for full pipeline ordering rationale.
+        $seriesCategoryCount = 0;
         if ($seriesCategories) {
             $seriesCategoriesToImport = $seriesCategories
-                ->filter(fn (array $category): bool => ! $this->preprocess
+                ->filter(fn ($category): bool => ! $this->preprocess
                     || $this->shouldIncludeSeries($category['category_name'] ?? ''))
                 ->values();
-            $categoryCount = $seriesCategoriesToImport->count();
+            $seriesCategoryCount = $seriesCategoriesToImport->count();
 
-            $seriesCategoriesToImport->each(function (array $category, int $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
+            $seriesCategoriesToImport->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $seriesCategoryCount) {
                 // Check if category is auto-enabled
                 $autoEnable = (bool) ($this->playlist->enable_series
                     || $this->enabledCategories->contains($category['category_name'] ?? ''));
@@ -1538,7 +1544,7 @@ class ProcessM3uImport implements ShouldQueue
                         'categoryName' => $category['category_name'],
                         'playlistId' => $playlistId,
                     ],
-                    $categoryCount,
+                    $seriesCategoryCount,
                     $batchNo,
                     $index,
                     $autoEnable
@@ -1556,7 +1562,11 @@ class ProcessM3uImport implements ShouldQueue
             isNew: $this->isNew,
             runningLiveImport: $liveStreamsEnabled,
             runningVodImport: $vodStreamsEnabled,
-            runningSeriesImport: $seriesCategories !== null,
+            // Only finalize series_progress at 100 when series categories were actually
+            // imported. A disabled series import, or an enabled one that resolved to zero
+            // selected/available categories, must leave series_progress at its start value
+            // (0) so the UI does not show a completed phase that never ran.
+            runningSeriesImport: $seriesCategoryCount > 0,
             syncRunId: $this->syncRunId,
         );
 
