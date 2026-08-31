@@ -1038,7 +1038,7 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
             'progress' => 42,
             'progress_message' => 'Still working through checkpoint 3.',
             'last_heartbeat_at' => now()->subMinutes(20),
-            'started_at' => now()->subMinutes(25),
+            'started_at' => now()->subMinutes(370),
             'run_state' => [
                 'resume' => [
                     'last_step' => 'checkpoint-3',
@@ -1085,6 +1085,158 @@ it('marks stale runs, supports cancellation requests, and queues resume for stal
                 && $job->options['existing_run_id'] === $staleRun->id
                 && $job->options['user_id'] === $user->id;
         });
+    } finally {
+        cleanupReviewFixturePlugin($pluginId);
+    }
+});
+
+it('uses heartbeat expiry authoritatively and minimum runtime for legacy stale runs', function () {
+    $pluginId = 'stale-runtime-fixture-'.Str::lower(Str::random(6));
+    $pluginManager = app(PluginManager::class);
+    $installed = installFixturePluginForTests($pluginId, trust: true, enabled: true);
+    $plugin = $installed['plugin'];
+
+    try {
+        $expiredHeartbeatRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => now()->subMinutes(20),
+            'started_at' => now()->subMinutes(10),
+        ]);
+        $freshHeartbeatRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => now(),
+            'started_at' => now()->subMinutes(370),
+        ]);
+        $youngLegacyRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => null,
+            'started_at' => now()->subMinutes(360),
+        ]);
+        $staleLegacyRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'running',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'last_heartbeat_at' => null,
+            'started_at' => now()->subMinutes(370),
+        ]);
+
+        expect(config('plugins.stale_run.heartbeat_minutes'))->toBe(15)
+            ->and(config('plugins.stale_run.minimum_runtime_minutes'))->toBe(365)
+            ->and($pluginManager->recoverStaleRuns())->toBe(2)
+            ->and($expiredHeartbeatRun->fresh()->status)->toBe('stale')
+            ->and($freshHeartbeatRun->fresh()->status)->toBe('running')
+            ->and($youngLegacyRun->fresh()->status)->toBe('running')
+            ->and($staleLegacyRun->fresh()->status)->toBe('stale');
+
+        $this->artisan('plugins:recover-stale-runs', [
+            '--minutes' => 15,
+            '--minimum-runtime' => 359,
+        ])
+            ->assertSuccessful()
+            ->expectsOutput('Recovered 1 stale plugin run(s).');
+
+        expect($youngLegacyRun->fresh()->status)->toBe('stale');
+    } finally {
+        cleanupReviewFixturePlugin($pluginId);
+    }
+});
+
+it('rejects explicit stale recovery overrides that are not a positive whole number', function () {
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => 0,
+        '--minimum-runtime' => 365,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Heartbeat expiry minutes must be a whole number of at least 1.');
+
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => '2.5',
+        '--minimum-runtime' => 365,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Heartbeat expiry minutes must be a whole number of at least 1.');
+
+    $this->artisan('plugins:recover-stale-runs', [
+        '--minutes' => 15,
+        '--minimum-runtime' => 0,
+    ])
+        ->assertFailed()
+        ->expectsOutputToContain('Minimum runtime minutes must be a whole number of at least 1.');
+
+    expect(fn () => app(PluginManager::class)->recoverStaleRuns(0))
+        ->toThrow(InvalidArgumentException::class, 'Heartbeat expiry minutes must be a whole number of at least 1.');
+});
+
+it('falls back to the default when a stale_run config value is blank or non-numeric', function () {
+    // A templated .env line left empty casts to 0; a typo leaves a non-numeric string.
+    // Neither may throw - recoverStaleRuns() runs every minute and on every plugin page mount.
+    config()->set('plugins.stale_run.heartbeat_minutes', 0);
+    config()->set('plugins.stale_run.minimum_runtime_minutes', 'not-a-number');
+
+    expect(app(PluginManager::class)->recoverStaleRuns())->toBe(0);
+
+    $this->artisan('plugins:recover-stale-runs')
+        ->assertSuccessful()
+        ->expectsOutputToContain('Recovered 0 stale plugin run(s).');
+});
+
+it('recovers resumed runs that were queued but never claimed by a worker', function () {
+    $pluginId = 'stale-pending-fixture-'.Str::lower(Str::random(6));
+    $installed = installFixturePluginForTests($pluginId, trust: true, enabled: true);
+    $plugin = $installed['plugin'];
+
+    try {
+        $orphanedPendingRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+            'started_at' => now()->subMinutes(400),
+        ]);
+        $orphanedPendingRun->forceFill(['updated_at' => now()->subMinutes(370)])->saveQuietly();
+
+        $freshPendingRun = PluginRun::query()->create([
+            'extension_plugin_id' => $plugin->id,
+            'status' => 'pending',
+            'invocation_type' => 'action',
+            'action' => 'scan',
+            'trigger' => 'manual',
+            'dry_run' => true,
+            'payload' => [],
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+            'started_at' => now()->subMinutes(400),
+        ]);
+
+        expect(app(PluginManager::class)->recoverStaleRuns())->toBe(1)
+            ->and($orphanedPendingRun->fresh()->status)->toBe('stale')
+            ->and($orphanedPendingRun->fresh()->summary)->toBe('Run was queued to resume but no worker picked it up. Marked stale so it can be resumed again.')
+            ->and($freshPendingRun->fresh()->status)->toBe('pending');
     } finally {
         cleanupReviewFixturePlugin($pluginId);
     }

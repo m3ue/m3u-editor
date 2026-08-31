@@ -5,6 +5,16 @@ use App\Plugins\Contracts\EpgProcessorPluginInterface;
 use App\Plugins\Contracts\ScheduledPluginInterface;
 use App\Plugins\Contracts\StreamAnalysisPluginInterface;
 
+// env() returns the raw string when set, so a blank or non-numeric value (e.g. a templated
+// .env line left empty) would cast to 0 via (int). A 0 here silently disables run pruning
+// or trips the >= 1 guards in PluginManager::recoverStaleRuns() (which runs every minute on
+// a schedule and on every plugin admin page mount). Fall back to the documented default.
+$pluginIntEnv = static function (string $key, int $default): int {
+    $value = env($key);
+
+    return is_numeric($value) ? (int) $value : $default;
+};
+
 return [
     'api_version' => '1.0.0',
 
@@ -17,7 +27,12 @@ return [
      */
     'auto_trust_official' => (bool) env('PLUGIN_AUTO_TRUST_OFFICIAL', true),
 
-    'run_retention_days' => (int) env('PLUGIN_RUN_RETENTION_DAYS', 7),
+    'run_retention_days' => $pluginIntEnv('PLUGIN_RUN_RETENTION_DAYS', 7),
+
+    'stale_run' => [
+        'heartbeat_minutes' => $pluginIntEnv('PLUGIN_STALE_HEARTBEAT_MINUTES', 15),
+        'minimum_runtime_minutes' => $pluginIntEnv('PLUGIN_STALE_MINIMUM_RUNTIME_MINUTES', 365),
+    ],
 
     'directories' => [
         base_path('plugins'),

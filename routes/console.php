@@ -85,7 +85,7 @@ Schedule::command('plugins:run-scheduled')
     ->withoutOverlapping();
 
 // Mark abandoned plugin runs stale so operators can resume them.
-Schedule::command('plugins:recover-stale-runs --minutes=15')
+Schedule::command('plugins:recover-stale-runs')
     ->everyMinute()
     ->withoutOverlapping();
 

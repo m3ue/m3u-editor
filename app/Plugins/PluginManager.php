@@ -18,14 +18,19 @@ use App\Plugins\Support\PluginSelectOptionsContext;
 use App\Plugins\Support\PluginUninstallContext;
 use App\Plugins\Support\PluginValidationResult;
 use Carbon\CarbonInterface;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use PharData;
 use RuntimeException;
 use Throwable;
@@ -662,9 +667,10 @@ class PluginManager
         string $action,
         array $payload = [],
         array $options = [],
-    ): PluginRun {
-        $this->recoverStaleRuns();
-        $actingUser = isset($options['user_id']) ? User::find($options['user_id']) : null;
+    ): ?PluginRun {
+        if (! ($options['existing_run_id'] ?? null)) {
+            $this->recoverStaleRuns();
+        }
 
         $run = $this->prepareRun($plugin, [
             'trigger' => $options['trigger'] ?? 'manual',
@@ -674,6 +680,12 @@ class PluginManager
             'dry_run' => (bool) ($options['dry_run'] ?? false),
             'user_id' => $options['user_id'] ?? null,
         ], $options);
+
+        if (! $run) {
+            return null;
+        }
+
+        $actingUser = isset($options['user_id']) ? User::find($options['user_id']) : null;
 
         try {
             Validator::make($payload, $this->schemaMapper->actionRules($plugin, $action))->validate();
@@ -707,8 +719,10 @@ class PluginManager
         string $hook,
         array $payload = [],
         array $options = [],
-    ): PluginRun {
-        $this->recoverStaleRuns();
+    ): ?PluginRun {
+        if (! ($options['existing_run_id'] ?? null)) {
+            $this->recoverStaleRuns();
+        }
 
         $run = $this->prepareRun($plugin, [
             'trigger' => $options['trigger'] ?? 'hook',
@@ -718,6 +732,10 @@ class PluginManager
             'dry_run' => (bool) ($options['dry_run'] ?? true),
             'user_id' => $options['user_id'] ?? null,
         ], $options);
+
+        if (! $run) {
+            return null;
+        }
 
         try {
             $instance = $this->instantiate($plugin);
@@ -1018,77 +1036,233 @@ class PluginManager
 
     public function resumeRun(PluginRun $run, ?int $userId = null): PluginRun
     {
-        $plugin = $run->plugin()->firstOrFail();
-
-        if (! in_array($run->status, ['cancelled', 'stale', 'failed'], true)) {
-            return $run->fresh();
+        try {
+            return Cache::lock("plugins:resume-run:{$run->id}", 30)->block(5, function () use ($run, $userId): PluginRun {
+                return $this->dispatchResumedRun($run, $userId);
+            });
+        } catch (LockTimeoutException) {
+            throw new RuntimeException('Another resume for this run is already in progress. Try again in a moment.');
         }
-
-        dispatch(new ExecutePluginInvocation(
-            pluginId: $plugin->id,
-            invocationType: $run->invocation_type,
-            name: $run->action ?? $run->hook ?? throw new RuntimeException('Run cannot be resumed without an action or hook name.'),
-            payload: $run->payload ?? [],
-            options: [
-                'trigger' => $run->trigger,
-                'dry_run' => $run->dry_run,
-                'user_id' => $userId ?? $run->user_id,
-                'existing_run_id' => $run->id,
-                'resume' => true,
-            ],
-        ));
-
-        return $run->fresh();
     }
 
-    public function recoverStaleRuns(int $minutes = 15): int
+    private function dispatchResumedRun(PluginRun $run, ?int $userId): PluginRun
     {
-        $staleRuns = PluginRun::query()
-            ->where('status', 'running')
-            ->where(function ($query) use ($minutes) {
-                $query
-                    ->where(function ($heartbeatQuery) use ($minutes) {
-                        $heartbeatQuery
-                            ->whereNotNull('last_heartbeat_at')
-                            ->where('last_heartbeat_at', '<', now()->subMinutes($minutes));
-                    })
-                    ->orWhere(function ($legacyQuery) use ($minutes) {
-                        $legacyQuery
-                            ->whereNull('last_heartbeat_at')
-                            ->whereNotNull('started_at')
-                            ->where('started_at', '<', now()->subMinutes($minutes));
-                    });
-            })
-            ->get();
+        $claimedRun = PluginRun::query()->findOrFail($run->id);
 
-        foreach ($staleRuns as $run) {
-            $summary = $run->progress_message ?: $run->summary ?: 'Run lost its heartbeat and was marked stale.';
-
-            $run->logs()->create([
-                'level' => 'warning',
-                'message' => 'Run heartbeat expired. Marking the run as stale so an operator can resume or rerun it.',
-                'context' => [
-                    'last_heartbeat_at' => optional($run->last_heartbeat_at)->toDateTimeString(),
-                ],
-            ]);
-
-            $run->update([
-                'status' => 'stale',
-                'summary' => $summary,
-                'stale_at' => now(),
-                'finished_at' => $run->finished_at ?? now(),
-                'result' => [
-                    'status' => 'stale',
-                    'success' => false,
-                    'summary' => $summary,
-                    'data' => [
-                        'run_state' => $run->run_state ?? [],
-                    ],
-                ],
-            ]);
+        if (! in_array($claimedRun->status, ['cancelled', 'stale', 'failed'], true)) {
+            return $claimedRun;
         }
 
-        return $staleRuns->count();
+        if (! in_array($claimedRun->invocation_type, ['action', 'hook'], true)) {
+            throw new RuntimeException('Run cannot be resumed with an invalid invocation type.');
+        }
+
+        $name = $claimedRun->invocation_type === 'action' ? $claimedRun->action : $claimedRun->hook;
+        if (! is_string($name) || $name === '') {
+            throw new RuntimeException('Run cannot be resumed without an action or hook name.');
+        }
+
+        $plugin = $claimedRun->plugin()->firstOrFail();
+        $originalStatus = $claimedRun->status;
+        $originalProgressMessage = $claimedRun->progress_message;
+
+        $claimedRun->update([
+            'status' => 'pending',
+            'progress_message' => 'Run queued and waiting for the worker to resume.',
+        ]);
+
+        try {
+            Bus::dispatch(new ExecutePluginInvocation(
+                pluginId: $plugin->id,
+                invocationType: $claimedRun->invocation_type,
+                name: $name,
+                payload: $claimedRun->payload ?? [],
+                options: [
+                    'trigger' => $claimedRun->trigger,
+                    'dry_run' => $claimedRun->dry_run,
+                    'user_id' => $userId ?? $claimedRun->user_id,
+                    'existing_run_id' => $claimedRun->id,
+                    'resume' => true,
+                ],
+            ));
+        } catch (Throwable $exception) {
+            PluginRun::query()
+                ->whereKey($claimedRun->id)
+                ->where('status', 'pending')
+                ->update([
+                    'status' => $originalStatus,
+                    'progress_message' => $originalProgressMessage,
+                ]);
+
+            throw $exception;
+        }
+
+        return $claimedRun->fresh();
+    }
+
+    public function recoverStaleRuns(?int $heartbeatMinutes = null, ?int $minimumRuntimeMinutes = null): int
+    {
+        $heartbeatMinutes = $this->resolveStaleThresholdMinutes(
+            $heartbeatMinutes,
+            'plugins.stale_run.heartbeat_minutes',
+            15,
+            'Heartbeat expiry minutes must be a whole number of at least 1.',
+        );
+        $minimumRuntimeMinutes = $this->resolveStaleThresholdMinutes(
+            $minimumRuntimeMinutes,
+            'plugins.stale_run.minimum_runtime_minutes',
+            365,
+            'Minimum runtime minutes must be a whole number of at least 1.',
+        );
+
+        $heartbeatCutoff = now()->subMinutes($heartbeatMinutes);
+        $runtimeCutoff = now()->subMinutes($minimumRuntimeMinutes);
+
+        // Single source of truth for "this run has been abandoned". Applied both to the
+        // bulk candidate query and to the per-row re-check under a row lock below, so a
+        // worker that checks in (or a resumed run a worker claims) between the two reads
+        // is not stomped back to stale.
+        $abandonedRunCriteria = function ($query) use ($heartbeatCutoff, $runtimeCutoff): void {
+            $query->where(function ($outer) use ($heartbeatCutoff, $runtimeCutoff) {
+                $outer
+                    // Running invocations that have stopped checking in.
+                    ->where(function ($runningQuery) use ($heartbeatCutoff, $runtimeCutoff) {
+                        $runningQuery
+                            ->where('status', 'running')
+                            ->whereNotNull('started_at')
+                            ->where(function ($ageQuery) use ($heartbeatCutoff, $runtimeCutoff) {
+                                $ageQuery
+                                    ->where(function ($heartbeatQuery) use ($heartbeatCutoff) {
+                                        $heartbeatQuery
+                                            ->whereNotNull('last_heartbeat_at')
+                                            ->where('last_heartbeat_at', '<', $heartbeatCutoff);
+                                    })
+                                    ->orWhere(function ($legacyQuery) use ($runtimeCutoff) {
+                                        $legacyQuery
+                                            ->whereNull('last_heartbeat_at')
+                                            ->where('started_at', '<', $runtimeCutoff);
+                                    });
+                            });
+                    })
+                    // Resumed invocations that were queued but never claimed by a worker. The
+                    // dedicated plugin worker runs one job at a time for up to the maximum
+                    // runtime, so anything still pending past that window is orphaned.
+                    ->orWhere(function ($pendingQuery) use ($runtimeCutoff) {
+                        $pendingQuery
+                            ->where('status', 'pending')
+                            ->where('updated_at', '<', $runtimeCutoff);
+                    });
+            });
+        };
+
+        $recovered = 0;
+
+        foreach (PluginRun::query()->tap($abandonedRunCriteria)->lazyById() as $candidate) {
+            $recovered += DB::transaction(function () use ($candidate, $abandonedRunCriteria): int {
+                $run = PluginRun::query()
+                    ->whereKey($candidate->getKey())
+                    ->tap($abandonedRunCriteria)
+                    ->lockForUpdate()
+                    ->first();
+
+                // A worker sent a heartbeat, finished, or claimed the resumed run between
+                // the candidate query and this lock - it is no longer abandoned.
+                if (! $run) {
+                    return 0;
+                }
+
+                $wasPending = $run->status === 'pending';
+                $summary = $wasPending
+                    ? 'Run was queued to resume but no worker picked it up. Marked stale so it can be resumed again.'
+                    : ($run->progress_message ?: $run->summary ?: 'Run lost its heartbeat and was marked stale.');
+
+                $run->logs()->create([
+                    'level' => 'warning',
+                    'message' => $wasPending
+                        ? 'Resumed run was never claimed by a worker. Marking it stale so an operator can resume or rerun it.'
+                        : 'Run heartbeat expired. Marking the run as stale so an operator can resume or rerun it.',
+                    'context' => [
+                        'previous_status' => $run->status,
+                        'last_heartbeat_at' => optional($run->last_heartbeat_at)->toDateTimeString(),
+                    ],
+                ]);
+
+                $run->update([
+                    'status' => 'stale',
+                    'summary' => $summary,
+                    'stale_at' => now(),
+                    'finished_at' => $run->finished_at ?? now(),
+                    'result' => [
+                        'status' => 'stale',
+                        'success' => false,
+                        'summary' => $summary,
+                        'data' => [
+                            'run_state' => $run->run_state ?? [],
+                        ],
+                    ],
+                ]);
+
+                return 1;
+            });
+        }
+
+        return $recovered;
+    }
+
+    /**
+     * Resolve a stale-recovery threshold in minutes.
+     *
+     * An explicit caller-supplied value (CLI option or direct call) must be a positive
+     * integer or it is rejected. A value that falls back to config is sanitised instead:
+     * this method runs every minute on a schedule and on every plugin admin page mount,
+     * so a blank or misconfigured setting must degrade to the documented default rather
+     * than throw and take those surfaces down.
+     */
+    private function resolveStaleThresholdMinutes(
+        ?int $explicit,
+        string $configKey,
+        int $default,
+        string $rejectionMessage,
+    ): int {
+        if ($explicit !== null) {
+            if ($explicit < 1) {
+                throw new InvalidArgumentException($rejectionMessage);
+            }
+
+            return $explicit;
+        }
+
+        $configured = config($configKey, $default);
+
+        return is_numeric($configured) && (int) $configured >= 1 ? (int) $configured : $default;
+    }
+
+    public function failPendingResumedRun(
+        Plugin $plugin,
+        int $runId,
+        string $invocationType,
+        string $name,
+    ): ?PluginRun {
+        return DB::transaction(function () use ($plugin, $runId, $invocationType, $name): ?PluginRun {
+            $run = PluginRun::query()
+                ->where('extension_plugin_id', $plugin->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->find($runId);
+
+            if (! $run) {
+                return null;
+            }
+
+            if (! $this->runMatchesInvocation($run, $invocationType, $name)) {
+                return null;
+            }
+
+            return $this->failRun(
+                $run,
+                'The resumed invocation could not start because the plugin is no longer eligible.',
+            );
+        });
     }
 
     private function pluginPaths(): array
@@ -1309,7 +1483,7 @@ class PluginManager
         }
     }
 
-    private function prepareRun(Plugin $plugin, array $attributes, array $options = []): PluginRun
+    private function prepareRun(Plugin $plugin, array $attributes, array $options = []): ?PluginRun
     {
         $existingRunId = $options['existing_run_id'] ?? null;
 
@@ -1317,38 +1491,60 @@ class PluginManager
             return $this->startRun($plugin, $attributes);
         }
 
-        $run = PluginRun::query()
-            ->where('extension_plugin_id', $plugin->id)
-            ->findOrFail($existingRunId);
+        return DB::transaction(function () use ($plugin, $attributes, $options, $existingRunId): ?PluginRun {
+            $run = PluginRun::query()
+                ->where('extension_plugin_id', $plugin->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->find($existingRunId);
 
-        $resumeMessage = ($options['resume'] ?? false)
-            ? 'Run resumed from its last saved checkpoint.'
-            : ($run->summary ?: 'Run restarted.');
+            $invocationType = $attributes['invocation_type'] ?? null;
+            $name = is_string($invocationType) ? ($attributes[$invocationType] ?? null) : null;
 
-        $run->logs()->create([
-            'level' => 'info',
-            'message' => $resumeMessage,
-            'context' => [
-                'resume' => (bool) ($options['resume'] ?? false),
-            ],
-        ]);
+            if (! $run
+                || ! is_string($invocationType)
+                || ! is_string($name)
+                || ! $this->runMatchesInvocation($run, $invocationType, $name)
+            ) {
+                return null;
+            }
 
-        $run->update([
-            ...$attributes,
-            'status' => 'running',
-            'summary' => $resumeMessage,
-            'result' => null,
-            'progress_message' => $resumeMessage,
-            'cancel_requested' => false,
-            'cancel_requested_at' => null,
-            'cancelled_at' => null,
-            'stale_at' => null,
-            'finished_at' => null,
-            'last_heartbeat_at' => now(),
-            'started_at' => $run->started_at ?? now(),
-        ]);
+            $resumeMessage = ($options['resume'] ?? false)
+                ? 'Run resumed from its last saved checkpoint.'
+                : ($run->summary ?: 'Run restarted.');
 
-        return $run->fresh();
+            $run->update([
+                ...$attributes,
+                'status' => 'running',
+                'summary' => $resumeMessage,
+                'result' => null,
+                'progress_message' => $resumeMessage,
+                'cancel_requested' => false,
+                'cancel_requested_at' => null,
+                'cancelled_at' => null,
+                'stale_at' => null,
+                'finished_at' => null,
+                'last_heartbeat_at' => now(),
+                'started_at' => now(),
+            ]);
+
+            $run->logs()->create([
+                'level' => 'info',
+                'message' => $resumeMessage,
+                'context' => [
+                    'resume' => (bool) ($options['resume'] ?? false),
+                ],
+            ]);
+
+            return $run->fresh();
+        });
+    }
+
+    private function runMatchesInvocation(PluginRun $run, string $invocationType, string $name): bool
+    {
+        return in_array($invocationType, ['action', 'hook'], true)
+            && $run->invocation_type === $invocationType
+            && $run->{$invocationType} === $name;
     }
 
     private function startRun(Plugin $plugin, array $attributes): PluginRun

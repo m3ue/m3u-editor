@@ -83,6 +83,7 @@ class RunsRelationManager extends RelationManager
                                 'failed' => 'danger',
                                 'running' => 'warning',
                                 'stale' => 'warning',
+                                'pending' => 'info',
                                 'cancelled' => 'gray',
                                 default => 'gray',
                             }),
@@ -125,6 +126,7 @@ class RunsRelationManager extends RelationManager
             ->filters([
                 SelectFilter::make('status')
                     ->options([
+                        'pending' => 'Pending',
                         'running' => 'Running',
                         'completed' => 'Completed',
                         'failed' => 'Failed',
@@ -157,7 +159,7 @@ class RunsRelationManager extends RelationManager
                         $plugin = $this->getOwnerRecord();
                         PluginRun::query()
                             ->where('extension_plugin_id', $plugin->getKey())
-                            ->whereNotIn('status', ['running'])
+                            ->whereNotIn('status', ['running', 'pending'])
                             ->delete();
                     }),
             ])
@@ -167,7 +169,7 @@ class RunsRelationManager extends RelationManager
                     ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->disabled(fn (PluginRun $record): bool => $record->status === 'running')
+                    ->disabled(fn (PluginRun $record): bool => in_array($record->status, ['running', 'pending'], true))
                     ->action(fn (PluginRun $record) => $record->delete()),
                 Action::make('open')
                     ->label(__('Open run'))

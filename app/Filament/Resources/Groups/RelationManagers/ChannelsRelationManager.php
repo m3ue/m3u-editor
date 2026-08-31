@@ -8,12 +8,19 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 use Hydrat\TableLayoutToggle\Concerns\HasToggleableTable;
+use Illuminate\Database\Eloquent\Model;
 
 class ChannelsRelationManager extends RelationManager
 {
     // use HasToggleableTable;
 
     protected static string $relationship = 'live_channels';
+
+    /** A merged group owns no channels directly; it manages child groups instead. */
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return ! $ownerRecord->is_merged;
+    }
 
     protected static ?string $label = 'Live Channels';
 

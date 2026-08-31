@@ -35,7 +35,7 @@ class EditVodGroup extends EditRecord
                             ->live()
                             ->label(__('Group'))
                             ->helperText(__('Select the group you would like to move the channels to.'))
-                            ->options(fn (Get $get, $record) => Group::where([
+                            ->options(fn (Get $get, $record) => Group::query()->assignableTarget()->where([
                                 'type' => 'vod',
                                 'user_id' => auth()->id(),
                                 'playlist_id' => $record->playlist_id,

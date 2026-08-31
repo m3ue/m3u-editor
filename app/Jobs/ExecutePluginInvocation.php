@@ -11,16 +11,27 @@ class ExecutePluginInvocation implements ShouldQueue
 {
     use Queueable;
 
+    public bool $failOnTimeout = true;
+
     public function __construct(
         public int $pluginId,
         public string $invocationType,
         public string $name,
         public array $payload = [],
         public array $options = [],
-    ) {}
+    ) {
+        $this->onConnection('plugin');
+        $this->onQueue('plugin-invocations');
+    }
 
     public function handle(PluginManager $pluginManager): void
     {
+        if (array_key_exists('existing_run_id', $this->options)
+            && ! in_array($this->invocationType, ['action', 'hook'], true)
+        ) {
+            return;
+        }
+
         $plugin = Plugin::find($this->pluginId);
         if (! $plugin
             || ! $plugin->enabled
@@ -30,6 +41,15 @@ class ExecutePluginInvocation implements ShouldQueue
             || ! $plugin->isTrusted()
             || ! $plugin->hasVerifiedIntegrity()
         ) {
+            if ($plugin && array_key_exists('existing_run_id', $this->options)) {
+                $pluginManager->failPendingResumedRun(
+                    $plugin,
+                    (int) $this->options['existing_run_id'],
+                    $this->invocationType,
+                    $this->name,
+                );
+            }
+
             return;
         }
 

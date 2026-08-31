@@ -3866,6 +3866,7 @@
     "Run a plugin action to see step-by-step activity appear here.": "运行插件操作，在此处查看分步活动详情。",
     "Run automatically after each playlist sync.": "在每次播放列表同步后自动运行。",
     "Run comskip after recording to detect and mark commercials. Produces .edl files that Kodi, Jellyfin, and Emby can use for automatic commercial skipping. The Emby.ComSkiper plugin for Emby is available at <a href=\"https://github.com/BillOatmanWork/Emby.ComSkipper\" class=\"underline\" target=\"_blank\" rel=\"noopener\">GitHub/BillOatmanWork/Emby.ComSkipper</a>.": "录制后运行 comskip 来检测和标记广告。生成 Kodi、Jellyfin 和 Emby 可用于自动广告跳过的 .edl 文件。 Emby 的 Emby.ComSkiper 插件位于 <a href=\"https://github.com/BillOatmanWork/Emby.ComSkipper\" class=\"underline\" target=\"_blank\" rel=\"noopener\">GitHub/BillOatmanWork/Emby.ComSkipper</a>。",
+    "Run not resumed": "Run not resumed",
     "Run resumed": "运行已恢复",
     "Run status": "运行状态",
     "Run the selected scrubbers now? This will not modify the \"Recurring\" setting.": "立即运行所选的链接清理工具吗？这不会修改“循环执行”设置。",

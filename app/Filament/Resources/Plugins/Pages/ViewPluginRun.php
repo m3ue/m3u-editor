@@ -98,7 +98,18 @@ class ViewPluginRun extends Page
                 ->color('primary')
                 ->visible(fn (): bool => in_array($this->runRecord->status, ['cancelled', 'stale', 'failed'], true))
                 ->action(function (): void {
-                    app(PluginManager::class)->resumeRun($this->runRecord, auth()->id());
+                    try {
+                        app(PluginManager::class)->resumeRun($this->runRecord, auth()->id());
+                    } catch (\RuntimeException $exception) {
+                        Notification::make()
+                            ->warning()
+                            ->title(__('Run not resumed'))
+                            ->body($exception->getMessage())
+                            ->send();
+
+                        return;
+                    }
+
                     $this->refreshRunState();
 
                     Notification::make()

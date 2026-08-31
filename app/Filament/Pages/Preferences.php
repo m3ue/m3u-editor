@@ -1037,7 +1037,7 @@ class Preferences extends SettingsPage
                                             ->label(__('Get the app'))
                                             ->color('gray')
                                             ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->url('https://github.com/m3ue/m3u-tv/releases')
+                                            ->url(config('dev.tv_releases_url'))
                                             ->openUrlInNewTab(true),
                                     ])
                                     ->schema([

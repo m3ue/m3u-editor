@@ -206,6 +206,20 @@ return [
             'nice' => 0,
         ],
 
+        'm3u-editor-plugin-queue' => [
+            'connection' => 'plugin',
+            'queue' => ['plugin-invocations'],
+            'balance' => 'simple',
+            'maxProcesses' => $horizonIntEnv('HORIZON_PLUGIN_MAX_PROCESSES', 1),
+            'maxTime' => $horizonIntEnv('HORIZON_PLUGIN_MAX_TIME', 3600),
+            'maxJobs' => $horizonIntEnv('HORIZON_PLUGIN_MAX_JOBS', 50),
+            'memory' => $horizonIntEnv('HORIZON_PLUGIN_MEMORY', 256),
+            'tries' => 1,
+            // Must stay shorter than the 'plugin' connection retry_after in config/queue.php.
+            'timeout' => $horizonIntEnv('HORIZON_PLUGIN_TIMEOUT', 60 * 60 * 6),
+            'nice' => 5,
+        ],
+
         // SchedulesDirect syncs (ProcessEpgImport for SD-sourced EPGs) run here
         // exclusively. maxProcesses defaults to 1 regardless of DB driver so only
         // one SD sync runs at a time across all accounts/EPGs - SD blocks accounts

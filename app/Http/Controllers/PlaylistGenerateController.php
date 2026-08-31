@@ -140,6 +140,12 @@ class PlaylistGenerateController extends Controller
                     $stationId = $channel->station_id ?? '';
                     $epgShift = $channel->tvg_shift ?? 0;
                     $group = $channel->group ?? '';
+                    // A group folded into a merged group reports the parent's name for
+                    // all standard (non-custom) output. Custom playlists key their
+                    // grouping off tags, handled just below, so leave those untouched.
+                    if (! $isCustomContext && ! empty($channel->merged_group_name)) {
+                        $group = $channel->merged_group_name;
+                    }
                     if ($playlist->force_channel_numbering || (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number))) {
                         $channelNo = ++$channelNumber;
                     }
@@ -281,7 +287,7 @@ class PlaylistGenerateController extends Controller
                     $seriesQuery = $playlist->series()
                         ->where('series.enabled', true)
                         ->with([
-                            'category',
+                            'category.parent',
                             'episodes' => function ($q) {
                                 $q->where('episodes.enabled', true);
                             },
@@ -295,7 +301,7 @@ class PlaylistGenerateController extends Controller
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
                             $channelNo = ++$channelNumber;
-                            $group = $s->category->name ?? 'Seasons';
+                            $group = $s->category->effective_name ?? 'Seasons';
                             $name = $s->name;
                             $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
                             $title = $episode->title;
@@ -691,6 +697,10 @@ class PlaylistGenerateController extends Controller
             : $playlist->uuid;
         $query = $playlist->channels()
             ->leftJoin('groups', 'channels.group_id', '=', 'groups.id')
+            // A group folded into a merged group defers its displayed name and sort
+            // order to that parent. Resolved here in SQL so output and ordering stay
+            // consistent without writing anything back to the channel rows.
+            ->leftJoin('groups as parent_groups', 'groups.parent_id', '=', 'parent_groups.id')
             ->where('channels.enabled', true)
             ->when($isVod === true, fn ($q) => $q->where('channels.is_vod', true))
             ->when($isVod === false, fn ($q) => $q->where('channels.is_vod', false))
@@ -699,7 +709,9 @@ class PlaylistGenerateController extends Controller
             // the custom tag name/order so we can order in SQL and avoid a PHP-side resort.
             ->selectRaw('channels.*')
             ->selectRaw('groups.name as group_name')
-            ->selectRaw('groups.sort_order as group_sort_order')
+            ->selectRaw('parent_groups.name as merged_group_name')
+            ->selectRaw('parent_groups.id as merged_group_id')
+            ->selectRaw('COALESCE(parent_groups.sort_order, groups.sort_order) as group_sort_order')
             ->selectRaw('groups.aed_profile_id as group_aed_profile_id');
 
         // Join EPG channel data to avoid N+1 queries and select common fields
@@ -774,8 +786,8 @@ class PlaylistGenerateController extends Controller
                 );
             }
 
-            // Standard ordering for non-custom playlists
-            $query->orderBy('groups.sort_order')
+            // Standard ordering for non-custom playlists (merged groups rank by the parent)
+            $query->orderByRaw('COALESCE(parent_groups.sort_order, groups.sort_order)')
                 ->orderBy('channels.sort')
                 ->orderBy('channels.channel')
                 ->orderBy('channels.title');

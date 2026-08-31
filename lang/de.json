@@ -3867,6 +3867,7 @@
     "Run a plugin action to see step-by-step activity appear here.": "Führen Sie eine Plugin-Aktion aus, um die Schritt-für-Schritt-Aktivität hier anzuzeigen.",
     "Run automatically after each playlist sync.": "Wird nach jeder Playlist-Synchronisierung automatisch ausgeführt.",
     "Run comskip after recording to detect and mark commercials. Produces .edl files that Kodi, Jellyfin, and Emby can use for automatic commercial skipping. The Emby.ComSkiper plugin for Emby is available at <a href=\"https://github.com/BillOatmanWork/Emby.ComSkipper\" class=\"underline\" target=\"_blank\" rel=\"noopener\">GitHub/BillOatmanWork/Emby.ComSkipper</a>.": "Führen Sie comskip nach der Aufnahme aus, um Werbespots zu erkennen und zu markieren. Erstellt .edl-Dateien, die Kodi, Jellyfin und Emby zum automatischen Überspringen von Werbespots verwenden können. Das Emby.ComSkiper-Plugin für Emby ist verfügbar unter <a href=\"https://github.com/BillOatmanWork/Emby.ComSkipper\" class=\"underline\" target=\"_blank\" rel=\"noopener\">GitHub/BillOatmanWork/Emby.ComSkipper</a>.",
+    "Run not resumed": "Run not resumed",
     "Run resumed": "Der Lauf wurde fortgesetzt",
     "Run status": "Ausführungsstatus",
     "Run the selected scrubbers now? This will not modify the \"Recurring\" setting.": "Die ausgewählten Scrubber jetzt ausführen? Dadurch wird die Einstellung „Wiederkehrend“ nicht geändert.",

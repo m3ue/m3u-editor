@@ -10,7 +10,7 @@ return [
     'donate' => 'https://buymeacoffee.com/shparkison',
     'discord_url' => 'https://discord.gg/rS3abJ5dz7',
     'tv_repo' => 'm3ue/m3u-tv',
-    'tv_releases_url' => 'https://github.com/m3ue/m3u-tv/releases',
+    'tv_releases_url' => 'https://github.com/m3ue/m3u-tv#m3u-tv', // 'https://github.com/m3ue/m3u-tv/releases',
     'paypal' => 'https://www.paypal.com/donate/?hosted_button_id=ULJRPVWJNBSSG',
     'kofi' => 'https://ko-fi.com/sparkison',
     'admin_emails' => ['admin@test.com'],

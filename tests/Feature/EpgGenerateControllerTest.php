@@ -16,8 +16,10 @@ use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
@@ -192,6 +194,108 @@ XML;
         ['system' => 'provider.example/id', 'value' => 'series-0'],
         ['system' => null, 'value' => 'Unclassified 7'],
     ])->and($xpath->query('//programme[@channel="fallback-identity-channel"]/icon[@src="https://example.com/fallback-programme-artwork.jpg"]'))->toHaveCount(1);
+});
+
+test('xmlreader fallback reads the local SchedulesDirect XMLTV file when cache data is unavailable', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'source_type' => EpgSourceType::SCHEDULES_DIRECT,
+        'url' => null,
+        'uploads' => null,
+        'is_cached' => false,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.schedules-direct-fallback',
+        'display_name' => 'Schedules Direct Fallback Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'schedules-direct-fallback-channel',
+        'title' => 'Schedules Direct Fallback Channel',
+        'channel' => 1,
+    ]);
+
+    $start = now()->startOfDay()->addHour()->format('YmdHis O');
+    $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="{$start}" stop="{$stop}" channel="source.schedules-direct-fallback">
+    <title>Schedules Direct Fallback Programme</title>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="schedules-direct-fallback-channel"]/title[text()="Schedules Direct Fallback Programme"]'))->toHaveCount(1);
+});
+
+test('xmlreader fallback reports a missing local SchedulesDirect XMLTV file when cache data is unavailable', function () {
+    NotificationFacade::fake();
+
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'source_type' => EpgSourceType::SCHEDULES_DIRECT,
+        'url' => null,
+        'uploads' => null,
+        'is_cached' => false,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.schedules-direct-missing-file',
+        'display_name' => 'Schedules Direct Missing File Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'schedules-direct-missing-file-channel',
+        'title' => 'Schedules Direct Missing File Channel',
+        'channel' => 1,
+    ]);
+
+    expect(Storage::disk('local')->missing($epg->file_path))->toBeTrue();
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    NotificationFacade::assertSentTo(
+        $user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['status'] === 'danger'
+            && $notification->data['title'] === "Error generating epg data for playlist \"{$playlist->name}\" using EPG \"{$epg->name}\""
+            && $notification->data['body'] === 'SchedulesDirect EPG source file is missing from local storage. Please sync the EPG and try again.',
+    );
+    NotificationFacade::assertNotSentTo(
+        $user,
+        DatabaseNotification::class,
+        fn (DatabaseNotification $notification): bool => $notification->data['body'] === 'Invalid EPG file. Unable to read or download an associated EPG file. Please check the URL or uploaded file and try again.',
+    );
 });
 
 test('epg xml generation preserves albanian characters with explicit utf8 escaping', function () {

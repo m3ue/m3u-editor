@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
+use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Job;
@@ -501,6 +502,38 @@ class ProcessEpgImport implements ShouldQueue
                 // Fire the epg synced event
                 event(new SyncCompleted($this->epg));
             }
+        } catch (SchedulesDirectRateLimitException $e) {
+            // Schedules Direct login limit (4009). A bounded cooldown is already
+            // recorded on the EPG. Do NOT schedule the 60/120/180s resync and do
+            // NOT retry: that is exactly what exhausts the provider's 24h limit.
+            // Show one actionable notification with the next eligible retry time.
+            $retryAt = $e->retryAt;
+            $error = "SchedulesDirect login limit reached. Automatic retries are paused until {$retryAt->toDayDateTimeString()} UTC.";
+
+            logger()->warning("SchedulesDirect login limit for \"{$this->epg->name}\"; cooldown until {$retryAt->toIso8601String()}");
+
+            Notification::make()
+                ->warning()
+                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
+                ->body($error)
+                ->broadcast($this->epg->user);
+            Notification::make()
+                ->warning()
+                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
+                ->body($error)
+                ->sendToDatabase($this->epg->user);
+
+            $this->epg->update([
+                'status' => Status::Failed,
+                'synced' => now(),
+                'errors' => $error,
+                'progress' => 100,
+                'processing' => false,
+                'processing_started_at' => null,
+                'processing_phase' => null,
+            ]);
+
+            event(new SyncCompleted($this->epg));
         } catch (Exception $e) {
             // Log the exception
             logger()->error("Error processing \"{$this->epg->name}\": {$e->getMessage()}");
