@@ -14,7 +14,7 @@
                     </h2>
                     @if ($versionData['branch'])
                         <x-filament::badge
-                            x-tooltip="'Commit: {{ $versionData['commit'] }}'"
+                            x-tooltip="'{{ __('Commit') }}: {{ $versionData['commit'] }}'"
                             class="cursor-pointer"
                             size="sm"
                             color="primary"

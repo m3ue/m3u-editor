@@ -282,7 +282,7 @@ class Preferences extends SettingsPage
                                                             $component->state((bool) config('dev.show_wan_details'));
                                                         }
                                                     })->disabled(fn () => config('dev.show_wan_details') !== null)
-                                                    ->hint(fn () => config('dev.show_wan_details') !== null ? 'Already set by environment variable!' : null)
+                                                    ->hint(fn () => config('dev.show_wan_details') !== null ? __('Already set by environment variable!') : null)
                                                     ->dehydrated(fn () => config('dev.show_wan_details') === null),
                                                 Toggle::make('suppress_success_notifications')
                                                     ->label(__('Suppress success notifications'))
@@ -322,7 +322,7 @@ class Preferences extends SettingsPage
                                                     ->placeholder(__('UTC'))
                                                     ->helperText(__('Override the application timezone. Leave empty to use the server default (UTC). Takes effect for all date/time output throughout the app.'))
                                                     ->disabled(fn () => ! empty(config('dev.timezone')))
-                                                    ->hint(fn () => ! empty(config('dev.timezone')) ? 'Already set by environment variable!' : null)
+                                                    ->hint(fn () => ! empty(config('dev.timezone')) ? __('Already set by environment variable!') : null)
                                                     ->dehydrated(fn () => empty(config('dev.timezone')))
                                                     ->afterStateHydrated(function (TextInput $component, $state) {
                                                         if (! empty(config('dev.timezone'))) {
@@ -396,7 +396,7 @@ class Preferences extends SettingsPage
                                             ->placeholder(fn () => config('dev.allowed_playlist_domains') ? null : '*.example.com*')
                                             ->helperText(__('List of allowed domains (supports wildcards, e.g. *.example.com*). Press [tab] or [return] to add item. When set, playlist URLs must match one of these patterns.'))
                                             ->disabled(fn () => ! empty(config('dev.allowed_playlist_domains')))
-                                            ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('dev.allowed_playlist_domains')) ? __('Already set by environment variable!') : null)
                                             ->default(fn () => ! empty(config('dev.allowed_playlist_domains'))
                                                 ? array_map('trim', explode(',', config('dev.allowed_playlist_domains')))
                                                 : [])
@@ -572,7 +572,7 @@ class Preferences extends SettingsPage
                                                 tooltip: __('If you would like the proxied streams to use a different base URL than the configured app url. Useful for local network access or when using a TLD for access, but prefer LAN address for streaming.')
                                             )
                                             ->disabled(fn () => ! empty(config('proxy.url_override')))
-                                            ->hint(fn () => ! empty(config('proxy.url_override')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('proxy.url_override')) ? __('Already set by environment variable!') : null)
                                             ->prefixIcon('heroicon-m-link')
                                             ->default(fn () => ! empty(config('proxy.url_override')) ? config('proxy.url_override') : '')
                                             ->afterStateHydrated(function (TextInput $component, $state) {
@@ -612,7 +612,7 @@ class Preferences extends SettingsPage
                                                 tooltip: __('This is useful for Plex which need HTTPS for logo images. When using a domain with HTTPS for the frontend, but proxy URL override points to a local HTTP address, Plex may not load the logos due to HTTPS requirements. By enabling this option you can keep the stream proxy override for local access while logos still use the HTTPS domain URL that Plex requires.')
                                             )
                                             ->disabled(fn () => config('proxy.url_override_include_logos') !== null)
-                                            ->hint(fn () => config('proxy.url_override_include_logos') !== null ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => config('proxy.url_override_include_logos') !== null ? __('Already set by environment variable!') : null)
                                             ->default(fn () => config('proxy.url_override_include_logos') !== null)
                                             ->afterStateHydrated(function (Toggle $component, $state) {
                                                 if (config('proxy.url_override_include_logos') !== null) {
@@ -674,7 +674,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->prefixIcon('heroicon-m-link')
                                             ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
-                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? __('Already set by environment variable!') : null)
                                             ->default(fn () => ! empty(config('proxy.m3u_resolver_url')) ? config('proxy.m3u_resolver_url') : '')
                                             ->afterStateHydrated(function (TextInput $component, $state) {
                                                 if (! empty(config('proxy.m3u_resolver_url'))) {
@@ -706,7 +706,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->live()
                                             ->disabled(fn () => ! empty(config('proxy.m3u_resolver_url')))
-                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('proxy.m3u_resolver_url')) ? __('Already set by environment variable!') : null)
                                             ->default(false)
                                             ->afterStateHydrated(function (Toggle $component, $state) {
                                                 if (! empty(config('proxy.m3u_resolver_url'))) {
@@ -1226,7 +1226,7 @@ class Preferences extends SettingsPage
                                             ->columnSpanFull()
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import')))
                                             ->live()
-                                            ->hint(fn () => ! empty(config('dev.invalidate_import')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import')) ? __('Already set by environment variable!') : null)
                                             ->default(function () {
                                                 return ! empty(config('dev.invalidate_import')) ? (bool) config('dev.invalidate_import') : false;
                                             })
@@ -1245,7 +1245,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_threshold')))
-                                            ->hint(fn () => ! empty(config('dev.invalidate_import_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_threshold')) ? __('Already set by environment variable!') : null)
                                             ->dehydrated(fn () => empty(config('dev.invalidate_import_threshold')))
                                             ->placeholder(fn () => empty(config('dev.invalidate_import_threshold')) ? 100 : config('dev.invalidate_import_threshold'))
                                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
@@ -1260,7 +1260,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_series_threshold')))
-                                            ->hint(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_series_threshold')) ? __('Already set by environment variable!') : null)
                                             ->dehydrated(fn () => empty(config('dev.invalidate_import_series_threshold')))
                                             ->placeholder(fn () => empty(config('dev.invalidate_import_series_threshold')) ? 100 : config('dev.invalidate_import_series_threshold'))
                                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
@@ -1275,7 +1275,7 @@ class Preferences extends SettingsPage
                                             )
                                             ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'heroicon-m-lock-closed' : null)
                                             ->disabled(fn () => ! empty(config('dev.invalidate_import_group_threshold')))
-                                            ->hint(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? 'Already set by environment variable!' : null)
+                                            ->hint(fn () => ! empty(config('dev.invalidate_import_group_threshold')) ? __('Already set by environment variable!') : null)
                                             ->dehydrated(fn () => empty(config('dev.invalidate_import_group_threshold')))
                                             ->placeholder(fn () => empty(config('dev.invalidate_import_group_threshold')) ? 50 : config('dev.invalidate_import_group_threshold'))
                                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
@@ -1807,7 +1807,7 @@ class Preferences extends SettingsPage
                                             ->default(20)
                                             ->hintIcon(
                                                 'heroicon-m-question-mark-circle',
-                                                tooltip: __('Applies to every request m3u-editor makes to an AIOStreams instance (manifest, catalog, stream, and meta lookups combined), per integration. Keep this low if you use a shared/hosted AIOStreams instance you don\'t control the server-side rate limits for — AIOStreams\' own defaults for the addon endpoints it exposes range from ~40 to ~360 requests/minute depending on endpoint, so the default here is still well below the strictest of those.')
+                                                tooltip: __('Applies to every request m3u-editor makes to an AIOStreams instance (manifest, catalog, stream, and meta lookups combined), per integration. Keep this low if you use a shared/hosted AIOStreams instance you don\'t control the server-side rate limits for - AIOStreams\' own defaults for the addon endpoints it exposes range from ~40 to ~360 requests/minute depending on endpoint, so the default here is still well below the strictest of those.')
                                             )
                                             ->helperText(__('Maximum combined AIOStreams requests per minute, per integration. Lower is safer for hosted/shared instances.')),
                                         TextInput::make('aiostreams_max_failover_candidates')

@@ -368,7 +368,7 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                                 ->label(__('Disable dead channels'))
                                 ->hintIcon(
                                     'heroicon-s-information-circle',
-                                    tooltip: __('Channels that fail the probe will be disabled. Turn off to run the scrubber in read-only mode — dead links are logged but no channels are changed.'),
+                                    tooltip: __('Channels that fail the probe will be disabled. Turn off to run the scrubber in read-only mode - dead links are logged but no channels are changed.'),
                                 )
                                 ->helperText(__('Automatically disable channels whose stream URL is unreachable.'))
                                 ->default(true),

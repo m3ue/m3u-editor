@@ -641,8 +641,8 @@
                     <button
                         @click="togglePaginationMode()"
                         class="p-1 text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                        x-tooltip="isScrollMode ? 'Switch to pages' : 'Switch to infinite scroll'"
-                        :title="isScrollMode ? 'Switch to pages' : 'Switch to infinite scroll'"
+                        x-tooltip="isScrollMode ? '{{ __('Switch to pages') }}' : '{{ __('Switch to infinite scroll') }}'"
+                        :title="isScrollMode ? '{{ __('Switch to pages') }}' : '{{ __('Switch to infinite scroll') }}'"
                     >
                         <template x-if="isScrollMode">
                             <x-heroicon-m-numbered-list class="h-4 w-4" />

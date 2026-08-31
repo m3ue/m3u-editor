@@ -271,7 +271,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         })
                         ->dehydrated(fn (): bool => ! config('app.disable_m3u_xtream_format', false))
                         ->disabled(fn (): bool => config('app.disable_m3u_xtream_format', false))
-                        ->helperText(config('app.disable_m3u_xtream_format', false) ? 'Already set by environment variable!' : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
+                        ->helperText(config('app.disable_m3u_xtream_format', false) ? __('Already set by environment variable!') : __('Output the provider URL directly in M3U instead of routing through the internal Xtream URL format.')),
                     Toggle::make('output_tvg_type')
                         ->label(__('Enable TVG Type Output'))
                         ->inline(false)

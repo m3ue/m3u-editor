@@ -7,7 +7,7 @@
     <div class="flex items-center gap-1">
         <code
             class="cursor-pointer rounded bg-white px-2 py-1.5 font-mono text-xs text-gray-800 select-all dark:bg-gray-900 dark:text-gray-200"
-            x-tooltip="'WAN IP, Click to copy'"
+            x-tooltip="'{{ __('WAN IP, Click to copy') }}'"
             x-on:click="
                 if (window.navigator && window.navigator.clipboard && window.navigator.clipboard.writeText) {
                     window.navigator.clipboard.writeText('{{ $externalIp }}')
