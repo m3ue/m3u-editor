@@ -6,6 +6,7 @@ use App\Facades\SortFacade;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Categories\Pages\EditCategory;
 use App\Filament\Resources\Categories\Pages\ListCategories;
+use App\Filament\Resources\Categories\RelationManagers\ChildCategoriesRelationManager;
 use App\Filament\Resources\Categories\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CategoryResource\Pages;
 use App\Jobs\CategoryFindAndReplace;
@@ -13,9 +14,9 @@ use App\Jobs\CategoryFindAndReplaceReset;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
-use App\Models\Playlist;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -33,14 +34,16 @@ use Filament\Schemas\Components\Group as ComponentsGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
-use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class CategoryResource extends Resource implements CopilotResource
 {
@@ -128,8 +131,14 @@ class CategoryResource extends Resource implements CopilotResource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('series')
-                    ->withCount('enabled_series');
+                $query->with('parent')
+                    ->withCount('series')
+                    ->withCount('enabled_series')
+                    ->withCount('children')
+                    ->withCount([
+                        'descendantSeries as descendant_series_count',
+                        'descendantSeries as enabled_descendant_series_count' => fn (Builder $subQuery) => $subQuery->where('series.enabled', true),
+                    ]);
             })
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
@@ -172,9 +181,43 @@ class CategoryResource extends Resource implements CopilotResource
                     ->sortable(),
                 TextColumn::make('series_count')
                     ->label(__('Series'))
-                    ->description(fn (Category $record): string => "Enabled: {$record->enabled_series_count}")
+                    ->state(fn (Category $record): int => $record->is_merged
+                        ? (int) $record->descendant_series_count
+                        : (int) $record->series_count)
+                    ->description(fn (Category $record): string => 'Enabled: '.($record->is_merged
+                        ? (int) $record->enabled_descendant_series_count
+                        : (int) $record->enabled_series_count))
                     ->toggleable()
                     ->sortable(),
+                IconColumn::make('is_merged')
+                    ->label(__('Merged Category'))
+                    ->boolean()
+                    ->tooltip(fn (Category $record): ?string => $record->is_merged ? __('This category combines the categories merged into it.') : null)
+                    ->toggleable()
+                    ->sortable(),
+                TextColumn::make('parent.name')
+                    ->label(__('Parent'))
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable()
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy(
+                            DB::table('categories as parent_categories')
+                                ->select('parent_categories.name')
+                                ->whereColumn('parent_categories.id', 'categories.parent_id'),
+                            $direction,
+                        );
+                    })
+                    ->toggleable(),
+                TextColumn::make('children_count')
+                    ->label(__('Children'))
+                    ->state(fn (Category $record): ?int => $record->is_merged ? (int) $record->children_count : null)
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('created_at')
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
@@ -185,15 +228,16 @@ class CategoryResource extends Resource implements CopilotResource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                // SelectFilter::make('playlist')
-                //     ->relationship('playlist', 'name')
-                //     ->multiple()
-                //     ->preload()
-                //     ->searchable(),
+                TernaryFilter::make('is_merged')
+                    ->label(__('Merged categories'))
+                    ->placeholder(__('All categories'))
+                    ->trueLabel(__('Merged categories only'))
+                    ->falseLabel(__('Exclude merged categories')),
             ])
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'series'),
+                    MergedGroupService::manageCategoryChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Series to Category'))
                         ->schema([
@@ -202,7 +246,7 @@ class CategoryResource extends Resource implements CopilotResource
                                 ->live()
                                 ->label(__('Category'))
                                 ->helperText(__('Select the category you would like to move the series to.'))
-                                ->options(fn (Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get, $record) => Category::query()->assignableTarget()->where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
                                 ->searchable(),
                         ])
                         ->action(function ($record, array $data): void {
@@ -349,6 +393,7 @@ class CategoryResource extends Resource implements CopilotResource
                                 ->helperText(__('Select the category you would like to move the series to.'))
                                 ->options(
                                     fn () => Category::query()
+                                        ->assignableTarget()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id()])
                                         ->get(['name', 'id', 'playlist_id'])
@@ -390,6 +435,7 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the category series to another category.'))
                         ->modalSubmitActionLabel(__('Move now')),
+                    MergedGroupService::addToMergedCategoryBulkAction(),
                     BulkAction::make('process')
                         ->label(__('Fetch Series Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
@@ -576,6 +622,7 @@ class CategoryResource extends Resource implements CopilotResource
     {
         return [
             SeriesRelationManager::class,
+            ChildCategoriesRelationManager::class,
         ];
     }
 

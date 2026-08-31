@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Exceptions\SchedulesDirectRateLimitException;
+use App\Exceptions\SchedulesDirectTokenExpiredException;
 use App\Facades\ProxyFacade;
 use App\Models\Epg;
 use Carbon\Carbon;
 use Exception;
 use Generator;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -48,6 +51,27 @@ class SchedulesDirectService
 
     /** Full subscriber download limit exceeded. */
     public const EXCEED_DOWNLOAD_LIMIT_CODE = 4004;
+
+    /** Token has expired; the stored token must be discarded and re-requested once. */
+    public const TOKEN_EXPIRED_CODE = 4006;
+
+    /** Exceeded the maximum number of logins in 24 hours. */
+    public const TOO_MANY_LOGINS_CODE = 4009;
+
+    /**
+     * Safety margin subtracted from the provider's real token expiry when persisting
+     * it, so a request never goes out with a token that expires in flight.
+     */
+    private const TOKEN_EXPIRY_SKEW_SECONDS = 60;
+
+    /** Length of the cooldown entered after a TOO_MANY_LOGINS (4009) rejection. */
+    private const LOGIN_COOLDOWN_HOURS = 24;
+
+    /** How long a single-flight authentication holds the per-account lock. */
+    private const AUTH_LOCK_SECONDS = 30;
+
+    /** How long a waiting worker blocks for the in-flight authentication to finish. */
+    private const AUTH_LOCK_WAIT_SECONDS = 25;
 
     /**
      * The current EPG model being used for requests (used to check/update sd_debug)
@@ -198,36 +222,100 @@ class SchedulesDirectService
     }
 
     /**
-     * Authenticate with SchedulesDirect and get a token
+     * Resolve the canonical token expiry from a /token response.
+     *
+     * Schedules Direct returns `tokenExpires` as the UNIX epoch at which the
+     * token stops working. `datetime` / `serverTime` are the server's current
+     * clock and must never be treated as an expiry. When `tokenExpires` is
+     * absent we fall back to the documented 24-hour lifetime. A small skew
+     * margin is subtracted so a request never leaves with a token that lapses
+     * in flight.
+     *
+     * @param  array<string, mixed>  $data
      */
-    public function authenticate(string $username, string $password): array
+    private function resolveTokenExpiry(array $data): Carbon
     {
-        $passwordHash = hash('sha1', $password);
-        $response = Http::withHeaders([
-            'User-Agent' => self::$USER_AGENT,
-        ])->post(self::BASE_URL.'/'.self::API_VERSION.'/token', [
-            'username' => $username,
-            'password' => $passwordHash,
-        ]);
+        $tokenExpires = $data['tokenExpires'] ?? null;
 
-        if ($response->failed()) {
+        // Carbon 3 returns a UTC instance from a bare timestamp; pin it to the
+        // app timezone so it round-trips through the tz-naive datetime column.
+        $expiresAt = is_numeric($tokenExpires)
+            ? Carbon::createFromTimestamp((int) $tokenExpires, config('app.timezone'))
+            : now()->addDay();
+
+        return $expiresAt->subSeconds(self::TOKEN_EXPIRY_SKEW_SECONDS);
+    }
+
+    /**
+     * POST credentials to /token, transparently retrying once without the debug
+     * header if the account is not enabled for debug routing (code 2055).
+     *
+     * @return array<string, mixed> the decoded response body
+     */
+    private function postToken(string $username, string $passwordHash, bool $withEpgHeaders): array
+    {
+        $headers = $withEpgHeaders
+            ? $this->buildHeaders()
+            : ['User-Agent' => self::$USER_AGENT];
+
+        $payload = ['username' => $username, 'password' => $passwordHash];
+
+        $response = Http::withHeaders($headers)->post(self::BASE_URL.'/'.self::API_VERSION.'/token', $payload);
+        $data = $response->json() ?? [];
+
+        if (($data['code'] ?? null) === self::DEBUG_NOT_ENABLED_CODE) {
+            $this->handleDebugNotEnabledError();
+
+            Log::debug('Retrying authentication without debug header');
+            $response = Http::withHeaders(['User-Agent' => self::$USER_AGENT])
+                ->post(self::BASE_URL.'/'.self::API_VERSION.'/token', $payload);
+            $data = $response->json() ?? [];
+        }
+
+        // Fold the HTTP status into the body so callers only inspect one place.
+        // Schedules Direct returns 4009 with an HTTP 4xx and a `response` string
+        // rather than a `message`, so normalize that here.
+        if ($response->failed() && ! isset($data['code'])) {
             throw new Exception('Authentication failed: '.$response->body());
         }
 
-        $data = $response->json();
+        return $data;
+    }
+
+    /**
+     * Authenticate with SchedulesDirect using raw credentials (no EPG persistence).
+     *
+     * @return array{token: string, expires: int}
+     */
+    public function authenticate(string $username, string $password): array
+    {
+        $data = $this->postToken($username, hash('sha1', $password), withEpgHeaders: false);
+
+        if ($this->isTooManyLogins($data)) {
+            throw new SchedulesDirectRateLimitException(now()->addHours(self::LOGIN_COOLDOWN_HOURS));
+        }
 
         if (isset($data['code']) && $data['code'] !== 0) {
-            throw new Exception('Authentication error: '.($data['message'] ?? 'Unknown error'));
+            throw new Exception('Authentication error: '.($data['message'] ?? $data['response'] ?? 'Unknown error'));
         }
 
         return [
             'token' => $data['token'],
-            'expires' => strtotime($data['datetime']),
+            'expires' => $this->resolveTokenExpiry($data)->getTimestamp(),
         ];
     }
 
     /**
-     * Authenticate using an EPG model with stored credentials
+     * Authenticate using an EPG model with stored credentials.
+     *
+     * Authentication is single-flight per Schedules Direct account: only one
+     * worker may hold the per-account lock and issue a /token request at a time.
+     * Workers that arrive while a peer is authenticating wait for the lock, then
+     * reuse the token the peer stored instead of logging in again.
+     *
+     * @return array{token: string, expires: int}
+     *
+     * @throws SchedulesDirectRateLimitException when a 4009 cooldown is active or freshly triggered
      */
     public function authenticateFromEpg(Epg $epg): array
     {
@@ -238,44 +326,98 @@ class SchedulesDirectService
         // Set the current EPG for debug header tracking
         $this->setCurrentEpg($epg);
 
-        $response = Http::withHeaders($this->buildHeaders())->post(self::BASE_URL.'/'.self::API_VERSION.'/token', [
-            'username' => $epg->sd_username,
-            'password' => hash('sha1', $epg->sd_password),
-        ]);
+        if ($epg->isInSchedulesDirectLoginCooldown()) {
+            throw new SchedulesDirectRateLimitException($epg->sd_login_cooldown_until);
+        }
 
-        $data = $response->json();
+        // Namespacing hash only, not a security boundary: keeps the lock key
+        // stable and free of characters the cache store might choke on.
+        $lock = Cache::lock('sd-auth:'.hash('sha256', (string) $epg->sd_username), self::AUTH_LOCK_SECONDS);
 
-        // Handle code 2055: debug not enabled - disable sd_debug and retry without debug header
-        if (isset($data['code']) && $data['code'] === self::DEBUG_NOT_ENABLED_CODE) {
-            $this->handleDebugNotEnabledError();
+        try {
+            $lock->block(self::AUTH_LOCK_WAIT_SECONDS);
+        } catch (LockTimeoutException) {
+            // A peer is authenticating and is taking longer than our patience.
+            // Reuse whatever it has stored by now, otherwise give up for this run.
+            $epg->refresh();
+            if ($epg->hasValidSchedulesDirectToken()) {
+                return ['token' => $epg->sd_token, 'expires' => $epg->sd_token_expires_at->getTimestamp()];
+            }
+            if ($epg->isInSchedulesDirectLoginCooldown()) {
+                throw new SchedulesDirectRateLimitException($epg->sd_login_cooldown_until);
+            }
+            throw new Exception('Timed out waiting for a concurrent SchedulesDirect authentication');
+        }
 
-            // Retry authentication without the debug header
-            Log::debug('Retrying authentication without debug header');
-            $response = Http::withHeaders($this->buildHeaders())->post(self::BASE_URL.'/'.self::API_VERSION.'/token', [
-                'username' => $epg->sd_username,
-                'password' => hash('sha1', $epg->sd_password),
+        try {
+            // Re-check under the lock: a peer may have just refreshed the token
+            // or tripped the cooldown while we were waiting.
+            $epg->refresh();
+            if ($epg->hasValidSchedulesDirectToken()) {
+                return ['token' => $epg->sd_token, 'expires' => $epg->sd_token_expires_at->getTimestamp()];
+            }
+            if ($epg->isInSchedulesDirectLoginCooldown()) {
+                throw new SchedulesDirectRateLimitException($epg->sd_login_cooldown_until);
+            }
+
+            $data = $this->postToken($epg->sd_username, hash('sha1', $epg->sd_password), withEpgHeaders: true);
+
+            if ($this->isTooManyLogins($data)) {
+                $retryAt = $this->beginLoginCooldown($epg);
+                throw new SchedulesDirectRateLimitException($retryAt);
+            }
+
+            if (isset($data['code']) && $data['code'] !== 0) {
+                throw new Exception('Authentication error: '.($data['message'] ?? $data['response'] ?? 'Unknown error'));
+            }
+
+            $expiresAt = $this->resolveTokenExpiry($data);
+
+            $epg->update([
+                'sd_token' => $data['token'],
+                'sd_token_expires_at' => $expiresAt,
+                // A successful login clears any prior rate-limit state.
+                'sd_login_cooldown_until' => null,
             ]);
-            $data = $response->json();
+
+            return [
+                'token' => $data['token'],
+                'expires' => $expiresAt->getTimestamp(),
+            ];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function isTooManyLogins(array $data): bool
+    {
+        return ($data['code'] ?? null) === self::TOO_MANY_LOGINS_CODE
+            || ($data['response'] ?? null) === 'TOO_MANY_LOGINS';
+    }
+
+    /**
+     * Enter a bounded cooldown after a 4009 rejection. An already-active cooldown
+     * is never pushed forward, so attempts that are locally suppressed during the
+     * window cannot extend it.
+     */
+    private function beginLoginCooldown(Epg $epg): Carbon
+    {
+        if ($epg->isInSchedulesDirectLoginCooldown()) {
+            return $epg->sd_login_cooldown_until;
         }
 
-        if ($response->failed()) {
-            throw new Exception('Authentication failed: '.$response->body());
-        }
+        $retryAt = now()->addHours(self::LOGIN_COOLDOWN_HOURS);
+        $epg->update(['sd_login_cooldown_until' => $retryAt]);
 
-        if (isset($data['code']) && $data['code'] !== 0) {
-            throw new Exception('Authentication error: '.($data['message'] ?? 'Unknown error'));
-        }
-
-        // Update the EPG model with new token data
-        $epg->update([
-            'sd_token' => $data['token'],
-            'sd_token_expires_at' => $data['datetime'],
+        Log::warning('SchedulesDirect login limit reached (4009); entering cooldown', [
+            'epg_id' => $epg->id,
+            'retry_at' => $retryAt->toIso8601String(),
         ]);
 
-        return [
-            'token' => $data['token'],
-            'expires' => strtotime($data['datetime']),
-        ];
+        return $retryAt;
     }
 
     /**
@@ -843,7 +985,12 @@ class SchedulesDirectService
     }
 
     /**
-     * Fetch SchedulesDirect EPG data and update the EPG record
+     * Fetch SchedulesDirect EPG data and update the EPG record.
+     *
+     * If the provider reports TOKEN_EXPIRED (4006) mid-sync, the stored token has
+     * already been cleared; we re-authenticate exactly once and retry the sync.
+     *
+     * @throws SchedulesDirectRateLimitException when a 4009 login-limit cooldown is active
      */
     public function syncEpgData(Epg $epg): void
     {
@@ -855,6 +1002,31 @@ class SchedulesDirectService
             'chunk_size' => self::STATIONS_PER_CHUNK,
             'sd_debug' => $epg->sd_debug,
         ]);
+
+        $reauthAttempted = false;
+
+        while (true) {
+            try {
+                $this->performEpgSync($epg);
+
+                return;
+            } catch (SchedulesDirectTokenExpiredException $e) {
+                if ($reauthAttempted) {
+                    throw $e;
+                }
+
+                $reauthAttempted = true;
+                Log::warning('SchedulesDirect token expired mid-sync (4006); re-authenticating once', [
+                    'epg_id' => $epg->id,
+                ]);
+                $this->authenticateFromEpg($epg);
+                $epg->refresh();
+            }
+        }
+    }
+
+    private function performEpgSync(Epg $epg): void
+    {
         try {
             // Validate token or re-authenticate
             if (! $epg->hasValidSchedulesDirectToken()) {
@@ -930,6 +1102,14 @@ class SchedulesDirectService
                 'stations_processed' => count($stationIds),
                 'file_path' => $xmlFilePath,
             ]);
+        } catch (SchedulesDirectTokenExpiredException $e) {
+            // Handled by the single retry in syncEpgData(); do not record as a
+            // sync error on the first occurrence.
+            throw $e;
+        } catch (SchedulesDirectRateLimitException $e) {
+            // Provider login-limit cooldown. Surface it unchanged so the caller
+            // can back off; recording it every 16 minutes would just be noise.
+            throw $e;
         } catch (Exception $e) {
             $errors = $epg->sd_errors ?? [];
             $errors[] = [
@@ -1518,6 +1698,26 @@ class SchedulesDirectService
 
             $body = $response->json();
             $responseCode = $body['code'] ?? null;
+        }
+
+        // Token expired mid-request (code 4006): discard the stored token so the
+        // next attempt re-authenticates, and let the caller perform exactly one
+        // controlled retry. Checked before the generic failure branch because
+        // Schedules Direct may return this on either an HTTP 4xx or a 200.
+        if ($responseCode === self::TOKEN_EXPIRED_CODE) {
+            if ($this->currentEpg) {
+                $this->currentEpg->update([
+                    'sd_token' => null,
+                    'sd_token_expires_at' => null,
+                ]);
+            }
+
+            Log::warning('SchedulesDirect token expired (4006); cleared stored token', [
+                'endpoint' => $endpoint,
+                'epg_id' => $this->currentEpg?->id,
+            ]);
+
+            throw new SchedulesDirectTokenExpiredException('SchedulesDirect token expired (Code: 4006)');
         }
 
         if ($response->failed()) {

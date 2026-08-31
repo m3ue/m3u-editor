@@ -7,15 +7,16 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Groups\Pages\EditGroup;
 use App\Filament\Resources\Groups\Pages\ListGroups;
 use App\Filament\Resources\Groups\RelationManagers\ChannelsRelationManager;
+use App\Filament\Resources\Groups\RelationManagers\ChildGroupsRelationManager;
 use App\Jobs\GroupFindAndReplace;
 use App\Jobs\GroupFindAndReplaceReset;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\Group;
-use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -39,9 +40,11 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 class GroupResource extends Resource implements CopilotResource
 {
@@ -92,9 +95,15 @@ class GroupResource extends Resource implements CopilotResource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->withCount('live_channels')
+                $query->with('parent')
+                    ->withCount('live_channels')
                     ->withCount('enabled_live_channels')
-                    ->where('type', 'live');
+                    ->withCount('children')
+                    ->withCount([
+                        'descendantChannels as descendant_live_channels_count' => fn (Builder $subQuery) => $subQuery->where('channels.is_vod', false),
+                        'descendantChannels as enabled_descendant_live_channels_count' => fn (Builder $subQuery) => $subQuery->where('channels.is_vod', false)->where('channels.enabled', true),
+                    ])
+                    ->where('groups.type', 'live');
             })
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
@@ -140,7 +149,12 @@ class GroupResource extends Resource implements CopilotResource
                     ->sortable(),
                 TextColumn::make('live_channels_count')
                     ->label(__('Live Channels'))
-                    ->description(fn (Group $record): string => "Enabled: {$record->enabled_live_channels_count}")
+                    ->state(fn (Group $record): int => $record->is_merged
+                        ? (int) $record->descendant_live_channels_count
+                        : (int) $record->live_channels_count)
+                    ->description(fn (Group $record): string => 'Enabled: '.($record->is_merged
+                        ? (int) $record->enabled_descendant_live_channels_count
+                        : (int) $record->enabled_live_channels_count))
                     ->toggleable()
                     ->sortable(),
                 IconColumn::make('custom')
@@ -154,6 +168,35 @@ class GroupResource extends Resource implements CopilotResource
                         '0' => 'danger',
                         '' => 'danger',
                     })->toggleable()->sortable(),
+                IconColumn::make('is_merged')
+                    ->label(__('Merged Group'))
+                    ->boolean()
+                    ->tooltip(fn (Group $record): ?string => $record->is_merged ? __('This group combines the groups merged into it.') : null)
+                    ->toggleable()
+                    ->sortable(),
+                TextColumn::make('parent.name')
+                    ->label(__('Parent'))
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable()
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        return $query->orderBy(
+                            DB::table('groups as parent_groups')
+                                ->select('parent_groups.name')
+                                ->whereColumn('parent_groups.id', 'groups.parent_id'),
+                            $direction,
+                        );
+                    })
+                    ->toggleable(),
+                TextColumn::make('children_count')
+                    ->label(__('Children'))
+                    ->state(fn (Group $record): ?int => $record->is_merged ? (int) $record->children_count : null)
+                    ->placeholder('-')
+                    ->badge()
+                    ->color('gray')
+                    ->sortable()
+                    ->toggleable(),
                 TextColumn::make('created_at')
                     ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
                     ->sortable()
@@ -164,15 +207,16 @@ class GroupResource extends Resource implements CopilotResource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                // SelectFilter::make('playlist')
-                //     ->relationship('playlist', 'name')
-                //     ->multiple()
-                //     ->preload()
-                //     ->searchable(),
+                TernaryFilter::make('is_merged')
+                    ->label(__('Merged groups'))
+                    ->placeholder(__('All groups'))
+                    ->trueLabel(__('Merged groups only'))
+                    ->falseLabel(__('Exclude merged groups')),
             ])
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
+                    MergedGroupService::manageChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([
@@ -181,7 +225,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ->live()
                                 ->label(__('Group'))
                                 ->helperText(__('Select the group you would like to move the channels to.'))
-                                ->options(fn (Get $get, $record) => Group::where([
+                                ->options(fn (Get $get, $record) => Group::query()->assignableTarget()->where([
                                     'type' => 'live',
                                     'user_id' => auth()->id(),
                                     'playlist_id' => $record->playlist_id,
@@ -404,6 +448,7 @@ class GroupResource extends Resource implements CopilotResource
                                 ->helperText(__('Select the group you would like to move the channels to.'))
                                 ->options(
                                     fn () => Group::query()
+                                        ->assignableTarget()
                                         ->with(['playlist'])
                                         ->where(['user_id' => auth()->id(), 'type' => 'live'])
                                         ->get(['name', 'id', 'playlist_id'])
@@ -446,6 +491,7 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrows-right-left')
                         ->modalDescription(__('Move the group channels to the another group.'))
                         ->modalSubmitActionLabel(__('Move now')),
+                    MergedGroupService::addToMergedGroupBulkAction('live'),
                     BulkAction::make('set-stream-profile')
                         ->label(__('Set Stream Profile'))
                         ->schema([
@@ -679,6 +725,7 @@ class GroupResource extends Resource implements CopilotResource
     {
         return [
             ChannelsRelationManager::class,
+            ChildGroupsRelationManager::class,
         ];
     }
 

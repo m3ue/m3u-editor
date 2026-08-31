@@ -85,6 +85,14 @@ class RefreshEpg extends Command
                 $interval = $epg->sync_interval === '24hr' ? '0 0 * * *' : $epg->sync_interval;
                 $cronExpression = new CronExpression($interval);
 
+                // Skip Schedules Direct EPGs that are in a provider login-limit
+                // (4009) cooldown: dispatching would just re-trigger a /token
+                // request and keep the account rate-limited. It resumes on its
+                // own once the cooldown clears.
+                if ($epg->isInSchedulesDirectLoginCooldown()) {
+                    return;
+                }
+
                 // Gate failed retries behind a cooldown to prevent CPU runaway
                 $isFailed = $epg->status === Status::Failed;
                 $cooldownPassed = $epg->updated_at->diffInMinutes(now()) >= $failedRetryCooldown;

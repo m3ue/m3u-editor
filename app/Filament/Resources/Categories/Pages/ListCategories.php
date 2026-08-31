@@ -7,6 +7,7 @@ use App\Jobs\CategoryFindAndReplace;
 use App\Jobs\CategoryFindAndReplaceReset;
 use App\Models\Playlist;
 use App\Services\FindReplaceService;
+use App\Services\MergedGroupService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Notifications\Notification;
@@ -27,6 +28,7 @@ class ListCategories extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            MergedGroupService::createMergedCategoryAction(),
             ActionGroup::make([
                 Action::make('find-replace')
                     ->label(__('Find & Replace'))

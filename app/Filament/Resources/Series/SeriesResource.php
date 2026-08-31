@@ -328,7 +328,7 @@ class SeriesResource extends Resource implements CopilotResource
                             ->live()
                             ->label(__('Category'))
                             ->helperText(__('Select the category you would like to move the series to.'))
-                            ->options(fn (Get $get, $record) => Category::where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
+                            ->options(fn (Get $get, $record) => Category::query()->assignableTarget()->where(['user_id' => auth()->id(), 'playlist_id' => $record->playlist_id])->get(['name', 'id'])->pluck('name', 'id'))
                             ->searchable(),
                     ])
                     ->action(function ($record, array $data): void {
@@ -613,6 +613,7 @@ class SeriesResource extends Resource implements CopilotResource
                             ->helperText(__('Select the category you would like to move the series to.'))
                             ->options(
                                 fn () => Category::query()
+                                    ->assignableTarget()
                                     ->with(['playlist'])
                                     ->where(['user_id' => auth()->id()])
                                     ->get(['name', 'id', 'playlist_id'])
@@ -1086,7 +1087,7 @@ class SeriesResource extends Resource implements CopilotResource
                                         ->inline(false)
                                         ->required(),
                                     Select::make('category_id')
-                                        ->relationship('category', 'name'),
+                                        ->relationship('category', 'name', fn ($query) => $query->assignableTarget()),
                                     TextInput::make('cover')
                                         ->maxLength(255)
                                         ->suffixActions([

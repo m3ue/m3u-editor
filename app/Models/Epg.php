@@ -36,6 +36,7 @@ class Epg extends Model
         'cache_meta' => 'array',
         'source_type' => EpgSourceType::class,
         'sd_token_expires_at' => 'datetime',
+        'sd_login_cooldown_until' => 'datetime',
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
         'sd_errors' => 'array',
@@ -105,11 +106,28 @@ class Epg extends Model
         return $this->source_type === EpgSourceType::SCHEDULES_DIRECT;
     }
 
+    /**
+     * A stored Schedules Direct token is usable when it exists and still has a
+     * safety margin left before its real expiry. Schedules Direct tokens are
+     * valid for 24 hours; the small margin absorbs clock skew and keeps a
+     * long-running sync from having a token lapse mid-request.
+     */
     public function hasValidSchedulesDirectToken(): bool
     {
         return $this->sd_token &&
             $this->sd_token_expires_at &&
-            $this->sd_token_expires_at->isFuture();
+            $this->sd_token_expires_at->isAfter(now()->addSeconds(60));
+    }
+
+    /**
+     * True while a bounded cooldown from a Schedules Direct TOO_MANY_LOGINS
+     * (code 4009) rejection is still in effect. No /token request may be made
+     * for this account until it clears.
+     */
+    public function isInSchedulesDirectLoginCooldown(): bool
+    {
+        return $this->sd_login_cooldown_until
+            && $this->sd_login_cooldown_until->isFuture();
     }
 
     public function hasSchedulesDirectCredentials(): bool

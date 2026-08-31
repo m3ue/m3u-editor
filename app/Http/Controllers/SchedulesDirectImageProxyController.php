@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
 use App\Services\SchedulesDirectService;
 use Illuminate\Http\Request;
@@ -129,6 +130,17 @@ class SchedulesDirectImageProxyController extends Controller
                     'status' => $response->status(),
                 ], $response->status());
             }
+        } catch (SchedulesDirectRateLimitException $e) {
+            // Provider login-limit cooldown is active; do not attempt to log in.
+            Log::warning('SchedulesDirect image proxy skipped during login-limit cooldown', [
+                'epg_id' => $epgId,
+                'retry_at' => $e->retryAt->toIso8601String(),
+            ]);
+
+            return response()->json([
+                'error' => 'SchedulesDirect login limit reached; try again later',
+                'retry_at' => $e->retryAt->toIso8601String(),
+            ], 429);
         } catch (\Exception $e) {
             Log::error('Exception in SchedulesDirect image proxy', [
                 'epg_id' => $epgId,
