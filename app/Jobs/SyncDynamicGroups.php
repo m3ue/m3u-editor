@@ -40,13 +40,6 @@ class SyncDynamicGroups implements ShouldQueue
     public int $timeout = 900;
 
     /**
-     * Hard ceiling on the per-rule page count. The TmdbService caches each
-     * page individually so this is mostly a safety bound on TMDB API calls,
-     * not on member rows.
-     */
-    private const MAX_PAGES_PER_RULE = 5;
-
-    /**
      * Pivot-row insert chunk size (matches AutoSyncGroupsToCustomPlaylist).
      */
     private const MEMBERSHIP_CHUNK_SIZE = 1000;
@@ -188,7 +181,7 @@ class SyncDynamicGroups implements ShouldQueue
     }
 
     /**
-     * Resolve the TMDB id list for a single rule across all requested pages.
+     * Resolve the TMDB id list for a single rule.
      *
      * Returns an array of string ids matching the column type
      * (`channels.tmdb_id` / `series.tmdb_id` are varchar per the 2025-06-18
@@ -198,130 +191,10 @@ class SyncDynamicGroups implements ShouldQueue
      */
     private function collectTmdbIds(TmdbService $tmdb, string $type, string $source, array $params): array
     {
-        $pages = (int) ($params['pages'] ?? 3);
-        $pages = max(1, min(self::MAX_PAGES_PER_RULE, $pages));
-        $results = [];
-
-        switch ($source) {
-            case 'trending':
-                // Trending already returns the merged list — ignore pages.
-                $mediaType = $type === 'series' ? 'tv' : 'movie';
-                $window = (string) ($params['time_window'] ?? 'week');
-                $results = $tmdb->getTrending($mediaType, $window);
-                break;
-
-            case 'popular':
-                for ($p = 1; $p <= $pages; $p++) {
-                    $page = $type === 'series'
-                        ? $tmdb->getPopularTv($p)
-                        : $tmdb->getPopularMovies($p);
-                    $results = array_merge($results, $page);
-                }
-                break;
-
-            case 'now_playing':
-                if ($type !== 'vod') {
-                    break;
-                }
-                for ($p = 1; $p <= $pages; $p++) {
-                    $results = array_merge($results, $tmdb->getNowPlayingMovies($p));
-                }
-                break;
-
-            case 'upcoming':
-                if ($type !== 'vod') {
-                    break;
-                }
-                for ($p = 1; $p <= $pages; $p++) {
-                    $results = array_merge($results, $tmdb->getUpcomingMovies($p));
-                }
-                break;
-
-            case 'top_genre':
-                $genreId = (int) ($params['genre_id'] ?? 0);
-                if ($genreId <= 0) {
-                    break;
-                }
-                $discoverParams = [
-                    'with_genres' => $genreId,
-                    'sort_by' => 'vote_average.desc',
-                    'vote_count.gte' => 200,
-                ];
-                $results = $this->collectDiscoverPages(
-                    fn (int $p) => $type === 'series'
-                        ? $tmdb->discoverTv($discoverParams + ['page' => $p])
-                        : $tmdb->discoverMovies($discoverParams + ['page' => $p]),
-                    $pages,
-                );
-                break;
-
-            case 'tmdb_network':
-                if ($type !== 'series') {
-                    break;
-                }
-                $networkId = (int) ($params['network_id'] ?? 0);
-                if ($networkId <= 0) {
-                    break;
-                }
-                $results = $this->collectDiscoverPages(
-                    fn (int $p) => $tmdb->discoverTv([
-                        'with_networks' => $networkId,
-                        'page' => $p,
-                    ]),
-                    $pages,
-                );
-                break;
-
-            case 'provider':
-                $providerId = (int) ($params['provider_id'] ?? 0);
-                if ($providerId <= 0) {
-                    break;
-                }
-                $region = strtoupper((string) ($params['region'] ?? 'US'));
-                $discoverParams = [
-                    'with_watch_providers' => $providerId,
-                    'watch_region' => $region,
-                ];
-                $results = $this->collectDiscoverPages(
-                    fn (int $p) => $type === 'series'
-                        ? $tmdb->discoverTv($discoverParams + ['page' => $p])
-                        : $tmdb->discoverMovies($discoverParams + ['page' => $p]),
-                    $pages,
-                );
-                break;
-
-            default:
-                // Unknown source — skip silently. Validated at the form layer
-                // but defensive coding here means a future source added to
-                // the enum without updating this switch fails open (no rows).
-                break;
-        }
-
-        return array_values(array_unique(array_map(
+        return array_map(
             fn (array $item): string => (string) ($item['tmdb_id'] ?? 0),
-            $results,
-        )));
-    }
-
-    /**
-     * Drive the paged discover calls and stop when TMDB reports it has no
-     * more pages.
-     *
-     * @param  callable(int): array{results: array<int, array<string, mixed>>, total_pages: int}  $discover
-     * @return array<int, array<string, mixed>>
-     */
-    private function collectDiscoverPages(callable $discover, int $maxPages): array
-    {
-        $all = [];
-        $totalPages = PHP_INT_MAX;
-
-        for ($p = 1; $p <= $maxPages && $p <= $totalPages; $p++) {
-            $page = $discover($p);
-            $all = array_merge($all, $page['results'] ?? []);
-            $totalPages = (int) ($page['total_pages'] ?? $p);
-        }
-
-        return $all;
+            $tmdb->collectDynamicGroupResults($type, $source, $params),
+        );
     }
 
     /**
@@ -332,24 +205,11 @@ class SyncDynamicGroups implements ShouldQueue
      */
     private function syncMembership(DynamicGroup $group, string $type, int $playlistId, array $tmdbIds): void
     {
-        if ($type === 'vod') {
-            $itemIds = Channel::query()
-                ->where('playlist_id', $playlistId)
-                ->where('is_vod', true)
-                ->whereIn('tmdb_id', $tmdbIds)
-                ->pluck('id')
-                ->map(fn ($id): int => (int) $id)
-                ->all();
-            $morphClass = Channel::class;
-        } else {
-            $itemIds = Series::query()
-                ->where('playlist_id', $playlistId)
-                ->whereIn('tmdb_id', $tmdbIds)
-                ->pluck('id')
-                ->map(fn ($id): int => (int) $id)
-                ->all();
-            $morphClass = Series::class;
-        }
+        $morphClass = $type === 'vod' ? Channel::class : Series::class;
+        $itemIds = DynamicGroup::itemsMatchingTmdbIds($type, $playlistId, $tmdbIds)
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
 
         // Remove stale membership — anything not in the freshly-computed set.
         DB::table('dynamic_group_items')

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
@@ -71,6 +72,28 @@ class DynamicGroup extends Model
     public function series(): MorphToMany
     {
         return $this->morphedByMany(Series::class, 'item', 'dynamic_group_items');
+    }
+
+    /**
+     * Query for the playlist items a rule's TMDB id set matches — VOD
+     * channels when $type is 'vod', otherwise series. Shared by the
+     * SyncDynamicGroups membership writer and the playlist form's per-rule
+     * preview action so both resolve membership identically.
+     *
+     * @param  array<int, string>  $tmdbIds
+     */
+    public static function itemsMatchingTmdbIds(string $type, int $playlistId, array $tmdbIds): Builder
+    {
+        if ($type === 'vod') {
+            return Channel::query()
+                ->where('playlist_id', $playlistId)
+                ->where('is_vod', true)
+                ->whereIn('tmdb_id', $tmdbIds);
+        }
+
+        return Series::query()
+            ->where('playlist_id', $playlistId)
+            ->whereIn('tmdb_id', $tmdbIds);
     }
 
     /**

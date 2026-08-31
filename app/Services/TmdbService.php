@@ -46,6 +46,13 @@ class TmdbService
         54 => 'Disney Channel',
     ];
 
+    /**
+     * Hard ceiling on the per-rule page count for dynamic-group list
+     * collection. Each page is cached individually so this is mostly a
+     * safety bound on TMDB API calls, not on member rows.
+     */
+    public const MAX_DYNAMIC_GROUP_PAGES = 5;
+
     protected ?string $apiKey;
 
     protected string $language;
@@ -2294,6 +2301,148 @@ class TmdbService
                 return [];
             }
         });
+    }
+
+    /**
+     * Resolve the TMDB result list for a single dynamic-group rule across all
+     * requested pages, deduplicated by tmdb_id.
+     *
+     * Shared by SyncDynamicGroups (which only needs the ids) and the playlist
+     * form's per-rule preview action (which also displays titles) so the two
+     * can never drift apart. Every underlying list endpoint caches per page,
+     * so repeated calls (e.g. re-opening the preview) are cheap.
+     *
+     * @param  string  $type  'vod' or 'series'
+     * @param  string  $source  trending|popular|now_playing|upcoming|top_genre|tmdb_network|provider
+     * @param  array<string, mixed>  $params  The rule's tmdb_params
+     * @return array<int, array<string, mixed>> Normalized discover results (tmdb_id, title, year, …)
+     */
+    public function collectDynamicGroupResults(string $type, string $source, array $params): array
+    {
+        $pages = (int) ($params['pages'] ?? 3);
+        $pages = max(1, min(self::MAX_DYNAMIC_GROUP_PAGES, $pages));
+        $results = [];
+
+        switch ($source) {
+            case 'trending':
+                // Trending already returns the merged list — ignore pages.
+                $mediaType = $type === 'series' ? 'tv' : 'movie';
+                $window = (string) ($params['time_window'] ?? 'week');
+                $results = $this->getTrending($mediaType, $window);
+                break;
+
+            case 'popular':
+                for ($p = 1; $p <= $pages; $p++) {
+                    $page = $type === 'series'
+                        ? $this->getPopularTv($p)
+                        : $this->getPopularMovies($p);
+                    $results = array_merge($results, $page);
+                }
+                break;
+
+            case 'now_playing':
+                if ($type !== 'vod') {
+                    break;
+                }
+                for ($p = 1; $p <= $pages; $p++) {
+                    $results = array_merge($results, $this->getNowPlayingMovies($p));
+                }
+                break;
+
+            case 'upcoming':
+                if ($type !== 'vod') {
+                    break;
+                }
+                for ($p = 1; $p <= $pages; $p++) {
+                    $results = array_merge($results, $this->getUpcomingMovies($p));
+                }
+                break;
+
+            case 'top_genre':
+                $genreId = (int) ($params['genre_id'] ?? 0);
+                if ($genreId <= 0) {
+                    break;
+                }
+                $discoverParams = [
+                    'with_genres' => $genreId,
+                    'sort_by' => 'vote_average.desc',
+                    'vote_count.gte' => 200,
+                ];
+                $results = $this->collectDiscoverPages(
+                    fn (int $p) => $type === 'series'
+                        ? $this->discoverTv($discoverParams + ['page' => $p])
+                        : $this->discoverMovies($discoverParams + ['page' => $p]),
+                    $pages,
+                );
+                break;
+
+            case 'tmdb_network':
+                if ($type !== 'series') {
+                    break;
+                }
+                $networkId = (int) ($params['network_id'] ?? 0);
+                if ($networkId <= 0) {
+                    break;
+                }
+                $results = $this->collectDiscoverPages(
+                    fn (int $p) => $this->discoverTv([
+                        'with_networks' => $networkId,
+                        'page' => $p,
+                    ]),
+                    $pages,
+                );
+                break;
+
+            case 'provider':
+                $providerId = (int) ($params['provider_id'] ?? 0);
+                if ($providerId <= 0) {
+                    break;
+                }
+                $region = strtoupper((string) ($params['region'] ?? 'US'));
+                $discoverParams = [
+                    'with_watch_providers' => $providerId,
+                    'watch_region' => $region,
+                ];
+                $results = $this->collectDiscoverPages(
+                    fn (int $p) => $type === 'series'
+                        ? $this->discoverTv($discoverParams + ['page' => $p])
+                        : $this->discoverMovies($discoverParams + ['page' => $p]),
+                    $pages,
+                );
+                break;
+
+            default:
+                // Unknown source — skip silently. Validated at the form layer
+                // but defensive coding here means a future source added to
+                // the enum without updating this switch fails open (no rows).
+                break;
+        }
+
+        return collect($results)
+            ->unique(fn (array $item): int => (int) ($item['tmdb_id'] ?? 0))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Drive the paged discover calls and stop when TMDB reports it has no
+     * more pages.
+     *
+     * @param  callable(int): array{results: array<int, array<string, mixed>>, total_pages: int}  $discover
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectDiscoverPages(callable $discover, int $maxPages): array
+    {
+        $all = [];
+        $totalPages = PHP_INT_MAX;
+
+        for ($p = 1; $p <= $maxPages && $p <= $totalPages; $p++) {
+            $page = $discover($p);
+            $all = array_merge($all, $page['results'] ?? []);
+            $totalPages = (int) ($page['total_pages'] ?? $p);
+        }
+
+        return $all;
     }
 
     /**

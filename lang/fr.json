@@ -5199,5 +5199,19 @@
     "Today": "Today",
     "Top Genre": "Top Genre",
     "Trending": "Trending",
-    "VOD (Movies)": "VOD (Movies)"
+    "VOD (Movies)": "VOD (Movies)",
+    "Preview the entries this rule currently matches": "Preview the entries this rule currently matches",
+    "Preview: :name": "Preview: :name",
+    "Preview dynamic group": "Preview dynamic group",
+    "Save the playlist before previewing dynamic groups.": "Save the playlist before previewing dynamic groups.",
+    "Select a content type and source first.": "Select a content type and source first.",
+    "TMDB is not configured. Add your TMDB API key in Settings → TMDB Integration.": "TMDB is not configured. Add your TMDB API key in Settings → TMDB Integration.",
+    "TMDB returned no titles for this rule. Check the rule parameters, or try again later.": "TMDB returned no titles for this rule. Check the rule parameters, or try again later.",
+    ":count entry matched|:count entries matched": ":count entry matched|:count entries matched",
+    ":total titles returned by TMDB for this rule.": ":total titles returned by TMDB for this rule.",
+    "Entries match by TMDB ID. If your series are missing TMDB IDs, run a playlist sync with TMDB matching enabled first.": "Entries match by TMDB ID. If your series are missing TMDB IDs, run a playlist sync with TMDB matching enabled first.",
+    "Entries match by TMDB ID. If your VOD channels are missing TMDB IDs, run a playlist sync with TMDB matching enabled first.": "Entries match by TMDB ID. If your VOD channels are missing TMDB IDs, run a playlist sync with TMDB matching enabled first.",
+    "In this playlist": "In this playlist",
+    "Not in this playlist": "Not in this playlist",
+    "and :count more…": "and :count more…"
 }

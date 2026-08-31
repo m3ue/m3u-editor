@@ -32,6 +32,7 @@ use App\Livewire\XtreamApiInfo;
 use App\Livewire\XtreamDnsStatus;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
+use App\Models\DynamicGroup;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -2039,6 +2040,40 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->collapsible()
                                 ->defaultItems(0)
                                 ->addActionLabel(__('Add dynamic group'))
+                                ->extraItemActions([
+                                    Action::make('preview_dynamic_group')
+                                        ->label(__('Preview'))
+                                        ->icon('heroicon-o-eye')
+                                        ->color('info')
+                                        ->tooltip(__('Preview the entries this rule currently matches'))
+                                        // Matching runs against the playlist's synced VOD/series
+                                        // rows, so there is nothing to preview until the
+                                        // playlist exists.
+                                        ->visible(fn (?Playlist $record): bool => $record !== null)
+                                        ->modalHeading(function (array $arguments, Repeater $component): string {
+                                            $itemKey = $arguments['item'] ?? null;
+                                            $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
+                                            $name = trim((string) ($rule['name'] ?? ''));
+
+                                            return $name !== ''
+                                                ? __('Preview: :name', ['name' => $name])
+                                                : __('Preview dynamic group');
+                                        })
+                                        ->modalWidth('2xl')
+                                        ->modalSubmitAction(false)
+                                        ->modalCancelActionLabel(__('Close'))
+                                        ->modalContent(function (array $arguments, Repeater $component, ?Playlist $record) {
+                                            // Raw (unvalidated) state so the preview reflects the
+                                            // rule as currently edited, before the form is saved.
+                                            $itemKey = $arguments['item'] ?? null;
+                                            $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
+
+                                            return view(
+                                                'filament.forms.dynamic-group-preview',
+                                                self::getDynamicGroupPreviewData($rule, $record),
+                                            );
+                                        }),
+                                ])
                                 ->itemLabel(function (array $state): ?string {
                                     $name = $state['name'] ?? null;
                                     if (! $name) {
@@ -3497,6 +3532,85 @@ class PlaylistResource extends Resource implements CopilotResource
 
         // Return sections and fields
         return $sections;
+    }
+
+    /**
+     * Build the view data for the dynamic-group rule preview modal.
+     *
+     * Uses the same TMDB collection (TmdbService::collectDynamicGroupResults)
+     * and item matching (DynamicGroup::itemsMatchingTmdbIds) as the
+     * SyncDynamicGroups job, so the preview always shows exactly what a sync
+     * would attach.
+     *
+     * @param  array<string, mixed>  $rule  Raw (unvalidated) repeater item state
+     * @return array{error: ?string, type: string, tmdbTotal: int, matched: array<int, string>, matchedTotal: int, unmatched: array<int, array<string, mixed>>, unmatchedTotal: int}
+     */
+    public static function getDynamicGroupPreviewData(array $rule, ?Playlist $record): array
+    {
+        $type = (string) ($rule['type'] ?? '');
+        $source = (string) ($rule['source'] ?? '');
+
+        $base = [
+            'error' => null,
+            'type' => $type,
+            'tmdbTotal' => 0,
+            'matched' => [],
+            'matchedTotal' => 0,
+            'unmatched' => [],
+            'unmatchedTotal' => 0,
+        ];
+
+        if (! $record) {
+            return ['error' => __('Save the playlist before previewing dynamic groups.')] + $base;
+        }
+
+        if (! in_array($type, ['vod', 'series'], true) || $source === '') {
+            return ['error' => __('Select a content type and source first.')] + $base;
+        }
+
+        $tmdb = app(TmdbService::class);
+        if (! $tmdb->isConfigured()) {
+            return ['error' => __('TMDB is not configured. Add your TMDB API key in Settings → TMDB Integration.')] + $base;
+        }
+
+        $results = $tmdb->collectDynamicGroupResults($type, $source, (array) ($rule['tmdb_params'] ?? []));
+        if ($results === []) {
+            return ['error' => __('TMDB returned no titles for this rule. Check the rule parameters, or try again later.')] + $base;
+        }
+
+        $tmdbIds = array_map(
+            fn (array $item): string => (string) ($item['tmdb_id'] ?? 0),
+            $results,
+        );
+
+        // cursor() keeps memory flat; the TMDB id set bounds the row count
+        // (a few hundred at most) regardless.
+        $matched = [];
+        $matchedTmdbIds = [];
+        $itemsQuery = DynamicGroup::itemsMatchingTmdbIds($type, $record->id, $tmdbIds)
+            ->select($type === 'vod' ? ['id', 'name', 'name_custom', 'tmdb_id'] : ['id', 'name', 'tmdb_id']);
+        foreach ($itemsQuery->cursor() as $item) {
+            $matchedTmdbIds[(string) $item->tmdb_id] = true;
+            $matched[] = $type === 'vod'
+                ? ($item->name_custom ?? $item->name)
+                : $item->name;
+        }
+        sort($matched, SORT_NATURAL | SORT_FLAG_CASE);
+
+        $unmatched = array_values(array_filter(
+            $results,
+            fn (array $item): bool => ! isset($matchedTmdbIds[(string) ($item['tmdb_id'] ?? 0)]),
+        ));
+
+        return [
+            'error' => null,
+            'type' => $type,
+            'tmdbTotal' => count($results),
+            'matched' => array_slice($matched, 0, 50),
+            'matchedTotal' => count($matched),
+            'unmatched' => array_slice($unmatched, 0, 50),
+            'unmatchedTotal' => count($unmatched),
+        ];
     }
 
     public static function getForm(): array
