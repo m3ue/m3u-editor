@@ -39,7 +39,6 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Hidden;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -48,6 +47,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
@@ -533,9 +533,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                 },
                             ]),
 
-                        Placeholder::make('library_instructions')
-                            ->label('')
-                            ->content(function (callable $get) {
+                        Callout::make()
+                            ->description(function (callable $get) {
                                 $libraries = $get('available_libraries');
                                 $type = $get('type');
 
@@ -625,9 +624,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                     ->schema([
                         Hidden::make('aiostreams_catalogs'),
 
-                        Placeholder::make('aiostreams_catalog_instructions')
-                            ->label('')
-                            ->content(function (callable $get) {
+                        Callout::make()
+                            ->description(function (callable $get) {
                                 $catalogs = $get('aiostreams_catalogs') ?? [];
                                 if (empty($catalogs)) {
                                     return new HtmlString(
@@ -771,9 +769,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->default(false),
 
                         Grid::make(2)->schema([
-                            Placeholder::make('plex_server_info')
-                                ->label(__('Server Info'))
-                                ->content(function ($record) {
+                            Callout::make(__('Server Info'))
+                                ->description(function ($record) {
                                     if (! $record || ! $record->isPlex()) {
                                         return new HtmlString('<span class="text-gray-400">Save integration first</span>');
                                     }
@@ -798,9 +795,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     }
                                 }),
 
-                            Placeholder::make('plex_dvr_sync_status')
-                                ->label(__('DVR Sync Status'))
-                                ->content(function ($record) {
+                            Callout::make(__('DVR Sync Status'))
+                                ->description(function ($record) {
                                     if (! $record || ! $record->isPlex()) {
                                         return '—';
                                     }
@@ -853,9 +849,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->description(__('Register this playlist as an HDHomeRun tuner in Plex for Live TV & DVR.'))
                             ->collapsible()
                             ->schema([
-                                Placeholder::make('plex_dvr_status')
-                                    ->label(__('DVR Status'))
-                                    ->content(function ($record) {
+                                Callout::make(__('DVR Status'))
+                                    ->description(function ($record) {
                                         if (! $record || ! $record->isPlex()) {
                                             return new HtmlString('<span class="text-gray-400">Save integration first</span>');
                                         }
@@ -866,9 +861,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                         return new HtmlString('<span class="text-warning-500">No DVR tuner registered in Plex</span>');
                                     }),
 
-                                Placeholder::make('plex_dvr_help')
-                                    ->label('')
-                                    ->content(new HtmlString(
+                                Callout::make()
+                                    ->description(new HtmlString(
                                         '<div class="text-sm text-gray-500 dark:text-gray-400">'
                                         .'<p>This registers the playlist\'s HDHomeRun emulation endpoint as a DVR tuner in Plex.</p>'
                                         .'<p class="mt-1">Plex will then use it for Live TV &amp; DVR, including the channel guide (EPG).</p>'
@@ -876,9 +870,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                         .'</div>'
                                     )),
 
-                                Placeholder::make('plex_dvr_tuners_list')
-                                    ->label(__('Registered Tuners'))
-                                    ->content(function ($record) {
+                                Callout::make(__('Registered Tuners'))
+                                    ->description(function ($record) {
                                         $tuners = $record->plex_dvr_tuners ?? [];
                                         if (empty($tuners)) {
                                             return new HtmlString('<span class="text-gray-400 text-sm">No tuners registered yet.</span>');
@@ -965,8 +958,9 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                     $set('epg_url', $baseUrl."/{$uuid}/epg.xml");
                                                 })
                                                 ->required(),
-                                            Placeholder::make('tvg_id_warning')
-                                                ->content(new HtmlString('<p style="color: #f59e0b; font-weight: 600;">⚠ This playlist\'s TVG ID output is not set to "Channel Number". For HDHR/Plex DVR to match EPG correctly, set the playlist\'s "Preferred TVG ID output" to "Channel Number".</p>'))
+                                            Callout::make()
+                                                ->warning()
+                                                ->description(new HtmlString('<p>This playlist\'s TVG ID output is not set to "Channel Number". For HDHR/Plex DVR to match EPG correctly, set the playlist\'s "Preferred TVG ID output" to "Channel Number".</p>'))
                                                 ->visible(function (Get $get): bool {
                                                     $uuid = $get('playlist_uuid');
                                                     if (! $uuid) {
@@ -1113,9 +1107,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->collapsible()
                             ->collapsed()
                             ->schema([
-                                Placeholder::make('plex_libraries')
-                                    ->label(__('Libraries'))
-                                    ->content(function ($record) {
+                                Callout::make(__('Libraries'))
+                                    ->description(function ($record) {
                                         if (! $record || ! $record->isPlex()) {
                                             return 'Save integration first';
                                         }
@@ -1162,9 +1155,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->collapsible()
                             ->collapsed()
                             ->schema([
-                                Placeholder::make('plex_recordings')
-                                    ->label(__('Scheduled Recordings'))
-                                    ->content(function ($record) {
+                                Callout::make(__('Scheduled Recordings'))
+                                    ->description(function ($record) {
                                         if (! $record || ! $record->isPlex()) {
                                             return 'Save integration first';
                                         }

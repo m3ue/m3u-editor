@@ -694,11 +694,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->columnSpanFull()
                 ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id'))
                 ->schema([
-                    Forms\Components\Placeholder::make('custom_playlist_filter_note')
-                        ->label(__('What you can select'))
+                    Schemas\Components\Callout::make(__('What you can select'))
                         ->columnSpanFull()
                         ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
-                        ->content(__('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
+                        ->description(__('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
 
                     Schemas\Components\Fieldset::make(__('Live channel groups'))
                         ->schema([

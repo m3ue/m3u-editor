@@ -6,8 +6,8 @@ use App\Models\Asset;
 use App\Services\AssetInventoryService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Illuminate\Support\Facades\Storage;
@@ -50,14 +50,12 @@ class AssetPickerAction
                     ->placeholder(__('Search by filename...'))
                     ->options(fn (): array => static::assetOptions())
                     ->getSearchResultsUsing(fn (string $search): array => static::assetOptions($search)),
-                Placeholder::make('asset_preview')
-                    ->label(__('Preview'))
-                    ->content(fn (Get $get): HtmlString => new HtmlString(
+                Callout::make(__('Preview'))
+                    ->description(fn (Get $get): HtmlString => new HtmlString(
                         $get('asset_url')
                             ? '<img src="'.e($get('asset_url')).'" class="max-h-32 w-auto object-contain rounded border border-gray-200 dark:border-gray-700 p-1 mt-1">'
                             : '<span class="text-sm text-gray-400 dark:text-gray-500 italic">No image selected</span>'
-                    ))
-                    ->live(),
+                    )),
             ])
             ->modalSubmitActionLabel(__('Use this image'))
             ->action(function (array $data, Set $schemaSet) use ($field): void {

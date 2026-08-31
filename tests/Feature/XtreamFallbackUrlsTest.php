@@ -160,6 +160,77 @@ describe('Playlist::promoteXtreamUrl', function () {
 
         expect($playlist->xtream_config['url'])->toBe('http://primary.example.com:8080');
     });
+
+    it('rewrites a tied provider EPG even when its host is not in the current URL list', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'user',
+                'password' => 'pass',
+            ],
+            'xtream_fallback_urls' => ['http://fallback1.example.com:8080'],
+        ]);
+
+        // A prior failover left the EPG pointing at a host that has since
+        // churned out of the fallback list entirely. URL matching can't find
+        // it; the provider tie still can.
+        $epg = Epg::factory()->for($user)->create([
+            'playlist_id' => $playlist->id,
+            'source_type' => 'url',
+            'url' => 'http://long-gone.example.com:8080/xmltv.php?username=user&password=pass',
+        ]);
+
+        $playlist->promoteXtreamUrl('http://fallback1.example.com:8080');
+
+        expect($epg->refresh()->url)
+            ->toBe('http://fallback1.example.com:8080/xmltv.php?username=user&password=pass');
+    });
+
+    it('does not touch a tied EPG that is a SchedulesDirect source', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'user',
+                'password' => 'pass',
+            ],
+            'xtream_fallback_urls' => ['http://fallback1.example.com:8080'],
+        ]);
+
+        $epg = Epg::factory()->for($user)->create([
+            'playlist_id' => $playlist->id,
+            'source_type' => 'schedules_direct',
+            'url' => null,
+        ]);
+
+        $playlist->promoteXtreamUrl('http://fallback1.example.com:8080');
+
+        expect($epg->refresh()->url)->toBeNull();
+    });
+
+    it('leaves an untied EPG at an unrelated host alone', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'user',
+                'password' => 'pass',
+            ],
+            'xtream_fallback_urls' => ['http://fallback1.example.com:8080'],
+        ]);
+
+        $other = Epg::factory()->for($user)->create([
+            'url' => 'http://someone-elses-guide.example.net/epg.xml',
+        ]);
+
+        $playlist->promoteXtreamUrl('http://fallback1.example.com:8080');
+
+        expect($other->refresh()->url)->toBe('http://someone-elses-guide.example.net/epg.xml');
+    });
 });
 
 // ── XtreamHealthService ──────────────────────────────────────────────────────

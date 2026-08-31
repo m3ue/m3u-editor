@@ -18,6 +18,7 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
+use App\Models\DynamicGroup;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Epg;
 use App\Models\EpgProgramme;
@@ -149,10 +150,17 @@ class XtreamApiController extends Controller
      * ### get_vod_categories
      * Returns a JSON array of VOD categories/groups. Only groups with enabled VOD channels are included.
      * Each category contains: `category_id`, `category_name`, `parent_id`.
+     * For regular Playlist and PlaylistAlias sources, enabled TMDB-derived
+     * "dynamic groups" (Trending, Popular, Top Genre, by Network, by
+     * Streaming Service) are prepended using reserved category ids (see
+     * DynamicGroup::XTREAM_CATEGORY_ID_OFFSET).
      *
      * ### get_series_categories
      * Returns a JSON array of series categories. Only categories with enabled series are included.
      * Each category contains: `category_id`, `category_name`, `parent_id`.
+     * For regular Playlist and PlaylistAlias sources, enabled TMDB-derived
+     * "dynamic groups" (Trending, Popular, Top Genre, by Network, by
+     * Streaming Service) are prepended using reserved category ids.
      *
      * ### get_series_info
      * Returns detailed information for a specific series, including its seasons and episodes.
@@ -912,6 +920,12 @@ class XtreamApiController extends Controller
 
             $categoryId = $request->input('category_id');
 
+            // Resolved once, used both by the filter branch below and the
+            // streamed response closure further down. Must be declared up
+            // here so the closure can `use ($dynamicGroupId)` regardless of
+            // whether a category filter was actually applied.
+            $dynamicGroupId = null;
+
             $channelsQuery = PlaylistGenerateController::getChannelQuery($playlist, isVod: true);
 
             if ($isCustomPlaylist) {
@@ -940,15 +954,35 @@ class XtreamApiController extends Controller
                         });
                     });
                 } else {
-                    // A merged group's category_id also matches every child folded into it.
-                    $channelsQuery->whereIn('group_id', XtreamCategoryService::resolveGroupFilterIds($categoryId));
+                    // Dynamic groups use a reserved id range
+                    // (DynamicGroup::XTREAM_CATEGORY_ID_OFFSET) so we can
+                    // distinguish them from real group PKs without an extra
+                    // DB lookup at request time.
+                    $dynamicGroupId = DynamicGroup::idFromXtreamCategoryId($categoryId);
+
+                    if ($dynamicGroupId !== null) {
+                        XtreamCategoryService::applyDynamicGroupFilter($channelsQuery, $dynamicGroupId, isVod: true);
+                    } else {
+                        // A merged group's category_id also matches every child folded into it.
+                        $channelsQuery->whereIn('group_id', XtreamCategoryService::resolveGroupFilterIds($categoryId));
+                    }
                 }
             }
 
             $cursor = $channelsQuery->cursor();
             $vodFileNameService = app(VodFileNameService::class);
 
-            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService) {
+            // Dynamic-category membership for the listing. Only the
+            // sources that advertise dynamic categories in
+            // get_vod_categories get the ids stamped onto member rows —
+            // see XtreamCategoryService::dynamicCategoryIdsByItem() for why
+            // the full listing needs them.
+            $dynamicCategoryIdsByChannel = [];
+            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && empty($aliasVodGroupFilter)) {
+                $dynamicCategoryIdsByChannel = XtreamCategoryService::dynamicCategoryIdsByItem($sourcePlaylist, isVod: true);
+            }
+
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService, $categoryId, $dynamicGroupId, $dynamicCategoryIdsByChannel) {
                 $num = 0;
                 $idChannelBy = $playlist->id_channel_by;
                 $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
@@ -980,6 +1014,11 @@ class XtreamApiController extends Controller
                         } elseif ($channel->group_id) {
                             $channelCategoryId = (string) $channel->group_id;
                         }
+                    } elseif ($dynamicGroupId !== null) {
+                        // When serving a dynamic category, clients group by
+                        // category_id client-side, so echo the requested id
+                        // (not the member's underlying group_id).
+                        $channelCategoryId = (string) $categoryId;
                     } else {
                         // Non-custom playlist: a group folded into a merged group reports the merged group's id.
                         $channelCategoryId = XtreamCategoryService::channelStreamCategoryId($channel);
@@ -1008,7 +1047,10 @@ class XtreamApiController extends Controller
                         'rating_5based' => $channel->rating_5based ?? 0,
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
-                        'category_ids' => [(int) $channelCategoryId],
+                        'category_ids' => array_values(array_unique(array_merge(
+                            [(int) $channelCategoryId],
+                            $dynamicCategoryIdsByChannel[(int) $channel->id] ?? [],
+                        ))),
                         'tmdb' => (string) $tmdb,
                         'tmdb_id' => (int) $tmdb,
                         'container_extension' => $channel->container_extension ?? 'mkv',
@@ -1034,6 +1076,12 @@ class XtreamApiController extends Controller
 
             $categoryId = $request->input('category_id');
 
+            // Resolved once, used both by the filter branch below and the
+            // streamed response closure further down. Must be declared up
+            // here so the closure can `use ($dynamicGroupId)` regardless of
+            // whether a category filter was actually applied.
+            $dynamicGroupId = null;
+
             $seriesQuery = $playlist->series()
                 ->where('series.enabled', true)
                 ->orderBy('series.sort', 'asc')
@@ -1057,9 +1105,19 @@ class XtreamApiController extends Controller
                             });
                     });
                 } else {
-                    // For regular Playlist and MergedPlaylist, filter by category_id.
-                    // A merged category's id also matches every child folded into it.
-                    $seriesQuery->whereIn('category_id', XtreamCategoryService::resolveSeriesCategoryFilterIds($categoryId));
+                    // Dynamic groups expose a reserved id range — see
+                    // DynamicGroup::XTREAM_CATEGORY_ID_OFFSET. Anything in
+                    // that range is a dynamic category, not a real Category
+                    // row, so we filter against the membership table.
+                    $dynamicGroupId = DynamicGroup::idFromXtreamCategoryId($categoryId);
+
+                    if ($dynamicGroupId !== null) {
+                        XtreamCategoryService::applyDynamicGroupFilter($seriesQuery, $dynamicGroupId, isVod: false);
+                    } else {
+                        // For regular Playlist and MergedPlaylist, filter by category_id.
+                        // A merged category's id also matches every child folded into it.
+                        $seriesQuery->whereIn('category_id', XtreamCategoryService::resolveSeriesCategoryFilterIds($categoryId));
+                    }
                 }
             }
 
@@ -1091,7 +1149,14 @@ class XtreamApiController extends Controller
                 });
             }
 
-            return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid) {
+            // Dynamic-category membership for the listing — mirrors the
+            // get_vod_streams wiring; see XtreamCategoryService::dynamicCategoryIdsByItem().
+            $dynamicCategoryIdsBySeries = [];
+            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && empty($aliasCategoryFilter)) {
+                $dynamicCategoryIdsBySeries = XtreamCategoryService::dynamicCategoryIdsByItem($sourcePlaylist, isVod: false);
+            }
+
+            return response()->stream(function () use ($seriesIterable, $playlist, $baseUrl, $isCustomPlaylist, $tagUuid, $categoryId, $dynamicGroupId, $dynamicCategoryIdsBySeries) {
                 $num = 0;
                 echo '[';
                 $first = true;
@@ -1109,6 +1174,10 @@ class XtreamApiController extends Controller
                         } elseif ($seriesItem->category_id) {
                             $seriesCategoryId = (string) $seriesItem->category_id;
                         }
+                    } elseif ($dynamicGroupId !== null) {
+                        // Dynamic category — echo the requested id rather
+                        // than the member's underlying category_id.
+                        $seriesCategoryId = (string) $categoryId;
                     } else {
                         // Non-custom playlist: a category folded into a merged category reports the parent's id.
                         $seriesCategoryId = XtreamCategoryService::seriesStreamCategoryId($seriesItem);
@@ -1157,6 +1226,10 @@ class XtreamApiController extends Controller
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                         'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
                         'category_id' => $seriesCategoryId,
+                        'category_ids' => array_values(array_unique(array_merge(
+                            [(int) $seriesCategoryId],
+                            $dynamicCategoryIdsBySeries[(int) $seriesItem->id] ?? [],
+                        ))),
                     ]);
                     $first = false;
                     if (ob_get_level() > 0) {
@@ -1547,8 +1620,15 @@ class XtreamApiController extends Controller
 
                 $vodCategories = self::filterCategoriesByName($vodCategories, $aliasVodGroupFilter);
             } else {
-                // For regular Playlist and MergedPlaylist, use the groups() relationship
-                $vodCategories = XtreamCategoryService::groupCategories($playlist, true, $aliasVodGroupFilter);
+                // For regular Playlist and MergedPlaylist, use the groups() relationship.
+                // XtreamCategoryService folds merged groups (children stand in for their
+                // parents) and prepends this source playlist's TMDB dynamic groups.
+                $vodCategories = XtreamCategoryService::prependDynamicGroups(
+                    XtreamCategoryService::groupCategories($playlist, true, $aliasVodGroupFilter),
+                    $playlist,
+                    isVod: true,
+                    aliasFilter: $aliasVodGroupFilter,
+                );
             }
 
             // Add a default "All" category if no specific categories exist
@@ -1643,8 +1723,14 @@ class XtreamApiController extends Controller
             } else {
                 // Get categories from series only — the series() relationship on PlaylistAlias
                 // automatically applies any alias category filter, so no extra scoping needed.
-                // Merged categories stand in for their children, which never appear alone.
-                $seriesCategories = XtreamCategoryService::seriesCategories($playlist);
+                // XtreamCategoryService folds merged categories (children stand in for parents)
+                // and prepends this source playlist's TMDB dynamic groups.
+                $seriesCategories = XtreamCategoryService::prependDynamicGroups(
+                    XtreamCategoryService::seriesCategories($playlist),
+                    $playlist,
+                    isVod: false,
+                    aliasFilter: $aliasCategoryFilter,
+                );
             }
 
             // Add a default "All" category if no specific categories exist

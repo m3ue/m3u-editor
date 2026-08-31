@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Models\Channel;
@@ -27,6 +28,8 @@ use Illuminate\Support\Str;
 class ProcessM3uImportComplete implements ShouldQueue
 {
     use Queueable;
+
+    public bool $runningSeriesImport = false;
 
     // Don't retry the job on failure
     public $tries = 1;
@@ -63,7 +66,10 @@ class ProcessM3uImportComplete implements ShouldQueue
         public bool $runningLiveImport = true, // Default to true for live imports
         public bool $runningVodImport = true, // Default to true for VOD imports
         public ?int $syncRunId = null,
+        bool $runningSeriesImport = false,
     ) {
+        $this->runningSeriesImport = $runningSeriesImport;
+
         // Set the invalidate import settings from config
         $this->invalidateImport = config('dev.invalidate_import', null);
         $this->invalidateImportThreshold = config('dev.invalidate_import_threshold', 100);
@@ -290,14 +296,23 @@ class ProcessM3uImportComplete implements ShouldQueue
                 $password = urlencode($playlist->xtream_config['password']);
                 $epgUrl = "$baseUrl/xmltv.php?username=$username&password=$password";
 
-                // Make sure EPG doesn't already exist
-                $epg = $user->epgs()->where('url', $epgUrl)->first();
+                // Make sure EPG doesn't already exist. Prefer the provider tie:
+                // a URL EPG already linked to this playlist is the one we would
+                // have created, regardless of what host DNS failover left its URL
+                // pointing at. Fall back to a URL match so an EPG the user
+                // deliberately unlinked is not recreated on the next sync.
+                $epg = $user->epgs()
+                    ->where('playlist_id', $playlist->id)
+                    ->where('source_type', EpgSourceType::URL)
+                    ->first()
+                    ?? $user->epgs()->where('url', $epgUrl)->first();
                 if (! $epg) {
                     // Create EPG to trigger sync
                     $epg = $user->epgs()->create([
                         'name' => $playlist->name.' EPG',
                         'url' => $epgUrl,
                         'user_id' => $user->id,
+                        'playlist_id' => $playlist->id,
                         'user_agent' => $playlist->user_agent,
                         'disable_ssl_verification' => $playlist->disable_ssl_verification,
                     ]);
@@ -358,6 +373,9 @@ class ProcessM3uImportComplete implements ShouldQueue
         }
         if ($this->runningVodImport) {
             $update['vod_progress'] = 100; // Only set if VOD import was run
+        }
+        if ($this->runningSeriesImport) {
+            $update['series_progress'] = 100; // Only set if Series import was run
         }
         $playlist->update($update);
 

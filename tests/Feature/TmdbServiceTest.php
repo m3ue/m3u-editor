@@ -894,3 +894,45 @@ it('returns cast with TMDB personId for click-through to filmography', function 
             'actor' => 'Brad Pitt',
         ]);
 });
+
+it('returns empties when API key is not configured for now playing', function () {
+    $settings = new GeneralSettings;
+    $settings->tmdb_api_key = null;
+
+    $service = new TmdbService($settings);
+
+    expect($service->getNowPlayingMovies())->toBe([]);
+});
+
+it('fetches and normalizes now-playing movies from TMDB', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/now_playing*' => Http::response([
+            'results' => [
+                [
+                    'id' => 700,
+                    'title' => 'In Theatres Now',
+                    'release_date' => '2024-05-01',
+                    'overview' => 'A new film.',
+                    'poster_path' => '/abc.jpg',
+                    'vote_average' => 8.1,
+                    'vote_count' => 1500,
+                    'genre_ids' => [28, 12],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $results = $service->getNowPlayingMovies();
+
+    expect($results)->toHaveCount(1)
+        ->and($results[0])->toMatchArray([
+            'tmdb_id' => 700,
+            'title' => 'In Theatres Now',
+            'media_type' => 'movie',
+            'year' => '2024',
+            'vote_average' => 8.1,
+            'genre_ids' => [28, 12],
+        ])
+        ->and($results[0]['poster_url'])->toBe('https://image.tmdb.org/t/p/w500/abc.jpg');
+});

@@ -5,10 +5,10 @@ namespace App\Filament\Support;
 use App\Enums\DvrSeriesMode;
 use App\Models\MediaServerIntegration;
 use App\Settings\GeneralSettings;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -110,9 +110,8 @@ class DvrRequestsAiostreamsTabs
                                     ->default(false)
                                     ->inline(false)
                                     ->columnSpanFull(),
-                                Placeholder::make('dvr_tmdb_status')
-                                    ->label(__('TMDB'))
-                                    ->content(function (): HtmlString {
+                                Callout::make(__('TMDB'))
+                                    ->description(function (): HtmlString {
                                         $hasKey = ! empty(app(GeneralSettings::class)->tmdb_api_key);
 
                                         if ($hasKey) {

@@ -9,10 +9,10 @@ use App\Models\PluginInstallReview;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -83,15 +83,12 @@ class PluginInstallReviewResource extends Resource implements CopilotResource
             Section::make(__('Requested Access'))
                 ->columns(2)
                 ->schema([
-                    Placeholder::make('permissions_preview')
-                        ->hiddenLabel()
-                        ->content(fn (?PluginInstallReview $record) => collect($record?->permissions ?? [])->implode(', ') ?: 'No permissions declared.'),
-                    Placeholder::make('capabilities_preview')
-                        ->hiddenLabel()
-                        ->content(fn (?PluginInstallReview $record) => collect($record?->capabilities ?? [])->implode(', ') ?: 'No capabilities declared.'),
-                    Placeholder::make('high_risk_permissions')
-                        ->label(__('High-Risk Permissions'))
-                        ->content(function (?PluginInstallReview $record): string {
+                    Callout::make()
+                        ->description(fn (?PluginInstallReview $record) => collect($record?->permissions ?? [])->implode(', ') ?: 'No permissions declared.'),
+                    Callout::make()
+                        ->description(fn (?PluginInstallReview $record) => collect($record?->capabilities ?? [])->implode(', ') ?: 'No capabilities declared.'),
+                    Callout::make(__('High-Risk Permissions'))
+                        ->description(function (?PluginInstallReview $record): string {
                             $highRisk = collect($record?->permissions ?? [])
                                 ->intersect(['network_egress', 'filesystem_write', 'schema_manage'])
                                 ->values();

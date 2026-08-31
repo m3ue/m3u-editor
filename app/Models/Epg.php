@@ -44,6 +44,8 @@ class Epg extends Model
         'sd_metadata' => 'array',
         'sd_debug' => 'boolean',
         'is_merged' => 'boolean',
+        'playlist_id' => 'integer',
+        'optimize_import' => 'boolean',
         'auto_resync_on_failure' => 'boolean',
         'auto_resync_retries' => 'integer',
         'resync_attempt' => 'integer',
@@ -148,6 +150,17 @@ class Epg extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Optional "same provider" tie to a playlist. When set, DNS failover on the
+     * playlist keeps this EPG's URL in sync, and optimized import scopes cache
+     * generation to the channels that playlist (and any other playlist mapping
+     * this EPG) actually uses.
+     */
+    public function playlist(): BelongsTo
+    {
+        return $this->belongsTo(Playlist::class);
     }
 
     public function channels(): HasMany
@@ -316,5 +329,57 @@ class Epg extends Model
     public function postProcesses(): MorphToMany
     {
         return $this->morphToMany(PostProcess::class, 'processable');
+    }
+
+    /**
+     * Playlist ids this EPG is scoped to for optimized import: the direct
+     * provider tie plus any playlist that has a mapping run against this EPG.
+     *
+     * @return array<int, int>
+     */
+    public function tiedPlaylistIds(): array
+    {
+        $ids = collect([$this->playlist_id])
+            ->merge($this->epgMaps()->pluck('playlist_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return array_map('intval', $ids);
+    }
+
+    /**
+     * Distinct XMLTV channel ids that optimized import should keep programme
+     * data for: the `channel_id` of every EpgChannel this EPG owns that a tied
+     * playlist's channel is currently mapped to.
+     *
+     * Returns null when optimization is off or nothing is mapped yet, which
+     * callers treat as "no filtering" (cache the full guide).
+     *
+     * @return array<int, string>|null
+     */
+    public function optimizedChannelIdAllowList(): ?array
+    {
+        if (! $this->optimize_import) {
+            return null;
+        }
+
+        $playlistIds = $this->tiedPlaylistIds();
+        if (empty($playlistIds)) {
+            return null;
+        }
+
+        $channelIds = EpgChannel::query()
+            ->where('epg_channels.epg_id', $this->id)
+            ->whereNotNull('epg_channels.channel_id')
+            ->where('epg_channels.channel_id', '!=', '')
+            ->join('channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
+            ->whereIn('channels.playlist_id', $playlistIds)
+            ->distinct()
+            ->pluck('epg_channels.channel_id')
+            ->all();
+
+        return empty($channelIds) ? null : $channelIds;
     }
 }

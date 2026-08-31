@@ -22,12 +22,12 @@ use App\Services\DateFormatService;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
@@ -93,9 +93,8 @@ class PluginResource extends Resource implements CopilotResource
                             Section::make(__('Overview'))
                                 ->compact()
                                 ->schema([
-                                    Placeholder::make('hero_panel')
-                                        ->hiddenLabel()
-                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::heroPanel($record))),
+                                    Callout::make()
+                                        ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::heroPanel($record))),
                                 ]),
                             Section::make(__('Current Status'))
                                 ->compact()
@@ -103,15 +102,12 @@ class PluginResource extends Resource implements CopilotResource
                                 ->collapsed()
                                 ->columns(3)
                                 ->schema([
-                                    Placeholder::make('run_posture')
-                                        ->hiddenLabel()
-                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::runPostureCard($record))),
-                                    Placeholder::make('automation_snapshot')
-                                        ->hiddenLabel()
-                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::automationCard($record))),
-                                    Placeholder::make('next_step_snapshot')
-                                        ->hiddenLabel()
-                                        ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::nextStepCard($record))),
+                                    Callout::make()
+                                        ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::runPostureCard($record))),
+                                    Callout::make()
+                                        ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::automationCard($record))),
+                                    Callout::make()
+                                        ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::nextStepCard($record))),
                                 ]),
                             Section::make(__('Capability Map'))
                                 ->compact()
@@ -120,9 +116,8 @@ class PluginResource extends Resource implements CopilotResource
                                 ->schema([
                                     Grid::make(2)
                                         ->schema([
-                                            Placeholder::make('capabilities_display')
-                                                ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Capabilities'), __('What this plugin can participate in inside the platform.'),
+                                            Callout::make()
+                                                ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Capabilities'), __('What this plugin can participate in inside the platform.'),
                                                     self::pillList(
                                                         collect($record?->capabilities ?? [])
                                                             ->map(fn (string $capability) => str($capability)->replace('_', __(' '))->headline())
@@ -130,25 +125,22 @@ class PluginResource extends Resource implements CopilotResource
                                                         'This plugin has not declared any capabilities yet.',
                                                     ),
                                                 ))),
-                                            Placeholder::make('actions_display')
-                                                ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Available Actions'), __('Manual actions available from the page header.'),
+                                            Callout::make()
+                                                ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Available Actions'), __('Manual actions available from the page header.'),
                                                     self::availableActions($record),
                                                 ))),
                                         ]),
                                     Grid::make(2)
                                         ->schema([
-                                            Placeholder::make('hooks_display')
-                                                ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Event Triggers'), __('Events that automatically run this plugin in the background.'),
+                                            Callout::make()
+                                                ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Event Triggers'), __('Events that automatically run this plugin in the background.'),
                                                     self::pillList(
                                                         collect($record?->hooks ?? [])->all(),
                                                         'This plugin only runs when you trigger one of its header actions.',
                                                     ),
                                                 ))),
-                                            Placeholder::make('plugin_identity')
-                                                ->hiddenLabel()
-                                                ->content(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Plugin Info'), __('Version, source, and type of this plugin.'),
+                                            Callout::make()
+                                                ->description(fn (?Plugin $record): HtmlString => new HtmlString(self::infoCard(__('Plugin Info'), __('Version, source, and type of this plugin.'),
                                                     self::pluginIdentity($record),
                                                 ))),
                                         ]),

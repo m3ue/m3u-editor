@@ -12,13 +12,13 @@ use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions;
 use Filament\Forms;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -144,11 +144,10 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ->compact()
                     ->columnSpanFull()
                     ->schema([
-                        Placeholder::make('path_preview')
-                            ->hiddenLabel()
+                        Callout::make()
                             ->columnSpanFull()
                             ->extraAttributes(['class' => 'font-mono'])
-                            ->content(function (Get $get): string {
+                            ->description(function (Get $get): string {
                                 $type = $get('type');
 
                                 $map = fn ($char) => match ($char) {
@@ -451,11 +450,10 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             ->live()
                             ->columnSpanFull()
                             ->helperText(__('When enabled, appends edition + a quality/codec/audio/HDR bracket to the filename built from "Filename metadata" above. Both work together.')),
-                        Placeholder::make('trash_probe_hint')
-                            ->hiddenLabel()
+                        Callout::make()
                             ->columnSpanFull()
                             ->visible(fn (Get $get): bool => (bool) $get('trash_guide_naming_enabled'))
-                            ->content(__('Note: Quality, video codec, audio and HDR placeholders require stream probing. Channels/episodes that have not been probed will fall back to manual values from the playlist source - some placeholders may render empty.')),
+                            ->description(__('Note: Quality, video codec, audio and HDR placeholders require stream probing. Channels/episodes that have not been probed will fall back to manual values from the playlist source - some placeholders may render empty.')),
                         ToggleButtons::make('trash_movie_components')
                             ->label(__('Movie extra components'))
                             ->helperText(__('Appended to the standard filename. Title/Year/TMDB/Group come from "Filename metadata" above.'))

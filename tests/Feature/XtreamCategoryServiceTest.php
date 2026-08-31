@@ -2,12 +2,15 @@
 
 use App\Models\Category;
 use App\Models\Channel;
+use App\Models\DynamicGroup;
 use App\Models\Group;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\XtreamCategoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -93,4 +96,133 @@ it('lists a merged group once, in the parent sort slot, for group categories', f
         ->and($categories[0]['category_id'])->toBe((string) $merged->id)
         ->and($categories[0]['category_name'])->toBe('Nordics')
         ->and($categories[0])->not->toHaveKey('_sort');
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Dynamic (TMDB) group projection
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('lists only enabled dynamic groups that have an enabled member, in sort order', function () {
+    $withMember = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending', 'sort_order' => 1, 'enabled' => true,
+    ]);
+    $first = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'popular', 'name' => 'Popular', 'sort_order' => 0, 'enabled' => true,
+    ]);
+    // Enabled group with no members — dropped.
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'upcoming', 'name' => 'Coming Soon', 'sort_order' => 2, 'enabled' => true,
+    ]);
+    // Disabled group with a member — dropped.
+    $disabled = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'now_playing', 'name' => 'In Theatres', 'sort_order' => 3, 'enabled' => false,
+    ]);
+    // Series-type group — excluded from the vod projection.
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Trending Shows', 'sort_order' => 0, 'enabled' => true,
+    ]);
+
+    $enabledChannel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id, 'is_vod' => true, 'enabled' => true,
+    ]);
+    $disabledChannel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id, 'is_vod' => true, 'enabled' => false,
+    ]);
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $withMember->id, 'item_type' => Channel::class, 'item_id' => $enabledChannel->id],
+        ['dynamic_group_id' => $first->id, 'item_type' => Channel::class, 'item_id' => $enabledChannel->id],
+        ['dynamic_group_id' => $disabled->id, 'item_type' => Channel::class, 'item_id' => $enabledChannel->id],
+    ]);
+    // "with member" group only has the disabled channel via a second row — still counts because $enabledChannel is attached above.
+    DB::table('dynamic_group_items')->insert([
+        'dynamic_group_id' => $withMember->id, 'item_type' => Channel::class, 'item_id' => $disabledChannel->id,
+    ]);
+
+    $categories = XtreamCategoryService::dynamicCategories($this->playlist, isVod: true);
+
+    expect(array_column($categories, 'category_name'))->toBe(['Popular', 'Trending'])
+        ->and($categories[0]['category_id'])->toBe((string) (DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $first->id))
+        ->and($categories[0]['parent_id'])->toBe(0);
+});
+
+it('maps member item ids to their dynamic Xtream category ids', function () {
+    $groupA = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'A', 'sort_order' => 0, 'enabled' => true,
+    ]);
+    $groupB = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'popular', 'name' => 'B', 'sort_order' => 1, 'enabled' => true,
+    ]);
+    $disabled = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'top_genre', 'name' => 'C', 'sort_order' => 2, 'enabled' => false,
+    ]);
+
+    $s1 = Series::factory()->for($this->user)->for($this->playlist)->create();
+    $s2 = Series::factory()->for($this->user)->for($this->playlist)->create();
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $groupA->id, 'item_type' => Series::class, 'item_id' => $s1->id],
+        ['dynamic_group_id' => $groupB->id, 'item_type' => Series::class, 'item_id' => $s1->id],
+        ['dynamic_group_id' => $groupA->id, 'item_type' => Series::class, 'item_id' => $s2->id],
+        ['dynamic_group_id' => $disabled->id, 'item_type' => Series::class, 'item_id' => $s2->id],
+    ]);
+
+    $map = XtreamCategoryService::dynamicCategoryIdsByItem($this->playlist, isVod: false);
+
+    expect($map[$s1->id])->toEqualCanonicalizing([
+        DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $groupA->id,
+        DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $groupB->id,
+    ])->and($map[$s2->id])->toBe([DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $groupA->id]);
+});
+
+it('constrains a query to one dynamic group\'s members', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending', 'sort_order' => 0, 'enabled' => true,
+    ]);
+    $member = Channel::factory()->for($this->playlist)->create(['user_id' => $this->user->id, 'is_vod' => true]);
+    $other = Channel::factory()->for($this->playlist)->create(['user_id' => $this->user->id, 'is_vod' => true]);
+    DB::table('dynamic_group_items')->insert([
+        'dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $member->id,
+    ]);
+
+    $query = Channel::query();
+    XtreamCategoryService::applyDynamicGroupFilter($query, $group->id, isVod: true);
+
+    expect($query->pluck('id')->all())->toBe([$member->id])
+        ->and($other->id)->not->toBeIn($query->pluck('id')->all());
+});
+
+it('prepends dynamic groups for a standalone playlist but not for a merged playlist or filtered alias', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending', 'sort_order' => 0, 'enabled' => true,
+    ]);
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id, 'is_vod' => true, 'enabled' => true,
+    ]);
+    DB::table('dynamic_group_items')->insert([
+        'dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $channel->id,
+    ]);
+
+    $base = [['category_id' => '5', 'category_name' => 'Regular', 'parent_id' => 0]];
+    $dynamicId = (string) (DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $group->id);
+
+    // Standalone Playlist, no alias filter → prepended.
+    $withDynamic = XtreamCategoryService::prependDynamicGroups($base, $this->playlist, isVod: true);
+    expect(array_column($withDynamic, 'category_id'))->toBe([$dynamicId, '5']);
+
+    // Curated alias filter → left untouched.
+    $filtered = XtreamCategoryService::prependDynamicGroups($base, $this->playlist, isVod: true, aliasFilter: ['Movies']);
+    expect($filtered)->toBe($base);
+
+    // MergedPlaylist request → no source Playlist, left untouched.
+    $merged = MergedPlaylist::factory()->for($this->user)->create();
+    expect(XtreamCategoryService::prependDynamicGroups($base, $merged, isVod: true))->toBe($base);
 });

@@ -41,7 +41,6 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -2150,9 +2149,8 @@ class Preferences extends SettingsPage
                                             ->label(__('Enable Slack alerts'))
                                             ->helperText(__('When enabled, error-level log entries will be forwarded to your Slack channel.'))
                                             ->live(),
-                                        Placeholder::make('slack_setup_guide')
-                                            ->label(__('Setup Guide'))
-                                            ->content(new HtmlString(<<<'HTML'
+                                        Callout::make(__('Setup Guide'))
+                                            ->description(new HtmlString(<<<'HTML'
 <div class="space-y-3 text-sm text-gray-600 dark:text-gray-400">
     <p>Create a Slack App using the manifest below, then paste the generated webhook URL into the field below.</p>
     <ol class="list-decimal list-inside space-y-1.5 ml-1">
@@ -2265,9 +2263,8 @@ HTML))
                                             ->label(__('Enable Telegram alerts'))
                                             ->helperText(__('When enabled, error-level log entries will be forwarded to your Telegram chat.'))
                                             ->live(),
-                                        Placeholder::make('telegram_setup_guide')
-                                            ->label(__('Setup Guide'))
-                                            ->content(new HtmlString(<<<'HTML'
+                                        Callout::make(__('Setup Guide'))
+                                            ->description(new HtmlString(<<<'HTML'
 <div class="space-y-3 text-sm text-gray-600 dark:text-gray-400">
     <p>Create a Telegram bot and find the chat ID to send alerts to.</p>
     <ol class="list-decimal list-inside space-y-1.5 ml-1">

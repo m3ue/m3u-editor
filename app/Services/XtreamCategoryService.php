@@ -3,22 +3,29 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Models\Channel;
+use App\Models\DynamicGroup;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\Series;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Single entry point for mapping between m3u-editor groups/categories and the
  * flat category list the Xtream API exposes for a standard Playlist,
  * MergedPlaylist or PlaylistAlias.
  *
- * Today this folds merged groups/categories (see Group/Category `is_merged` +
+ * This folds merged groups/categories (see Group/Category `is_merged` +
  * `parent_id`) into their parent for both the category listings and the
- * stream-filter/echo paths. Any future feature that projects extra "virtual"
- * categories into the Xtream surface (e.g. TMDB-derived dynamic groups) should
- * extend the methods here rather than re-branching inside XtreamApiController,
- * so the four listing/filter/echo call sites stay in sync.
+ * stream-filter/echo paths, and projects a source playlist's TMDB-derived
+ * DynamicGroup rows (see DynamicGroup::XTREAM_CATEGORY_ID_OFFSET) into the same
+ * surface. Any future feature that adds more "virtual" categories should extend
+ * the methods here rather than re-branching inside XtreamApiController, so the
+ * listing/filter/echo call sites stay in sync.
  *
  * CustomPlaylist categories are tag-driven and unrelated; that branch stays in
  * the controller.
@@ -150,6 +157,137 @@ class XtreamCategoryService
         $id = $seriesItem->category?->parent_id ?? $seriesItem->category_id ?? null;
 
         return $id !== null ? (string) $id : 'all';
+    }
+
+    /**
+     * Prepend a source playlist's enabled TMDB dynamic-group categories to an
+     * already-built Xtream category list.
+     *
+     * No-op unless the request resolves to a standalone Playlist (dynamic
+     * groups live on a Playlist, so MergedPlaylist requests and aliases of one
+     * get nothing) and no alias group/category filter is narrowing the surface
+     * on purpose.
+     *
+     * @param  array<int, array{category_id: string, category_name: string, parent_id: int}>  $categories
+     * @param  Playlist|MergedPlaylist|PlaylistAlias  $playlist
+     * @param  array<int, string>  $aliasFilter  alias group/category filter for this content type
+     * @return array<int, array{category_id: string, category_name: string, parent_id: int}>
+     */
+    public static function prependDynamicGroups(array $categories, $playlist, bool $isVod, array $aliasFilter = []): array
+    {
+        $source = self::dynamicGroupSource($playlist);
+
+        if ($source === null || ! empty($aliasFilter)) {
+            return $categories;
+        }
+
+        return array_merge(self::dynamicCategories($source, $isVod), $categories);
+    }
+
+    /**
+     * Constrain a channels/series query to the members of one DynamicGroup,
+     * via the polymorphic `dynamic_group_items` pivot. Used by the
+     * get_vod_streams / get_series category filter when the requested
+     * category_id decodes to a dynamic group (see
+     * DynamicGroup::idFromXtreamCategoryId()).
+     *
+     * @param  \Illuminate\Contracts\Database\Query\Builder|Builder|Relation  $query
+     */
+    public static function applyDynamicGroupFilter($query, int $dynamicGroupId, bool $isVod): void
+    {
+        $table = $isVod ? 'channels' : 'series';
+        $itemType = $isVod ? Channel::class : Series::class;
+
+        $query->whereIn("{$table}.id", function ($sub) use ($dynamicGroupId, $itemType): void {
+            $sub->select('item_id')
+                ->from('dynamic_group_items')
+                ->where('dynamic_group_id', $dynamicGroupId)
+                ->where('item_type', $itemType);
+        });
+    }
+
+    /**
+     * Xtream-shaped category entries for a source playlist's enabled
+     * TMDB-derived dynamic groups of the given content type. Groups with no
+     * enabled members are dropped so the client never sees an empty category.
+     *
+     * The category_id is DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $dg->id, so
+     * it can never collide with a real groups/categories PK;
+     * DynamicGroup::idFromXtreamCategoryId() decodes it again on the stream
+     * endpoints.
+     *
+     * @return array<int, array{category_id: string, category_name: string, parent_id: int}>
+     */
+    public static function dynamicCategories(Playlist $sourcePlaylist, bool $isVod): array
+    {
+        $relation = $isVod ? 'channels' : 'series';
+
+        return DynamicGroup::query()
+            ->where('playlist_id', $sourcePlaylist->id)
+            ->where('type', $isVod ? 'vod' : 'series')
+            ->where('enabled', true)
+            ->whereHas($relation, function ($query): void {
+                $query->where('enabled', true);
+            })
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (DynamicGroup $dg): array => [
+                'category_id' => (string) $dg->xtreamCategoryId(),
+                'category_name' => $dg->name,
+                'parent_id' => 0,
+            ])
+            ->all();
+    }
+
+    /**
+     * Map item id => Xtream dynamic category ids for a source playlist's
+     * enabled dynamic groups of the given type.
+     *
+     * Needed by the full get_vod_streams / get_series listings: most TV apps
+     * fetch the whole list once and bucket streams client-side by
+     * category_id/category_ids, so without the dynamic ids stamped onto the
+     * member rows a dynamic category renders empty in those apps even though
+     * the per-category request returns its streams. The map is bounded by the
+     * membership table for one playlist (each group holds at most a few TMDB
+     * pages worth of items).
+     *
+     * @return array<int, array<int, int>>
+     */
+    public static function dynamicCategoryIdsByItem(Playlist $sourcePlaylist, bool $isVod): array
+    {
+        $itemType = $isVod ? Channel::class : Series::class;
+
+        $map = [];
+        $rows = DB::table('dynamic_group_items')
+            ->join('dynamic_groups', 'dynamic_groups.id', '=', 'dynamic_group_items.dynamic_group_id')
+            ->where('dynamic_groups.playlist_id', $sourcePlaylist->id)
+            ->where('dynamic_groups.type', $isVod ? 'vod' : 'series')
+            ->where('dynamic_groups.enabled', true)
+            ->where('dynamic_group_items.item_type', $itemType)
+            ->select(['dynamic_group_items.item_id', 'dynamic_group_items.dynamic_group_id'])
+            ->cursor();
+
+        foreach ($rows as $row) {
+            $map[(int) $row->item_id][] = DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + (int) $row->dynamic_group_id;
+        }
+
+        return $map;
+    }
+
+    /**
+     * The standalone Playlist a request's dynamic groups live on, or null when
+     * there is none (MergedPlaylist request, or a PlaylistAlias that resolves
+     * to one). Mirrors the $sourcePlaylist resolution in XtreamApiController.
+     *
+     * @param  Playlist|MergedPlaylist|PlaylistAlias  $playlist
+     */
+    private static function dynamicGroupSource($playlist): ?Playlist
+    {
+        if ($playlist instanceof Playlist) {
+            return $playlist;
+        }
+
+        return $playlist instanceof PlaylistAlias ? $playlist->playlist : null;
     }
 
     /**

@@ -4,13 +4,13 @@ namespace App\Filament\Pages;
 
 use App\Services\PluginScaffoldService;
 use Filament\Forms\Components\CheckboxList;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
@@ -172,12 +172,10 @@ class CreatePlugin extends Page
                         ->icon('heroicon-o-rocket-launch')
                         ->description(__('Review and create your plugin'))
                         ->schema([
-                            Placeholder::make('summary')
-                                ->hiddenLabel()
-                                ->content(fn (): HtmlString => new HtmlString($this->buildSummaryHtml())),
-                            Placeholder::make('actions_placeholder')
-                                ->hiddenLabel()
-                                ->content(new HtmlString('<p class="text-sm text-gray-500 dark:text-gray-400">Choose how to generate your plugin below.</p>')),
+                            Callout::make()
+                                ->description(fn (): HtmlString => new HtmlString($this->buildSummaryHtml())),
+                            Callout::make()
+                                ->description(new HtmlString('<p class="text-sm text-gray-500 dark:text-gray-400">Choose how to generate your plugin below.</p>')),
                         ]),
                 ])
                     ->columnSpanFull()

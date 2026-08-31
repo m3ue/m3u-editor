@@ -17,6 +17,7 @@ use App\Jobs\ProcessVodChannels;
 use App\Jobs\RunPlaylistChannelEnableDisableRules;
 use App\Jobs\RunPlaylistFindReplaceRules;
 use App\Jobs\RunPlaylistSortAlpha;
+use App\Jobs\SyncDynamicGroups;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
 use App\Listeners\SyncListener;
@@ -281,6 +282,7 @@ class SyncPipelineService
             SyncRunPhase::ChannelMerge => $this->dispatchChannelMerge($run, $playlist),
             SyncRunPhase::LiveProbe => $this->dispatchLiveProbe($run, $playlist),
             SyncRunPhase::CustomPlaylistSync => $this->dispatchCustomPlaylistSync($run, $playlist),
+            SyncRunPhase::DynamicGroups => $this->dispatchDynamicGroups($run, $playlist),
             SyncRunPhase::SyncCompleted => $this->finish($run),
         };
     }
@@ -517,6 +519,18 @@ class SyncPipelineService
         $this->chainOrDispatch($jobs, $run);
     }
 
+    private function dispatchDynamicGroups(SyncRun $run, Playlist $playlist): void
+    {
+        // SyncDynamicGroups is responsible for signalling completion itself
+        // (handles unconfigured TMDB / no rules paths via its finally block),
+        // mirroring FetchTmdbIds's behaviour for the same early-return cases.
+        dispatch(new SyncDynamicGroups(
+            playlistId: $playlist->id,
+            syncRunId: $run->id,
+            completionPhase: SyncRunPhase::DynamicGroups,
+        ));
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private function chainOrDispatch(array $jobs, ?SyncRun $run = null): void
@@ -690,6 +704,14 @@ class SyncPipelineService
 
         if ($this->hasEnabledRule($playlist->auto_sync_to_custom_config)) {
             $phases[] = SyncRunPhase::CustomPlaylistSync;
+        }
+
+        // Dynamic TMDB groups: must run after Group 3 (TMDB ids populated)
+        // and only when the playlist has any vod/series content to sync. The
+        // job no-ops and completes the phase itself when the rule list is
+        // empty or TMDB is unconfigured.
+        if (($hasVod || $hasSeries) && $this->hasEnabledRule($playlist->dynamic_groups_config)) {
+            $phases[] = SyncRunPhase::DynamicGroups;
         }
 
         $phases[] = SyncRunPhase::SyncCompleted;

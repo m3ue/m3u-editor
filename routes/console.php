@@ -21,6 +21,11 @@ Schedule::command('app:refresh-playlist')
     ->everyMinute()
     ->withoutOverlapping();
 
+// Refresh TMDB dynamic groups (trending/popular/etc.) independent of playlist syncs
+Schedule::command('app:refresh-dynamic-groups')
+    ->dailyAt('04:15')
+    ->withoutOverlapping();
+
 // Refresh media server integrations
 Schedule::command('app:refresh-media-server-integrations')
     ->everyMinute()
