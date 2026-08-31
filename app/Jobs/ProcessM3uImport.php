@@ -575,7 +575,12 @@ class ProcessM3uImport implements ShouldQueue
 
                     return;
                 }
-                $seriesCategories = collect($seriesCategoriesResponse->json());
+                // Some panels return a 200 with malformed entries (null/scalar elements)
+                // mixed into the category list. Drop anything that isn't a category array so
+                // downstream loops and job builders can rely on the shape.
+                $seriesCategories = collect($seriesCategoriesResponse->json())
+                    ->filter(fn ($category): bool => is_array($category))
+                    ->values();
             } else {
                 $seriesCategories = null;
             }
@@ -1519,27 +1524,31 @@ class ProcessM3uImport implements ShouldQueue
         // exist in the DB by the time the SyncPipeline is built. This guarantees the
         // FindReplace phase can see (and rewrite) series titles before STRM filenames are
         // generated. See SYNC_RUN_SUMMARY.md for full pipeline ordering rationale.
+        $seriesCategoryCount = 0;
         if ($seriesCategories) {
-            $categoryCount = $seriesCategories->count();
-            $seriesCategories->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $categoryCount) {
-                if (! $this->preprocess || $this->shouldIncludeSeries($category['category_name'] ?? '')) {
-                    // Check if category is auto-enabled
-                    $autoEnable = (bool) ($this->playlist->enable_series
-                        || $this->enabledCategories->contains($category['category_name'] ?? ''));
+            $seriesCategoriesToImport = $seriesCategories
+                ->filter(fn ($category): bool => ! $this->preprocess
+                    || $this->shouldIncludeSeries($category['category_name'] ?? ''))
+                ->values();
+            $seriesCategoryCount = $seriesCategoriesToImport->count();
 
-                    // Create a job for each series category
-                    $jobs[] = new ProcessM3uImportSeriesChunk(
-                        [
-                            'categoryId' => $category['category_id'],
-                            'categoryName' => $category['category_name'],
-                            'playlistId' => $playlistId,
-                        ],
-                        $categoryCount,
-                        $batchNo,
-                        $index,
-                        $autoEnable
-                    );
-                }
+            $seriesCategoriesToImport->each(function ($category, $index) use (&$jobs, $playlistId, $batchNo, $seriesCategoryCount) {
+                // Check if category is auto-enabled
+                $autoEnable = (bool) ($this->playlist->enable_series
+                    || $this->enabledCategories->contains($category['category_name'] ?? ''));
+
+                // Create a job for each series category
+                $jobs[] = new ProcessM3uImportSeriesChunk(
+                    [
+                        'categoryId' => $category['category_id'],
+                        'categoryName' => $category['category_name'],
+                        'playlistId' => $playlistId,
+                    ],
+                    $seriesCategoryCount,
+                    $batchNo,
+                    $index,
+                    $autoEnable
+                );
             });
         }
 
@@ -1553,6 +1562,11 @@ class ProcessM3uImport implements ShouldQueue
             isNew: $this->isNew,
             runningLiveImport: $liveStreamsEnabled,
             runningVodImport: $vodStreamsEnabled,
+            // Only finalize series_progress at 100 when series categories were actually
+            // imported. A disabled series import, or an enabled one that resolved to zero
+            // selected/available categories, must leave series_progress at its start value
+            // (0) so the UI does not show a completed phase that never ran.
+            runningSeriesImport: $seriesCategoryCount > 0,
             syncRunId: $this->syncRunId,
         );
 
