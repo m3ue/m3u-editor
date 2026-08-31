@@ -360,6 +360,17 @@ it('returns 200 for get_vod_streams with no category_id when dynamic groups exis
         'item_id' => $channel->id,
     ]);
 
+    // A second VOD channel that is NOT a dynamic group member — its
+    // category_ids must not pick up the dynamic id.
+    $nonMember = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $group->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'title' => 'Other Film',
+    ]);
+
     // No category_id param — the controller must still resolve cleanly.
     $response = $this->get(dynCatXtreamUrl($this->username, $this->password, 'get_vod_streams'));
     $response->assertOk();
@@ -367,10 +378,21 @@ it('returns 200 for get_vod_streams with no category_id when dynamic groups exis
     $body = $response->streamedContent();
     $decoded = json_decode($body, true);
 
+    expect($decoded)->toHaveCount(2);
+
+    $byStreamId = collect($decoded)->keyBy('stream_id');
+    $memberRow = $byStreamId[$channel->id];
+    $nonMemberRow = $byStreamId[$nonMember->id];
+
     // Echoed category_id must be the regular group's id, not the dynamic
-    // group id (since no dynamic filter was applied).
-    expect($decoded)->toHaveCount(1)
-        ->and((string) $decoded[0]['category_id'])->toBe((string) $group->id);
+    // group id (since no dynamic filter was applied) — but the member's
+    // category_ids must ALSO carry the dynamic category id, because most TV
+    // apps fetch the full list once and bucket streams client-side; without
+    // it a dynamic category renders empty in those apps.
+    expect((string) $memberRow['category_id'])->toBe((string) $group->id)
+        ->and($memberRow['category_ids'])->toContain($group->id)
+        ->and($memberRow['category_ids'])->toContain(DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $dynGroup->id)
+        ->and($nonMemberRow['category_ids'])->toBe([$group->id]);
 });
 
 it('returns 200 for get_series with no category_id when dynamic groups exist', function () {
@@ -402,14 +424,33 @@ it('returns 200 for get_series with no category_id when dynamic groups exist', f
         'item_id' => $seriesItem->id,
     ]);
 
+    // A second series that is NOT a dynamic group member.
+    $nonMember = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Other Show',
+    ]);
+
     $response = $this->get(dynCatXtreamUrl($this->username, $this->password, 'get_series'));
     $response->assertOk();
 
     $body = $response->streamedContent();
     $decoded = json_decode($body, true);
 
-    expect($decoded)->toHaveCount(1)
-        ->and((string) $decoded[0]['category_id'])->toBe((string) $category->id);
+    expect($decoded)->toHaveCount(2);
+
+    $bySeriesId = collect($decoded)->keyBy('series_id');
+    $memberRow = $bySeriesId[$seriesItem->id];
+    $nonMemberRow = $bySeriesId[$nonMember->id];
+
+    // Same client-side-bucketing contract as get_vod_streams: the member's
+    // category_ids carries the dynamic category id, the non-member's don't.
+    expect((string) $memberRow['category_id'])->toBe((string) $category->id)
+        ->and($memberRow['category_ids'])->toContain($category->id)
+        ->and($memberRow['category_ids'])->toContain(DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $dynGroup->id)
+        ->and($nonMemberRow['category_ids'])->toBe([$category->id]);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
