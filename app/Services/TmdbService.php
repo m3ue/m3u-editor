@@ -1007,7 +1007,7 @@ class TmdbService
      * Get cast for a TV series from TMDB.
      * Returns the same shape as TvMazeService cast so it can be used as a fallback.
      *
-     * @return array<int, array{actor: string, character: string, photo: ?string}>
+     * @return array<int, array{id: int, actor: string, character: string, photo: ?string}>
      */
     public function getTvCast(int $tmdbId): array
     {
@@ -1033,6 +1033,7 @@ class TmdbService
                 return collect($response->json()['cast'] ?? [])
                     ->take(15)
                     ->map(fn ($p) => [
+                        'id' => (int) ($p['id'] ?? 0),
                         'actor' => $p['name'] ?? '',
                         'character' => $p['character'] ?? '',
                         'photo' => ! empty($p['profile_path'])

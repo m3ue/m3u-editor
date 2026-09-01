@@ -43,6 +43,7 @@ use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\TmdbService;
 use App\Services\VodFileNameService;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
@@ -1279,6 +1280,31 @@ class XtreamApiController extends Controller
                 'category_id' => (string) ($seriesItem->category?->effective_id ?? $seriesItem->category_id ?? 'all'),
             ];
 
+            // Rich cast from TMDB (separate wire key from the existing string
+            // `cast` so old clients reading `cast` via _asNullableString keep
+            // working - PHP associative arrays overwrite on duplicate key).
+            // Reshape TmdbService::getTvCast() output to m3u-tv's wire
+            // contract: {id, name, character, photo}. Only emitted when a
+            // tmdb id is resolvable - unpatched / non-TMDB-enriched servers
+            // skip entirely and stay byte-identical to today.
+            if ($tmdb) {
+                $tmdbService = app(TmdbService::class);
+                if ($tmdbService->isConfigured()) {
+                    $rawCast = $tmdbService->getTvCast((int) $tmdb);
+                    if (! empty($rawCast)) {
+                        $seriesInfo['cast_list'] = array_map(
+                            fn ($c) => [
+                                'id' => $c['id'] ?? null,
+                                'name' => $c['actor'] ?? '',
+                                'character' => $c['character'] ?? null,
+                                'photo' => $c['photo'] ?? null,
+                            ],
+                            $rawCast,
+                        );
+                    }
+                }
+            }
+
             $seasons = [];
             $episodesBySeason = [];
             if ($seriesItem->seasons && $seriesItem->seasons->isNotEmpty()) {
@@ -1763,6 +1789,32 @@ class XtreamApiController extends Controller
                 if ($dvrEdlUrl !== null) {
                     $defaultInfo['dvr_uuid'] = $dvrRecording->uuid;
                     $defaultInfo['edl_url'] = $dvrEdlUrl;
+                }
+            }
+
+            // Rich cast from TMDB (separate wire key from the existing string
+            // `cast` so old clients reading `cast` via _asNullableString keep
+            // working - PHP associative arrays overwrite on duplicate key).
+            // Reshape TmdbService::getMovieCast() output to m3u-tv's wire
+            // contract: {id, name, character, photo}. Only emitted when we
+            // have a tmdb_id - unpatched / non-TMDB-enriched servers skip
+            // entirely and stay byte-identical to today.
+            $tmdbId = $channel->getTmdbId();
+            if ($tmdbId) {
+                $tmdbService = app(TmdbService::class);
+                if ($tmdbService->isConfigured()) {
+                    $rawCast = $tmdbService->getMovieCast($tmdbId);
+                    if (! empty($rawCast)) {
+                        $defaultInfo['cast_list'] = array_map(
+                            fn ($c) => [
+                                'id' => $c['id'] ?? null,
+                                'name' => $c['actor'] ?? '',
+                                'character' => $c['character'] ?? null,
+                                'photo' => $c['photo'] ?? null,
+                            ],
+                            $rawCast,
+                        );
+                    }
                 }
             }
 
