@@ -436,6 +436,35 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalDescription(__('Move the category series to another category.'))
                         ->modalSubmitActionLabel(__('Move now')),
                     MergedGroupService::addToMergedCategoryBulkAction(),
+                    BulkAction::make('sort_release_date_bulk')
+                        ->label(__('Sort by Release Date'))
+                        ->icon('heroicon-o-calendar-days')
+                        ->schema([
+                            Select::make('sort')
+                                ->label(__('Sort Order'))
+                                ->options([
+                                    'DESC' => 'Newest first (2026 to 1950)',
+                                    'ASC' => 'Newest first (1950 to 2026)',
+                                ])
+                                ->default('DESC')
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            foreach ($records as $record) {
+                                SortFacade::bulkSortCategorySeriesByReleaseDate($record, $data['sort'] ?? 'DESC');
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Series Sorted by Release Date'))
+                                ->body(__('The series in the selected categories have been sorted by release date.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-calendar-days')
+                        ->modalDescription(__('Sort all series in the selected categories by release date? This will update the sort order.')),
                     BulkAction::make('process')
                         ->label(__('Fetch Series Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')

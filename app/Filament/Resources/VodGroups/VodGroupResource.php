@@ -642,6 +642,36 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalDescription(__('Disable the selected group(s) channels now?'))
                         ->modalSubmitActionLabel(__('Yes, disable now')),
 
+                    BulkAction::make('sort_release_date_bulk')
+                        ->label(__('Sort by Release Date'))
+                        ->icon('heroicon-o-calendar-days')
+                        ->schema([
+                            Select::make('sort')
+                                ->label(__('Sort Order'))
+                                ->options([
+                                    'DESC' => 'Newest first (2026 to 1950)',
+                                    'ASC' => 'Newest first (1950 to 2026)',
+                                ])
+                                ->default('DESC')
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            foreach ($records as $record) {
+                                SortFacade::bulkSortGroupChannelsByReleaseDate($record, $data['sort'] ?? 'DESC');
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Channels Sorted by Release Date'))
+                                ->body(__('The channels in the selected groups have been sorted by release date.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-calendar-days')
+                        ->modalDescription(__('Sort all channels in the selected groups by release date? This will update the sort order.')),
+
                     BulkAction::make('process_bulk_vod')
                         ->label(__('Fetch Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
