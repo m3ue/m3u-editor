@@ -160,7 +160,24 @@ it('does not dispatch FetchTmdbIds when the TMDB API key is missing', function (
     Livewire::test(ListVodGroups::class)
         ->loadTable()
         ->callAction(TestAction::make('fetch_tmdb_ids')->table($group), ['overwrite_existing' => false])
-        ->assertNotified('TMDB API Key Required')
+        ->assertNotified('TMDB API Key Required');
+
+    Bus::assertNotDispatched(FetchTmdbIds::class);
+});
+
+it('does not show the "lookup started" notification when the TMDB API key is missing', function () {
+    mockTmdbApiKeyForActions(null);
+
+    $group = vodGroup($this->user, $this->playlist, ['name' => 'Movies', 'name_internal' => 'Movies']);
+
+    // The guard must halt the action, otherwise Filament still fires the
+    // configured success notification for a lookup that never started.
+    // Filament's assertion helpers pull (and clear) session notifications on
+    // read, so this negative assertion stands alone rather than chained after
+    // assertNotified(), which would consume the bag first and no-op this check.
+    Livewire::test(ListVodGroups::class)
+        ->loadTable()
+        ->callAction(TestAction::make('fetch_tmdb_ids')->table($group), ['overwrite_existing' => false])
         ->assertNotNotified('TMDB ID lookup started');
 
     Bus::assertNotDispatched(FetchTmdbIds::class);

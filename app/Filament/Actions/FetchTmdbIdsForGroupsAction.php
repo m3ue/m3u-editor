@@ -23,10 +23,8 @@ final class FetchTmdbIdsForGroupsAction
         $isVod = $type === 'vod';
 
         return self::configure(Action::make('fetch_tmdb_ids'), $isVod)
-            ->action(function (Model $record, array $data) use ($isVod): void {
-                if (! self::guardApiKey()) {
-                    return;
-                }
+            ->action(function (Model $record, array $data, Action $action) use ($isVod): void {
+                self::guardApiKey($action);
 
                 self::dispatch($isVod, [$record->id], (bool) ($data['overwrite_existing'] ?? false));
             });
@@ -42,10 +40,8 @@ final class FetchTmdbIdsForGroupsAction
         $isVod = $type === 'vod';
 
         $action = self::configure(BulkAction::make('fetch_tmdb_ids'), $isVod)
-            ->action(function (Collection $records, array $data) use ($isVod): void {
-                if (! self::guardApiKey()) {
-                    return;
-                }
+            ->action(function (Collection $records, array $data, BulkAction $action) use ($isVod): void {
+                self::guardApiKey($action);
 
                 self::dispatch($isVod, $records->pluck('id')->all(), (bool) ($data['overwrite_existing'] ?? false));
             })
@@ -106,12 +102,18 @@ final class FetchTmdbIdsForGroupsAction
         ));
     }
 
-    private static function guardApiKey(): bool
+    /**
+     * Abort the action with a notice when no TMDB API key is configured.
+     *
+     * Uses $action->halt() rather than a bare return so Filament does not also
+     * fire the configured success notification for an action that did nothing.
+     */
+    private static function guardApiKey(Action $action): void
     {
         $settings = app(GeneralSettings::class);
 
         if (! empty($settings->tmdb_api_key)) {
-            return true;
+            return;
         }
 
         Notification::make()
@@ -121,7 +123,7 @@ final class FetchTmdbIdsForGroupsAction
             ->duration(10000)
             ->send();
 
-        return false;
+        $action->halt();
     }
 
     private static function assertValidType(string $type): void
