@@ -1736,9 +1736,10 @@ class XtreamApiController extends Controller
             }
 
             // Fill in missing info fields with channel data
+            $tmdbId = $channel->getTmdbId();
             $defaultInfo = [
                 'kinopoisk_url' => $info['kinopoisk_url'] ?? '',
-                'tmdb_id' => $channel->getTmdbId() ?? 0,
+                'tmdb_id' => $tmdbId ?? 0,
                 'name' => $info['name'] ?? $channel->name,
                 'o_name' => $info['o_name'] ?? $channel->name,
                 'cover_big' => $cover,
@@ -1798,8 +1799,8 @@ class XtreamApiController extends Controller
             // Reshape TmdbService::getMovieCast() output to m3u-tv's wire
             // contract: {id, name, character, photo}. Only emitted when we
             // have a tmdb_id - unpatched / non-TMDB-enriched servers skip
-            // entirely and stay byte-identical to today.
-            $tmdbId = $channel->getTmdbId();
+            // entirely and stay byte-identical to today. $tmdbId is resolved
+            // once above for $defaultInfo['tmdb_id'].
             if ($tmdbId) {
                 $tmdbService = app(TmdbService::class);
                 if ($tmdbService->isConfigured()) {

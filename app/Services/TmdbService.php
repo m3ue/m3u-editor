@@ -1015,7 +1015,11 @@ class TmdbService
             return [];
         }
 
-        $cacheKey = "tmdb_tv_cast_v1_{$tmdbId}_{$this->language}";
+        // v2: the mapped row gained an `id` field. Bumping the key avoids
+        // serving pre-upgrade cache entries (shaped without `id`) for up to
+        // 60 minutes, which would emit `cast_list[].id = null` downstream.
+        // Mirrors the getMovieCast() v1 -> v2 bump in #1212.
+        $cacheKey = "tmdb_tv_cast_v2_{$tmdbId}_{$this->language}";
 
         return Cache::remember($cacheKey, now()->addMinutes(60), function () use ($tmdbId) {
             $this->waitForRateLimit();

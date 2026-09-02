@@ -30,7 +30,7 @@ beforeEach(function () {
 
 // Helper to build URL for Xtream API actions. Inlined per-test to avoid a
 // top-level function name clash with XtreamApiControllerTest which
-// defines the same helper globally — Pest auto-loads every file under
+// defines the same helper globally - Pest auto-loads every file under
 // tests/Feature and PHP forbids redeclaring top-level functions.
 function xtreamCastUrl(string $username, string $password, string $action, array $params = []): string
 {
