@@ -63,6 +63,8 @@ class FetchTmdbIds implements ShouldQueue
      * @param  bool  $allSeriesPlaylists  Process all series from all user playlists
      * @param  bool  $overwriteExisting  Whether to overwrite existing IDs
      * @param  User|null  $user  The user to notify upon completion
+     * @param  Collection|array|null  $vodGroupIds  VOD group IDs to process (merged parents expand to children)
+     * @param  Collection|array|null  $seriesCategoryIds  Series category IDs to process (merged parents expand to children)
      */
     public function __construct(
         public Collection|array|null $vodChannelIds = null,
@@ -79,6 +81,8 @@ class FetchTmdbIds implements ShouldQueue
         public array $postCompletionJobs = [],
         public ?int $syncRunId = null,
         public ?SyncRunPhase $completionPhase = null,
+        public Collection|array|null $vodGroupIds = null,
+        public Collection|array|null $seriesCategoryIds = null,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -86,6 +90,12 @@ class FetchTmdbIds implements ShouldQueue
         }
         if ($this->seriesIds instanceof Collection) {
             $this->seriesIds = $this->seriesIds->toArray();
+        }
+        if ($this->vodGroupIds instanceof Collection) {
+            $this->vodGroupIds = $this->vodGroupIds->toArray();
+        }
+        if ($this->seriesCategoryIds instanceof Collection) {
+            $this->seriesCategoryIds = $this->seriesCategoryIds->toArray();
         }
     }
 
@@ -101,6 +111,8 @@ class FetchTmdbIds implements ShouldQueue
             'allSeriesPlaylists' => $this->allSeriesPlaylists,
             'user_id' => $this->user?->id,
             'overwriteExisting' => $this->overwriteExisting,
+            'vodGroupIds' => $this->vodGroupIds,
+            'seriesCategoryIds' => $this->seriesCategoryIds,
         ]);
 
         $this->settings = app(GeneralSettings::class);
@@ -127,12 +139,12 @@ class FetchTmdbIds implements ShouldQueue
         }
 
         // Process VOD channels (new playlist-based or legacy ID-based)
-        if ($this->vodPlaylistId || $this->allVodPlaylists || ! empty($this->vodChannelIds)) {
+        if ($this->vodPlaylistId || $this->allVodPlaylists || ! empty($this->vodChannelIds) || ! empty($this->vodGroupIds)) {
             $this->processVodChannels($tmdb);
         }
 
         // Process Series (new playlist-based or legacy ID-based)
-        if ($this->seriesPlaylistId || $this->allSeriesPlaylists || ! empty($this->seriesIds)) {
+        if ($this->seriesPlaylistId || $this->allSeriesPlaylists || ! empty($this->seriesIds) || ! empty($this->seriesCategoryIds)) {
             $this->processSeries($tmdb);
         }
 
@@ -328,6 +340,21 @@ class FetchTmdbIds implements ShouldQueue
     }
 
     /**
+     * Expand merged group/category IDs to include their child IDs, since merged
+     * parents never own channels/series directly.
+     *
+     * @param  class-string<Group|Category>  $model
+     * @param  array<int>  $ids
+     * @return array<int>
+     */
+    protected function expandMergedIds(string $model, array $ids): array
+    {
+        $childIds = $model::query()->whereIn('parent_id', $ids)->pluck('id')->all();
+
+        return array_values(array_unique(array_merge($ids, $childIds)));
+    }
+
+    /**
      * Build filtered VOD query based on job arguments.
      */
     protected function buildVodQuery(): ?Builder
@@ -343,6 +370,10 @@ class FetchTmdbIds implements ShouldQueue
             $query->whereHas('playlist', function ($q) {
                 $q->where('user_id', $this->user->id);
             });
+            $this->applyScopeFilter($query);
+        } elseif (! empty($this->vodGroupIds)) {
+            $query->whereIn('group_id', $this->expandMergedIds(Group::class, $this->vodGroupIds))
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
             $this->applyScopeFilter($query);
         } elseif (! empty($this->vodChannelIds)) {
             // Legacy: direct ID array support
@@ -375,6 +406,10 @@ class FetchTmdbIds implements ShouldQueue
             $this->applyScopeFilter($query);
         } elseif ($this->allSeriesPlaylists && $this->user) {
             $query->where('user_id', $this->user->id);
+            $this->applyScopeFilter($query);
+        } elseif (! empty($this->seriesCategoryIds)) {
+            $query->whereIn('category_id', $this->expandMergedIds(Category::class, $this->seriesCategoryIds))
+                ->when($this->user, fn ($q) => $q->where('user_id', $this->user->id));
             $this->applyScopeFilter($query);
         } elseif (! empty($this->seriesIds)) {
             // Legacy: direct ID array support

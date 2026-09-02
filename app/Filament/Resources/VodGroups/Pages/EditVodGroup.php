@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\VodGroups\Pages;
 
 use App\Facades\SortFacade;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
@@ -188,6 +189,8 @@ class EditVodGroup extends EditRecord
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Fetch and process VOD metadata for the group channels.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+
+                FetchTmdbIdsForGroupsAction::make('vod'),
 
                 Action::make('sync_vod')
                     ->label(__('Sync VOD .strm file'))
