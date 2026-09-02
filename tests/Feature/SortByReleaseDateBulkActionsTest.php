@@ -58,8 +58,8 @@ it('sorts series by release date across the selected categories via the bulk act
         ->assertHasNoTableBulkActionErrors()
         ->assertNotified('Series Sorted by Release Date');
 
-    expect($c1New->refresh()->sort)->toBe(1);
-    expect($c1Old->refresh()->sort)->toBe(2);
-    expect($c2New->refresh()->sort)->toBe(1);
-    expect($c2Old->refresh()->sort)->toBe(2);
+    expect((int) $c1New->refresh()->sort)->toBe(1);
+    expect((int) $c1Old->refresh()->sort)->toBe(2);
+    expect((int) $c2New->refresh()->sort)->toBe(1);
+    expect((int) $c2Old->refresh()->sort)->toBe(2);
 });
