@@ -1402,7 +1402,8 @@ class FetchTmdbIds implements ShouldQueue
 
     /**
      * Reclassify non-genre-matching VOD groups / Series categories for every playlist
-     * touched by this job that has `reclassify_groups_to_tmdb_genres` enabled.
+     * touched by this job that has either `reclassify_vod_groups_to_tmdb_genres` or
+     * `reclassify_series_categories_to_tmdb_genres` enabled.
      *
      * Reads the playlist column fresh (NOT a constructor arg) so the chunk-job path -
      * which forwards only `overwriteExisting` + `lookupScope` to child jobs - still
@@ -1431,7 +1432,7 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected static function reclassifyGroupsForPlaylistIds(array $vodPlaylistIds, array $seriesPlaylistIds): void
     {
-        foreach (Playlist::query()->whereIn('id', $vodPlaylistIds)->where('reclassify_groups_to_tmdb_genres', true)->get() as $playlist) {
+        foreach (Playlist::query()->whereIn('id', $vodPlaylistIds)->where('reclassify_vod_groups_to_tmdb_genres', true)->get() as $playlist) {
             try {
                 GenreGroupReclassifyService::reclassifyVodGroups($playlist);
             } catch (\Throwable $e) {
@@ -1442,7 +1443,7 @@ class FetchTmdbIds implements ShouldQueue
             }
         }
 
-        foreach (Playlist::query()->whereIn('id', $seriesPlaylistIds)->where('reclassify_groups_to_tmdb_genres', true)->get() as $playlist) {
+        foreach (Playlist::query()->whereIn('id', $seriesPlaylistIds)->where('reclassify_series_categories_to_tmdb_genres', true)->get() as $playlist) {
             try {
                 GenreGroupReclassifyService::reclassifyCategories($playlist);
             } catch (\Throwable $e) {

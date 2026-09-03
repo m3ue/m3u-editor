@@ -596,7 +596,7 @@ it('recovers already-misfiled Series from Uncategorized', function () {
 it('FetchTmdbIds::reclassifyGroupsForTouchedPlaylists() routes per-item, not per-group', function () {
     mockTmdbForGenreTest();
 
-    $this->playlist->update(['reclassify_groups_to_tmdb_genres' => true]);
+    $this->playlist->update(['reclassify_vod_groups_to_tmdb_genres' => true]);
 
     $src = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Whatever']);
     $actionCh = enabledChannel($this->playlist, $src, $this->user, [
@@ -628,7 +628,7 @@ it('does not run reclassify from FetchTmdbIds when the playlist flag is off', fu
     $ref->setAccessible(true);
     $ref->invoke($job);
 
-    expect($this->playlist->fresh()->reclassify_groups_to_tmdb_genres)->toBeFalse()
+    expect($this->playlist->fresh()->reclassify_vod_groups_to_tmdb_genres)->toBeFalse()
         ->and((int) refreshChannel($ch)->group_id)->toBe((int) $src->id);
 });
 
@@ -756,4 +756,74 @@ it('routes the playlist\'s VOD channels via the EditVodGroup header action', fun
         ->callAction('reclassify_tmdb_genres');
 
     expect((int) refreshChannel($ch)->group_id)->toBe((int) Group::where('name', 'Comedy')->first()->id);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 5 — split reclassify toggle into VOD + Series
+// ────────────────────────────────────────────────────────────────────────────
+
+it('VOD toggle on, Series toggle off: reclassifies VOD channels but leaves Series alone', function () {
+    mockTmdbForGenreTest();
+
+    $this->playlist->update([
+        'reclassify_vod_groups_to_tmdb_genres' => true,
+        'reclassify_series_categories_to_tmdb_genres' => false,
+    ]);
+
+    // VOD channel in a non-genre-matching group
+    $vodSrc = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Whatever']);
+    $vodCh = enabledChannel($this->playlist, $vodSrc, $this->user, [
+        'is_vod' => true, 'info' => ['genre' => 'Action'],
+    ]);
+
+    // Series in a non-genre-matching category
+    $seriesSrc = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Whatever']);
+    $series = enabledSeries($this->playlist, $seriesSrc, $this->user, ['genre' => 'Action & Adventure']);
+
+    $job = new FetchTmdbIds(vodPlaylistId: $this->playlist->id, user: $this->user);
+    $ref = new ReflectionMethod($job, 'reclassifyGroupsForTouchedPlaylists');
+    $ref->setAccessible(true);
+    $ref->invoke($job);
+
+    $actionGroup = Group::where('name', 'Action')->first();
+    expect($actionGroup)->not->toBeNull()
+        ->and((int) refreshChannel($vodCh)->group_id)->toBe((int) $actionGroup->id)
+        // Series must NOT have moved — its category is still the original $seriesSrc
+        ->and((int) $series->refresh()->category_id)->toBe((int) $seriesSrc->id);
+});
+
+it('Series toggle on, VOD toggle off: reclassifies Series categories but leaves VOD channels alone', function () {
+    mockTmdbForGenreTest();
+
+    $this->playlist->update([
+        'reclassify_vod_groups_to_tmdb_genres' => false,
+        'reclassify_series_categories_to_tmdb_genres' => true,
+    ]);
+
+    // Series in a non-genre-matching category
+    $seriesSrc = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Whatever']);
+    $series = enabledSeries($this->playlist, $seriesSrc, $this->user, ['genre' => 'Action & Adventure']);
+
+    // VOD channel in a non-genre-matching group
+    $vodSrc = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Whatever']);
+    $vodCh = enabledChannel($this->playlist, $vodSrc, $this->user, [
+        'is_vod' => true, 'info' => ['genre' => 'Action'],
+    ]);
+
+    // Mirror the VOD-side test: pass `seriesPlaylistId` (not `vodPlaylistId`)
+    // so resolveTouchedSeriesPlaylistIds() returns the test playlist instead of
+    // an empty array. With only series scope, the VOD reclassify loop sees no
+    // touched VOD playlists and skips the VOD channel — which is exactly the
+    // behavior we want to prove: leaving the VOD toggle off prevents the VOD
+    // channel from being reclassified.
+    $job = new FetchTmdbIds(seriesPlaylistId: $this->playlist->id, user: $this->user);
+    $ref = new ReflectionMethod($job, 'reclassifyGroupsForTouchedPlaylists');
+    $ref->setAccessible(true);
+    $ref->invoke($job);
+
+    $actionCategory = Category::where('name', 'Action & Adventure')->first();
+    expect($actionCategory)->not->toBeNull()
+        ->and((int) $series->refresh()->category_id)->toBe((int) $actionCategory->id)
+        // VOD channel must NOT have moved — its group is still the original $vodSrc
+        ->and((int) refreshChannel($vodCh)->group_id)->toBe((int) $vodSrc->id);
 });

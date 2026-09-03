@@ -1919,6 +1919,18 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->collapsed($creating)
                 ->schema([
+                    Toggle::make('reclassify_vod_groups_to_tmdb_genres')
+                        ->label(__('Auto-reclassify VOD groups to TMDB genres on sync'))
+                        ->helperText(__('After each sync, route each enabled VOD channel out of any group that doesn\'t match a TMDB genre into its own genre group (or "Uncategorized" if no genre data). Groups referenced by an Auto-Add to Custom Playlist rule, or merged groups, are never touched.'))
+                        ->default(false)
+                        ->inline(false)
+                        ->columnSpanFull(),
+                    Toggle::make('reclassify_series_categories_to_tmdb_genres')
+                        ->label(__('Auto-reclassify Series categories to TMDB genres on sync'))
+                        ->helperText(__('After each sync, route each enabled series out of any category that doesn\'t match a TMDB genre into its own genre category (or "Uncategorized" if no genre data). Categories referenced by an Auto-Add to Custom Playlist rule, or merged categories, are never touched. Independent of the VOD toggle — turn this on/off separately if genre-based categorization doesn\'t fit how you organize series.'))
+                        ->default(false)
+                        ->inline(false)
+                        ->columnSpanFull(),
                     Repeater::make('dynamic_groups_config')
                         ->label('')
                         ->schema([
