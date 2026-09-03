@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
 use App\Jobs\UpdateXtreamStats;
+use App\Pivots\BouquetPlaylistAlias;
 use App\Pivots\MergedPlaylistPivot;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -991,5 +992,11 @@ class PlaylistAlias extends Model
     public function playlistViewers(): MorphMany
     {
         return $this->morphMany(PlaylistViewer::class, 'viewerable');
+    }
+
+    public function bouquets(): BelongsToMany
+    {
+        return $this->belongsToMany(Bouquet::class, 'bouquet_playlist_alias')
+            ->using(BouquetPlaylistAlias::class);
     }
 }

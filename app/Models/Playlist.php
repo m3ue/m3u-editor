@@ -356,6 +356,11 @@ class Playlist extends Model
         return $this->hasMany(PlaylistAlias::class);
     }
 
+    public function bouquets(): HasMany
+    {
+        return $this->hasMany(Bouquet::class);
+    }
+
     public function enabledAliases(): HasMany
     {
         return $this->aliases()->where('enabled', true)->orderBy('priority');

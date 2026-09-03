@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
@@ -130,4 +131,114 @@ it('does not clear the alias EPG cache for unrelated field updates', function ()
     $alias->update(['name' => 'Renamed Alias']);
 
     expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+});
+
+// Issue #1391: Bouquets attach to Playlist Aliases and feed their effective
+// filter, so anything that changes what a bouquet contributes (its own
+// selections, or the attach/detach relationship itself) must invalidate the
+// cached EPG XML of every alias it is attached to.
+
+it('clears an attached alias EPG cache when the bouquet group_selections change, leaving an unattached alias alone', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    $bouquet = Bouquet::factory()->create(['user_id' => $user->id, 'playlist_id' => $playlist->id]);
+
+    $attachedAlias = PlaylistAlias::create([
+        'name' => 'Attached Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ]);
+    $unattachedAlias = PlaylistAlias::create([
+        'name' => 'Unattached Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ]);
+
+    $attachedAlias->bouquets()->attach($bouquet);
+
+    $attachedCachePath = EpgCacheService::getPlaylistEpgCachePath($attachedAlias);
+    $unattachedCachePath = EpgCacheService::getPlaylistEpgCachePath($unattachedAlias);
+    Storage::disk('local')->put($attachedCachePath, '<tv></tv>');
+    Storage::disk('local')->put($unattachedCachePath, '<tv></tv>');
+
+    $bouquet->update(['group_selections' => ['selected_groups' => ['Sports HD']]]);
+
+    expect(Storage::disk('local')->exists($attachedCachePath))->toBeFalse()
+        ->and(Storage::disk('local')->exists($unattachedCachePath))->toBeTrue();
+});
+
+it('clears the alias EPG cache when a bouquet is attached to it', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    $bouquet = Bouquet::factory()->create(['user_id' => $user->id, 'playlist_id' => $playlist->id]);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ]);
+
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($alias);
+    Storage::disk('local')->put($cachePath, '<tv></tv>');
+    expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+
+    $alias->bouquets()->attach($bouquet);
+
+    expect(Storage::disk('local')->exists($cachePath))->toBeFalse();
+});
+
+it('clears the alias EPG cache when a bouquet is detached from it', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    $bouquet = Bouquet::factory()->create(['user_id' => $user->id, 'playlist_id' => $playlist->id]);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ]);
+    $alias->bouquets()->attach($bouquet);
+
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($alias);
+    Storage::disk('local')->put($cachePath, '<tv></tv>');
+    expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+
+    $alias->bouquets()->detach($bouquet);
+
+    expect(Storage::disk('local')->exists($cachePath))->toBeFalse();
+});
+
+it('clears the alias EPG cache when an attached bouquet is deleted', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    $bouquet = Bouquet::factory()->create(['user_id' => $user->id, 'playlist_id' => $playlist->id]);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ]);
+    $alias->bouquets()->attach($bouquet);
+
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($alias);
+    Storage::disk('local')->put($cachePath, '<tv></tv>');
+    expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+
+    $bouquet->delete();
+
+    expect(Storage::disk('local')->exists($cachePath))->toBeFalse();
 });

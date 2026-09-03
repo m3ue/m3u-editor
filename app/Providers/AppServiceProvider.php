@@ -806,6 +806,24 @@ class AppServiceProvider extends ServiceProvider
 
                 return $bouquet;
             });
+            Bouquet::updated(function (Bouquet $bouquet) {
+                if ($bouquet->wasChanged('group_selections')) {
+                    // Selections feed attached aliases' effective filters — their cached
+                    // EPG XML was generated against the old selection.
+                    $bouquet->playlistAliases->each(
+                        fn (PlaylistAlias $alias) => EpgCacheService::clearPlaylistEpgCacheFile($alias)
+                    );
+                }
+            });
+            Bouquet::deleting(function (Bouquet $bouquet) {
+                // Pivot rows cascade at the DB level (no pivot events fire there), so
+                // clear the attached aliases' caches while they are still attached.
+                $bouquet->playlistAliases->each(
+                    fn (PlaylistAlias $alias) => EpgCacheService::clearPlaylistEpgCacheFile($alias)
+                );
+
+                return $bouquet;
+            });
 
             // StreamProfile
             StreamProfile::creating(function (StreamProfile $streamProfile) {

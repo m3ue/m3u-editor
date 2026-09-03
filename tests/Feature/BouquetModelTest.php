@@ -2,7 +2,9 @@
 
 use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 
@@ -91,5 +93,85 @@ describe('Bouquet uniqueness and cascade', function () {
         $bouquet = Bouquet::create(['name' => 'Mine', 'playlist_id' => $this->playlist->id]);
 
         expect($bouquet->user_id)->toBe($this->user->id);
+    });
+});
+
+function makeBouquetTestAlias(User $user, Playlist $playlist, array $overrides = []): PlaylistAlias
+{
+    return PlaylistAlias::create(array_merge([
+        'name' => 'Test Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'xtream_config' => null,
+    ], $overrides));
+}
+
+describe('Bouquet attachment invariant', function () {
+    it('attaches a standard-target bouquet to an alias of the same playlist', function () {
+        $alias = makeBouquetTestAlias($this->user, $this->playlist);
+        $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+
+        $alias->bouquets()->attach($bouquet);
+
+        expect($alias->bouquets()->count())->toBe(1)
+            ->and($bouquet->playlistAliases()->count())->toBe(1);
+    });
+
+    it('rejects attaching a bouquet of a different playlist', function () {
+        $alias = makeBouquetTestAlias($this->user, $this->playlist);
+        $other = Playlist::factory()->for($this->user)->create();
+        $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $other->id]);
+
+        $alias->bouquets()->attach($bouquet);
+    })->throws(InvalidArgumentException::class);
+
+    it('rejects attaching a standard-target bouquet to a custom-playlist alias', function () {
+        $custom = CustomPlaylist::create(['name' => 'CP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
+        $alias = makeBouquetTestAlias($this->user, $this->playlist, [
+            'playlist_id' => null,
+            'custom_playlist_id' => $custom->id,
+        ]);
+        $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+
+        $alias->bouquets()->attach($bouquet);
+    })->throws(InvalidArgumentException::class);
+
+    it('attaches a custom-target bouquet to an alias of the same custom playlist', function () {
+        $custom = CustomPlaylist::create(['name' => 'CP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
+        $alias = makeBouquetTestAlias($this->user, $this->playlist, [
+            'playlist_id' => null,
+            'custom_playlist_id' => $custom->id,
+        ]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => null,
+            'custom_playlist_id' => $custom->id,
+        ]);
+
+        $alias->bouquets()->attach($bouquet);
+
+        expect($alias->bouquets()->count())->toBe(1);
+    });
+
+    it('rejects attaching anything to a merged-playlist alias', function () {
+        $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+        $merged = MergedPlaylist::create(['name' => 'MP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
+        $alias = makeBouquetTestAlias($this->user, $this->playlist, [
+            'playlist_id' => null,
+            'merged_playlist_id' => $merged->id,
+        ]);
+
+        $alias->bouquets()->attach($bouquet);
+    })->throws(InvalidArgumentException::class);
+
+    it('cascades pivot rows when the bouquet is deleted', function () {
+        $alias = makeBouquetTestAlias($this->user, $this->playlist);
+        $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+        $alias->bouquets()->attach($bouquet);
+
+        $bouquet->delete();
+
+        expect($alias->bouquets()->count())->toBe(0);
     });
 });

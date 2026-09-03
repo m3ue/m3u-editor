@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use App\Pivots\BouquetPlaylistAlias;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Bouquet extends Model
 {
@@ -31,6 +33,12 @@ class Bouquet extends Model
     public function customPlaylist(): BelongsTo
     {
         return $this->belongsTo(CustomPlaylist::class);
+    }
+
+    public function playlistAliases(): BelongsToMany
+    {
+        return $this->belongsToMany(PlaylistAlias::class, 'bouquet_playlist_alias')
+            ->using(BouquetPlaylistAlias::class);
     }
 
     /**
