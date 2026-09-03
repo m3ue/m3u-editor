@@ -238,7 +238,7 @@ class ListVod extends ListRecords
                             ->label(__('Sort Order'))
                             ->options([
                                 'DESC' => 'Newest first (2026 to 1950)',
-                                'ASC' => 'Newest first (1950 to 2026)',
+                                'ASC' => 'Oldest first (1950 to 2026)',
                             ])
                             ->default('DESC')
                             ->required(),
