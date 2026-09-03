@@ -15,6 +15,10 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // Dynamic Groups are gated behind an experimental feature flag that
+    // ships disabled. Enable it so the widgets render under test.
+    config()->set('feature.playlist_tmdb_dynamic_groups', true);
+
     Bus::fake();
     $this->user = User::factory()->create();
     $this->actingAs($this->user);

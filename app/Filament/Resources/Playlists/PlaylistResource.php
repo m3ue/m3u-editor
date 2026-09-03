@@ -1907,47 +1907,47 @@ class PlaylistResource extends Resource implements CopilotResource
                         ])->splitKeys(['Tab', 'Return']),
                 ]),
 
-                    // Dynamic Groups (TMDB) — nested inside Playlist Processing
-                    // (per CJ's 2026-08-30 amendment: should sit alongside the
-                    // Live/VOD/Series processing fieldsets, not as a standalone
-                    // top-level section). Nested Section keeps ->description() and
-                    // ->collapsible() semantics. columnSpanFull() is preserved
-                    // because the parent section uses ->columns(2).
-                    Section::make(__('Dynamic Groups (TMDB)'))
-                        ->description(__('Per-playlist virtual groups computed from TMDB list endpoints (Trending, Popular, In Theatres, Coming Soon, Top <Genre>, by TV Network, by Streaming Service). Categories are prepended to the Xtream VOD/series category lists. Requires the TMDB API key in Settings → TMDB Integration.'))
-                        ->columnSpanFull()
-                        ->collapsible()
-                        ->collapsed($creating)
+            // Dynamic Groups (TMDB) - nested inside Playlist Processing
+            // (per CJ's 2026-08-30 amendment: should sit alongside the
+            // Live/VOD/Series processing fieldsets, not as a standalone
+            // top-level section). Nested Section keeps ->description() and
+            // ->collapsible() semantics. columnSpanFull() is preserved
+            // because the parent section uses ->columns(2).
+            Section::make(__('Dynamic Groups (TMDB)'))
+                ->description(__('Per-playlist virtual groups computed from TMDB list endpoints (Trending, Popular, In Theatres, Coming Soon, Top <Genre>, by TV Network, by Streaming Service). Categories are prepended to the Xtream VOD/series category lists. Requires the TMDB API key in Settings → TMDB Integration.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->schema([
+                    Repeater::make('dynamic_groups_config')
+                        ->label('')
                         ->schema([
-                            Repeater::make('dynamic_groups_config')
-                                ->label('')
-                                ->schema([
-                                    Toggle::make('enabled')
-                                        ->label(__('Enabled'))
-                                        ->default(true)
-                                        ->inline(false)
-                                        ->columnSpan(2),
-                                    Select::make('type')
-                                        ->label(__('Content Type'))
-                                        ->options([
-                                            'vod' => __('VOD (Movies)'),
-                                            'series' => __('Series'),
-                                        ])
-                                        ->live()
-                                        ->required()
-                                        ->afterStateUpdated(function (Set $set): void {
-                                            // Reset source-dependent fields so the user
-                                            // cannot keep a provider/genre/network that
-                                            // is no longer relevant after switching
-                                            // between vod and series.
-                                            $set('source', null);
-                                            $set('tmdb_params', []);
-                                        })
-                                        ->columnSpan(2),
-                                    Select::make('source')
-                                        ->label(__('Source'))
-                                        ->options(function (Get $get): array {
-                                            $type = $get('type');
+                            Toggle::make('enabled')
+                                ->label(__('Enabled'))
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(2),
+                            Select::make('type')
+                                ->label(__('Content Type'))
+                                ->options([
+                                    'vod' => __('VOD (Movies)'),
+                                    'series' => __('Series'),
+                                ])
+                                ->live()
+                                ->required()
+                                ->afterStateUpdated(function (Set $set): void {
+                                    // Reset source-dependent fields so the user
+                                    // cannot keep a provider/genre/network that
+                                    // is no longer relevant after switching
+                                    // between vod and series.
+                                    $set('source', null);
+                                    $set('tmdb_params', []);
+                                })
+                                ->columnSpan(2),
+                            Select::make('source')
+                                ->label(__('Source'))
+                                ->options(function (Get $get): array {
+                                    $type = $get('type');
 
                                     if ($type === 'series') {
                                         return [
@@ -2004,54 +2004,54 @@ class PlaylistResource extends Resource implements CopilotResource
                                     $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
                                     $providers = $tmdb->getWatchProviders($mediaType, $region);
 
-                                            return array_column($providers, 'name', 'id');
-                                        })
-                                        ->required()
-                                        ->live()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                        ->columnSpan(4),
-                                    TextInput::make('tmdb_params.region')
-                                        ->label(__('Region'))
-                                        ->placeholder('US')
-                                        ->maxLength(2)
-                                        ->live()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                        ->columnSpan(1),
-                                    Select::make('tmdb_params.time_window')
-                                        ->label(__('Time Window'))
-                                        ->options([
-                                            'day' => __('Today'),
-                                            'week' => __('This Week'),
-                                        ])
-                                        ->default('week')
-                                        ->visible(fn (Get $get): bool => $get('source') === 'trending')
-                                        ->columnSpan(5),
-                                    TextInput::make('name')
-                                        ->label(__('Category Name'))
-                                        ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
-                                        ->required()
-                                        ->columnSpan(5),
+                                    return array_column($providers, 'name', 'id');
+                                })
+                                ->required()
+                                ->live()
+                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                                ->columnSpan(4),
+                            TextInput::make('tmdb_params.region')
+                                ->label(__('Region'))
+                                ->placeholder('US')
+                                ->maxLength(2)
+                                ->live()
+                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                                ->columnSpan(1),
+                            Select::make('tmdb_params.time_window')
+                                ->label(__('Time Window'))
+                                ->options([
+                                    'day' => __('Today'),
+                                    'week' => __('This Week'),
                                 ])
-                                ->columns(12)
-                                ->reorderable()
-                                ->reorderableWithButtons()
-                                ->collapsible()
-                                ->defaultItems(0)
-                                ->addActionLabel(__('Add dynamic group'))
-                                ->extraItemActions([
-                                    Action::make('preview_dynamic_group')
-                                        ->label(__('Preview'))
-                                        ->icon('heroicon-o-eye')
-                                        ->color('info')
-                                        ->tooltip(__('Preview the entries this rule currently matches'))
-                                        // Matching runs against the playlist's synced VOD/series
-                                        // rows, so there is nothing to preview until the
-                                        // playlist exists.
-                                        ->visible(fn (?Playlist $record): bool => $record !== null)
-                                        ->modalHeading(function (array $arguments, Repeater $component): string {
-                                            $itemKey = $arguments['item'] ?? null;
-                                            $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
-                                            $name = trim((string) ($rule['name'] ?? ''));
+                                ->default('week')
+                                ->visible(fn (Get $get): bool => $get('source') === 'trending')
+                                ->columnSpan(5),
+                            TextInput::make('name')
+                                ->label(__('Category Name'))
+                                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
+                                ->required()
+                                ->columnSpan(5),
+                        ])
+                        ->columns(12)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel(__('Add dynamic group'))
+                        ->extraItemActions([
+                            Action::make('preview_dynamic_group')
+                                ->label(__('Preview'))
+                                ->icon('heroicon-o-eye')
+                                ->color('info')
+                                ->tooltip(__('Preview the entries this rule currently matches'))
+                                // Matching runs against the playlist's synced VOD/series
+                                // rows, so there is nothing to preview until the
+                                // playlist exists.
+                                ->visible(fn (?Playlist $record): bool => $record !== null)
+                                ->modalHeading(function (array $arguments, Repeater $component): string {
+                                    $itemKey = $arguments['item'] ?? null;
+                                    $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
+                                    $name = trim((string) ($rule['name'] ?? ''));
 
                                     return $name !== ''
                                         ? __('Preview: :name', ['name' => $name])
@@ -2092,12 +2092,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             };
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
-                                    return $typeLabel
-                                        ? "{$name} ({$typeLabel} — {$sourceLabel}){$disabled}"
-                                        : "{$name} ({$sourceLabel}){$disabled}";
-                                }),
-                        ]),
-                ]),
+                            return $typeLabel
+                                ? "{$name} ({$typeLabel} - {$sourceLabel}){$disabled}"
+                                : "{$name} ({$sourceLabel}){$disabled}";
+                        }),
+                ])->hidden(! config('feature.playlist_tmdb_dynamic_groups')),
 
             Section::make(__('URL Find & Replace Preprocessing'))
                 ->description(__('Define find & replace rules that run against each provider stream URL during import, before channels are saved. Useful for cleaning up malformed provider URLs (e.g. fixing a wrong scheme or port). Rules execute in order and only affect newly imported data - existing channel URLs are not modified until the next sync.'))

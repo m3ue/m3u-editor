@@ -32,6 +32,15 @@ class DynamicGroupsWidget extends BaseWidget
 
     protected int|string|array $columnSpan = 'full';
 
+    /**
+     * Experimental feature - only render when
+     * `config('feature.playlist_tmdb_dynamic_groups')` is enabled.
+     */
+    public static function canView(): bool
+    {
+        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+    }
+
     public function table(Table $table): Table
     {
         return $table

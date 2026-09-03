@@ -68,6 +68,21 @@ class DynamicGroupResource extends Resource
     }
 
     /**
+     * Dynamic Groups are an experimental feature gated behind
+     * `config('feature.playlist_tmdb_dynamic_groups')`. When the flag is off,
+     * hide the resource entirely (navigation + routes + global search).
+     */
+    public static function canAccess(): bool
+    {
+        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+    }
+
+    /**
      * Source slugs → human labels. Must stay in sync with the `Select::make('source')`
      * options in `PlaylistResource.php:1958-1974` (the Playlist form's Dynamic
      * Groups (TMDB) section).
