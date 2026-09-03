@@ -59,6 +59,7 @@ class Playlist extends Model
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',
         'auto_probe_streams' => 'boolean',
+        'reclassify_groups_to_tmdb_genres' => 'boolean',
         'auto_probe_streams_only_unprobed' => 'boolean',
         'auto_probe_streams_include_disabled' => 'boolean',
         'auto_probe_vod_streams' => 'boolean',

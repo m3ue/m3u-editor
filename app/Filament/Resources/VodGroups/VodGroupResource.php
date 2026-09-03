@@ -14,9 +14,11 @@ use App\Jobs\GroupFindAndReplaceReset;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
+use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
@@ -424,6 +426,23 @@ class VodGroupResource extends Resource implements CopilotResource
 
                     FetchTmdbIdsForGroupsAction::make('vod'),
 
+                    Action::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Group $record): void {
+                            GenreGroupReclassifyService::reclassifyVodGroups($record->playlist);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Groups Reclassified'))
+                                ->body(__('Channels in non-genre-matching groups have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify this playlist\'s VOD groups to TMDB genres now? Channels in non-genre-matching groups will be moved to Uncategorized. Groups protected by an Auto-Add to Custom Playlist rule are skipped.')),
+
                     Action::make('sync_vod')
                         ->label(__('Sync VOD .strm file'))
                         ->action(function ($record) {
@@ -674,6 +693,32 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all channels in the selected groups by release date? This will update the sort order.')),
+
+                    BulkAction::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Collection $records): void {
+                            // Per-playlist scope: reclassify the whole playlist's groups, not
+                            // just the selected rows. Mirrors the GenreGroupReclassifyService
+                            // contract.
+                            foreach ($records->pluck('playlist_id')->unique() as $playlistId) {
+                                $playlist = Playlist::find($playlistId);
+                                if ($playlist) {
+                                    GenreGroupReclassifyService::reclassifyVodGroups($playlist);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Groups Reclassified'))
+                                ->body(__('Channels in non-genre-matching groups have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify the selected playlists\' VOD groups to TMDB genres now? Channels in non-genre-matching groups will be moved to Uncategorized. Groups protected by an Auto-Add to Custom Playlist rule are skipped.')),
 
                     BulkAction::make('process_bulk_vod')
                         ->label(__('Fetch Provider Metadata'))

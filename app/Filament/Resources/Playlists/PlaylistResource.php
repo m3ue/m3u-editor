@@ -1918,6 +1918,12 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->collapsible()
                         ->collapsed($creating)
                         ->schema([
+                            Toggle::make('reclassify_groups_to_tmdb_genres')
+                                ->label(__('Auto-reclassify groups/categories to TMDB genres on sync'))
+                                ->helperText(__('After each sync, route each enabled channel/series out of any VOD group or Series category that doesn\'t match a TMDB genre into its own genre group (or "Uncategorized" if no genre data). Only enabled content is touched — disabled channels/series are left in place. Groups referenced by an Auto-Add to Custom Playlist rule, or merged groups, are never touched.'))
+                                ->default(false)
+                                ->inline(false)
+                                ->columnSpanFull(),
                             Repeater::make('dynamic_groups_config')
                                 ->label('')
                                 ->schema([
@@ -2025,6 +2031,24 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->default('week')
                                         ->visible(fn (Get $get): bool => $get('source') === 'trending')
                                         ->columnSpan(5),
+                                    Select::make('tmdb_params.pages')
+                                        ->label(__('Pages to Fetch'))
+                                        ->options([
+                                            1 => '1 (~20 items)',
+                                            2 => '2 (~40 items)',
+                                            3 => '3 (~60 items) — default',
+                                            4 => '4 (~80 items)',
+                                            5 => '5 (~100 items) — max',
+                                        ])
+                                        ->default(3)
+                                        ->native(false)
+                                        ->helperText(__('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers.'))
+                                        // Trending ignores `pages` (see TmdbService.php comment
+                                        // at collectDynamicGroupResults(): "Trending already
+                                        // returns the merged list — ignore pages"), so don't
+                                        // surface a control that does nothing.
+                                        ->visible(fn (Get $get): bool => $get('source') !== 'trending')
+                                        ->columnSpan(3),
                                     TextInput::make('name')
                                         ->label(__('Category Name'))
                                         ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))

@@ -15,8 +15,10 @@ use App\Jobs\CategoryFindAndReplaceReset;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Models\Playlist;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
@@ -293,6 +295,22 @@ class CategoryResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all series in this category by release date? This will update the sort order.')),
+                    Action::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Category $record): void {
+                            GenreGroupReclassifyService::reclassifyCategories($record->playlist);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify this playlist\'s Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     Action::make('process')
                         ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
@@ -467,6 +485,29 @@ class CategoryResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all series in the selected categories by release date? This will update the sort order.')),
+                    BulkAction::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Collection $records): void {
+                            // Per-playlist scope: reclassify the whole playlist's categories.
+                            foreach ($records->pluck('playlist_id')->unique() as $playlistId) {
+                                $playlist = Playlist::find($playlistId);
+                                if ($playlist) {
+                                    GenreGroupReclassifyService::reclassifyCategories($playlist);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify the selected playlists\' Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     BulkAction::make('process')
                         ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
