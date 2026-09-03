@@ -235,10 +235,14 @@ class BouquetResource extends Resource
                 Action::make('clean_up_missing')
                     ->label(__('Clean up missing'))
                     ->icon('heroicon-o-sparkles')
-                    ->visible(fn (Bouquet $record): bool => $record->staleSelectionNames() !== [])
                     ->requiresConfirmation()
-                    ->modalDescription(fn (Bouquet $record): string => __('Remove these entries that are no longer selectable?')
-                        .' '.implode(', ', $record->staleSelectionNames()))
+                    ->modalDescription(function (Bouquet $record): string {
+                        $stale = $record->staleSelectionNames();
+
+                        return $stale === []
+                            ? __('No missing entries found — nothing will be removed.')
+                            : __('Remove these entries that are no longer selectable?').' '.implode(', ', $stale);
+                    })
                     ->action(function (Bouquet $record): void {
                         $record->removeStaleSelectionNames();
                         Notification::make()->success()->title(__('Missing entries removed'))->send();

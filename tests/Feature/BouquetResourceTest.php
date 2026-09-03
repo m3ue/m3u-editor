@@ -92,3 +92,19 @@ it('cleans up stale names via the table action', function () {
 
     expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe([]);
 });
+
+it('leaves group_selections unchanged when cleaning up a bouquet with no stale names', function () {
+    SourceGroup::create([
+        'name' => 'Alive', 'playlist_id' => $this->playlist->id, 'source_group_id' => 1, 'type' => 'live',
+    ]);
+    $bouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_selections' => ['selected_groups' => ['Alive']],
+    ]);
+
+    Livewire::test(ListBouquets::class)
+        ->callTableAction('clean_up_missing', $bouquet);
+
+    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Alive']);
+});
