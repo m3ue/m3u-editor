@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Series members of the parent DynamicGroup. Visible only when the parent's
- * `type` is `'series'` — see the parallel ChannelsRelationManager docblock for
+ * `type` is `'series'` - see the parallel ChannelsRelationManager docblock for
  * the full rationale.
  *
  * Strictly read-only.

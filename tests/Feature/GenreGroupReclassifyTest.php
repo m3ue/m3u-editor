@@ -261,14 +261,15 @@ it('skips VOD channels whose current group is protected by auto_sync_to_custom_c
         ->and((int) refreshChannel($ch)->group_id)->toBe((int) $protected->id);
 });
 
-it('skips VOD channels whose current group is merged', function () {
+it('skips VOD channels folded into a merged group (membership points at a child row)', function () {
     mockTmdbForGenreTest();
 
-    $child = Group::factory()->for($this->user)->for($this->playlist)->create([
-        'type' => 'vod', 'name' => 'Whatever',
-    ]);
-    Group::factory()->for($this->user)->for($this->playlist)->create([
+    $merged = Group::factory()->for($this->user)->for($this->playlist)->create([
         'type' => 'vod', 'name' => 'My Bucket', 'is_merged' => true, 'custom' => true,
+    ]);
+    // Real merged membership: the child row carries parent_id, is_merged = false.
+    $child = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'Some Provider Group', 'parent_id' => $merged->id,
     ]);
     $ch = enabledChannel($this->playlist, $child, $this->user, [
         'is_vod' => true,
@@ -277,9 +278,91 @@ it('skips VOD channels whose current group is merged', function () {
 
     $result = GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
 
-    expect($result['moved'])->toBe(1)
-        ->and($result['protected'])->toBe(0)
-        ->and((int) refreshChannel($ch)->group_id)->toBe((int) Group::where('name', 'Action')->first()->id);
+    expect($result['moved'])->toBe(0)
+        ->and($result['protected'])->toBe(1)
+        ->and((int) refreshChannel($ch)->group_id)->toBe((int) $child->id)
+        ->and(Group::where('name', 'Action')->where('type', 'vod')->where('playlist_id', $this->playlist->id)->exists())->toBeFalse();
+});
+
+it('never routes a VOD channel into a merged group, even one named after a genre', function () {
+    mockTmdbForGenreTest();
+
+    // A merged parent that happens to be named "Action".
+    Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'Action', 'is_merged' => true, 'custom' => true,
+    ]);
+    $src = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'Whatever',
+    ]);
+    $ch = enabledChannel($this->playlist, $src, $this->user, [
+        'is_vod' => true,
+        'info' => ['genre' => 'Action'],
+    ]);
+
+    GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+
+    // The service must create a fresh non-merged "Action" group rather than
+    // assigning the channel to the merged container (which ChannelObserver rejects).
+    $target = Group::where('name', 'Action')->where('type', 'vod')
+        ->where('playlist_id', $this->playlist->id)->where('is_merged', false)->first();
+
+    expect($target)->not->toBeNull()
+        ->and((int) refreshChannel($ch)->group_id)->toBe((int) $target->id);
+});
+
+it('is a no-op when the TMDB genre lookup comes back empty (transient outage)', function () {
+    // isConfigured() true, but the canonical genre lists are empty (HTTP failure).
+    mockTmdbForGenreTest(movieNames: [], tvNames: []);
+
+    $src = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'Action',
+    ]);
+    $ch = enabledChannel($this->playlist, $src, $this->user, [
+        'is_vod' => true,
+        'info' => ['genre' => 'Action'],
+    ]);
+
+    $result = GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+
+    expect($result)->toMatchArray(['no_op' => true, 'moved' => 0])
+        ->and((int) refreshChannel($ch)->group_id)->toBe((int) $src->id)
+        ->and(Group::where('name', 'Uncategorized')->where('playlist_id', $this->playlist->id)->exists())->toBeFalse();
+});
+
+it('is a no-op for Series when the TMDB TV genre lookup comes back empty', function () {
+    mockTmdbForGenreTest(movieNames: [], tvNames: []);
+
+    $house = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Drama']);
+    $s = enabledSeries($this->playlist, $house, $this->user, ['genre' => 'Drama']);
+
+    $result = GenreGroupReclassifyService::reclassifyCategories($this->playlist);
+
+    expect($result)->toMatchArray(['no_op' => true, 'moved' => 0])
+        ->and((int) $s->refresh()->category_id)->toBe((int) $house->id)
+        ->and(Category::where('name', 'Uncategorized')->where('playlist_id', $this->playlist->id)->exists())->toBeFalse();
+});
+
+it('does not rewrite a moved VOD channel\'s group_internal (provider group name)', function () {
+    mockTmdbForGenreTest();
+
+    $src = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'New Releases',
+    ]);
+    $ch = enabledChannel($this->playlist, $src, $this->user, [
+        'is_vod' => true,
+        'info' => ['genre' => 'Action'],
+        'group_internal' => 'Provider Bucket 7',
+    ]);
+
+    GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+
+    $moved = refreshChannel($ch);
+    $action = Group::where('name', 'Action')->where('type', 'vod')->where('playlist_id', $this->playlist->id)->first();
+
+    expect((int) $moved->group_id)->toBe((int) $action->id)
+        ->and($moved->group)->toBe('Action')
+        // group_internal is the provider's own group name; the move action leaves it alone.
+        ->and($moved->group_internal)->toBe('Provider Bucket 7');
 });
 
 it('treats Uncategorized + null genre as no-op routing (stays in Uncategorized)', function () {

@@ -27,7 +27,7 @@ use Illuminate\Database\Eloquent\Builder;
  * Top Genre / By Network / By Streaming Service). The actual rule config lives
  * on `Playlist.dynamic_groups_config` and is edited in the Playlist form's
  * Dynamic Groups (TMDB) section. This resource does NOT create/edit/delete
- * rules — membership and config stay owned by the Playlist form. The resource
+ * rules - membership and config stay owned by the Playlist form. The resource
  * exists purely to show what's currently sitting in `dynamic_group_items` after
  * a sync, which is otherwise opaque.
  */
@@ -39,7 +39,7 @@ class DynamicGroupResource extends Resource
 
     public static function getNavigationGroup(): ?string
     {
-        // Dynamic Groups are a per-playlist concept — nest under the Playlist
+        // Dynamic Groups are a per-playlist concept - nest under the Playlist
         // nav group (matches PlaylistResource.php:122). `DynamicGroup` rows are
         // type-mixed (vod or series), so they don't fit the content-type
         // buckets used by `VodGroupResource` ("VOD Channels"),
@@ -106,7 +106,7 @@ class DynamicGroupResource extends Resource
     public static function formatTmdbParams(array $params): string
     {
         if (empty($params)) {
-            return '—';
+            return '-';
         }
 
         $lines = [];
@@ -181,7 +181,7 @@ class DynamicGroupResource extends Resource
                                 ->formatStateUsing(function (DynamicGroup $record): string {
                                     return static::formatTmdbParams((array) ($record->tmdb_params ?? []));
                                 })
-                                ->placeholder('—'),
+                                ->placeholder('-'),
                             TextEntry::make('sort_order'),
                             TextEntry::make('enabled')
                                 ->badge()

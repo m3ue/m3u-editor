@@ -7,7 +7,7 @@ use Filament\Actions\Action;
 use Filament\Resources\Pages\ViewRecord;
 
 /**
- * No destructive actions (no Edit/Delete/Delete-actions) on purpose — this resource
+ * No destructive actions (no Edit/Delete/Delete-actions) on purpose - this resource
  * is strictly a transparency window over synced `dynamic_group_items` membership.
  * Rule config continues to live on the Playlist form's Dynamic Groups (TMDB)
  * repeater.

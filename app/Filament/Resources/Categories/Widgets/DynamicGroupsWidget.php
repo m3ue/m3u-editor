@@ -7,6 +7,7 @@ use App\Models\DynamicGroup;
 use Filament\Actions\Action;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
 
@@ -14,7 +15,7 @@ use Filament\Widgets\TableWidget as BaseWidget;
  * Footer widget on `ListCategories` showing the current user's series-type
  * Dynamic Groups (Trending / Popular / Top Genre / By TV Network / etc.).
  *
- * Parallel to `VodGroups\Widgets\DynamicGroupsWidget` — same shape, same
+ * Parallel to `VodGroups\Widgets\DynamicGroupsWidget` - same shape, same
  * read-only invariant. Built because CJ's own test data (the "Netflix"
  * Dynamic Group) is series-type, so building only the VOD half would
  * leave the identical gap on the Series page.
@@ -67,8 +68,11 @@ class DynamicGroupsWidget extends BaseWidget
                 Action::make('view')
                     ->label(__('View'))
                     ->icon('heroicon-o-eye')
-                    ->url(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record])),
-            ])
+                    ->url(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record]))
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
+            ], RecordActionsPosition::BeforeCells)
             ->emptyStateHeading(__('No Dynamic Groups configured'))
             ->emptyStateDescription(__('Add Dynamic Groups in the Playlist form → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.'))
             ->emptyStateIcon('heroicon-o-sparkles');
