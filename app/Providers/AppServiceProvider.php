@@ -19,6 +19,7 @@ use App\Listeners\AlertOnJobFailed;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\TmdbSearch;
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
@@ -80,6 +81,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
 use PDO;
@@ -780,6 +782,29 @@ class AppServiceProvider extends ServiceProvider
                     ->delete();
 
                 return $playlistAlias;
+            });
+
+            // Bouquets (issue #1391)
+            Bouquet::creating(function (Bouquet $bouquet) {
+                if (! $bouquet->user_id) {
+                    $bouquet->user_id = auth()->id();
+                }
+
+                return $bouquet;
+            });
+            Bouquet::saving(function (Bouquet $bouquet) {
+                $hasPlaylist = $bouquet->playlist_id !== null;
+                $hasCustom = $bouquet->custom_playlist_id !== null;
+                if ($hasPlaylist === $hasCustom) {
+                    throw new InvalidArgumentException('A bouquet must target exactly one of playlist_id or custom_playlist_id.');
+                }
+                if ($hasCustom) {
+                    // Auto-include is a provider-sync concept; custom playlists never sync.
+                    $bouquet->auto_include_new_live = false;
+                    $bouquet->auto_include_new_vod = false;
+                }
+
+                return $bouquet;
             });
 
             // StreamProfile
