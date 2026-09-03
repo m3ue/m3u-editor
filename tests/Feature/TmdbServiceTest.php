@@ -895,6 +895,59 @@ it('returns cast with TMDB personId for click-through to filmography', function 
         ]);
 });
 
+it('returns a rich cast_list from getMovieDetails for downstream persistence', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/27205*' => Http::response([
+            'id' => 27205,
+            'title' => 'Inception',
+            'credits' => [
+                'cast' => [
+                    ['id' => 6193, 'name' => 'Leonardo DiCaprio', 'character' => 'Cobb', 'profile_path' => '/leo.jpg'],
+                    ['id' => 24045, 'name' => 'Joseph Gordon-Levitt', 'character' => 'Arthur', 'profile_path' => null],
+                ],
+                'crew' => [],
+            ],
+            'videos' => ['results' => []],
+            'external_ids' => [],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetails(27205);
+
+    expect($details['cast_list'])->toBe([
+        ['id' => 6193, 'name' => 'Leonardo DiCaprio', 'character' => 'Cobb', 'photo' => 'https://image.tmdb.org/t/p/w185/leo.jpg'],
+        ['id' => 24045, 'name' => 'Joseph Gordon-Levitt', 'character' => 'Arthur', 'photo' => null],
+    ]);
+});
+
+it('returns a rich cast_list from getTvSeriesDetails for downstream persistence', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/1396*' => Http::response([
+            'id' => 1396,
+            'name' => 'Breaking Bad',
+            'genres' => [],
+            'external_ids' => [],
+            'credits' => [
+                'cast' => [
+                    ['id' => 17419, 'name' => 'Bryan Cranston', 'character' => 'Walter White', 'profile_path' => '/bc.jpg'],
+                    ['id' => 84433, 'name' => 'Aaron Paul', 'character' => 'Jesse Pinkman', 'profile_path' => null],
+                ],
+                'crew' => [],
+            ],
+            'videos' => ['results' => []],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getTvSeriesDetails(1396);
+
+    expect($details['cast_list'])->toBe([
+        ['id' => 17419, 'name' => 'Bryan Cranston', 'character' => 'Walter White', 'photo' => 'https://image.tmdb.org/t/p/w185/bc.jpg'],
+        ['id' => 84433, 'name' => 'Aaron Paul', 'character' => 'Jesse Pinkman', 'photo' => null],
+    ]);
+});
+
 it('returns empties when API key is not configured for now playing', function () {
     $settings = new GeneralSettings;
     $settings->tmdb_api_key = null;

@@ -71,16 +71,28 @@ function makeBatchChannel(User $user, Playlist $playlist, string $epgChannelId, 
         ->create(array_merge([
             'enabled' => true,
             'epg_channel_id' => $epgChannel->id,
+            // No group: the default ChannelFactory group_id spins up a throwaway
+            // Group -> Playlist -> dummy EPG per channel, which this suite does
+            // not need.
+            'group_id' => null,
         ], $channelAttrs));
 
     return ['epg' => $epg, 'channel' => $channel, 'epgChannelId' => $epgChannelId];
 }
 
+/**
+ * Append one programme to an EPG's SQLite programme cache. The `$date` argument
+ * is retained for call-site readability; the real date bucket is derived from
+ * the programme's own `start` by {@see seedEpgProgrammeCache()}. Repeated calls
+ * for the same EPG accumulate and rebuild the store.
+ */
 function putProgramme(Epg $epg, string $date, string $epgChannelId, array $programme): void
 {
-    $path = "epg-cache/{$epg->uuid}/v2/programmes-{$date}.jsonl";
-    $line = json_encode(['channel' => $epgChannelId, 'programme' => $programme])."\n";
-    Storage::disk('local')->append($path, trim($line));
+    static $seeded = [];
+
+    $seeded[$epg->uuid][] = [$epgChannelId, $programme];
+
+    seedEpgProgrammeCache($epg, $seeded[$epg->uuid]);
 }
 
 it('rejects missing stream_ids', function () {
@@ -119,6 +131,7 @@ it('includes an empty epg_listings entry for a requested channel with no EPG map
     $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([
         'enabled' => true,
         'epg_channel_id' => null,
+        'group_id' => null,
     ]);
 
     $response = $this->getJson(batchUrl($this->username, $this->password, [
@@ -281,7 +294,9 @@ it('caps requested channels at 100 and silently drops the rest', function () {
         ->for($this->user)
         ->for($this->playlist)
         ->count(101)
-        ->sequence(fn ($sequence) => ['enabled' => true])
+        // group_id null: avoid 101 throwaway Group -> Playlist -> dummy EPG
+        // cascades from the default ChannelFactory state.
+        ->sequence(fn ($sequence) => ['enabled' => true, 'group_id' => null])
         ->create();
 
     $ids = $channels->pluck('id')->all();

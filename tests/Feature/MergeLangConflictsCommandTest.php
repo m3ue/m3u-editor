@@ -1,8 +1,16 @@
 <?php
 
 test('resolves conflicts without corrupting numeric-string translation keys', function () {
-    $path = lang_path('en.json');
-    $original = file_get_contents($path);
+    // Point lang_path() at a throwaway directory for the duration of this test.
+    // The command rewrites every *.json under lang_path(), so operating on the
+    // real lang/en.json would corrupt it for any other test rendering a Blade
+    // view while this one runs (the suite runs in parallel).
+    $tmpLangPath = sys_get_temp_dir().'/lang-merge-'.uniqid();
+    mkdir($tmpLangPath);
+    $path = $tmpLangPath.'/en.json';
+
+    $originalLangPath = app()->langPath();
+    app()->useLangPath($tmpLangPath);
 
     $conflicted = <<<'JSON'
 {
@@ -31,6 +39,8 @@ JSON;
             ->toHaveKey('Head only', 'Head only')
             ->toHaveKey('Their only', 'Their only');
     } finally {
-        file_put_contents($path, $original);
+        app()->useLangPath($originalLangPath);
+        @unlink($path);
+        @rmdir($tmpLangPath);
     }
 });

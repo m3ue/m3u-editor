@@ -26,9 +26,9 @@ use Illuminate\Support\Facades\Storage;
  * already does for `title` / `description`:
  *
  *   - `search_epg_shows` → plain string (Eloquent source)
- *   - `get_short_epg`    → plain string (JSONL cache source)
- *   - `get_epg_batch`    → base64-encoded (JSONL cache source, encoded to match
- *                           the other batch fields)
+ *   - `get_short_epg`    → plain string (programme-cache source)
+ *   - `get_epg_batch`    → base64-encoded (programme-cache source, encoded to
+ *                           match the other batch fields)
  *
  * Don't "fix" one endpoint to match another — they have always been
  * inconsistent and downstream clients depend on each shape.
@@ -92,6 +92,7 @@ it('exposes the EPG programme subtitle on search_epg_shows recent_episodes (plai
         ->create([
             'enabled' => true,
             'epg_channel_id' => $epgChannel->id,
+            'group_id' => null,
         ]);
 
     $start = Carbon::now()->addHour();
@@ -133,17 +134,14 @@ it('exposes the EPG programme subtitle on get_short_epg epg_listings (plain)', f
         ->create([
             'enabled' => true,
             'epg_channel_id' => $epgChannel->id,
+            'group_id' => null,
         ]);
 
     $start = Carbon::now()->addMinutes(5);
     $end = Carbon::now()->addHour();
 
-    $today = Carbon::now()->format('Y-m-d');
-    $cachePath = "epg-cache/{$epg->uuid}/v2/programmes-{$today}.jsonl";
-
-    Storage::disk('local')->put($cachePath, json_encode([
-        'channel' => 'channel.cache',
-        'programme' => [
+    seedEpgProgrammeCache($epg, [
+        ['channel.cache', [
             'id' => 'prog-1',
             'title' => 'The Bear',
             'subtitle' => 'Groundhog Day',
@@ -151,8 +149,8 @@ it('exposes the EPG programme subtitle on get_short_epg epg_listings (plain)', f
             'start' => $start->format('Y-m-d H:i:s'),
             'stop' => $end->format('Y-m-d H:i:s'),
             'lang' => 'en',
-        ],
-    ])."\n");
+        ]],
+    ]);
 
     $response = $this->getJson(xtreamApiUrl($this->username, $this->password, 'get_short_epg', [
         'stream_id' => (string) $channel->id,
@@ -179,17 +177,14 @@ it('exposes the EPG programme subtitle on get_epg_batch epg_listings (base64-enc
         ->create([
             'enabled' => true,
             'epg_channel_id' => $epgChannel->id,
+            'group_id' => null,
         ]);
 
     $start = Carbon::now()->addMinutes(5);
     $end = Carbon::now()->addHour();
 
-    $today = Carbon::now()->format('Y-m-d');
-    $cachePath = "epg-cache/{$epg->uuid}/v2/programmes-{$today}.jsonl";
-
-    Storage::disk('local')->put($cachePath, json_encode([
-        'channel' => 'channel.batch',
-        'programme' => [
+    seedEpgProgrammeCache($epg, [
+        ['channel.batch', [
             'id' => 'prog-2',
             'title' => 'The Bear',
             'subtitle' => 'Groundhog Day',
@@ -197,8 +192,8 @@ it('exposes the EPG programme subtitle on get_epg_batch epg_listings (base64-enc
             'start' => $start->format('Y-m-d H:i:s'),
             'stop' => $end->format('Y-m-d H:i:s'),
             'lang' => 'en',
-        ],
-    ])."\n");
+        ]],
+    ]);
 
     $response = $this->getJson(xtreamApiUrl($this->username, $this->password, 'get_epg_batch', [
         'stream_ids' => (string) $channel->id,

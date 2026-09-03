@@ -185,6 +185,10 @@ trait AppliesTmdbSelection
                 $info['cast'] = is_array($details['cast']) ? implode(', ', $details['cast']) : $details['cast'];
             }
 
+            if (! empty($details['cast_list'])) {
+                $info['cast_list'] = $details['cast_list'];
+            }
+
             if (! empty($details['director'])) {
                 $info['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
             }
@@ -339,6 +343,10 @@ trait AppliesTmdbSelection
 
             if (! empty($details['cast'])) {
                 $updateData['cast'] = is_array($details['cast']) ? implode(', ', $details['cast']) : $details['cast'];
+            }
+
+            if (! empty($details['cast_list'])) {
+                $seriesMetadata['cast_list'] = $details['cast_list'];
             }
 
             if (! empty($details['director'])) {

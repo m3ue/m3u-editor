@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Categories;
 
 use App\Facades\SortFacade;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Categories\Pages\EditCategory;
 use App\Filament\Resources\Categories\Pages\ListCategories;
@@ -315,6 +316,7 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-down-tray')
                         ->modalDescription(__('Process series for selected category now? Only enabled series will be processed. This will fetch all episodes and seasons for the category series. This may take a while depending on the number of series in the category.'))
                         ->modalSubmitActionLabel(__('Yes, process now')),
+                    FetchTmdbIdsForGroupsAction::make('series'),
                     Action::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function ($record) {
@@ -490,6 +492,7 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-down-tray')
                         ->modalDescription(__('Process series for selected category now? Only enabled series will be processed. This will fetch all episodes and seasons for the category series. This may take a while depending on the number of series in the category.'))
                         ->modalSubmitActionLabel(__('Yes, process now')),
+                    FetchTmdbIdsForGroupsAction::makeBulk('series'),
                     BulkAction::make('sync')
                         ->label(__('Sync Series .strm files'))
                         ->action(function (Collection $records) {

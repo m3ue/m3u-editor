@@ -445,6 +445,7 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         'stream_id' => 'schedules-direct-channel',
         'title' => 'Schedules Direct Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
     $baseUrl = rtrim(ProxyFacade::getBaseUrl(), '/');
@@ -465,14 +466,7 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
     $userinfoImage = "{$userinfoBaseUrl}/schedules-direct/{$epg->uuid}/image/userinfo-image";
     $externalIcon = 'https://public-artwork.example.test/external-icon.jpg';
     $externalImage = 'https://public-artwork.example.test/external-image.jpg';
-    $date = now()->format('Y-m-d');
-    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
-
-    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
-        'cache_created' => time(),
-        'cache_version' => 'v2',
-    ], JSON_THROW_ON_ERROR));
-    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", collect([
+    seedEpgProgrammeCache($epg, collect([
         [
             'title' => 'First-party artwork',
             'icon' => $schedulesDirectIcon,
@@ -517,20 +511,17 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
                 ['url' => $externalImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
             ],
         ],
-    ])->map(function (array $programme, int $index): string {
-        return json_encode([
-            'channel' => 'source.schedules-direct',
-            'programme' => array_merge([
-                'start' => now()->startOfDay()->addHours($index + 1)->toISOString(),
-                'stop' => now()->startOfDay()->addHours($index + 2)->toISOString(),
-                'subtitle' => '',
-                'desc' => '',
-                'category' => '',
-                'rating' => '',
-                'new' => false,
-            ], $programme),
-        ], JSON_THROW_ON_ERROR);
-    })->implode("\n")."\n");
+    ])->map(function (array $programme, int $index): array {
+        return ['source.schedules-direct', array_merge([
+            'start' => now()->startOfDay()->addHours($index + 1)->toISOString(),
+            'stop' => now()->startOfDay()->addHours($index + 2)->toISOString(),
+            'subtitle' => '',
+            'desc' => '',
+            'category' => '',
+            'rating' => '',
+            'new' => false,
+        ], $programme)];
+    })->all());
 
     $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
 
@@ -585,20 +576,14 @@ test('cached Schedules Direct artwork built on a different host than the serving
         'stream_id' => 'schedules-direct-mismatched-host-channel',
         'title' => 'Schedules Direct Mismatched Host Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
     // Built with a different host/scheme/port than whatever the test request resolves to.
     $mismatchedHostIcon = "https://queue-internal.example:8443/schedules-direct/{$epg->uuid}/image/mismatched-host-artwork";
-    $date = now()->format('Y-m-d');
-    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
 
-    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
-        'cache_created' => time(),
-        'cache_version' => 'v2',
-    ], JSON_THROW_ON_ERROR));
-    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", json_encode([
-        'channel' => 'source.schedules-direct-mismatched-host',
-        'programme' => [
+    seedEpgProgrammeCache($epg, [
+        ['source.schedules-direct-mismatched-host', [
             'start' => now()->startOfDay()->addHour()->toISOString(),
             'stop' => now()->startOfDay()->addHours(2)->toISOString(),
             'title' => 'Mismatched host artwork',
@@ -609,8 +594,8 @@ test('cached Schedules Direct artwork built on a different host than the serving
             'new' => false,
             'icon' => $mismatchedHostIcon,
             'images' => [],
-        ],
-    ], JSON_THROW_ON_ERROR)."\n");
+        ]],
+    ]);
 
     $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
 
@@ -646,8 +631,16 @@ test('legacy scalar episode numbers emit only valid xmltv namespace identities',
         'stream_id' => 'legacy-channel',
         'title' => 'Legacy Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
+    // Deliberately a legacy JSONL fixture (no `programmes.sqlite`): a programme
+    // that carries only the scalar `episode_num` and no `episode_nums` array can
+    // only come from a v1 cache written before that field existed. Every cache
+    // the current parser writes - JSONL or SQLite - always seeds `episode_nums`
+    // (via EpgProgrammeStore::EMPTY_PROGRAMME), so the scalar-legacy branch in
+    // EpisodeNumberNormalizer::forProgramme() is unreachable from the SQLite
+    // store by construction. This pins that fallback on the format it applies to.
     $date = now()->format('Y-m-d');
     $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
     Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([

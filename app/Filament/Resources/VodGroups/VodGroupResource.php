@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\VodGroups;
 
 use App\Facades\SortFacade;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\Groups\RelationManagers\ChildGroupsRelationManager;
 use App\Filament\Resources\VodGroups\Pages\EditVodGroup;
@@ -421,6 +422,8 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalDescription(__('Fetch and process VOD metadata for the group channels.'))
                         ->modalSubmitActionLabel(__('Yes, process now')),
 
+                    FetchTmdbIdsForGroupsAction::make('vod'),
+
                     Action::make('sync_vod')
                         ->label(__('Sync VOD .strm file'))
                         ->action(function ($record) {
@@ -704,6 +707,8 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-down-tray')
                         ->modalDescription(__('Fetch and process VOD metadata for the selected group channels.'))
                         ->modalSubmitActionLabel(__('Yes, process now')),
+
+                    FetchTmdbIdsForGroupsAction::makeBulk('vod'),
 
                     BulkAction::make('sync_bulk_vod')
                         ->label(__('Sync VOD .strm file'))

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Categories\Pages;
 
 use App\Facades\SortFacade;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
@@ -103,6 +104,7 @@ class EditCategory extends EditRecord
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Process series for this category now? Only enabled series will be processed. This will fetch all episodes and seasons for the category series. This may take a while depending on the number of series in the category.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+                FetchTmdbIdsForGroupsAction::make('series'),
                 Action::make('sync')
                     ->label(__('Sync Series .strm files'))
                     ->action(function ($record) {

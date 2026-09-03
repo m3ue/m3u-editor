@@ -832,6 +832,11 @@ class TmdbService
                     ->implode(', ');
             }
 
+            // Rich cast list (id/name/character/photo) for structured client
+            // rendering - persisted downstream so client detail endpoints
+            // never make a live TMDB call.
+            $castList = $this->reshapeRichCast($data['credits']['cast'] ?? []);
+
             // Extract director(s) from crew
             $director = null;
             if (! empty($data['credits']['crew'])) {
@@ -876,6 +881,7 @@ class TmdbService
                 'number_of_seasons' => $data['number_of_seasons'] ?? null,
                 'number_of_episodes' => $data['number_of_episodes'] ?? null,
                 'cast' => $cast,
+                'cast_list' => $castList,
                 'director' => $director,
                 'youtube_trailer' => $youtubeTrailer,
             ];
@@ -945,6 +951,11 @@ class TmdbService
                     ->toArray();
             }
 
+            // Rich cast list (id/name/character/photo) for structured client
+            // rendering - persisted downstream so client detail endpoints
+            // never make a live TMDB call.
+            $castList = $this->reshapeRichCast($data['credits']['cast'] ?? []);
+
             // Extract director(s)
             $directors = [];
             if (! empty($data['credits']['crew'])) {
@@ -982,6 +993,7 @@ class TmdbService
                 'runtime' => $data['runtime'] ?? null,
                 'status' => $data['status'] ?? null,
                 'cast' => $cast,
+                'cast_list' => $castList,
                 'director' => $directors,
                 'youtube_trailer' => $youtubeTrailer,
             ];
@@ -993,6 +1005,29 @@ class TmdbService
 
             return null;
         }
+    }
+
+    /**
+     * Reshape a raw TMDB `credits.cast` array into the m3u-tv wire contract.
+     * Top 15 billed members, one entry per person.
+     *
+     * @param  array<int, array<string, mixed>>  $rawCast
+     * @return array<int, array{id: int, name: string, character: string, photo: ?string}>
+     */
+    private function reshapeRichCast(array $rawCast): array
+    {
+        return collect($rawCast)
+            ->take(15)
+            ->map(fn ($p) => [
+                'id' => (int) ($p['id'] ?? 0),
+                'name' => $p['name'] ?? '',
+                'character' => $p['character'] ?? '',
+                'photo' => ! empty($p['profile_path'])
+                    ? 'https://image.tmdb.org/t/p/w185'.$p['profile_path']
+                    : null,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

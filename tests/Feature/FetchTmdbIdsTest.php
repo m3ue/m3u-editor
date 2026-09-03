@@ -1916,6 +1916,178 @@ it('with lookupScope both, processes series that are enabled OR new', function (
     $job->handle($tmdb);
 });
 
+it('fetches IDs only for enabled VOD channels in the given groups', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    $groupA = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Movies A']);
+    $groupB = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Movies B']);
+
+    // Enabled channel in group A — should be processed
+    $enabledInA = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'group_id' => $groupA->id,
+        'title' => 'Enabled In A',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Disabled channel in group A — should NOT be processed (applyScopeFilter default = enabled)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => false,
+        'group_id' => $groupA->id,
+        'title' => 'Disabled In A',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Enabled channel in group B — should NOT be processed (different group)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'group_id' => $groupB->id,
+        'title' => 'Enabled In B',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchMovie')->once()->with('Enabled In A', Mockery::any())->andReturn(null);
+    $tmdb->shouldNotReceive('getMovieDetails');
+
+    $job = new TestableFetchTmdbIds(
+        vodGroupIds: [$groupA->id],
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('fetches IDs only for enabled series in the given categories', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    $categoryA = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Shows A']);
+    $categoryB = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Shows B']);
+
+    // Enabled series in category A — should be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'category_id' => $categoryA->id,
+        'enabled' => true,
+        'name' => 'Enabled Show In A',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Disabled series in category A — should NOT be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'category_id' => $categoryA->id,
+        'enabled' => false,
+        'name' => 'Disabled Show In A',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    // Enabled series in category B — should NOT be processed
+    Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'category_id' => $categoryB->id,
+        'enabled' => true,
+        'name' => 'Enabled Show In B',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchTvSeries')->once()->with('Enabled Show In A', Mockery::any())->andReturn(null);
+    $tmdb->shouldNotReceive('getTvSeriesDetails');
+
+    $job = new TestableFetchTmdbIds(
+        seriesCategoryIds: [$categoryA->id],
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('expands a merged VOD group to its child groups', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+
+    $merged = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod',
+        'name' => 'Merged Movies',
+        'is_merged' => true,
+        'custom' => true,
+    ]);
+    $child = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod',
+        'name' => 'Child Movies',
+        'parent_id' => $merged->id,
+    ]);
+
+    // Enabled channel lives on the child group (merged parents never own channels directly)
+    Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'group_id' => $child->id,
+        'title' => 'On Child Group',
+        'tmdb_id' => null,
+        'last_metadata_fetch' => null,
+    ]);
+
+    $tmdb->shouldReceive('searchMovie')->once()->with('On Child Group', Mockery::any())->andReturn(null);
+    $tmdb->shouldNotReceive('getMovieDetails');
+
+    $job = new TestableFetchTmdbIds(
+        vodGroupIds: [$merged->id],
+        user: $this->user,
+    );
+    $job->handle($tmdb);
+});
+
+it('splits large group lookups into batched chunk jobs', function () {
+    $group = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Big Group']);
+
+    Channel::factory()
+        ->count(5)
+        ->create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'is_vod' => true,
+            'enabled' => true,
+            'group_id' => $group->id,
+            'info' => [],
+        ]);
+
+    Bus::fake();
+
+    $job = new TestableFetchTmdbIds(
+        vodGroupIds: [$group->id],
+        overwriteExisting: false,
+        user: $this->user,
+    );
+
+    $job->batchChunkSize = 2;
+
+    $job->handle(app(TmdbService::class));
+
+    Bus::assertBatched(function ($batch) {
+        return count($batch->jobs) === 3;
+    });
+});
+
 it('advances the sync pipeline when TMDB is not configured', function () {
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(false);

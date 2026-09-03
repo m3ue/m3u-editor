@@ -7,12 +7,17 @@ use App\Models\PlaylistAuth;
 use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
-use App\Services\TmdbService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // Rich cast is now served straight from persisted columns
+    // (channel->info['cast_list'] / series->metadata['cast_list']); these
+    // endpoints must never reach out to TMDB, so any stray request is a bug.
+    Http::preventStrayRequests();
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->username = 'testuser_'.str()->random(5);
@@ -43,43 +48,37 @@ function xtreamCastUrl(string $username, string $password, string $action, array
     return '/player_api.php?'.http_build_query($queryParams);
 }
 
-function mockTmdbConfigured(): TmdbService
-{
-    $mock = Mockery::mock(TmdbService::class);
-    $mock->shouldReceive('isConfigured')->andReturn(true);
-    app()->instance(TmdbService::class, $mock);
+$vodCastList = [
+    ['id' => 6193, 'name' => 'Leonardo DiCaprio', 'character' => 'Cobb', 'photo' => 'https://image.tmdb.org/t/p/w185/leo.jpg'],
+    ['id' => 24045, 'name' => 'Joseph Gordon-Levitt', 'character' => 'Arthur', 'photo' => null],
+];
 
-    return $mock;
-}
+$seriesCastList = [
+    ['id' => 17419, 'name' => 'Bryan Cranston', 'character' => 'Walter White', 'photo' => 'https://image.tmdb.org/t/p/w185/bc.jpg'],
+    ['id' => 84433, 'name' => 'Aaron Paul', 'character' => 'Jesse Pinkman', 'photo' => null],
+];
 
 // ---- get_vod_info cast_list ----
 
-it('emits cast_list in get_vod_info when channel has tmdb_id and TMDB returns cast', function () {
-    $tmdbService = mockTmdbConfigured();
-    $tmdbService->shouldReceive('getMovieCast')
-        ->with(27205)
-        ->andReturn([
-            ['id' => 6193, 'actor' => 'Leonardo DiCaprio', 'character' => 'Cobb', 'photo' => 'https://image.tmdb.org/t/p/w185/leo.jpg'],
-            ['id' => 24045, 'actor' => 'Joseph Gordon-Levitt', 'character' => 'Arthur', 'photo' => null],
-        ]);
-
+it('emits cast_list in get_vod_info from channel info', function () use ($vodCastList) {
     $group = Group::factory()->for($this->user)->create();
     $channel = Channel::factory()->for($this->playlist)->for($group)->create([
         'enabled' => true,
         'is_vod' => true,
         'name' => 'Inception',
         'last_metadata_fetch' => now(),
-        'info' => ['cast' => 'Leonardo DiCaprio, Joseph Gordon-Levitt'], // existing string
+        'info' => [
+            'cast' => 'Leonardo DiCaprio, Joseph Gordon-Levitt', // existing string
+            'cast_list' => $vodCastList,
+        ],
     ]);
-    $channel->tmdb_id = 27205;
-    $channel->save();
 
     $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
 
     $response->assertOk();
     // Existing string cast untouched (safe-degrade for old clients).
     $response->assertJsonPath('info.cast', 'Leonardo DiCaprio, Joseph Gordon-Levitt');
-    // New rich array at root AND under info.
+    // Rich array at root AND under info.
     $response->assertJsonPath('cast_list.0.name', 'Leonardo DiCaprio');
     $response->assertJsonPath('cast_list.0.character', 'Cobb');
     $response->assertJsonPath('cast_list.0.photo', 'https://image.tmdb.org/t/p/w185/leo.jpg');
@@ -89,15 +88,13 @@ it('emits cast_list in get_vod_info when channel has tmdb_id and TMDB returns ca
     $response->assertJsonPath('info.cast_list.0.name', 'Leonardo DiCaprio');
 });
 
-it('omits cast_list in get_vod_info when channel has no tmdb_id', function () {
-    mockTmdbConfigured(); // isConfigured true, but getMovieCast should never be called
-
+it('omits cast_list in get_vod_info when channel info has none', function () {
     $group = Group::factory()->for($this->user)->create();
     $channel = Channel::factory()->for($this->playlist)->for($group)->create([
         'enabled' => true,
         'is_vod' => true,
         'last_metadata_fetch' => now(),
-        'info' => [],
+        'info' => ['cast' => 'Someone'],
     ]);
 
     $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
@@ -107,67 +104,32 @@ it('omits cast_list in get_vod_info when channel has no tmdb_id', function () {
     $response->assertJsonMissingPath('info.cast_list');
 });
 
-it('omits cast_list in get_vod_info when TMDB is not configured', function () {
-    // isConfigured returns false - getMovieCast should never be called.
-    $mock = Mockery::mock(TmdbService::class);
-    $mock->shouldReceive('isConfigured')->andReturn(false);
-    $mock->shouldNotReceive('getMovieCast');
-    app()->instance(TmdbService::class, $mock);
-
+it('omits cast_list in get_vod_info when persisted list is empty', function () {
     $group = Group::factory()->for($this->user)->create();
     $channel = Channel::factory()->for($this->playlist)->for($group)->create([
         'enabled' => true,
         'is_vod' => true,
         'last_metadata_fetch' => now(),
-        'info' => [],
+        'info' => ['cast_list' => []],
     ]);
-    $channel->tmdb_id = 27205;
-    $channel->save();
 
     $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
 
     $response->assertOk();
     $response->assertJsonMissingPath('cast_list');
-});
-
-it('omits cast_list in get_vod_info when TMDB returns empty cast', function () {
-    $tmdbService = mockTmdbConfigured();
-    $tmdbService->shouldReceive('getMovieCast')->with(27205)->andReturn([]);
-
-    $group = Group::factory()->for($this->user)->create();
-    $channel = Channel::factory()->for($this->playlist)->for($group)->create([
-        'enabled' => true,
-        'is_vod' => true,
-        'last_metadata_fetch' => now(),
-        'info' => [],
-    ]);
-    $channel->tmdb_id = 27205;
-    $channel->save();
-
-    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
-
-    $response->assertOk();
-    $response->assertJsonMissingPath('cast_list');
+    $response->assertJsonMissingPath('info.cast_list');
 });
 
 // ---- get_series_info cast_list ----
 
-it('emits cast_list in get_series_info when series has tmdb_id and TMDB returns cast', function () {
-    $tmdbService = mockTmdbConfigured();
-    $tmdbService->shouldReceive('getTvCast')
-        ->with(1396)
-        ->andReturn([
-            ['id' => 17419, 'actor' => 'Bryan Cranston', 'character' => 'Walter White', 'photo' => 'https://image.tmdb.org/t/p/w185/bc.jpg'],
-            ['id' => 84433, 'actor' => 'Aaron Paul', 'character' => 'Jesse Pinkman', 'photo' => null],
-        ]);
-
+it('emits cast_list in get_series_info from series metadata', function () use ($seriesCastList) {
     $series = Series::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'enabled' => true,
         'name' => 'Breaking Bad',
         'cast' => 'Bryan Cranston, Aaron Paul', // existing string
         'tmdb_id' => 1396,
-        'metadata' => [],
+        'metadata' => ['cast_list' => $seriesCastList],
         'last_modified' => now(),
     ]);
 
@@ -182,7 +144,7 @@ it('emits cast_list in get_series_info when series has tmdb_id and TMDB returns 
     $response->assertOk();
     // Existing string cast untouched (safe-degrade for old clients).
     $response->assertJsonPath('info.cast', 'Bryan Cranston, Aaron Paul');
-    // New rich array under info.
+    // Rich array under info.
     $response->assertJsonPath('info.cast_list.0.name', 'Bryan Cranston');
     $response->assertJsonPath('info.cast_list.0.character', 'Walter White');
     $response->assertJsonPath('info.cast_list.0.photo', 'https://image.tmdb.org/t/p/w185/bc.jpg');
@@ -191,9 +153,7 @@ it('emits cast_list in get_series_info when series has tmdb_id and TMDB returns 
     $response->assertJsonPath('info.cast_list.1.photo', null);
 });
 
-it('omits cast_list in get_series_info when series has no tmdb_id', function () {
-    mockTmdbConfigured(); // isConfigured true, but getTvCast should never be called
-
+it('omits cast_list in get_series_info when series metadata has none', function () {
     $series = Series::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'enabled' => true,
@@ -216,18 +176,13 @@ it('omits cast_list in get_series_info when series has no tmdb_id', function () 
     $response->assertJsonMissingPath('info.cast_list');
 });
 
-it('omits cast_list in get_series_info when TMDB is not configured', function () {
-    $mock = Mockery::mock(TmdbService::class);
-    $mock->shouldReceive('isConfigured')->andReturn(false);
-    $mock->shouldNotReceive('getTvCast');
-    app()->instance(TmdbService::class, $mock);
-
+it('omits cast_list in get_series_info when persisted list is empty', function () {
     $series = Series::factory()->for($this->playlist)->create([
         'user_id' => $this->user->id,
         'enabled' => true,
         'name' => 'Breaking Bad',
         'tmdb_id' => 1396,
-        'metadata' => [],
+        'metadata' => ['cast_list' => []],
         'last_modified' => now(),
     ]);
 
@@ -241,58 +196,4 @@ it('omits cast_list in get_series_info when TMDB is not configured', function ()
 
     $response->assertOk();
     $response->assertJsonMissingPath('info.cast_list');
-});
-
-it('omits cast_list in get_series_info when TMDB returns empty cast', function () {
-    $tmdbService = mockTmdbConfigured();
-    $tmdbService->shouldReceive('getTvCast')->with(1396)->andReturn([]);
-
-    $series = Series::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
-        'enabled' => true,
-        'name' => 'Breaking Bad',
-        'tmdb_id' => 1396,
-        'metadata' => [],
-        'last_modified' => now(),
-    ]);
-
-    Season::factory()->create([
-        'series_id' => $series->id,
-        'season_number' => 1,
-        'episode_count' => 1,
-    ]);
-
-    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
-
-    $response->assertOk();
-    $response->assertJsonMissingPath('info.cast_list');
-});
-
-// ---- tmdb_id fallback paths (info.metadata.tmdb_id / metadata.tmdb) ----
-
-it('emits cast_list in get_series_info when tmdb_id is only in metadata', function () {
-    $tmdbService = mockTmdbConfigured();
-    $tmdbService->shouldReceive('getTvCast')->with(1396)->andReturn([
-        ['id' => 1, 'actor' => 'Bryan Cranston', 'character' => 'Walter White', 'photo' => null],
-    ]);
-
-    $series = Series::factory()->for($this->playlist)->create([
-        'user_id' => $this->user->id,
-        'enabled' => true,
-        'name' => 'Breaking Bad',
-        'tmdb_id' => null, // not on the column
-        'metadata' => ['tmdb_id' => 1396], // only on metadata
-        'last_modified' => now(),
-    ]);
-
-    Season::factory()->create([
-        'series_id' => $series->id,
-        'season_number' => 1,
-        'episode_count' => 1,
-    ]);
-
-    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
-
-    $response->assertOk();
-    $response->assertJsonPath('info.cast_list.0.name', 'Bryan Cranston');
 });

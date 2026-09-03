@@ -29,5 +29,8 @@
         "mpegts.js": "^1.8.0",
         "overlayscrollbars": "^2.15.1",
         "video.js": "^8.23.3"
+    },
+    "overrides": {
+        "@xmldom/xmldom": "^0.8.15"
     }
 }

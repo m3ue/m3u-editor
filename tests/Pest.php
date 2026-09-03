@@ -1,7 +1,11 @@
 <?php
 
+use App\Models\Epg;
 use App\Models\MediaServerIntegration;
+use App\Services\EpgProgrammeStore;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 /*
@@ -48,6 +52,55 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Seed an EPG's on-disk programme cache the way production writes it: a real
+ * `programmes.sqlite` built through {@see EpgProgrammeStore}, plus a v2
+ * `metadata.json`. Use this instead of hand-writing `programmes-{date}.jsonl`
+ * fixtures so tests exercise the SQLite read path that `EpgCacheService` now
+ * takes.
+ *
+ * Each entry is `[$epgChannelId, $programme]`; `$programme` needs at least a
+ * `title` and a parseable `start` (and normally `stop`). The local `Y-m-d`
+ * bucket and the start/stop unix timestamps are derived from those, mirroring
+ * the XMLTV parser. Keys outside the canonical set (e.g. `id`, `lang`) are
+ * stored and returned verbatim, matching the old JSONL behaviour. Call once
+ * per EPG with every programme - a second call rebuilds the file from scratch.
+ *
+ * @param  iterable<array{0: string, 1: array<string, mixed>}>  $entries
+ */
+function seedEpgProgrammeCache(Epg $epg, iterable $entries): void
+{
+    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
+
+    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
+        'cache_created' => time(),
+        'cache_version' => 'v2',
+    ], JSON_THROW_ON_ERROR));
+
+    $store = new EpgProgrammeStore;
+    $store->beginWrite(Storage::disk('local')->path("{$cacheDirectory}/programmes.sqlite"));
+
+    try {
+        foreach ($entries as [$channelId, $programme]) {
+            $start = Carbon::parse($programme['start']);
+            $stop = empty($programme['stop']) ? null : Carbon::parse($programme['stop']);
+
+            $store->insert(
+                $channelId,
+                $start->format('Y-m-d'),
+                $start->getTimestamp(),
+                $stop?->getTimestamp(),
+                $programme,
+            );
+        }
+
+        $store->finish();
+    } catch (Throwable $e) {
+        $store->discard();
+        throw $e;
+    }
 }
 
 function createEligiblePlexDvrIntegration(int $userId): MediaServerIntegration
