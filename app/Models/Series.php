@@ -422,6 +422,17 @@ class Series extends Model
                             ]
                         );
                     }
+
+                    // The provider is the source of truth for its own episodes: anything
+                    // it stopped listing has been removed or renumbered upstream, and keeping
+                    // it leaves an unplayable entry in every client (the stream URL 404s).
+                    // Only provider-sourced rows are considered, and only when the provider
+                    // actually returned episodes — an empty answer must never wipe a series.
+                    $this->episodes()
+                        ->whereNotNull('source_episode_id')
+                        ->where('import_batch_no', '!=', $batchNo)
+                        ->delete();
+                    $this->seasons()->whereDoesntHave('episodes')->delete();
                 }
 
                 // Update last fetched timestamp for the series (always, regardless of episode count).
