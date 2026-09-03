@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Playlist;
 use Exception;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -105,11 +106,19 @@ class XtreamService
         $user_agent = $this->playlist?->user_agent ?? 'VLC/3.0.21 LibVLC/3.0.21';
         $verify = ! ($this->playlist?->disable_ssl_verification ?? false);
 
+        // A provider that answered 429 is left alone until the cooldown elapses:
+        // retrying only keeps the account rate limited (and every client with it).
+        $this->throwIfRateLimited($url);
+
         // Try the primary URL first
         $result = $this->attemptCall($url, $timeout, $user_agent, $verify);
         if ($result !== null) {
             return $result;
         }
+
+        // The limit is per account, and fallback URLs share the account — do not
+        // knock on the next door with the same credentials.
+        $this->throwIfRateLimited($url);
 
         // Primary failed — try fallback URLs
         if (! empty($this->fallbackUrls)) {
@@ -180,6 +189,11 @@ class XtreamService
                 if ($response->ok()) {
                     return $response->json();
                 }
+                if ($response->status() === 429) {
+                    $this->markRateLimited($url);
+
+                    return null;
+                }
             } catch (Exception $e) {
                 // Connection error — continue retrying
             }
@@ -191,6 +205,44 @@ class XtreamService
         } while ($attempts < $this->retryLimit);
 
         return null;
+    }
+
+    /**
+     * Cache key of the rate-limit circuit for the host of the given URL.
+     */
+    protected function rateLimitKey(string $url): string
+    {
+        return 'xtream:rate_limited:'.strtolower((string) (parse_url($url, PHP_URL_HOST) ?: $url));
+    }
+
+    /**
+     * Open the circuit for this host: no further calls until the cooldown elapses.
+     */
+    protected function markRateLimited(string $url): void
+    {
+        $seconds = max(1, (int) config('xtream.rate_limit_cooldown', 900));
+        Cache::put($this->rateLimitKey($url), now()->addSeconds($seconds)->timestamp, $seconds);
+
+        Log::warning('Xtream provider answered 429, pausing calls', [
+            'host' => parse_url($url, PHP_URL_HOST),
+            'cooldown_seconds' => $seconds,
+            'playlist_id' => $this->playlist?->id,
+        ]);
+    }
+
+    /**
+     * @throws Exception when the host is currently rate limited.
+     */
+    protected function throwIfRateLimited(string $url): void
+    {
+        $until = Cache::get($this->rateLimitKey($url));
+        if ($until && (int) $until > now()->timestamp) {
+            throw new Exception(sprintf(
+                'Xtream provider %s is rate limited (HTTP 429), calls paused until %s',
+                parse_url($url, PHP_URL_HOST),
+                date('c', (int) $until)
+            ));
+        }
     }
 
     protected function makeUrl(string $action, array $extra = []): string
