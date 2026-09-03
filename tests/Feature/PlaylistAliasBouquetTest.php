@@ -104,6 +104,37 @@ it('resets the bouquets form state when the source playlist changes', function (
         ->assertSchemaStateSet(['bouquets' => []]);
 });
 
+it('does not leak another user\'s bouquet contribution when the bouquets state is tampered', function () {
+    // Simulates a forged Livewire update setting data.bouquets to an id the
+    // relationship Select would never offer (the Select's own modifyQueryUsing
+    // scopes options to this user + target). bouquetContributedNames() and the
+    // contribution callout must independently scope their read, or a tampered
+    // request could leak another user's group/category names via the picker
+    // badges or the callout's counts.
+    $alias = makeFormAlias($this->user, $this->playlist);
+
+    $otherUser = User::factory()->create();
+    $otherPlaylist = Playlist::factory()->for($otherUser)->create();
+    $foreignBouquet = Bouquet::factory()->create([
+        'user_id' => $otherUser->id,
+        'playlist_id' => $otherPlaylist->id,
+        'group_selections' => [
+            'selected_groups' => ['Secret Live Group'],
+            'selected_vod_groups' => ['Secret VOD Group'],
+            'selected_categories' => ['Secret Category'],
+        ],
+    ]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSuccessful()
+        ->set('data.bouquets', [$foreignBouquet->id])
+        ->assertSuccessful()
+        ->assertSee('Assigned bouquets contribute 0 live groups, 0 VOD groups, and 0 series categories in addition to your manual selections.')
+        ->assertDontSee('Secret Live Group')
+        ->assertDontSee('Secret VOD Group')
+        ->assertDontSee('Secret Category');
+});
+
 it('does not materialize bouquet names into group_filter when the form is saved (R1 guard)', function () {
     // The picker round-trips selections through SourceGroup ids, so a matching row
     // must exist for the manual name to survive an untouched save.

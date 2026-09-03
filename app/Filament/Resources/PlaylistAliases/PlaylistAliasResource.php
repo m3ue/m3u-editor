@@ -746,15 +746,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Schemas\Components\Callout::make(__('Bouquet contributions'))
                                 ->columnSpanFull()
                                 ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
-                                ->description(function (Get $get): string {
-                                    $bouquets = Bouquet::whereIn('id', (array) $get('bouquets'))->get();
-
-                                    return __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
-                                        'live' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedLiveGroupNames())->unique()->count(),
-                                        'vod' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedVodGroupNames())->unique()->count(),
-                                        'series' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedCategoryNames())->unique()->count(),
-                                    ]);
-                                }),
+                                ->description(fn (Get $get): string => __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
+                                    'live' => count(self::bouquetContributedNames($get, 'live')),
+                                    'vod' => count(self::bouquetContributedNames($get, 'vod')),
+                                    'series' => count(self::bouquetContributedNames($get, 'categories')),
+                                ])),
                         ]),
 
                     Schemas\Components\Callout::make(__('What you can select'))
@@ -1205,7 +1201,18 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             default => 'getSelectedLiveGroupNames',
         };
 
+        // Scope to the current user and the alias's active target — mirrors the
+        // Select's own modifyQueryUsing — so a tampered `bouquets` state (e.g. a
+        // forged Livewire request with another user's bouquet IDs) can never leak
+        // another user's bouquet contents through the picker badges or the
+        // contribution callout below.
         return Bouquet::whereIn('id', $bouquetIds)
+            ->where('user_id', auth()->id())
+            ->when(
+                $get('custom_playlist_id'),
+                fn (Builder $query) => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
+                fn (Builder $query) => $query->where('playlist_id', (int) $get('playlist_id')),
+            )
             ->get()
             ->flatMap(fn (Bouquet $bouquet): array => $bouquet->{$method}())
             ->unique()
