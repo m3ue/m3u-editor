@@ -29,6 +29,9 @@ class PlaylistAlias extends Model
     /** @var array<string, array<string, int>> Memoised custom playlist tag name => id maps, keyed by tag type. */
     private array $resolvedCustomTagIds = [];
 
+    /** @var array{selected_groups: array<string>, selected_vod_groups: array<string>, selected_categories: array<string>}|null Memoised union of attached bouquets' selections. */
+    private ?array $bouquetSelections = null;
+
     protected $casts = [
         'xtream_config' => 'array',
         'inherit_dns_failover' => 'boolean',
@@ -78,13 +81,53 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * Get the allowed live group names for this alias (empty = no restriction).
+     * The merged selections of every attached bouquet, memoised per instance.
+     *
+     * NEVER surface this through a group_filter attribute accessor/cast: the
+     * Filament alias form binds group_filter.* state paths directly, and an
+     * attribute-level union would be hydrated into the form and persisted into
+     * the manual filter on save (spec R1).
+     *
+     * @return array{selected_groups: array<string>, selected_vod_groups: array<string>, selected_categories: array<string>}
+     */
+    private function bouquetSelections(): array
+    {
+        if ($this->bouquetSelections !== null) {
+            return $this->bouquetSelections;
+        }
+
+        $merged = ['selected_groups' => [], 'selected_vod_groups' => [], 'selected_categories' => []];
+
+        // Merged-playlist (and orphaned) aliases have no bouquet support — zero queries.
+        if (! $this->playlist_id && ! $this->custom_playlist_id) {
+            return $this->bouquetSelections = $merged;
+        }
+
+        $bouquets = $this->relationLoaded('bouquets') ? $this->bouquets : $this->bouquets()->get();
+
+        foreach ($bouquets as $bouquet) {
+            foreach ($merged as $key => $existing) {
+                $names = $bouquet->group_selections[$key] ?? [];
+                if (! empty($names)) {
+                    $merged[$key] = array_merge($existing, $names);
+                }
+            }
+        }
+
+        return $this->bouquetSelections = $merged;
+    }
+
+    /**
+     * Get the allowed live group names for this alias: the manual group_filter
+     * selection unioned with every attached bouquet's selection (empty = no
+     * restriction). With no bouquets attached the manual array is returned
+     * unchanged so existing behavior stays bit-for-bit identical.
      *
      * @return array<string>
      */
     public function getAllowedLiveGroupNames(): array
     {
-        return $this->group_filter['selected_groups'] ?? [];
+        return $this->allowedNamesFor('selected_groups');
     }
 
     /**
@@ -94,7 +137,7 @@ class PlaylistAlias extends Model
      */
     public function getAllowedVodGroupNames(): array
     {
-        return $this->group_filter['selected_vod_groups'] ?? [];
+        return $this->allowedNamesFor('selected_vod_groups');
     }
 
     /**
@@ -104,17 +147,33 @@ class PlaylistAlias extends Model
      */
     public function getAllowedCategoryNames(): array
     {
-        return $this->group_filter['selected_categories'] ?? [];
+        return $this->allowedNamesFor('selected_categories');
     }
 
     /**
-     * Whether this alias has any group/category filter applied.
+     * @return array<string>
+     */
+    private function allowedNamesFor(string $key): array
+    {
+        $manual = $this->group_filter[$key] ?? [];
+        $bouquet = $this->bouquetSelections()[$key];
+
+        if (empty($bouquet)) {
+            return $manual;
+        }
+
+        return array_values(array_unique(array_merge($manual, $bouquet)));
+    }
+
+    /**
+     * Whether this alias has any group/category filter applied, from its manual
+     * selection or any attached bouquet.
      */
     public function hasGroupFilter(): bool
     {
-        return ! empty($this->group_filter['selected_groups'])
-            || ! empty($this->group_filter['selected_vod_groups'])
-            || ! empty($this->group_filter['selected_categories']);
+        return ! empty($this->getAllowedLiveGroupNames())
+            || ! empty($this->getAllowedVodGroupNames())
+            || ! empty($this->getAllowedCategoryNames());
     }
 
     /**
