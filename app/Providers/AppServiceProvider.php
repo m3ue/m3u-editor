@@ -714,6 +714,63 @@ class AppServiceProvider extends ServiceProvider
                 }
             });
 
+            // Custom playlist group/category tags: propagate renames into bouquets
+            // and alias group filters, which store tag names and would otherwise
+            // silently stop matching — same treatment the provider-rename pass in
+            // ProcessM3uImport gives standard playlists (issue #1391).
+            Tag::updated(function (Tag $tag) {
+                if (! $tag->wasChanged('name') || ! $tag->type) {
+                    return;
+                }
+
+                $oldName = json_decode($tag->getRawOriginal('name') ?? '', true)['en'] ?? null;
+                $newName = $tag->getTranslation('name', 'en');
+                if (! $oldName || ! $newName || $oldName === $newName) {
+                    return;
+                }
+
+                $isCategory = str_ends_with($tag->type, '-category');
+                $uuid = $isCategory ? substr($tag->type, 0, -strlen('-category')) : $tag->type;
+                $customPlaylist = CustomPlaylist::where('uuid', $uuid)->first();
+                if (! $customPlaylist) {
+                    return;
+                }
+
+                // Group tags are shared across live and VOD; category tags map to series.
+                $keys = $isCategory ? ['selected_categories'] : ['selected_groups', 'selected_vod_groups'];
+
+                $rewrite = function (array $lists) use ($keys, $oldName, $newName): array {
+                    foreach ($keys as $key) {
+                        $current = $lists[$key] ?? [];
+                        if (in_array($oldName, $current, true)) {
+                            $lists[$key] = array_values(array_unique(
+                                array_map(fn (string $name): string => $name === $oldName ? $newName : $name, $current)
+                            ));
+                        }
+                    }
+
+                    return $lists;
+                };
+
+                Bouquet::where('custom_playlist_id', $customPlaylist->id)
+                    ->cursor()
+                    ->each(function (Bouquet $bouquet) use ($rewrite): void {
+                        $updated = $rewrite($bouquet->group_selections ?? []);
+                        if ($updated !== ($bouquet->group_selections ?? [])) {
+                            $bouquet->update(['group_selections' => $updated]);
+                        }
+                    });
+
+                PlaylistAlias::where('custom_playlist_id', $customPlaylist->id)
+                    ->cursor()
+                    ->each(function (PlaylistAlias $alias) use ($rewrite): void {
+                        $updated = $rewrite($alias->group_filter ?? []);
+                        if ($updated !== ($alias->group_filter ?? [])) {
+                            $alias->updateQuietly(['group_filter' => $updated]);
+                        }
+                    });
+            });
+
             // Auto-generate UUID for channels
             Channel::creating(function (Channel $channel) {
                 if (empty($channel->uuid)) {
