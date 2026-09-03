@@ -12,6 +12,7 @@ use App\Filament\Tables\CustomPlaylistCategoriesTable;
 use App\Filament\Tables\CustomPlaylistGroupsTable;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
+use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
@@ -95,7 +96,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         return $table
             ->recordTitleAttribute('name')
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with(['playlist', 'customPlaylist', 'mergedPlaylist']);
+                $query->with(['playlist', 'customPlaylist', 'mergedPlaylist', 'bouquets']);
             })
             ->deferLoading()
             ->columns([
@@ -133,6 +134,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
                         return null;
                     }),
+                Tables\Columns\TextColumn::make('bouquets.name')
+                    ->label(__('Bouquets'))
+                    ->badge()
+                    ->limitList(2)
+                    ->toggleable(),
                 // Tables\Columns\ToggleColumn::make('enabled'),
                 Tables\Columns\TextColumn::make('user_info')
                     ->label(__('Provider Streams'))
@@ -694,6 +700,63 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->columnSpanFull()
                 ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id'))
                 ->schema([
+                    Schemas\Components\Fieldset::make(__('Bouquets'))
+                        ->columnSpanFull()
+                        ->schema([
+                            Forms\Components\Select::make('bouquets')
+                                ->label(__('Assigned bouquets'))
+                                ->relationship(
+                                    name: 'bouquets',
+                                    titleAttribute: 'name',
+                                    modifyQueryUsing: function (Builder $query, Get $get): Builder {
+                                        $query->where('user_id', auth()->id());
+
+                                        return $get('custom_playlist_id')
+                                            ? $query->where('custom_playlist_id', (int) $get('custom_playlist_id'))
+                                            : $query->where('playlist_id', (int) $get('playlist_id'));
+                                    },
+                                )
+                                ->multiple()
+                                ->searchable()
+                                ->preload()
+                                ->live()
+                                ->columnSpanFull()
+                                ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine — assigning a bouquet never removes anything the manual pickers allow.'))
+                                ->createOptionForm([
+                                    Forms\Components\TextInput::make('name')->required(),
+                                    Forms\Components\Textarea::make('description'),
+                                ])
+                                ->createOptionUsing(function (array $data, Get $get): int {
+                                    $bouquet = Bouquet::create([
+                                        'name' => $data['name'],
+                                        'description' => $data['description'] ?? null,
+                                        'user_id' => auth()->id(),
+                                        'playlist_id' => $get('custom_playlist_id') ? null : ((int) $get('playlist_id') ?: null),
+                                        'custom_playlist_id' => $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
+                                    ]);
+
+                                    Notification::make()
+                                        ->success()
+                                        ->title(__('Bouquet created'))
+                                        ->body(__('Select its groups under Playlist Bouquets.'))
+                                        ->send();
+
+                                    return $bouquet->getKey();
+                                }),
+                            Schemas\Components\Callout::make(__('Bouquet contributions'))
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
+                                ->description(function (Get $get): string {
+                                    $bouquets = Bouquet::whereIn('id', (array) $get('bouquets'))->get();
+
+                                    return __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
+                                        'live' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedLiveGroupNames())->unique()->count(),
+                                        'vod' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedVodGroupNames())->unique()->count(),
+                                        'series' => $bouquets->flatMap(fn (Bouquet $bouquet) => $bouquet->getSelectedCategoryNames())->unique()->count(),
+                                    ]);
+                                }),
+                        ]),
+
                     Schemas\Components\Callout::make(__('What you can select'))
                         ->columnSpanFull()
                         ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
@@ -712,6 +775,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     'playlist_id' => (int) $get('playlist_id'),
                                     'type' => 'live',
                                     'selected' => $get('group_filter.selected_groups') ?? [],
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -795,6 +859,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableArguments(fn (Get $get): array => [
                                     'custom_playlist_id' => (int) $get('custom_playlist_id'),
                                     'type' => 'live',
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -864,7 +929,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->deletable(false)
                                 ->reorderable(true)
                                 ->compact()
-                                ->helperText(__('Drag the groups into the order you want them delivered to the client.'))
+                                ->helperText(__('Drag the groups into the order you want them delivered to the client. Groups contributed by bouquets that are not listed here are appended in source-playlist order.'))
                                 ->afterStateHydrated(function (Forms\Components\Repeater $component, $state, $record): void {
                                     $playlistId = ((int) ($record?->playlist_id ?? 0)) ?: null;
                                     $orderedNames = self::liveGroupSortNames($state);
@@ -890,6 +955,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     'playlist_id' => (int) $get('playlist_id'),
                                     'type' => 'vod',
                                     'selected' => $get('group_filter.selected_vod_groups') ?? [],
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -955,6 +1021,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableArguments(fn (Get $get): array => [
                                     'custom_playlist_id' => (int) $get('custom_playlist_id'),
                                     'type' => 'vod',
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -991,6 +1058,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->tableArguments(fn (Get $get): array => [
                                     'playlist_id' => (int) $get('playlist_id'),
                                     'selected' => $get('group_filter.selected_categories') ?? [],
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -1060,6 +1128,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
                                 ->tableArguments(fn (Get $get): array => [
                                     'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
                                 ])
                                 ->selectAction(
                                     fn (Action $action) => $action
@@ -1109,11 +1178,39 @@ class PlaylistAliasResource extends Resource implements CopilotResource
      */
     protected static function resetGroupFilter(Set $set): void
     {
+        $set('bouquets', []);
         $set('group_filter.selected_groups', []);
         $set('group_filter.selected_vod_groups', []);
         $set('group_filter.selected_categories', []);
         $set('group_filter.sort_live_groups_custom', false);
         $set('group_filter.live_group_order', []);
+    }
+
+    /**
+     * Names contributed by the alias's currently selected bouquets, used by the
+     * picker tables to badge rows already covered by a bouquet.
+     *
+     * @return array<string>
+     */
+    protected static function bouquetContributedNames(Get $get, string $type): array
+    {
+        $bouquetIds = (array) $get('bouquets');
+        if (empty($bouquetIds)) {
+            return [];
+        }
+
+        $method = match ($type) {
+            'vod' => 'getSelectedVodGroupNames',
+            'categories' => 'getSelectedCategoryNames',
+            default => 'getSelectedLiveGroupNames',
+        };
+
+        return Bouquet::whereIn('id', $bouquetIds)
+            ->get()
+            ->flatMap(fn (Bouquet $bouquet): array => $bouquet->{$method}())
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

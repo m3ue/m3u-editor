@@ -5,6 +5,7 @@ namespace App\Filament\Tables;
 use App\Models\CustomPlaylist;
 use App\Models\CustomPlaylistGroup;
 use Filament\Actions\BulkActionGroup;
+use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -37,6 +38,11 @@ class CustomPlaylistCategoriesTable
                         ['%'.mb_strtolower($search).'%']
                     ))
                     ->sortable(),
+                IconColumn::make('in_bouquet')
+                    ->label(__('In bouquet'))
+                    ->visible(fn (): bool => ! empty($table->getArguments()['bouquet_group_names'] ?? []))
+                    ->state(fn ($record): bool => in_array($record->name, $table->getArguments()['bouquet_group_names'] ?? [], true))
+                    ->boolean(),
             ])
             ->filters([
                 //

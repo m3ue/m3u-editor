@@ -16,6 +16,7 @@ use App\Filament\Resources\PlaylistAliases\Pages\CreatePlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Tables\CustomPlaylistGroupsTable;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -732,4 +733,34 @@ it('keeps an existing custom playlist filter when the edit form is saved untouch
         ->assertHasNoFormErrors();
 
     expect($alias->refresh()->getAllowedLiveGroupNames())->toBe(['Sports']);
+});
+
+it('does not materialize bouquet names into group_filter when the form is saved (R1 guard)', function () {
+    $this->actingAs($this->user);
+
+    $sports = addCustomChannel($this->user, $this->playlist, $this->customPlaylist);
+    tagChannels($this->customPlaylist, 'Manual Group', [$sports]);
+
+    $alias = makeCustomAlias($this->user, $this->customPlaylist, ['selected_groups' => ['Manual Group']], [
+        'xtream_config' => [[
+            'url' => 'http://example.com:8080',
+            'username' => 'alias-user',
+            'password' => 'alias-pass',
+        ]],
+    ]);
+
+    $bouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => null,
+        'custom_playlist_id' => $this->customPlaylist->id,
+        'group_selections' => ['selected_groups' => ['Bouquet Group']],
+    ]);
+    $alias->bouquets()->sync([$bouquet->id]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSuccessful()
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($alias->refresh()->group_filter['selected_groups'])->toBe(['Manual Group']);
 });
