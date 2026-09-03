@@ -28,6 +28,7 @@ class EditVodGroup extends EditRecord
         return [
             ActionGroup::make([
                 PlaylistService::getAddGroupsToPlaylistAction('add', 'vod'),
+                PlaylistService::getAddGroupsToBouquetAction(type: 'vod'),
                 Action::make('move')
                     ->label(__('Move to Group'))
                     ->schema([

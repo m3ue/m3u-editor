@@ -238,6 +238,7 @@ class CategoryResource extends Resource implements CopilotResource
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'series'),
+                    PlaylistService::getAddGroupsToBouquetAction(type: 'category'),
                     MergedGroupService::manageCategoryChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Series to Category'))
@@ -385,6 +386,7 @@ class CategoryResource extends Resource implements CopilotResource
             ->toolbarActions([
                 BulkActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'series'),
+                    PlaylistService::getAddGroupsToBouquetBulkAction(type: 'category'),
                     BulkAction::make('move')
                         ->label(__('Move Series to Category'))
                         ->schema([

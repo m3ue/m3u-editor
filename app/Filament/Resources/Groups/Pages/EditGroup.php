@@ -25,6 +25,7 @@ class EditGroup extends EditRecord
         return [
             ActionGroup::make([
                 PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
+                PlaylistService::getAddGroupsToBouquetAction(type: 'live'),
                 Action::make('move')
                     ->label(__('Move to Group'))
                     ->schema([
