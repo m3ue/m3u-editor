@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Series;
@@ -65,6 +66,21 @@ class DuplicateCustomPlaylist implements ShouldQueue
                 $newPlaylist->attachTag($newTag);
                 $categoryTagMap[$oldTag->id] = $newTag;
             }
+
+            // Copy the playlist's bouquets. Tag names are recreated byte-identical
+            // under the new UUID, so the name-based selections copy verbatim. Alias
+            // attachments are deliberately NOT copied: the duplicate has no aliases,
+            // and attaching its bouquets to the source's aliases would violate the
+            // same-target invariant.
+            Bouquet::where('custom_playlist_id', $playlist->id)
+                ->cursor()
+                ->each(function (Bouquet $bouquet) use ($newPlaylist, $now): void {
+                    $copy = $bouquet->replicate(except: ['id']);
+                    $copy->custom_playlist_id = $newPlaylist->id;
+                    $copy->created_at = $now;
+                    $copy->updated_at = $now;
+                    $copy->saveQuietly();
+                });
 
             // Copy channel links, preserving pivot data and group tag assignments
             DB::table('channel_custom_playlist')

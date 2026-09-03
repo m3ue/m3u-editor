@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Bouquet;
 use App\Models\Playlist;
 use Exception;
 use Filament\Notifications\Notification;
@@ -103,6 +104,16 @@ class DuplicatePlaylist implements ShouldQueue
                     }
                 }
             }
+
+            // Copy the playlist's bouquets (groups replicate with identical names,
+            // so the name-based selections stay valid). No alias attachments.
+            Bouquet::where('playlist_id', $playlist->id)
+                ->cursor()
+                ->each(function (Bouquet $bouquet) use ($newPlaylist): void {
+                    $copy = $bouquet->replicate(except: ['id']);
+                    $copy->playlist_id = $newPlaylist->id;
+                    $copy->saveQuietly();
+                });
 
             // Copy the categories
             foreach ($playlist->categories()->get() as $category) {
