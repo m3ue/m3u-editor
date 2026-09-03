@@ -16,6 +16,7 @@
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
 use App\Http\Controllers\PlaylistGenerateController;
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
@@ -169,6 +170,36 @@ describe('getChannelQuery custom live group ordering', function () {
         $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
 
         expect($ids)->toBe([$sportsCh->id, $newsCh->id, $comedyCh->id]);
+    });
+
+    it('ranks a bouquet-contributed group in the CASE ELSE bucket after an explicitly ordered manual group', function () {
+        // A Group's natural sort_order (1) would put it first; only the CASE
+        // ordering — with B Group explicitly ranked and A Group falling into the
+        // ELSE bucket — can put B Group first instead.
+        $aGroup = makeLiveGroup($this->user, $this->playlist, 'A Group', 1);
+        $bGroup = makeLiveGroup($this->user, $this->playlist, 'B Group', 2);
+        $aCh = makeLiveChannel($this->user, $this->playlist, $aGroup, 'A Channel');
+        $bCh = makeLiveChannel($this->user, $this->playlist, $bGroup, 'B Channel');
+
+        $alias = makeSortAlias($this->user, $this->playlist, [
+            'selected_groups' => ['B Group'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['B Group'],
+        ]);
+
+        // Bouquet contributes 'A Group' to the union — it is never in the manual
+        // live_group_order, so it must land in the CASE ELSE bucket.
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['A Group']],
+        ]);
+        $alias->bouquets()->attach($bouquet);
+        $alias->refresh();
+
+        $ids = PlaylistGenerateController::getChannelQuery($alias)->get()->pluck('id')->all();
+
+        expect($ids)->toBe([$bCh->id, $aCh->id]);
     });
 });
 
