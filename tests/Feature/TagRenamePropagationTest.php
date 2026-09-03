@@ -104,3 +104,50 @@ it('ignores tags whose type is not a custom playlist uuid', function () {
 
     expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Loose Tag']);
 });
+
+it('ignores category tags whose uuid does not match any custom playlist', function () {
+    $tag = Tag::findOrCreate('Loose Cat', 'no-such-uuid-category');
+    $bouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => null,
+        'custom_playlist_id' => $this->custom->id,
+        'group_selections' => ['selected_categories' => ['Loose Cat']],
+    ]);
+    $alias = PlaylistAlias::create([
+        'name' => 'A', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => null, 'custom_playlist_id' => $this->custom->id,
+        'xtream_config' => null,
+        'group_filter' => ['selected_categories' => ['Loose Cat']],
+    ]);
+
+    $tag->setTranslation('name', 'en', 'Renamed Loose Cat');
+    $tag->save();
+
+    expect($bouquet->refresh()->getSelectedCategoryNames())->toBe(['Loose Cat'])
+        ->and($alias->refresh()->group_filter['selected_categories'])->toBe(['Loose Cat']);
+});
+
+it('rewrites alias live_group_order on group tag renames but not on category tag renames', function () {
+    $groupTag = Tag::findOrCreate('Old Group', $this->custom->uuid);
+    $alias = PlaylistAlias::create([
+        'name' => 'A', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => null, 'custom_playlist_id' => $this->custom->id,
+        'xtream_config' => null,
+        'group_filter' => [
+            'selected_groups' => ['Old Group', 'Other'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Old Group', 'Other'],
+        ],
+    ]);
+
+    $groupTag->setTranslation('name', 'en', 'New Group');
+    $groupTag->save();
+
+    expect($alias->refresh()->group_filter['live_group_order'])->toBe(['New Group', 'Other']);
+
+    $catTag = Tag::findOrCreate('Other', $this->custom->uuid.'-category');
+    $catTag->setTranslation('name', 'en', 'Renamed Other Category');
+    $catTag->save();
+
+    expect($alias->refresh()->group_filter['live_group_order'])->toBe(['New Group', 'Other']);
+});

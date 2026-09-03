@@ -739,13 +739,17 @@ class AppServiceProvider extends ServiceProvider
                 // Group tags are shared across live and VOD; category tags map to series.
                 $keys = $isCategory ? ['selected_categories'] : ['selected_groups', 'selected_vod_groups'];
 
-                $rewrite = function (array $lists) use ($keys, $oldName, $newName): array {
+                $replaceName = function (array $names) use ($oldName, $newName): array {
+                    return array_values(array_unique(
+                        array_map(fn (string $name): string => $name === $oldName ? $newName : $name, $names)
+                    ));
+                };
+
+                $rewrite = function (array $lists) use ($keys, $oldName, $replaceName): array {
                     foreach ($keys as $key) {
                         $current = $lists[$key] ?? [];
                         if (in_array($oldName, $current, true)) {
-                            $lists[$key] = array_values(array_unique(
-                                array_map(fn (string $name): string => $name === $oldName ? $newName : $name, $current)
-                            ));
+                            $lists[$key] = $replaceName($current);
                         }
                     }
 
@@ -761,12 +765,24 @@ class AppServiceProvider extends ServiceProvider
                         }
                     });
 
+                // Custom-playlist aliases also carry a manual live-group sort order
+                // (fed by the same custom-variant picker as selected_groups), which
+                // goes stale the same way — but only group tags have a live-group
+                // sort order to rewrite; category tags don't touch it.
                 PlaylistAlias::where('custom_playlist_id', $customPlaylist->id)
                     ->cursor()
-                    ->each(function (PlaylistAlias $alias) use ($rewrite): void {
-                        $updated = $rewrite($alias->group_filter ?? []);
-                        if ($updated !== ($alias->group_filter ?? [])) {
-                            $alias->updateQuietly(['group_filter' => $updated]);
+                    ->each(function (PlaylistAlias $alias) use ($rewrite, $replaceName, $isCategory, $oldName): void {
+                        $filter = $rewrite($alias->group_filter ?? []);
+
+                        if (! $isCategory) {
+                            $order = $filter['live_group_order'] ?? [];
+                            if (in_array($oldName, $order, true)) {
+                                $filter['live_group_order'] = $replaceName($order);
+                            }
+                        }
+
+                        if ($filter !== ($alias->group_filter ?? [])) {
+                            $alias->updateQuietly(['group_filter' => $filter]);
                         }
                     });
             });
