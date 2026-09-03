@@ -1058,4 +1058,47 @@ class PlaylistAlias extends Model
         return $this->belongsToMany(Bouquet::class, 'bouquet_playlist_alias')
             ->using(BouquetPlaylistAlias::class);
     }
+
+    /**
+     * Companion fix to the bouquet rename propagation: rewrite provider group
+     * renames into the playlist's aliases' manual group_filter (and, for live,
+     * the custom sort order), which previously went silently stale. Quiet saves:
+     * output is identical before and after (names track the provider), so no
+     * EPG-cache invalidation or other update side effects are wanted.
+     *
+     * @param  array<string, string>  $renames
+     */
+    public static function applyProviderGroupRenames(int $playlistId, string $type, array $renames): void
+    {
+        $key = $type === 'vod' ? 'selected_vod_groups' : 'selected_groups';
+
+        self::where('playlist_id', $playlistId)->cursor()->each(function (self $alias) use ($key, $type, $renames): void {
+            $filter = $alias->group_filter ?? [];
+            $changed = false;
+
+            $map = function (array $names) use ($renames): array {
+                return array_values(array_unique(
+                    array_map(fn (string $name): string => $renames[$name] ?? $name, $names)
+                ));
+            };
+
+            $current = $filter[$key] ?? [];
+            if (! empty($current) && ($updated = $map($current)) !== $current) {
+                $filter[$key] = $updated;
+                $changed = true;
+            }
+
+            if ($type === 'live') {
+                $order = $filter['live_group_order'] ?? [];
+                if (! empty($order) && ($updatedOrder = $map($order)) !== $order) {
+                    $filter['live_group_order'] = $updatedOrder;
+                    $changed = true;
+                }
+            }
+
+            if ($changed) {
+                $alias->updateQuietly(['group_filter' => $filter]);
+            }
+        });
+    }
 }
