@@ -175,3 +175,27 @@ describe('Bouquet attachment invariant', function () {
         expect($alias->bouquets()->count())->toBe(0);
     });
 });
+
+describe('stale selection detection', function () {
+    it('reports and removes names that no longer resolve for a standard target', function () {
+        \App\Models\SourceGroup::create([
+            'name' => 'Alive', 'playlist_id' => $this->playlist->id, 'source_group_id' => 1, 'type' => 'live',
+        ]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => [
+                'selected_groups' => ['Alive', 'Gone'],
+                'selected_vod_groups' => ['Alive'],  // vod namespace: 'Alive' has no vod SourceGroup -> stale there
+            ],
+        ]);
+
+        expect($bouquet->staleSelectionNames())->toEqualCanonicalizing(['Gone', 'Alive']);
+
+        $bouquet->removeStaleSelectionNames();
+        $bouquet->refresh();
+
+        expect($bouquet->getSelectedLiveGroupNames())->toBe(['Alive'])
+            ->and($bouquet->getSelectedVodGroupNames())->toBe([]);
+    });
+});
