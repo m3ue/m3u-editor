@@ -6,6 +6,7 @@ use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Models\Channel;
+use App\Models\EpgMap;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
@@ -319,7 +320,7 @@ class ProcessM3uImportComplete implements ShouldQueue
 
                     // Create a mapping too so that once sync is complete, the EPG will be mapped to the playlist channels
                     $epg->epgMaps()->create([
-                        'name' => $playlist->name.' EPG -> '.$playlist->name.' mapping',
+                        'name' => EpgMap::buildName($epg->name, $playlist->name),
                         'playlist_id' => $playlist->id,
                         'user_id' => $user->id,
                         'uuid' => Str::orderedUuid()->toString(),

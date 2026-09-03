@@ -81,8 +81,9 @@ class MapEpgToChannelsComplete implements ShouldQueue
         }
 
         // Notify the user
+        $mapName = $map?->name ?? "EPG \"{$epg->name}\"";
         $title = 'Completed processing EPG channel mapping';
-        $body = "EPG \"{$epg->name}\" channel mapping completed. Mapped {$actualMappedCount} of {$this->channelCount} channels. Mapping took {$completedInRounded} seconds.";
+        $body = "\"{$mapName}\" completed. Mapped {$actualMappedCount} of {$this->channelCount} channels. Mapping took {$completedInRounded} seconds.";
         Notification::make()
             ->success()
             ->title($title)->body($body)

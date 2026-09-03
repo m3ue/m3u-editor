@@ -24,6 +24,7 @@ use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
 use App\Models\CustomPlaylist;
 use App\Models\Epg;
+use App\Models\EpgMap;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
@@ -501,6 +502,15 @@ class AppServiceProvider extends ServiceProvider
                     EpgCacheService::clearPlaylistEpgCacheFile($playlist);
                 }
 
+                // Keep auto-generated EPG map names in sync when the playlist is renamed
+                if ($playlist->wasChanged('name')) {
+                    $previousName = $playlist->getOriginal('name');
+                    $playlist->epgMaps()->with('epg:id,name')->lazy()->each(function (EpgMap $map) use ($playlist, $previousName) {
+                        $map->setRelation('playlist', $playlist);
+                        $map->syncGeneratedName(previousPlaylistName: $previousName);
+                    });
+                }
+
                 // Fire the updated event
                 event(new PlaylistUpdated($playlist));
             });
@@ -576,7 +586,18 @@ class AppServiceProvider extends ServiceProvider
 
             // Process epg on creation
             Epg::created(fn (Epg $epg) => event(new EpgCreated($epg)));
-            Epg::updated(fn (Epg $epg) => event(new EpgUpdated($epg)));
+            Epg::updated(function (Epg $epg) {
+                // Keep auto-generated EPG map names in sync when the EPG is renamed
+                if ($epg->wasChanged('name')) {
+                    $previousName = $epg->getOriginal('name');
+                    $epg->epgMaps()->with('playlist:id,name')->lazy()->each(function (EpgMap $map) use ($epg, $previousName) {
+                        $map->setRelation('epg', $epg);
+                        $map->syncGeneratedName(previousEpgName: $previousName);
+                    });
+                }
+
+                event(new EpgUpdated($epg));
+            });
             Epg::creating(function (Epg $epg) {
                 if (! $epg->user_id) {
                     $epg->user_id = auth()->id();
@@ -603,6 +624,25 @@ class AppServiceProvider extends ServiceProvider
                 event(new EpgDeleted($epg));
 
                 return $epg;
+            });
+
+            // Re-derive an EPG map's auto-generated name when it is re-pointed
+            // to a different EPG and/or playlist (e.g. via the resource edit
+            // form, which has no name field). Manually renamed maps are left
+            // untouched by syncGeneratedName().
+            EpgMap::updated(function (EpgMap $map) {
+                if (! $map->wasChanged(['epg_id', 'playlist_id'])) {
+                    return;
+                }
+
+                $previousEpgName = optional(Epg::find($map->getOriginal('epg_id')))->name;
+                $previousPlaylistId = $map->getOriginal('playlist_id');
+                $previousPlaylistName = $previousPlaylistId
+                    ? optional(Playlist::find($previousPlaylistId))->name
+                    : null;
+
+                $map->load(['epg:id,name', 'playlist:id,name']);
+                $map->syncGeneratedName($previousEpgName, $previousPlaylistName);
             });
 
             // Merged playlist
