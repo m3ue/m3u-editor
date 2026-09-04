@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Traits\HasPlaylistScopedDisplayLabels;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\JoinClause;
 
 class SourceGroup extends Model
 {
+    use HasPlaylistScopedDisplayLabels;
+
     protected $table = 'source_groups';
 
     public function playlist()
@@ -29,13 +32,13 @@ class SourceGroup extends Model
      */
     public static function displayLabelsForIds(int|array|null $playlistIds, ?string $type, array $ids, bool $includePlaylistName = false): array
     {
-        $ids = array_values(array_filter($ids, fn ($value): bool => is_numeric($value)));
-        $playlistIds = array_values(array_filter((array) $playlistIds, fn ($value): bool => is_numeric($value)));
+        $ids = self::numericIds($ids);
+        $playlistIds = self::numericIds($playlistIds);
         if (empty($playlistIds) || empty($ids)) {
             return [];
         }
 
-        return static::query()
+        $rows = static::query()
             ->leftJoin('groups', function (JoinClause $join) use ($type): void {
                 $join->on('groups.name_internal', '=', 'source_groups.name')
                     ->on('groups.playlist_id', '=', 'source_groups.playlist_id')
@@ -44,18 +47,13 @@ class SourceGroup extends Model
                     $join->where('groups.type', '=', $type);
                 }
             })
-            ->when($includePlaylistName, fn ($query) => $query->leftJoin('playlists', 'playlists.id', '=', 'source_groups.playlist_id'))
             ->whereIn('source_groups.playlist_id', $playlistIds)
             ->when($type, fn ($query) => $query->where('source_groups.type', $type))
             ->whereIn('source_groups.id', $ids)
             ->selectRaw('source_groups.id as id, COALESCE(groups.name, source_groups.name) as label')
-            ->when($includePlaylistName, fn ($query) => $query->selectRaw('playlists.name as playlist_name'))
-            ->get()
-            ->mapWithKeys(fn ($row): array => [
-                $row->id => $includePlaylistName && filled($row->playlist_name)
-                    ? "{$row->label} ({$row->playlist_name})"
-                    : $row->label,
-            ])
-            ->toArray();
+            ->when($includePlaylistName, fn ($query) => self::selectPlaylistName($query, 'source_groups'))
+            ->get();
+
+        return self::labelsById($rows);
     }
 }

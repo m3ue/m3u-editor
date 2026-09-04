@@ -138,10 +138,11 @@ class SeriesResource extends Resource
                     ->where('enabled', true)
                     ->whereIn('playlist_id', $playlist->mergedPlaylist?->sourcePlaylistIds('series') ?? []);
 
-                // Apply the source-scoped series category filter if configured on the alias
-                $allowedCategories = $playlist->getAllowedCategorySelections();
-                if (! empty($allowedCategories)) {
-                    $query->where(fn ($query) => $playlist->constrainSeriesToSourceCategories($query, $allowedCategories));
+                // Apply the source-scoped series category filter if configured on the alias.
+                // The stored selection gates it, not the parsed pairs, so a malformed
+                // selection fails closed instead of silently allowing every category.
+                if ($playlist->hasCategoryFilter()) {
+                    $query->where(fn ($query) => $playlist->constrainSeriesToSourceCategories($query, $playlist->getAllowedCategorySelections()));
                 }
 
                 return $query;

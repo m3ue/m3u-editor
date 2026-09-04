@@ -152,10 +152,11 @@ class VodResource extends Resource
                     ->where('is_vod', true)
                     ->whereIn('playlist_id', $playlist->mergedPlaylist?->sourcePlaylistIds('vod') ?? []);
 
-                // Apply the source-scoped VOD group filter if configured on the alias
-                $allowedVodGroups = $playlist->getAllowedVodGroupSelections();
-                if (! empty($allowedVodGroups)) {
-                    $query->where(fn ($query) => $playlist->constrainChannelsToSourceGroups($query, $allowedVodGroups));
+                // Apply the source-scoped VOD group filter if configured on the alias. The
+                // stored selection gates it, not the parsed pairs, so a malformed selection
+                // fails closed instead of silently allowing every group.
+                if ($playlist->hasVodGroupFilter()) {
+                    $query->where(fn ($query) => $playlist->constrainChannelsToSourceGroups($query, $playlist->getAllowedVodGroupSelections()));
                 }
 
                 return $query;

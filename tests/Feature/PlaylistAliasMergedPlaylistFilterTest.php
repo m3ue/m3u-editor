@@ -338,3 +338,116 @@ it('scopes the guest panel to the merged playlist content instead of every chann
     expect($ids->sort()->values()->all())->toBe(collect([$this->channelAMovies->id, $this->channelBMovies->id])->sort()->values()->all())
         ->and($ids)->not->toContain($otherVod->id);
 });
+
+// ── Fail closed on malformed selections ──────────────────────────────────────
+
+it('fails closed when a merged alias stores bare names instead of source-scoped pairs', function () {
+    $alias = mergedFilterAlias($this->user, $this->merged, [
+        'selected_groups' => ['Sports'],
+        'selected_vod_groups' => ['Movies'],
+        'selected_categories' => ['Drama'],
+    ]);
+
+    expect($alias->hasGroupFilter())->toBeTrue()
+        ->and($alias->live_channels()->count())->toBe(0)
+        ->and($alias->vod_channels()->count())->toBe(0)
+        ->and($alias->series()->count())->toBe(0)
+        ->and($alias->groups()->count())->toBe(0);
+});
+
+it('fails closed in the guest panel when a merged alias stores bare names', function () {
+    $alias = mergedFilterAlias($this->user, $this->merged, [
+        'selected_vod_groups' => ['Movies'],
+        'selected_categories' => ['Drama'],
+    ]);
+    request()->attributes->set('playlist_uuid', $alias->uuid);
+
+    expect(GuestVodResource::getEloquentQuery()->count())->toBe(0)
+        ->and(GuestSeriesResource::getEloquentQuery()->count())->toBe(0);
+});
+
+// ── Ownership of the hidden source ids ───────────────────────────────────────
+
+it('rejects a merged playlist the current user does not own when creating an alias', function () {
+    $this->actingAs($this->user);
+    $otherMerged = MergedPlaylist::factory()->for(User::factory()->create())->create();
+
+    Livewire::test(CreatePlaylistAlias::class)
+        ->fillForm([
+            'name' => 'Tampered Merged Alias',
+            'source_type' => 'merged_playlist',
+            'source_id' => $this->merged->id,
+            'xtream_config' => [[
+                'url' => 'http://provider.example.com:8080',
+                'username' => 'newuser',
+                'password' => 'newpass',
+            ]],
+            'merged_playlist_id' => $otherMerged->id,
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['merged_playlist_id']);
+
+    expect(PlaylistAlias::where('name', 'Tampered Merged Alias')->exists())->toBeFalse();
+});
+
+it('rejects a playlist the current user does not own when creating an alias', function () {
+    $this->actingAs($this->user);
+    $otherPlaylist = Playlist::factory()->for(User::factory()->create())->createQuietly();
+
+    Livewire::test(CreatePlaylistAlias::class)
+        ->fillForm([
+            'name' => 'Tampered Playlist Alias',
+            'source_type' => 'playlist',
+            'source_id' => $this->sourceA->id,
+            'xtream_config' => [[
+                'url' => 'http://provider.example.com:8080',
+                'username' => 'newuser',
+                'password' => 'newpass',
+            ]],
+            'playlist_id' => $otherPlaylist->id,
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['playlist_id']);
+
+    expect(PlaylistAlias::where('name', 'Tampered Playlist Alias')->exists())->toBeFalse();
+});
+
+it('resolves picker source playlist ids only for playlists the current user owns', function () {
+    $this->actingAs($this->user);
+    $otherUser = User::factory()->create();
+    $otherPlaylist = Playlist::factory()->for($otherUser)->createQuietly();
+    $otherMerged = MergedPlaylist::factory()->for($otherUser)->create();
+    $otherMerged->playlists()->attach($otherPlaylist->id);
+
+    expect(PlaylistAliasResource::mergedSourcePlaylistIds($this->merged->id, null))->toBe([$this->sourceA->id, $this->sourceB->id])
+        ->and(PlaylistAliasResource::mergedSourcePlaylistIds($otherMerged->id, null))->toBe([])
+        ->and(PlaylistAliasResource::ownedPlaylistIds($this->sourceA->id))->toBe([$this->sourceA->id])
+        ->and(PlaylistAliasResource::ownedPlaylistIds($otherPlaylist->id))->toBe([]);
+});
+
+// ── Picker labels and form guidance ──────────────────────────────────────────
+
+it('appends the source playlist name to group and category labels only when asked', function () {
+    $playlistIds = [$this->sourceA->id, $this->sourceB->id];
+
+    expect(SourceGroup::displayLabelsForIds($playlistIds, 'live', [$this->sourceGroupBSports->id], includePlaylistName: true))
+        ->toBe([$this->sourceGroupBSports->id => 'Sports (Provider B)'])
+        ->and(SourceCategory::displayLabelsForIds($playlistIds, [$this->sourceCategoryADrama->id], includePlaylistName: true))
+        ->toBe([$this->sourceCategoryADrama->id => 'Drama (Provider A)'])
+        ->and(SourceGroup::displayLabelsForIds($this->sourceA->id, 'live', [$this->sourceGroupANews->id]))
+        ->toBe([$this->sourceGroupANews->id => 'News'])
+        ->and(SourceCategory::displayLabelsForIds($this->sourceA->id, [$this->sourceCategoryADrama->id]))
+        ->toBe([$this->sourceCategoryADrama->id => 'Drama']);
+});
+
+it('shows the merged-alias guidance callout instead of the custom-playlist one', function () {
+    $this->actingAs($this->user);
+
+    $alias = mergedFilterAlias($this->user, $this->merged, [
+        'selected_groups' => [['playlist_id' => $this->sourceA->id, 'name' => 'Sports']],
+    ]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSee(__('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.'))
+        ->assertDontSee(__('The lists below combine any groups you created in the custom playlist with the original source playlist groups.'));
+});

@@ -49,6 +49,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Exists;
 
 class PlaylistAliasResource extends Resource implements CopilotResource
 {
@@ -406,9 +407,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->helperText(fn (Get $get): string => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true)
                             ? __('Multiple provider credentials can be configured to match source providers.')
                             : __('Only one set of alternative credentials can be configured.')),
-                    Forms\Components\Hidden::make('playlist_id'),
-                    Forms\Components\Hidden::make('custom_playlist_id'),
-                    Forms\Components\Hidden::make('merged_playlist_id'),
+                    self::ownedSourceIdField('playlist_id', 'playlists'),
+                    self::ownedSourceIdField('custom_playlist_id', 'custom_playlists'),
+                    self::ownedSourceIdField('merged_playlist_id', 'merged_playlists'),
                 ]),
 
             Schemas\Components\Fieldset::make(__('Provider Credentials'))
@@ -696,12 +697,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->schema([
                     Schemas\Components\Callout::make(__('What you can select'))
                         ->columnSpanFull()
-                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
-                        ->description(__('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
-                    Schemas\Components\Callout::make(__('What you can select'))
-                        ->columnSpanFull()
-                        ->visible(fn (Get $get): bool => (bool) $get('merged_playlist_id'))
-                        ->description(__('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.')),
+                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') || (bool) $get('merged_playlist_id'))
+                        ->description(fn (Get $get): string => $get('merged_playlist_id')
+                            ? __('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.')
+                            : __('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
 
                     Schemas\Components\Fieldset::make(__('Live channel groups'))
                         ->schema([
@@ -1083,6 +1082,17 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     }
 
     /**
+     * A hidden source id field that only validates against the current user's own
+     * rows in $table, so a tampered form payload cannot point an alias at someone
+     * else's playlist. The ids not in use are null and pass as nullable.
+     */
+    protected static function ownedSourceIdField(string $name, string $table): Forms\Components\Hidden
+    {
+        return Forms\Components\Hidden::make($name)
+            ->exists(table: $table, column: 'id', modifyRuleUsing: fn (Exists $rule): Exists => $rule->where('user_id', auth()->id()));
+    }
+
+    /**
      * Whether the source-group / source-category pickers (as opposed to the custom
      * playlist tag pickers) drive the channel filter for the current form state.
      */
@@ -1108,7 +1118,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     /**
      * The playlist ids whose source groups / categories the pickers select from: the
      * alias's own playlist, or every source playlist of its merged playlist that
-     * contributes the given content type ('live', 'vod' or 'series').
+     * contributes the given content type ('live', 'vod' or 'series'). Both resolve
+     * through the current user's own playlists, so a tampered hidden id yields none.
      *
      * @return array<int>
      */
@@ -1116,7 +1127,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     {
         if ($get('playlist_id') || $get('merged_playlist_id')) {
             return $get('playlist_id')
-                ? [(int) $get('playlist_id')]
+                ? self::ownedPlaylistIds((int) $get('playlist_id'))
                 : self::mergedSourcePlaylistIds((int) $get('merged_playlist_id'), $contentType);
         }
 
@@ -1129,7 +1140,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     protected static function sourcePlaylistIdsForRecord(?PlaylistAlias $record, ?string $contentType = null): array
     {
         if ($record?->playlist_id) {
-            return [(int) $record->playlist_id];
+            return self::ownedPlaylistIds((int) $record->playlist_id);
         }
 
         if ($record?->merged_playlist_id) {
@@ -1140,15 +1151,34 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     }
 
     /**
-     * Source playlist ids of a merged playlist, memoised for the current request
-     * (once() is keyed by the arguments) because every picker closure asks for them
-     * several times while the form renders.
+     * Source playlist ids of a merged playlist the current user owns, or an empty
+     * list for anyone else's so a tampered hidden field cannot list their groups.
+     * Memoised for the current request (once() is keyed by the arguments) because
+     * every picker closure asks for them several times while the form renders.
      *
      * @return array<int>
      */
-    protected static function mergedSourcePlaylistIds(int $mergedPlaylistId, ?string $contentType): array
+    public static function mergedSourcePlaylistIds(int $mergedPlaylistId, ?string $contentType): array
     {
-        return once(fn (): array => MergedPlaylist::find($mergedPlaylistId)?->sourcePlaylistIds($contentType) ?? []);
+        return once(fn (): array => MergedPlaylist::query()
+            ->whereKey($mergedPlaylistId)
+            ->where('user_id', auth()->id())
+            ->first()
+            ?->sourcePlaylistIds($contentType) ?? []);
+    }
+
+    /**
+     * The given playlist id as a single-item list when the current user owns that
+     * playlist, otherwise empty. Memoised like mergedSourcePlaylistIds().
+     *
+     * @return array<int>
+     */
+    public static function ownedPlaylistIds(int $playlistId): array
+    {
+        return once(fn (): array => Playlist::query()
+            ->whereKey($playlistId)
+            ->where('user_id', auth()->id())
+            ->exists() ? [$playlistId] : []);
     }
 
     /**
@@ -1264,9 +1294,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     }
 
     /**
-     * Convert the live group selection state — SourceGroup IDs while editing, or
-     * group names (or {playlist_id, name} pairs for merged aliases) once persisted —
-     * into an ordered list of internal group names.
+     * Convert the live group selection state into an ordered list of internal group
+     * names. The state holds SourceGroup IDs while editing, or group names (or
+     * {playlist_id, name} pairs for merged aliases) once persisted.
      *
      * @param  int|array<int>|null  $playlistIds  the alias's playlist, or a merged playlist's sources
      * @return array<string>

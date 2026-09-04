@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Traits\HasPlaylistScopedDisplayLabels;
 use Illuminate\Database\Eloquent\Model;
 
 class SourceCategory extends Model
 {
+    use HasPlaylistScopedDisplayLabels;
+
     protected $table = 'source_categories';
 
     public function playlist()
@@ -24,24 +27,19 @@ class SourceCategory extends Model
      */
     public static function displayLabelsForIds(int|array|null $playlistIds, array $ids, bool $includePlaylistName = false): array
     {
-        $ids = array_values(array_filter($ids, fn ($value): bool => is_numeric($value)));
-        $playlistIds = array_values(array_filter((array) $playlistIds, fn ($value): bool => is_numeric($value)));
+        $ids = self::numericIds($ids);
+        $playlistIds = self::numericIds($playlistIds);
         if (empty($playlistIds) || empty($ids)) {
             return [];
         }
 
-        return static::query()
-            ->when($includePlaylistName, fn ($query) => $query->leftJoin('playlists', 'playlists.id', '=', 'source_categories.playlist_id'))
+        $rows = static::query()
             ->whereIn('source_categories.playlist_id', $playlistIds)
             ->whereIn('source_categories.id', $ids)
             ->selectRaw('source_categories.id as id, source_categories.name as label')
-            ->when($includePlaylistName, fn ($query) => $query->selectRaw('playlists.name as playlist_name'))
-            ->get()
-            ->mapWithKeys(fn ($row): array => [
-                $row->id => $includePlaylistName && filled($row->playlist_name)
-                    ? "{$row->label} ({$row->playlist_name})"
-                    : $row->label,
-            ])
-            ->toArray();
+            ->when($includePlaylistName, fn ($query) => self::selectPlaylistName($query, 'source_categories'))
+            ->get();
+
+        return self::labelsById($rows);
     }
 }

@@ -207,13 +207,37 @@ class PlaylistAlias extends Model
     }
 
     /**
+     * Whether a live group selection is stored, whatever its shape. The merged-alias
+     * branches gate on these predicates rather than on the parsed pairs so a
+     * malformed selection fails closed instead of silently allowing every group.
+     */
+    public function hasLiveGroupFilter(): bool
+    {
+        return ! empty($this->group_filter['selected_groups']);
+    }
+
+    /**
+     * Whether a VOD group selection is stored, whatever its shape.
+     */
+    public function hasVodGroupFilter(): bool
+    {
+        return ! empty($this->group_filter['selected_vod_groups']);
+    }
+
+    /**
+     * Whether a series category selection is stored, whatever its shape.
+     */
+    public function hasCategoryFilter(): bool
+    {
+        return ! empty($this->group_filter['selected_categories']);
+    }
+
+    /**
      * Whether this alias has any group/category filter applied.
      */
     public function hasGroupFilter(): bool
     {
-        return ! empty($this->group_filter['selected_groups'])
-            || ! empty($this->group_filter['selected_vod_groups'])
-            || ! empty($this->group_filter['selected_categories']);
+        return $this->hasLiveGroupFilter() || $this->hasVodGroupFilter() || $this->hasCategoryFilter();
     }
 
     /**
@@ -448,20 +472,21 @@ class PlaylistAlias extends Model
         if ($this->merged_playlist_id) {
             // A merged alias only exposes the source groups it allows, so a filtered-out
             // group never surfaces as an empty Xtream category. Each content type is
-            // scoped independently: no selection for a type leaves that type unfiltered.
+            // scoped independently: no selection for a type leaves that type unfiltered,
+            // while a stored selection with no valid pairs fails closed for that type.
             $liveSelections = $this->getAllowedLiveGroupSelections();
             $vodSelections = $this->getAllowedVodGroupSelections();
 
-            if (! empty($liveSelections) || ! empty($vodSelections)) {
+            if ($this->hasLiveGroupFilter() || $this->hasVodGroupFilter()) {
                 $relation->where(function ($query) use ($liveSelections, $vodSelections): void {
                     $query->where(function ($query) use ($liveSelections): void {
                         $query->where('groups.type', 'live');
-                        if (! empty($liveSelections)) {
+                        if ($this->hasLiveGroupFilter()) {
                             $query->where(fn ($query) => $this->constrainGroupsToSourceGroups($query, $liveSelections));
                         }
                     })->orWhere(function ($query) use ($vodSelections): void {
                         $query->where('groups.type', 'vod');
-                        if (! empty($vodSelections)) {
+                        if ($this->hasVodGroupFilter()) {
                             $query->where(fn ($query) => $this->constrainGroupsToSourceGroups($query, $vodSelections));
                         }
                     });
@@ -542,18 +567,21 @@ class PlaylistAlias extends Model
 
             // The alias filter is stored as {playlist_id, name} pairs so a group can be
             // allowed from one source without also allowing a same-named group from
-            // another. Matching mirrors the standard branch below, scoped per source.
+            // another. Matching mirrors the standard branch below, scoped per source. The
+            // stored selection, not the parsed pairs, gates each filter so a malformed
+            // selection fails closed (the constrain helpers emit 1 = 0) instead of
+            // silently allowing every group.
             $liveSelections = $this->getAllowedLiveGroupSelections();
             $vodSelections = $this->getAllowedVodGroupSelections();
 
-            if (! empty($liveSelections)) {
+            if ($this->hasLiveGroupFilter()) {
                 $relation->where(function ($query) use ($liveSelections): void {
                     $query->where('channels.is_vod', true)
                         ->orWhere(fn ($query) => $this->constrainChannelsToSourceGroups($query, $liveSelections));
                 });
             }
 
-            if (! empty($vodSelections)) {
+            if ($this->hasVodGroupFilter()) {
                 $relation->where(function ($query) use ($vodSelections): void {
                     $query->where('channels.is_vod', false)
                         ->orWhere(fn ($query) => $this->constrainChannelsToSourceGroups($query, $vodSelections));
@@ -658,7 +686,7 @@ class PlaylistAlias extends Model
             )->where('merged_playlist_playlist.include_series', true);
 
             $categorySelections = $this->getAllowedCategorySelections();
-            if (! empty($categorySelections)) {
+            if ($this->hasCategoryFilter()) {
                 $relation->where(fn ($query) => $this->constrainSeriesToSourceCategories($query, $categorySelections));
             }
 
@@ -771,7 +799,7 @@ class PlaylistAlias extends Model
      * Restrict a channels query to the source-scoped groups a merged alias allows:
      * for each source playlist, channels whose provider group (group_internal) is in
      * that playlist's allowed names. Custom channels follow the same fallback as the
-     * standard alias filter — matched on their user-assigned group name, or passed
+     * standard alias filter: matched on their user-assigned group name, or passed
      * through when ungrouped.
      *
      * Public so the guest panel can reuse the exact same matching rules against
