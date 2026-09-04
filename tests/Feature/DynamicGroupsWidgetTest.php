@@ -398,6 +398,47 @@ it('hasDynamicGroups() respects activePlaylistId on the Series widget', function
     )->toBeFalse();
 });
 
+it('the VOD widget renders a section wire:key that flips between empty/non-empty scope so the collapse state re-syncs on reactive re-renders', function () {
+    // Filament's collapsible section only seeds its Alpine `isCollapsed`
+    // state once, on `x-data` init. A reactive re-render (e.g. switching
+    // playlist tabs) morphs the section element in place rather than
+    // recreating it, so without a state-dependent `wire:key` the collapse
+    // state would get stuck at whatever it was on first mount instead of
+    // following `hasDynamicGroups()`. This asserts the key that forces
+    // that recreation is present and tracks the underlying scope.
+    Livewire::test(VodDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertSeeHtml('wire:key="dynamic-groups-section-collapsed"');
+
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
+    ]);
+
+    Livewire::test(VodDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertSeeHtml('wire:key="dynamic-groups-section-expanded"');
+});
+
+it('the Series widget renders a section wire:key that flips between empty/non-empty scope so the collapse state re-syncs on reactive re-renders', function () {
+    Livewire::test(SeriesDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertSeeHtml('wire:key="dynamic-groups-section-collapsed"');
+
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Mine Series',
+    ]);
+
+    Livewire::test(SeriesDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertSeeHtml('wire:key="dynamic-groups-section-expanded"');
+});
+
 it('getDynamicGroupsHelpText() returns the same non-empty help text on both widgets (single source of truth)', function () {
     // The shared view passes this string to BOTH the empty-state
     // description on the table AND the always-visible header tooltip.

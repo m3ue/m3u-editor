@@ -1,5 +1,16 @@
 <x-filament-widgets::widget class="fi-wi-table">
     <x-filament::section
+        {{--
+            Alpine's `isCollapsed` is only set from `:collapsed` on initial
+            `x-data` evaluation. A reactive re-render (e.g. switching
+            playlist tabs into one with no Dynamic Groups) morphs this
+            element in place rather than recreating it, so the collapse
+            state would otherwise get stuck at whatever it was on first
+            mount. Keying on `hasDynamicGroups()` forces Livewire to treat
+            a flip between empty/non-empty as a new element, so the
+            collapse state re-syncs on every such change.
+        --}}
+        wire:key="dynamic-groups-section-{{ $this->hasDynamicGroups() ? 'expanded' : 'collapsed' }}"
         icon="heroicon-o-sparkles"
         :heading="__('Dynamic Groups (TMDB)')"
         collapsible
