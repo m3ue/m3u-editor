@@ -107,7 +107,7 @@ it('the Series widget\'s view action links to the DynamicGroupResource view rout
         ->assertTableActionHasUrl('view', $expectedUrl, $group);
 });
 
-it('the VOD widget exposes no edit / delete actions (only a read-only view)', function () {
+it('the VOD widget exposes view and delete actions but no edit (membership stays read-only, the row itself is deletable)', function () {
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
         'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
@@ -117,10 +117,24 @@ it('the VOD widget exposes no edit / delete actions (only a read-only view)', fu
         ->assertOk()
         ->loadTable()
         ->assertTableActionExists('view')
-        ->assertTableActionDoesNotExist('edit')
-        ->assertTableActionDoesNotExist('delete');
+        ->assertTableActionExists('delete')
+        ->assertTableActionDoesNotExist('edit');
 
     expect($group->refresh()->exists())->toBeTrue();
+});
+
+it('deleting a row from the VOD widget removes the DynamicGroup record', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
+    ]);
+
+    Livewire::test(VodDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->callTableAction('delete', $group);
+
+    expect(DynamicGroup::find($group->id))->toBeNull();
 });
 
 it('both widgets are registered as footer widgets on their respective list pages', function () {
@@ -441,17 +455,25 @@ it('the Series widget renders a section wire:key that flips between empty/non-em
         ->assertSeeHtml('wire:key="dynamic-groups-section-expanded"');
 });
 
-it('getDynamicGroupsHelpText() returns the same non-empty help text on both widgets (single source of truth)', function () {
-    // The shared view passes this string to BOTH the empty-state
-    // description on the table AND the always-visible header tooltip.
-    // If the two widgets ever drift, this test catches it.
-    $vodText = Livewire::test(VodDynamicGroupsWidget::class)
-        ->instance()
-        ->getDynamicGroupsHelpText();
-    $seriesText = Livewire::test(SeriesDynamicGroupsWidget::class)
-        ->instance()
-        ->getDynamicGroupsHelpText();
+it('getDynamicGroupsHelpText() and getSectionHeading() use Group vs Category wording per widget, matching each page\'s own vocabulary', function () {
+    // Both widgets feed the shared blade view - the empty-state description
+    // AND the always-visible header tooltip both read from
+    // getDynamicGroupsHelpText(), and the section heading from
+    // getSectionHeading(). The two widgets deliberately diverge in wording
+    // (Series uses "Categories", VOD uses "Groups") - this guards that each
+    // widget stays internally correct without requiring cross-widget
+    // byte-identical copy.
+    $vodText = Livewire::test(VodDynamicGroupsWidget::class)->instance()->getDynamicGroupsHelpText();
+    $seriesText = Livewire::test(SeriesDynamicGroupsWidget::class)->instance()->getDynamicGroupsHelpText();
 
     expect($vodText)->toBeString()->not->toBe('')
-        ->and($seriesText)->toBe($vodText);
+        ->and($seriesText)->toBeString()->not->toBe('')
+        ->and($vodText)->not->toContain('Categories')
+        ->and($seriesText)->toContain('Dynamic Categories');
+
+    $vodHeading = Livewire::test(VodDynamicGroupsWidget::class)->instance()->getSectionHeading();
+    $seriesHeading = Livewire::test(SeriesDynamicGroupsWidget::class)->instance()->getSectionHeading();
+
+    expect($vodHeading)->toBe('Dynamic Groups (TMDB)')
+        ->and($seriesHeading)->toBe('Dynamic Categories (TMDB)');
 });

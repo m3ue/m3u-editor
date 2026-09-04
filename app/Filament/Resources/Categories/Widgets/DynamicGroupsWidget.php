@@ -6,6 +6,7 @@ use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Models\DynamicGroup;
 use App\Services\TmdbService;
 use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -17,11 +18,14 @@ use Livewire\Attributes\Reactive;
 /**
  * Footer widget on `ListCategories` showing the current user's series-type
  * Dynamic Groups (Trending / Popular / Top Genre / By TV Network / etc.).
+ * Rows are fully clickable through to the read-only detail page - see
+ * `VodGroups\Widgets\DynamicGroupsWidget` for the full rationale (this
+ * widget mirrors it, with "Category" wording throughout since this page's
+ * own vocabulary is Categories, not Groups).
  *
- * Parallel to `VodGroups\Widgets\DynamicGroupsWidget` - same shape, same
- * read-only invariant. Built because CJ's own test data (the "Netflix"
- * Dynamic Group) is series-type, so building only the VOD half would
- * leave the identical gap on the Series page.
+ * Built because CJ's own test data (the "Netflix" Dynamic Group) is
+ * series-type, so building only the VOD half would leave the identical gap
+ * on the Series page.
  *
  * The user-scoping rule (admin sees all, non-admin sees only their own)
  * mirrors `DynamicGroupResource::getEloquentQuery()` so the widget and
@@ -122,7 +126,17 @@ class DynamicGroupsWidget extends BaseWidget
      */
     public function getDynamicGroupsHelpText(): string
     {
-        return __('Add Dynamic Groups in the Playlist form → Processing → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
+        return __('Add Dynamic Categories in the Playlist form → Processing → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
+    }
+
+    /**
+     * Section heading, read by the shared blade view. "Categories" wording
+     * to match this page's own vocabulary - see
+     * `VodGroups\Widgets\DynamicGroupsWidget::getSectionHeading()`.
+     */
+    public function getSectionHeading(): string
+    {
+        return __('Dynamic Categories (TMDB)');
     }
 
     public function table(Table $table): Table
@@ -130,6 +144,7 @@ class DynamicGroupsWidget extends BaseWidget
         return $table
             ->query($this->baseQuery()->withCount('series'))
             ->defaultSort('name')
+            ->recordUrl(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('playlist.name')
                     ->label(__('Playlist'))
@@ -159,8 +174,12 @@ class DynamicGroupsWidget extends BaseWidget
                     ->button()
                     ->size('sm')
                     ->hiddenLabel(),
+                DeleteAction::make()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
             ], RecordActionsPosition::BeforeCells)
-            ->emptyStateHeading(__('No Dynamic Groups configured'))
+            ->emptyStateHeading(__('No Dynamic Categories configured'))
             ->emptyStateDescription($this->getDynamicGroupsHelpText())
             ->emptyStateIcon('heroicon-o-sparkles');
     }

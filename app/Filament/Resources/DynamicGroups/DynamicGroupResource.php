@@ -181,11 +181,14 @@ class DynamicGroupResource extends Resource
     }
 
     /**
-     * The resource has no `index` page (see class docblock). Filament's
-     * breadcrumb + record-link rendering still calls `getIndexUrl()` for
-     * "go back to list" anchors, so point that at the Playlists index
-     * instead — the natural parent surface when navigating from a
-     * VOD/Series page.
+     * The resource has no `index` page (see class docblock). This exists as
+     * a defensive fallback for any generic Filament internals that still
+     * call `getUrl('index')` / `getIndexUrl()` on this resource directly
+     * (e.g. global search's "view all results" link) — without it those
+     * would throw a `LogicException`. It is NOT what drives the page's own
+     * breadcrumb/back-navigation chain anymore: `Pages\ViewDynamicGroup`
+     * overrides `getBreadcrumbs()` and its header actions directly, routing
+     * through `VodGroupResource`/`CategoryResource` by type instead.
      *
      * @param  array<mixed>  $parameters
      */

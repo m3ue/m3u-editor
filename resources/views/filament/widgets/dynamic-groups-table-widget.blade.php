@@ -12,7 +12,7 @@
         --}}
         wire:key="dynamic-groups-section-{{ $this->hasDynamicGroups() ? 'expanded' : 'collapsed' }}"
         icon="heroicon-o-sparkles"
-        :heading="__('Dynamic Groups (TMDB)')"
+        :heading="$this->getSectionHeading()"
         collapsible
         :collapsed="! $this->hasDynamicGroups()"
     >

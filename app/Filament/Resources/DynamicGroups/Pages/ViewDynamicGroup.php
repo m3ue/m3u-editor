@@ -2,67 +2,106 @@
 
 namespace App\Filament\Resources\DynamicGroups\Pages;
 
+use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
-use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Resources\VodGroups\VodGroupResource;
+use App\Models\DynamicGroup;
 use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\ViewRecord;
 
 /**
  * Read-only View surface for a DynamicGroup row.
  *
- * The auto-generated breadcrumb (Dynamic Groups > {Group Name}) was the
- * reason this resource was first taken off the routes — clicking the
- * "Dynamic Groups" link landed users on the global list, which is the
- * wrong context for someone who drilled in from a VOD/Series/Categories
- * page. We override `getHeaderBreadcrumbs()` to chain back through the
- * owning playlist instead, so the breadcrumb matches the user's actual
- * context regardless of which content-type page they came from.
+ * The auto-generated breadcrumb (Filament's real hook is `getBreadcrumbs()`,
+ * plural — a `getHeaderBreadcrumbs()` override here previously did nothing,
+ * silently) linked the resource's own plural label ("Dynamic Groups") to
+ * `getIndexUrl()`, which is confusing on two counts: the label doesn't
+ * distinguish VOD from Series, and the destination (Playlists) isn't where
+ * anyone drilled in from. We override the real hook to chain through the
+ * type-appropriate parent resource instead:
  *
- * No destructive actions on purpose - this page is strictly a transparency
- * window over the dynamic_group_items rows the owning playlist's last
- * `dynamic_groups` phase produced. Rule config lives on the Playlist form.
+ *     Groups → Dynamic → {Group Name}        (vod-type)
+ *     Categories → Dynamic → {Group Name}    (series-type)
+ *
+ * matching this app's existing "Groups"/"Categories" vocabulary split
+ * (VodGroupResource vs CategoryResource) instead of the type-mixed
+ * "Dynamic Groups" wording that reads correctly for VOD but not Series.
+ *
+ * Only the membership relation managers stay strictly read-only. Deleting
+ * the DynamicGroup row itself is allowed — see `DeleteAction` below.
  */
 class ViewDynamicGroup extends ViewRecord
 {
     protected static string $resource = DynamicGroupResource::class;
 
     /**
-     * Filament auto-generates breadcrumbs from the resource name. Override
-     * here so the link chain reads:
-     *
-     *     Playlists → {Playlist Name} → {Group Name}
-     *
-     * where the first two are links. Users who drilled in from a VOD/
-     * Series/Categories page can always back out via the playlist view,
-     * which is the natural parent context for a per-playlist row.
-     *
-     * @return array<int, string|null>
+     * Stashed by the delete action's `->before()` hook, while `$record` is
+     * still intact - Filament evaluates `->successRedirectUrl()` with the
+     * `record` parameter nulled out once the row is actually gone, so a
+     * closure typed `DynamicGroup $record` there throws a TypeError.
      */
-    public function getBreadcrumb(): string
-    {
-        return $this->getRecord()->name;
-    }
+    protected ?string $redirectUrlAfterDelete = null;
 
-    protected function getHeaderBreadcrumbs(): array
+    /**
+     * @return array<int|string, string>
+     */
+    public function getBreadcrumbs(): array
     {
         $record = $this->getRecord();
 
         return [
-            PlaylistResource::getUrl('view', ['record' => $record->playlist_id]) => $record->playlist?->name ?? __('Playlist'),
+            $this->rootIndexUrl($record) => $this->rootLabel($record),
+            __('Dynamic'),
+            $record->name,
         ];
     }
 
     protected function getHeaderActions(): array
     {
         return [
-            // The original "Back to Dynamic Groups" link landed users on a
-            // list they never asked to be on. Point at the playlist view
-            // instead so the back action matches the breadcrumb chain above.
-            Action::make('back_to_playlist')
-                ->label(__('Back to Playlist'))
-                ->url(fn (): string => PlaylistResource::getUrl('view', ['record' => $this->getRecord()->playlist_id]))
+            Action::make('back_to_index')
+                ->label(fn (): string => $this->isVodRecord($this->getRecord()) ? __('Back to Groups') : __('Back to Categories'))
+                ->url(fn (): string => $this->rootIndexUrl($this->getRecord()))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray'),
+
+            // The row itself is a plain user-owned record - deletable even
+            // though membership underneath it is computed and read-only.
+            // See class docblock. Redirect to the same type-appropriate
+            // index the breadcrumb/back action use, since the record (and
+            // therefore this page) no longer exists after deletion.
+            DeleteAction::make()
+                ->before(function (DynamicGroup $record): void {
+                    $this->redirectUrlAfterDelete = $this->rootIndexUrl($record);
+                })
+                ->successRedirectUrl(fn (): ?string => $this->redirectUrlAfterDelete),
         ];
+    }
+
+    /**
+     * The Groups/Categories index URL for this record's type - the natural
+     * parent list for a per-playlist VOD Group or Series Category row.
+     */
+    protected function rootIndexUrl(DynamicGroup $record): string
+    {
+        return $this->isVodRecord($record)
+            ? VodGroupResource::getUrl('index')
+            : CategoryResource::getUrl('index');
+    }
+
+    /**
+     * Breadcrumb label for the root segment - "Groups" or "Categories"
+     * matching this app's existing VodGroupResource/CategoryResource
+     * vocabulary split, instead of the type-mixed "Dynamic Groups".
+     */
+    protected function rootLabel(DynamicGroup $record): string
+    {
+        return $this->isVodRecord($record) ? __('Groups') : __('Categories');
+    }
+
+    protected function isVodRecord(DynamicGroup $record): bool
+    {
+        return $record->type === 'vod';
     }
 }

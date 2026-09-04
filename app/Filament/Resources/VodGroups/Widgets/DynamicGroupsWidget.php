@@ -6,6 +6,7 @@ use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Models\DynamicGroup;
 use App\Services\TmdbService;
 use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -16,13 +17,18 @@ use Livewire\Attributes\Reactive;
 
 /**
  * Footer widget on `ListVodGroups` showing the current user's vod-type
- * Dynamic Groups (Trending / Popular / In Theatres / etc.) with a single
- * `view` action linking through to the full read-only detail page.
+ * Dynamic Groups (Trending / Popular / In Theatres / etc.). Rows are fully
+ * clickable through to the read-only detail page (`->recordUrl()`); the
+ * explicit `view` button is kept alongside for keyboard/discoverability.
  *
- * Strictly read-only - no mutation actions, no toolbar actions, no bulk
- * actions. Same "no edit/delete anywhere on this feature" invariant as the
- * underlying `DynamicGroupResource`. This is the deliberate deviation from
- * the `ArrIntegrationsWidget` template.
+ * The only mutation surface is `DeleteAction` - membership itself is never
+ * editable here (that stays computed by `SyncDynamicGroups`), but the
+ * DynamicGroup row itself is a plain user-owned record, and removing a rule
+ * from the Playlist form's `dynamic_groups_config` doesn't retroactively
+ * delete the row it produced - it just stops future syncs from touching it.
+ * Letting the user delete the now-orphaned row directly means they don't
+ * have to wait for (or force) another sync just to make a stale entry go
+ * away.
  *
  * The user-scoping rule (admin sees all, non-admin sees only their own)
  * mirrors `DynamicGroupResource::getEloquentQuery()` so the row counts and
@@ -136,11 +142,22 @@ class DynamicGroupsWidget extends BaseWidget
         return __('Add Dynamic Groups in the Playlist form → Processing → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
     }
 
+    /**
+     * Section heading, read by the shared blade view. A plain method (not a
+     * class constant) so the Series-side widget can override it with
+     * "Categories" wording instead of subclassing the whole widget.
+     */
+    public function getSectionHeading(): string
+    {
+        return __('Dynamic Groups (TMDB)');
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->query($this->baseQuery()->withCount('channels'))
             ->defaultSort('name')
+            ->recordUrl(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('playlist.name')
                     ->label(__('Playlist'))
@@ -163,6 +180,10 @@ class DynamicGroupsWidget extends BaseWidget
                     ->sortable(),
             ])
             ->recordActions([
+                DeleteAction::make()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
                 Action::make('view')
                     ->label(__('View'))
                     ->icon('heroicon-o-eye')

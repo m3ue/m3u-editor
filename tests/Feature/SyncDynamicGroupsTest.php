@@ -145,7 +145,13 @@ it('drops stale membership rows when faked results change on a re-run', function
             'type' => 'vod',
             'source' => 'trending',
             'name' => 'Trending Now',
-            'tmdb_params' => ['time_window' => 'week'],
+            // Pin to a single page: collectDynamicGroupResults() defaults to
+            // fetching 3 pages per sync run, but this test's Http::sequence()
+            // queues exactly one response per handle() call (to simulate the
+            // trending list changing between runs) - without this, the first
+            // run's page-2 request would consume the second queued response
+            // too, pulling in both channels instead of just the first run's.
+            'tmdb_params' => ['time_window' => 'week', 'pages' => 1],
         ]],
     ]);
 

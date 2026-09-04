@@ -2,10 +2,12 @@
 
 use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
+use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Filament\Resources\DynamicGroups\Pages\ViewDynamicGroup;
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\DynamicGroupItemSnapshot;
@@ -45,8 +47,9 @@ it('registers only the view page (no index) and stays out of nav', function () {
     // The standalone index was removed because its auto-generated breadcrumb
     // off the per-playlist widgets landed users on a list page they never
     // asked to be on. The view page is reachable via the widget row's
-    // view action, with a breadcrumb that chains back through the owning
-    // playlist instead of the (now-missing) index.
+    // view action (or a click anywhere on the row), with a breadcrumb that
+    // chains through the type-appropriate VodGroupResource/CategoryResource
+    // index instead of the (now-missing) index or the owning playlist.
     $pages = DynamicGroupResource::getPages();
 
     expect(DynamicGroupResource::canCreate())->toBeFalse()
@@ -244,4 +247,87 @@ it('lists the real synced dynamic_group_items members on the Series relation man
         ->assertOk()
         ->loadTable()
         ->assertCanSeeTableRecords([$attached]);
+});
+
+it('chains the View page breadcrumb through VodGroupResource for vod-type groups', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+
+    $breadcrumbs = Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk()
+        ->instance()
+        ->getBreadcrumbs();
+
+    expect($breadcrumbs)->toHaveKey(VodGroupResource::getUrl('index'))
+        ->and($breadcrumbs[VodGroupResource::getUrl('index')])->toBe('Groups')
+        ->and($breadcrumbs)->toContain('Dynamic')
+        ->and($breadcrumbs)->toContain('Trending Now')
+        ->and($breadcrumbs)->not->toContain('Dynamic Groups')
+        ->and($breadcrumbs)->not->toHaveKey(CategoryResource::getUrl('index'));
+});
+
+it('chains the View page breadcrumb through CategoryResource for series-type groups', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Trending Series',
+    ]);
+
+    $breadcrumbs = Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk()
+        ->instance()
+        ->getBreadcrumbs();
+
+    expect($breadcrumbs)->toHaveKey(CategoryResource::getUrl('index'))
+        ->and($breadcrumbs[CategoryResource::getUrl('index')])->toBe('Categories')
+        ->and($breadcrumbs)->toContain('Dynamic')
+        ->and($breadcrumbs)->toContain('Trending Series')
+        ->and($breadcrumbs)->not->toHaveKey(VodGroupResource::getUrl('index'));
+});
+
+it('the View page\'s back action points at Groups for vod-type and Categories for series-type', function () {
+    $vodGroup = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'VOD Group',
+    ]);
+    $seriesGroup = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Series Group',
+    ]);
+
+    Livewire::test(ViewDynamicGroup::class, ['record' => $vodGroup->id])
+        ->assertOk()
+        ->assertSee('Back to Groups')
+        ->assertDontSee('Back to Categories');
+
+    Livewire::test(ViewDynamicGroup::class, ['record' => $seriesGroup->id])
+        ->assertOk()
+        ->assertSee('Back to Categories')
+        ->assertDontSee('Back to Groups');
+});
+
+it('deletes the DynamicGroup and cascades its dynamic_group_items when the View page delete action runs', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+    $channel = Channel::factory()->for($this->user)->for($this->playlist)->create(['is_vod' => true]);
+    DB::table('dynamic_group_items')->insert([
+        'dynamic_group_id' => $group->id,
+        'item_type' => Channel::class,
+        'item_id' => $channel->id,
+    ]);
+
+    Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk()
+        ->callAction('delete');
+
+    expect(DynamicGroup::find($group->id))->toBeNull()
+        ->and(DB::table('dynamic_group_items')->where('dynamic_group_id', $group->id)->exists())->toBeFalse();
 });
