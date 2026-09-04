@@ -6,6 +6,7 @@ use App\Facades\LogoFacade;
 use App\Facades\PlaylistFacade;
 use App\Filament\GuestPanel\Pages\Concerns\HasPlaylist;
 use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\Series;
@@ -84,6 +85,13 @@ class SeriesResource extends Resource
                 })
                 ->where('enabled', true); // Only show enabled series
         }
+        if ($playlist instanceof MergedPlaylist) {
+            return parent::getEloquentQuery()
+                ->with('playlist')
+                ->where('enabled', true)
+                // Only the sources configured to contribute series to the merged playlist
+                ->whereIn('playlist_id', $playlist->sourcePlaylistIds('series'));
+        }
         if ($playlist instanceof PlaylistAlias) {
             // Alias backed by a standard playlist
             if ($playlist->playlist_id) {
@@ -118,6 +126,22 @@ class SeriesResource extends Resource
                 $allowedCategoryNames = $playlist->getAllowedCategoryNames();
                 if (! empty($allowedCategoryNames)) {
                     $query->where(fn ($query) => $playlist->constrainSeriesToCustomCategories($query, $allowedCategoryNames));
+                }
+
+                return $query;
+            }
+
+            // Alias backed by a merged playlist
+            if ($playlist->merged_playlist_id) {
+                $query = parent::getEloquentQuery()
+                    ->with('playlist')
+                    ->where('enabled', true)
+                    ->whereIn('playlist_id', $playlist->mergedPlaylist?->sourcePlaylistIds('series') ?? []);
+
+                // Apply the source-scoped series category filter if configured on the alias
+                $allowedCategories = $playlist->getAllowedCategorySelections();
+                if (! empty($allowedCategories)) {
+                    $query->where(fn ($query) => $playlist->constrainSeriesToSourceCategories($query, $allowedCategories));
                 }
 
                 return $query;
