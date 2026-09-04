@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 
 use App\Filament\Resources\Vods\VodResource;
-use App\Models\DynamicGroup;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Tables\Table;
@@ -45,16 +44,22 @@ class ChannelsRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
-        return $table
-            ->modifyQueryUsing(function ($query) {
-                // The parent's `channels()` relation is `morphedByMany(Channel::class, 'item', 'dynamic_group_items')`
-                // - its pivot columns are stored on the relation. We just need
-                // standard channel hydration; the relation eagerly loads the
-                // pivot but we don't display it.
-                return $query;
-            })
+        // Reuse VodResource's full table setup (columns, filters, eager-loading,
+        // pagination, sort) so this view can never drift from the canonical VOD
+        // table - the same convention `VodGroups\RelationManagers\VodRelationManager`
+        // uses. `$this->ownerRecord->id` is only consulted by setupTable() to decide
+        // column visibility (truthy => hide Group/Playlist, same as `showGroup: false,
+        // showPlaylist: false` before), not to scope the query - Filament's relation
+        // manager machinery already scopes via the `channels` relationship.
+        //
+        // setupTable() also wires up VodResource's full record/bulk actions
+        // (edit, delete, fetch metadata, sync, ...), which would break this
+        // manager's "strictly read-only" contract (see class docblock) - strip
+        // them back out rather than exposing mutation actions on a computed,
+        // read-only membership view.
+        return VodResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('title')
-            ->columns(VodResource::getTableColumns(showGroup: false, showPlaylist: false))
-            ->filters(VodResource::getTableFilters(showPlaylist: false));
+            ->recordActions([])
+            ->toolbarActions([]);
     }
 }

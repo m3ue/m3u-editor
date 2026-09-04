@@ -43,9 +43,14 @@ class SeriesRelationManager extends RelationManager
 
     public function table(Table $table): Table
     {
-        return $table
+        // Reuse SeriesResource's full table setup - see the parallel comment on
+        // `ChannelsRelationManager::table()` for why (drift prevention, matches
+        // `Categories\RelationManagers\SeriesRelationManager`'s convention) and why
+        // record/bulk actions are stripped back out afterward (this manager stays
+        // strictly read-only, see class docblock).
+        return SeriesResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('name')
-            ->columns(SeriesResource::getTableColumns(showCategory: false, showPlaylist: false))
-            ->filters(SeriesResource::getTableFilters(showPlaylist: false));
+            ->recordActions([])
+            ->toolbarActions([]);
     }
 }
