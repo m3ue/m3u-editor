@@ -2049,12 +2049,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ])
                                 ->default(3)
                                 ->native(false)
-                                ->helperText(__('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers.'))
-                                // Trending ignores `pages` (see TmdbService.php comment
-                                // at collectDynamicGroupResults(): "Trending already
-                                // returns the merged list — ignore pages"), so don't
-                                // surface a control that does nothing.
-                                ->visible(fn (Get $get): bool => $get('source') !== 'trending')
+                                ->helperText(__('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).'))
                                 ->columnSpan(3),
                             TextInput::make('name')
                                 ->label(__('Category Name'))

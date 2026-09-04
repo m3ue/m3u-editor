@@ -2081,23 +2081,28 @@ class TmdbService
      *
      * @param  string  $mediaType  'all', 'movie', or 'tv'
      * @param  string  $timeWindow  'day' or 'week'
+     * @param  int  $page  1-based TMDB page number. Each page returns ~20 items.
      * @return array<int, array<string, mixed>>
      */
-    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week'): array
+    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week', int $page = 1): array
     {
         if (! $this->isConfigured()) {
             return [];
         }
 
-        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$this->language}";
+        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$page}_{$this->language}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow) {
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow, $page) {
             $this->waitForRateLimit();
 
             try {
                 $response = Http::timeout(15)->get(
                     self::BASE_URL."/trending/{$mediaType}/{$timeWindow}",
-                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                    [
+                        'api_key' => $this->apiKey,
+                        'language' => $this->language,
+                        'page' => $page,
+                    ]
                 );
 
                 if (! $response->successful()) {
@@ -2542,10 +2547,11 @@ class TmdbService
 
         switch ($source) {
             case 'trending':
-                // Trending already returns the merged list — ignore pages.
                 $mediaType = $type === 'series' ? 'tv' : 'movie';
                 $window = (string) ($params['time_window'] ?? 'week');
-                $results = $this->getTrending($mediaType, $window);
+                for ($p = 1; $p <= $pages; $p++) {
+                    $results = array_merge($results, $this->getTrending($mediaType, $window, $p));
+                }
                 break;
 
             case 'popular':

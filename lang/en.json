@@ -5610,7 +5610,7 @@
     "TMDB Search Started": "TMDB Search Started",
     "TMDB is not configured. Add your TMDB API key in Settings → TMDB Integration.": "TMDB is not configured. Add your TMDB API key in Settings → TMDB Integration.",
     "TMDB metadata fetch started": "TMDB metadata fetch started",
-    "TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren't showing up; they may simply be on a later page than the default covers.": "TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren't showing up; they may simply be on a later page than the default covers.",
+    "TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren't showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).": "TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren't showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).",
     "TMDB returned no titles for this rule. Check the rule parameters, or try again later.": "TMDB returned no titles for this rule. Check the rule parameters, or try again later.",
     "TMDB/TVDB": "TMDB/TVDB",
     "TV": "TV",
