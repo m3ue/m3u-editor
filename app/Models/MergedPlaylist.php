@@ -88,6 +88,8 @@ class MergedPlaylist extends Model
     /**
      * IDs of the source playlists, optionally limited to those contributing a
      * content type ('live', 'vod' or 'series') via the per-source pivot toggles.
+     * Ordered by playlist id: without an ORDER BY, Postgres returns pivot rows in
+     * heap order, which changes as soon as a row is updated.
      *
      * @return array<int>
      */
@@ -101,7 +103,7 @@ class MergedPlaylist extends Model
             $sources->wherePivot("include_{$contentType}", true);
         }
 
-        return $sources->pluck('playlists.id')
+        return $sources->orderBy('playlists.id')->pluck('playlists.id')
             ->map(fn ($id) => (int) $id)
             ->all();
     }
