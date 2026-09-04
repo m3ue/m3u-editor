@@ -8,6 +8,7 @@ use App\Filament\Resources\DynamicGroups\Pages\ViewDynamicGroup;
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\VodGroups\VodGroupResource;
+use App\Filament\Resources\Vods\VodResource;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\DynamicGroupItemSnapshot;
@@ -92,20 +93,21 @@ it('labels common TMDB source slugs', function () {
 });
 
 it('formats tmdb_params as a human-readable key=value list', function () {
-    // Empty / missing → placeholder string.
-    expect(DynamicGroupResource::formatTmdbParams([]))->toBe('-');
+    // Empty / missing → no rows.
+    expect(DynamicGroupResource::formatTmdbParams([]))->toBe([]);
 
     // Plain values pass through unchanged.
     expect(DynamicGroupResource::formatTmdbParams(['pages' => 5]))
-        ->toBe('pages = 5');
+        ->toBe(['pages' => '5']);
 
     // Array values are comma-joined.
     expect(DynamicGroupResource::formatTmdbParams(['with_genres' => [28, 12]]))
-        ->toBe('with_genres = 28, 12');
+        ->toBe(['with_genres' => '28, 12']);
 
     // Known network_id resolves to the human name (TMDB canonical list
     // lives in TmdbService::TV_NETWORKS).
     expect(DynamicGroupResource::formatTmdbParams(['network_id' => 213]))
+        ->and(DynamicGroupResource::formatTmdbParams(['network_id' => 213])['network_id'])
         ->toContain('Netflix')
         ->toContain('213');
 });
@@ -155,6 +157,56 @@ it('shows the last sync diff inline on the View page with +added/-removed chips'
         ->assertSee('+1')
         ->assertSee('-1')
         ->assertSee('Added Title');
+});
+
+it('resolves the title and links a removed item, even though its type only appears in the previous run\'s snapshot', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+
+    $kept = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_vod' => true, 'enabled' => true, 'title' => 'Kept Title',
+    ]);
+    $removed = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_vod' => true, 'enabled' => true, 'title' => 'Removed Title',
+    ]);
+
+    $run1 = SyncRun::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'phases' => [SyncRunPhase::DynamicGroups->value],
+        'status' => SyncRunStatus::Completed->value,
+    ]);
+    DynamicGroupItemSnapshot::insert([
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run1->id, 'item_type' => Channel::class, 'item_id' => $kept->id, 'captured_at' => now()],
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run1->id, 'item_type' => Channel::class, 'item_id' => $removed->id, 'captured_at' => now()],
+    ]);
+
+    // $removed only ever appears in run1's snapshot - its item_type row
+    // never exists for the *current* run, so a lookup scoped to only the
+    // current run's snapshot (the bug this test guards against) can't
+    // resolve it, leaving the title/link blank.
+    $run2 = SyncRun::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'phases' => [SyncRunPhase::DynamicGroups->value],
+        'status' => SyncRunStatus::Completed->value,
+    ]);
+    DynamicGroupItemSnapshot::insert([
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run2->id, 'item_type' => Channel::class, 'item_id' => $kept->id, 'captured_at' => now()],
+    ]);
+
+    Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk()
+        ->assertSee('Removed Title')
+        ->assertDontSee('#'.$removed->id)
+        ->assertSee(VodResource::getUrl('view', ['record' => $removed->id]), false);
 });
 
 it('does not leak diff info when the owning SyncRun belongs to another user', function () {

@@ -5,15 +5,22 @@ namespace App\Filament\Resources\DynamicGroups;
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Resources\Series\SeriesResource;
+use App\Filament\Resources\Vods\VodResource;
+use App\Models\Channel;
 use App\Models\DynamicGroup;
+use App\Models\DynamicGroupItemSnapshot;
+use App\Models\Series;
+use App\Models\SyncRun;
 use App\Services\TmdbService;
+use Filament\Infolists\Components\KeyValueEntry;
 use Filament\Infolists\Components\TextEntry;
-use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 /**
  * Read-only Filament resource for a DynamicGroup row. Rule config lives on
@@ -81,10 +88,10 @@ class DynamicGroupResource extends Resource
      * cheaply (TV_NETWORKS is a local constant; genre/provider IDs require a TMDB
      * HTTP lookup and are left as the raw ID).
      */
-    public static function formatTmdbParams(array $params): string
+    public static function formatTmdbParams(array $params): array
     {
         if (empty($params)) {
-            return '-';
+            return [];
         }
 
         $lines = [];
@@ -100,10 +107,132 @@ class DynamicGroupResource extends Resource
                 }
             }
 
-            $lines[] = $key.' = '.$resolved;
+            $lines[$key] = ! empty($resolved) ? $resolved : '-';
         }
 
-        return implode("\n", $lines);
+        return $lines;
+    }
+
+    /**
+     * Per-record cache of `computeSyncDiff()`, so the several infolist
+     * entries that each read a slice of the "last sync diff" (timestamp,
+     * +N/-N badges, added/removed title lists) share one set of queries
+     * instead of recomputing it per entry. Keyed by the record object itself
+     * via WeakMap rather than by id - a plain id-keyed array leaks across
+     * requests sharing one PHP process (Octane, or the test suite, where a
+     * fresh record can reuse a truncated table's previous id) because the
+     * class-static array outlives the request. WeakMap entries are scoped to
+     * the record instance's own lifetime, so a new page load's fresh model
+     * instance can never read another request's cached diff.
+     *
+     * @var \WeakMap<DynamicGroup, array{last_run: SyncRun|null, has_previous: bool, added_count: int, removed_count: int, added_titles: array<int, string>, removed_titles: array<int, string>}>
+     */
+    protected static \WeakMap $syncDiffCache;
+
+    /**
+     * @return array{last_run: SyncRun|null, has_previous: bool, added_count: int, removed_count: int, added_titles: array<int, string>, removed_titles: array<int, string>}
+     */
+    public static function getSyncDiffFor(DynamicGroup $record): array
+    {
+        static::$syncDiffCache ??= new \WeakMap;
+
+        return static::$syncDiffCache[$record] ??= static::computeSyncDiff($record);
+    }
+
+    /**
+     * @return array{last_run: SyncRun|null, has_previous: bool, added_count: int, removed_count: int, added_items: array<int, array{title: string, url: string|null}>, removed_items: array<int, array{title: string, url: string|null}>}
+     */
+    protected static function computeSyncDiff(DynamicGroup $record): array
+    {
+        $none = ['last_run' => null, 'has_previous' => false, 'added_count' => 0, 'removed_count' => 0, 'added_items' => [], 'removed_items' => []];
+
+        $latestRunId = DynamicGroupItemSnapshot::query()
+            ->where('dynamic_group_id', $record->id)
+            ->whereNotNull('sync_run_id')
+            ->max('sync_run_id');
+
+        if ($latestRunId === null) {
+            return $none;
+        }
+
+        $lastRun = SyncRun::query()->visibleTo(auth()->user())->find($latestRunId);
+
+        if ($lastRun === null) {
+            return $none;
+        }
+
+        $diff = DynamicGroupItemSnapshot::diffForRun($record->id, $latestRunId);
+
+        // Only the ids we're actually going to render (first 50 per side)
+        // need their type resolved - caps the lookup query even if the
+        // underlying diff is huge.
+        $shownAdded = $diff['added']->take(50);
+        $shownRemoved = $diff['removed']->take(50);
+
+        // `itemsForRun($latestRunId)` alone only knows the type of ids in the
+        // *current* snapshot - "removed" ids only ever appear in the
+        // *previous* run's snapshot, so that lookup always missed for them
+        // (title/url silently fell back to null - a plain "#id"). item_type
+        // doesn't vary per item_id (a Channel row is always a Channel), so
+        // query every snapshot row for just the shown ids, regardless of
+        // which run they were captured in.
+        $itemTypes = DynamicGroupItemSnapshot::query()
+            ->where('dynamic_group_id', $record->id)
+            ->whereIn('item_id', $shownAdded->merge($shownRemoved)->unique())
+            ->get(['item_id', 'item_type'])
+            ->keyBy('item_id')
+            ->map(fn ($row): string => $row->item_type);
+
+        // Resolve titles (and, where the underlying row still exists, a link
+        // to it) for the shown ids - two batched whereIn() lookups per side
+        // instead of one query per item.
+        $resolveItems = function (Collection $ids, Collection $shown) use ($itemTypes): array {
+            $channelIds = $shown->filter(fn ($id): bool => ($itemTypes[$id] ?? null) === Channel::class)->values();
+            $seriesIds = $shown->filter(fn ($id): bool => ($itemTypes[$id] ?? null) === Series::class)->values();
+
+            $channelTitles = $channelIds->isNotEmpty()
+                ? Channel::query()->whereIn('id', $channelIds)->pluck('title', 'id')
+                : collect();
+            $seriesTitles = $seriesIds->isNotEmpty()
+                ? Series::query()->whereIn('id', $seriesIds)->pluck('name', 'id')
+                : collect();
+
+            $items = $shown->map(function ($id) use ($itemTypes, $channelTitles, $seriesTitles): array {
+                $type = $itemTypes[$id] ?? null;
+                $title = match ($type) {
+                    Channel::class => $channelTitles[$id] ?? null,
+                    Series::class => $seriesTitles[$id] ?? null,
+                    default => null,
+                };
+
+                // No link when the title lookup came back empty - the row
+                // was deleted since this snapshot was captured, so a link
+                // would just 404.
+                $url = match (true) {
+                    $title === null => null,
+                    $type === Channel::class => VodResource::getUrl('view', ['record' => $id]),
+                    $type === Series::class => SeriesResource::getUrl('view', ['record' => $id]),
+                    default => null,
+                };
+
+                return ['title' => $title ?: '#'.$id, 'url' => $url];
+            })->all();
+
+            if ($ids->count() > 50) {
+                $items[] = ['title' => __('and :count more…', ['count' => $ids->count() - 50]), 'url' => null];
+            }
+
+            return $items;
+        };
+
+        return [
+            'last_run' => $lastRun,
+            'has_previous' => $diff['has_previous'],
+            'added_count' => $diff['added']->count(),
+            'removed_count' => $diff['removed']->count(),
+            'added_items' => $resolveItems($diff['added'], $shownAdded),
+            'removed_items' => $resolveItems($diff['removed'], $shownRemoved),
+        ];
     }
 
     public static function getEloquentQuery(): Builder
@@ -149,13 +278,12 @@ class DynamicGroupResource extends Resource
         return $schema->components([
             Section::make(__('Details'))
                 ->columns(2)
+                ->compact()
                 ->collapsible()
                 ->collapsed()
                 ->columnSpanFull()
                 ->schema([
                     TextEntry::make('name'),
-                    TextEntry::make('playlist.source_type')
-                        ->label(__('Source Type')),
                     TextEntry::make('type')
                         ->badge()
                         ->formatStateUsing(fn (string $state): string => match ($state) {
@@ -163,28 +291,79 @@ class DynamicGroupResource extends Resource
                             'series' => __('Series'),
                             default => $state,
                         }),
-                    TextEntry::make('playlist.name'),
+                    TextEntry::make('playlist.name')
+                        ->label(__('Playlist'))
+                        ->badge(),
                     TextEntry::make('source')
+                        ->label(__('Source'))
                         ->formatStateUsing(function (DynamicGroup $record): string {
                             return static::sourceLabelFor($record->type)[$record->source] ?? $record->source;
-                        }),
-                    TextEntry::make('tmdb_params')
-                        ->formatStateUsing(function (DynamicGroup $record): string {
-                            return static::formatTmdbParams((array) ($record->tmdb_params ?? []));
+                        })
+                        ->badge(),
+                    TextEntry::make('last_synced_at')
+                        ->label(__('Last synced'))
+                        ->state(fn (DynamicGroup $record): ?string => (static::getSyncDiffFor($record)['last_run']?->started_at ?? $record->last_synced_at)?->diffForHumans())
+                        ->placeholder(__('Never')),
+                    TextEntry::make('sync_diff_summary')
+                        ->label(__('Since previous sync'))
+                        ->badge()
+                        ->state(function (DynamicGroup $record): array {
+                            $diff = static::getSyncDiffFor($record);
+
+                            if ($diff['last_run'] === null) {
+                                return [];
+                            }
+
+                            if (! $diff['has_previous']) {
+                                return [__('baseline')];
+                            }
+
+                            return array_filter([
+                                $diff['added_count'] > 0 ? '+'.$diff['added_count'] : null,
+                                $diff['removed_count'] > 0 ? '-'.$diff['removed_count'] : null,
+                            ]);
+                        })
+                        ->color(fn (string $state): string => match (true) {
+                            str_starts_with($state, '+') => 'success',
+                            str_starts_with($state, '-') => 'danger',
+                            default => 'gray',
                         })
                         ->placeholder('-'),
-                    TextEntry::make('sort_order'),
-                    TextEntry::make('enabled')
-                        ->badge()
-                        ->formatStateUsing(fn (bool $state): string => $state ? __('Enabled') : __('Disabled'))
-                        ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
-                    // Inline timestamp + diff chips + click-to-expand list of
-                    // titles. State is forced to null because the partial
-                    // reads $getRecord() and queries snapshots directly.
-                    ViewEntry::make('last_sync_diff')
-                        ->label(__('Last synced'))
-                        ->state(null)
-                        ->view('filament.partials.last-sync-diff'),
+                    KeyValueEntry::make('tmdb_params')
+                        ->label(__('TMDB Params'))
+                        ->columnSpanFull()
+                        ->state(fn (DynamicGroup $record): array => static::formatTmdbParams((array) ($record->tmdb_params ?? [])))
+                        ->placeholder('-'),
+                ]),
+            Section::make(__('Added since previous sync'))
+                ->compact()
+                ->collapsible()
+                ->collapsed()
+                ->columnSpanFull()
+                ->visible(fn (DynamicGroup $record): bool => static::getSyncDiffFor($record)['added_count'] > 0)
+                ->schema([
+                    TextEntry::make('sync_diff_added')
+                        ->hiddenLabel()
+                        ->state(fn (DynamicGroup $record): array => static::getSyncDiffFor($record)['added_items'])
+                        ->formatStateUsing(fn (array $state): string => $state['title'])
+                        ->url(fn (array $state): ?string => $state['url'])
+                        ->listWithLineBreaks()
+                        ->bulleted(),
+                ]),
+            Section::make(__('Removed since previous sync'))
+                ->compact()
+                ->collapsible()
+                ->collapsed()
+                ->columnSpanFull()
+                ->visible(fn (DynamicGroup $record): bool => static::getSyncDiffFor($record)['removed_count'] > 0)
+                ->schema([
+                    TextEntry::make('sync_diff_removed')
+                        ->hiddenLabel()
+                        ->state(fn (DynamicGroup $record): array => static::getSyncDiffFor($record)['removed_items'])
+                        ->formatStateUsing(fn (array $state): string => $state['title'])
+                        ->url(fn (array $state): ?string => $state['url'])
+                        ->listWithLineBreaks()
+                        ->bulleted(),
                 ]),
         ]);
     }
