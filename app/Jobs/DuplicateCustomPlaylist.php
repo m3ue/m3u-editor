@@ -79,6 +79,9 @@ class DuplicateCustomPlaylist implements ShouldQueue
                     $copy->custom_playlist_id = $newPlaylist->id;
                     $copy->created_at = $now;
                     $copy->updated_at = $now;
+                    // saveQuietly() bypasses the Bouquet::saving ownership guard by design — the
+                    // copy keeps the source bouquet's user_id, and $newPlaylist replicated the
+                    // same user_id, so the invariant already holds.
                     $copy->saveQuietly();
                 });
 

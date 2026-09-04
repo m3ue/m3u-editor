@@ -1760,6 +1760,24 @@ class PlaylistService
             return;
         }
 
+        // Custom groups (user-created, no matching SourceGroup row) only ever match
+        // is_custom channels via the fallback name path — provider channels moved into
+        // them never match. Adding them to a bouquet would make the staleness tooling
+        // falsely flag them, and "Clean up missing" would then delete a half-working
+        // selection. Category records have no `custom` column at all.
+        $originalCount = $records->count();
+        $records = $records->reject(fn ($record) => $record->custom ?? false)->values();
+        $skippedCustomCount = $originalCount - $records->count();
+
+        if ($records->isEmpty()) {
+            Notification::make()
+                ->danger()
+                ->title(__('Custom groups cannot be added to bouquets'))
+                ->send();
+
+            return;
+        }
+
         $playlistIds = $records->pluck('playlist_id')->unique();
         if ($playlistIds->count() !== 1 || (int) $playlistIds->first() !== $bouquet->playlist_id) {
             Notification::make()
@@ -1790,13 +1808,18 @@ class PlaylistService
         $selections[$key] = $updated;
         $bouquet->update(['group_selections' => $selections]);
 
+        $body = __(':added added, :existing already present.', [
+            'added' => $added,
+            'existing' => $names->count() - $added,
+        ]);
+        if ($skippedCustomCount > 0) {
+            $body .= ' '.__(':skipped custom group(s) skipped.', ['skipped' => $skippedCustomCount]);
+        }
+
         Notification::make()
             ->success()
             ->title(__('Added to bouquet'))
-            ->body(__(':added added, :existing already present.', [
-                'added' => $added,
-                'existing' => $names->count() - $added,
-            ]))
+            ->body($body)
             ->send();
     }
 

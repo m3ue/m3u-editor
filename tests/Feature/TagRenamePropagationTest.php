@@ -5,6 +5,8 @@ use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\User;
+use App\Services\EpgCacheService;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Tags\Tag;
 
 beforeEach(function () {
@@ -65,6 +67,35 @@ it('rewrites alias manual group_filter for the same custom playlist', function (
     $tag->save();
 
     expect($alias->refresh()->group_filter['selected_groups'])->toBe(['New Group']);
+});
+
+it('clears the cached EPG file for a manual-filter-only alias whose group_filter changed, leaving an unrelated alias\'s cache intact', function () {
+    Storage::fake('local');
+
+    $tag = Tag::findOrCreate('Old Group', $this->custom->uuid);
+    $alias = PlaylistAlias::create([
+        'name' => 'A', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => null, 'custom_playlist_id' => $this->custom->id,
+        'xtream_config' => null,
+        'group_filter' => ['selected_groups' => ['Old Group']],
+    ]);
+    $unrelatedAlias = PlaylistAlias::create([
+        'name' => 'B', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => null, 'custom_playlist_id' => $this->custom->id,
+        'xtream_config' => null,
+        'group_filter' => ['selected_groups' => ['Other']],
+    ]);
+
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($alias);
+    $unrelatedCachePath = EpgCacheService::getPlaylistEpgCachePath($unrelatedAlias);
+    Storage::disk('local')->put($cachePath, '<tv></tv>');
+    Storage::disk('local')->put($unrelatedCachePath, '<tv></tv>');
+
+    $tag->setTranslation('name', 'en', 'New Group');
+    $tag->save();
+
+    expect(Storage::disk('local')->exists($cachePath))->toBeFalse()
+        ->and(Storage::disk('local')->exists($unrelatedCachePath))->toBeTrue();
 });
 
 it('leaves other playlists and standard-target bouquets alone', function () {

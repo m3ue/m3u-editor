@@ -1,13 +1,16 @@
 <?php
 
 use App\Models\Bouquet;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\Series;
 use App\Models\SourceGroup;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Spatie\Tags\Tag;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -56,6 +59,30 @@ describe('Bouquet target guard', function () {
             'user_id' => $this->user->id,
             'playlist_id' => $this->playlist->id,
             'custom_playlist_id' => $custom->id,
+        ]);
+    })->throws(InvalidArgumentException::class);
+});
+
+describe('Bouquet target ownership guard', function () {
+    it('rejects a bouquet whose playlist_id targets another user\'s playlist', function () {
+        $otherUser = User::factory()->create();
+        $othersPlaylist = Playlist::factory()->for($otherUser)->create();
+
+        Bouquet::create([
+            'name' => 'Forged',
+            'user_id' => $this->user->id,
+            'playlist_id' => $othersPlaylist->id,
+        ]);
+    })->throws(InvalidArgumentException::class);
+
+    it('rejects a bouquet whose custom_playlist_id targets another user\'s custom playlist', function () {
+        $otherUser = User::factory()->create();
+        $othersCustom = CustomPlaylist::factory()->for($otherUser)->create();
+
+        Bouquet::create([
+            'name' => 'Forged',
+            'user_id' => $this->user->id,
+            'custom_playlist_id' => $othersCustom->id,
         ]);
     })->throws(InvalidArgumentException::class);
 });
@@ -198,5 +225,49 @@ describe('stale selection detection', function () {
 
         expect($bouquet->getSelectedLiveGroupNames())->toBe(['Alive'])
             ->and($bouquet->getSelectedVodGroupNames())->toBe([]);
+    });
+
+    it('reports and removes names that no longer resolve for a custom target', function () {
+        $custom = CustomPlaylist::create(['name' => 'CP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
+
+        // Live tag: 'Live Tag' exists (attached to an enabled untagged-fallback-free
+        // channel); 'Gone Tag' was a tag name that no longer exists (deleted/re-tagged).
+        $taggedChannel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_vod' => false, 'enabled' => true, 'group' => null,
+        ]);
+        $custom->channels()->attach($taggedChannel->id);
+        $liveTag = Tag::findOrCreate('Live Tag', $custom->uuid);
+        $taggedChannel->attachTag($liveTag);
+
+        // Fallback provider-group name: 'Fallback Alive' is carried by an untagged
+        // enabled channel (resolvable); 'Fallback Gone' is carried by no channel (stale).
+        $fallbackChannel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'is_vod' => false, 'enabled' => true, 'group' => 'Fallback Alive',
+        ]);
+        $custom->channels()->attach($fallbackChannel->id);
+
+        // Category tag: 'Cat Alive' exists; 'Cat Gone' was deleted/re-tagged.
+        $series = Series::factory()->for($this->user)->for($this->playlist)->create(['enabled' => true]);
+        $custom->series()->attach($series->id);
+        $catTag = Tag::findOrCreate('Cat Alive', $custom->uuid.'-category');
+        $series->attachTag($catTag);
+
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => null,
+            'custom_playlist_id' => $custom->id,
+            'group_selections' => [
+                'selected_groups' => ['Live Tag', 'Gone Tag', 'Fallback Alive', 'Fallback Gone'],
+                'selected_categories' => ['Cat Alive', 'Cat Gone'],
+            ],
+        ]);
+
+        expect($bouquet->staleSelectionNames())->toEqualCanonicalizing(['Gone Tag', 'Fallback Gone', 'Cat Gone']);
+
+        $bouquet->removeStaleSelectionNames();
+        $bouquet->refresh();
+
+        expect($bouquet->getSelectedLiveGroupNames())->toEqualCanonicalizing(['Live Tag', 'Fallback Alive'])
+            ->and($bouquet->getSelectedCategoryNames())->toBe(['Cat Alive']);
     });
 });

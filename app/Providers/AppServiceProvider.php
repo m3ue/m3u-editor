@@ -783,6 +783,10 @@ class AppServiceProvider extends ServiceProvider
 
                         if ($filter !== ($alias->group_filter ?? [])) {
                             $alias->updateQuietly(['group_filter' => $filter]);
+                            // updateQuietly() skips the ::updating hook that clears the EPG
+                            // cache on target-FK changes, but a rewritten manual filter is
+                            // just as stale as one the user edited by hand — clear it here.
+                            EpgCacheService::clearPlaylistEpgCacheFile($alias);
                         }
                     });
             });
@@ -858,6 +862,11 @@ class AppServiceProvider extends ServiceProvider
             });
 
             // Bouquets (issue #1391)
+            //
+            // Auto-assign the owner before the ownership check below runs: `saving`
+            // fires before `creating` on a new model, so a bouquet created without an
+            // explicit user_id (relying on the auth()->id() fallback) would otherwise
+            // still be null here.
             Bouquet::creating(function (Bouquet $bouquet) {
                 if (! $bouquet->user_id) {
                     $bouquet->user_id = auth()->id();
@@ -866,6 +875,10 @@ class AppServiceProvider extends ServiceProvider
                 return $bouquet;
             });
             Bouquet::saving(function (Bouquet $bouquet) {
+                if (! $bouquet->user_id) {
+                    $bouquet->user_id = auth()->id();
+                }
+
                 $hasPlaylist = $bouquet->playlist_id !== null;
                 $hasCustom = $bouquet->custom_playlist_id !== null;
                 if ($hasPlaylist === $hasCustom) {
@@ -875,6 +888,18 @@ class AppServiceProvider extends ServiceProvider
                     // Auto-include is a provider-sync concept; custom playlists never sync.
                     $bouquet->auto_include_new_live = false;
                     $bouquet->auto_include_new_vod = false;
+                }
+
+                // The hidden target FK is otherwise a name-existence oracle for other
+                // users' playlists (the staleness callout would reveal group/tag names
+                // on a playlist the requester doesn't own) — confirm the target actually
+                // belongs to this bouquet's user. No auth() dependency: this must also
+                // hold during queue-context saves (e.g. applyProviderRenames()).
+                $target = $hasPlaylist
+                    ? Playlist::find($bouquet->playlist_id)
+                    : CustomPlaylist::find($bouquet->custom_playlist_id);
+                if (! $target || $target->user_id !== $bouquet->user_id) {
+                    throw new InvalidArgumentException('A bouquet must target a playlist owned by its user.');
                 }
 
                 return $bouquet;
