@@ -5,6 +5,7 @@ use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\SourceGroup;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 
@@ -178,7 +179,7 @@ describe('Bouquet attachment invariant', function () {
 
 describe('stale selection detection', function () {
     it('reports and removes names that no longer resolve for a standard target', function () {
-        \App\Models\SourceGroup::create([
+        SourceGroup::create([
             'name' => 'Alive', 'playlist_id' => $this->playlist->id, 'source_group_id' => 1, 'type' => 'live',
         ]);
         $bouquet = Bouquet::factory()->create([
