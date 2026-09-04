@@ -3425,7 +3425,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->inline(false)
                         ->default(false)
-                        ->helperText(__('When enabled, dummy EPG data will be generated for the next 5 days. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
+                        ->helperText(__('When enabled, dummy EPG data will be generated for the number of days set below. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
                     Select::make('id_channel_by')
                         ->label(__('Preferred TVG ID output'))
                         ->helperText(__('How you would like to ID your channels in the EPG.'))
@@ -3439,20 +3439,33 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->required()
                         ->default('stream_id') // Default to stream_id
                         ->columnSpan(1),
-                    Toggle::make('dummy_epg_category')
-                        ->label(__('Channel group as category'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->default(false)
-                        ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
-                    TextInput::make('dummy_epg_length')
-                        ->label(__('Dummy program length (in minutes)'))
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->default(120)
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                    Grid::make()
+                        ->columnSpanFull()
+                        ->columns(3)
+                        ->schema([
+                            Toggle::make('dummy_epg_category')
+                                ->label(__('Channel group as category'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_length')
+                                ->label(__('Dummy program length (in minutes)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1'])
+                                ->type('number')
+                                ->default(120)
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_days')
+                                ->label(__('Dummy EPG length (in days)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1', 'max:14'])
+                                ->type('number')
+                                ->default(5)
+                                ->helperText(__('How many days of dummy EPG data to generate. AED profiles can override this per profile.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                        ]),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
                         ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))

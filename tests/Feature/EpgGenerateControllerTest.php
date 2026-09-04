@@ -793,3 +793,67 @@ test('aed dummy programmes do not fall back to channel branding for programme ar
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]/icon'))->toHaveCount(0);
 });
+
+test('playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'short-window-channel',
+        'title' => 'Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="short-window-channel"]'))->toHaveCount(2);
+});
+
+test('aed profile dummy_epg_days overrides the playlist dummy_epg_days for that channel', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_days' => 5,
+    ]);
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $user->id,
+        'name' => 'Short Window AED',
+        'event_duration_minutes' => 1440,
+        'dummy_epg_days' => 2,
+    ])->save();
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'aed-short-window-channel',
+        'title' => 'AED Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="aed-short-window-channel"]'))->toHaveCount(2);
+});
