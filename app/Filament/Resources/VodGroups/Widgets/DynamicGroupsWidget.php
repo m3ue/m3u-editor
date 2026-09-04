@@ -10,6 +10,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
+use Livewire\Attributes\Reactive;
 
 /**
  * Footer widget on `ListVodGroups` showing the current user's vod-type
@@ -28,9 +29,32 @@ use Filament\Widgets\TableWidget as BaseWidget;
  */
 class DynamicGroupsWidget extends BaseWidget
 {
+    protected static bool $isLazy = false;
+
     protected static ?string $heading = 'Dynamic Groups (TMDB)';
 
     protected int|string|array $columnSpan = 'full';
+
+    /**
+     * Bound from the parent page (`ListVodGroups::getWidgetData()`).
+     * String-cast of the active tab key, which `setupTabs()` maps from
+     * `$playlist->id`. `null` = no tab selected = show all (regression guard).
+     *
+     * Reactive: when the user clicks a different tab on `ListVodGroups`,
+     * the parent's `wire:click="$set('activeTab', ...)"` updates this
+     * prop via Filament's `Livewire::make(..., fn () => [...$this->getWidgetData()])`
+     * param closure, which re-invokes on every parent re-render.
+     *
+     * The #[Reactive] attribute is required for that re-invoked value to
+     * actually reach this property on a live tab click (not just on initial
+     * mount / full page load) — without it, Livewire treats the value passed
+     * at first mount as this component's own local state and never re-syncs
+     * it from the parent's re-renders. Filament's own `InteractsWithPageTable`
+     * trait (vendor/filament/filament/src/Widgets/Concerns/InteractsWithPageTable.php)
+     * uses this exact attribute for its `activeTab` property — same mechanism.
+     */
+    #[Reactive]
+    public ?string $activePlaylistId = null;
 
     /**
      * Experimental feature - only render when
@@ -47,6 +71,10 @@ class DynamicGroupsWidget extends BaseWidget
             ->query(
                 DynamicGroup::query()
                     ->where('type', 'vod')
+                    ->when(
+                        $this->activePlaylistId !== null && $this->activePlaylistId !== '',
+                        fn ($query) => $query->where('playlist_id', (int) $this->activePlaylistId),
+                    )
                     ->when(
                         auth()->check() && ! auth()->user()->isAdmin(),
                         fn ($query) => $query->where('dynamic_groups.user_id', auth()->id()),

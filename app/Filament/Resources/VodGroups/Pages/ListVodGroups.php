@@ -117,6 +117,20 @@ class ListVodGroups extends ListRecords
         ];
     }
 
+    /**
+     * Pass the currently-active playlist tab into the registered footer
+     * widgets so the Dynamic Groups table can follow the active playlist
+     * (matches `setupTabs()` which keys tabs by `$playlist->id`).
+     *
+     * @return array<string, mixed>
+     */
+    public function getWidgetData(): array
+    {
+        return [
+            'activePlaylistId' => $this->activeTab,
+        ];
+    }
+
     public function getTabs(): array
     {
         return self::setupTabs();

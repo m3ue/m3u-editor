@@ -10,6 +10,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
+use Livewire\Attributes\Reactive;
 
 /**
  * Footer widget on `ListCategories` showing the current user's series-type
@@ -26,9 +27,24 @@ use Filament\Widgets\TableWidget as BaseWidget;
  */
 class DynamicGroupsWidget extends BaseWidget
 {
+    protected static bool $isLazy = false;
+
     protected static ?string $heading = 'Dynamic Groups (TMDB)';
 
     protected int|string|array $columnSpan = 'full';
+
+    /**
+     * Bound from the parent page (`ListCategories::getWidgetData()`).
+     * String-cast of the active tab key, which `setupTabs()` maps from
+     * `$playlist->id`. `null` = no tab selected = show all (regression guard).
+     *
+     * Parallel to the VOD-side widget — same reactive semantics, see the
+     * docblock on `VodGroups\Widgets\DynamicGroupsWidget::$activePlaylistId`
+     * for the full Filament/Livewire wiring explanation. #[Reactive] is
+     * required for live tab clicks to actually reach this property.
+     */
+    #[Reactive]
+    public ?string $activePlaylistId = null;
 
     /**
      * Experimental feature - only render when
@@ -45,6 +61,10 @@ class DynamicGroupsWidget extends BaseWidget
             ->query(
                 DynamicGroup::query()
                     ->where('type', 'series')
+                    ->when(
+                        $this->activePlaylistId !== null && $this->activePlaylistId !== '',
+                        fn ($query) => $query->where('playlist_id', (int) $this->activePlaylistId),
+                    )
                     ->when(
                         auth()->check() && ! auth()->user()->isAdmin(),
                         fn ($query) => $query->where('dynamic_groups.user_id', auth()->id()),
