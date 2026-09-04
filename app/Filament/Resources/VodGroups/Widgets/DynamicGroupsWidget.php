@@ -4,6 +4,7 @@ namespace App\Filament\Resources\VodGroups\Widgets;
 
 use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Models\DynamicGroup;
+use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -74,11 +75,17 @@ class DynamicGroupsWidget extends BaseWidget
 
     /**
      * Experimental feature - only render when
-     * `config('feature.playlist_tmdb_dynamic_groups')` is enabled.
+     * `config('feature.playlist_tmdb_dynamic_groups')` is enabled, and only
+     * when TMDB is actually configured. Without a TMDB API key,
+     * `dynamic_group_items` can never be populated (SyncDynamicGroups is a
+     * no-op), so showing the widget's "no dynamic groups yet" empty state
+     * would misleadingly suggest the feature just needs a rule added rather
+     * than a TMDB key.
      */
     public static function canView(): bool
     {
-        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+        return (bool) config('feature.playlist_tmdb_dynamic_groups')
+            && app(TmdbService::class)->isConfigured();
     }
 
     /**
@@ -126,7 +133,7 @@ class DynamicGroupsWidget extends BaseWidget
      */
     public function getDynamicGroupsHelpText(): string
     {
-        return __('Add Dynamic Groups in the Playlist form → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
+        return __('Add Dynamic Groups in the Playlist form → Processing → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
     }
 
     public function table(Table $table): Table

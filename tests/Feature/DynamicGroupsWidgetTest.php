@@ -8,6 +8,7 @@ use App\Filament\Resources\VodGroups\Widgets\DynamicGroupsWidget as VodDynamicGr
 use App\Models\DynamicGroup;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\TmdbService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Livewire\Livewire;
@@ -18,6 +19,12 @@ beforeEach(function () {
     // Dynamic Groups are gated behind an experimental feature flag that
     // ships disabled. Enable it so the widgets render under test.
     config()->set('feature.playlist_tmdb_dynamic_groups', true);
+
+    // Also gated behind a configured TMDB integration - the widgets are
+    // the sole entry point into a feature that's a no-op without TMDB.
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    app()->instance(TmdbService::class, $tmdb);
 
     Bus::fake();
     $this->user = User::factory()->create();

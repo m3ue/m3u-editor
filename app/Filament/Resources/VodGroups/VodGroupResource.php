@@ -21,6 +21,7 @@ use App\Services\FindReplaceService;
 use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -429,7 +430,17 @@ class VodGroupResource extends Resource implements CopilotResource
                     Action::make('reclassify_tmdb_genres')
                         ->label(__('Reclassify to TMDB Genres'))
                         ->icon('heroicon-o-tag')
-                        ->action(function (Group $record): void {
+                        ->action(function (Group $record, Action $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
                             GenreGroupReclassifyService::reclassifyVodGroups($record->playlist);
                         })
                         ->after(function () {
@@ -697,7 +708,17 @@ class VodGroupResource extends Resource implements CopilotResource
                     BulkAction::make('reclassify_tmdb_genres')
                         ->label(__('Reclassify to TMDB Genres'))
                         ->icon('heroicon-o-tag')
-                        ->action(function (Collection $records): void {
+                        ->action(function (Collection $records, BulkAction $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
                             // Per-playlist scope: reclassify the whole playlist's groups, not
                             // just the selected rows. Mirrors the GenreGroupReclassifyService
                             // contract.

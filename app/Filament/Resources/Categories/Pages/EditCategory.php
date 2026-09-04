@@ -10,6 +10,7 @@ use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
 use App\Services\GenreGroupReclassifyService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
@@ -85,7 +86,17 @@ class EditCategory extends EditRecord
                 Action::make('reclassify_tmdb_genres')
                     ->label(__('Reclassify to TMDB Genres'))
                     ->icon('heroicon-o-tag')
-                    ->action(function (Category $record): void {
+                    ->action(function (Category $record, Action $action): void {
+                        if (! app(TmdbService::class)->isConfigured()) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                ->duration(10000)
+                                ->send();
+                            $action->halt();
+                        }
+
                         GenreGroupReclassifyService::reclassifyCategories($record->playlist);
                     })
                     ->after(function ($livewire): void {
