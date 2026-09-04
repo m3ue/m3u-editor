@@ -8,6 +8,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\ChannelMergeKeyService;
+use App\Services\ChannelTitleSimilarityService;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -82,6 +83,7 @@ class MergeChannels implements ShouldQueue
         public string $contentType = 'live',
         public string $mergeKey = 'stream_id',
         public bool $scrubberAwareMasterSelection = false,
+        public float $minTitleSimilarity = 0.0,
     ) {
         $this->contentType = in_array($this->contentType, ['live', 'vod'], true) ? $this->contentType : 'live';
         $this->mergeKey = in_array($this->mergeKey, ['stream_id', 'tmdb_id'], true) ? $this->mergeKey : 'stream_id';
@@ -89,6 +91,10 @@ class MergeChannels implements ShouldQueue
         if ($this->contentType !== 'vod' && $this->mergeKey === 'tmdb_id') {
             $this->mergeKey = 'stream_id';
         }
+
+        // Clamp to a sane range. 0.0 keeps the guard off, which is the default
+        // so existing merges behave exactly as before.
+        $this->minTitleSimilarity = max(0.0, min(1.0, $this->minTitleSimilarity));
     }
 
     /**
@@ -550,17 +556,55 @@ class MergeChannels implements ShouldQueue
      * master's - a failover pointing at the exact same stream the master
      * already plays provides no redundancy, it's just a no-op duplicate.
      */
+    /**
+     * Drop failover candidates that would be useless or actively wrong:
+     * anything pointing at the master's own URL, and — when enabled — anything
+     * whose title says it is a different channel.
+     */
     protected function filterFailoverCandidates(Collection $group, Channel $master): Collection
     {
         $masterUrl = $this->resolveEffectiveUrl($master);
 
-        if ($masterUrl === null) {
-            return $group;
+        return $group->filter(function (Channel $channel) use ($masterUrl, $master) {
+            // A master with no URL has nothing to compare against, so the
+            // duplicate-URL check is skipped for it - but the title guard still
+            // has to run. Returning the whole group early here let every
+            // candidate through whenever the master's URL was empty, which
+            // silently disabled the guard for exactly those records.
+            if ($masterUrl !== null && $this->resolveEffectiveUrl($channel) === $masterUrl) {
+                return false;
+            }
+
+            return $this->titlesArePlausiblyTheSameChannel($master, $channel);
+        });
+    }
+
+    /**
+     * Guard against a bad merge key turning unrelated channels into each
+     * other's failovers.
+     *
+     * Merging trusts its grouping key completely, so one wrong stream ID —
+     * whether the provider sent it or the importer mis-parsed it — is enough to
+     * make a viewer's channel fail over to something entirely different. When
+     * minTitleSimilarity is set, the titles have to agree as well as the key.
+     *
+     * Off by default (0.0), and the comparison abstains whenever it cannot
+     * judge safely, so turning it on only ever drops pairs it is confident
+     * about.
+     */
+    protected function titlesArePlausiblyTheSameChannel(Channel $master, Channel $candidate): bool
+    {
+        // A job queued before this property existed unserialises without it,
+        // and reading an uninitialised typed property is a fatal error. Treat a
+        // missing value as the default, so old payloads drain normally.
+        $threshold = isset($this->minTitleSimilarity) ? $this->minTitleSimilarity : 0.0;
+
+        if ($threshold <= 0.0) {
+            return true;
         }
 
-        return $group->filter(function (Channel $channel) use ($masterUrl) {
-            return $this->resolveEffectiveUrl($channel) !== $masterUrl;
-        });
+        return app(ChannelTitleSimilarityService::class)
+            ->isPlausibleMatch($master, $candidate, $threshold);
     }
 
     /**
