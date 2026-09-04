@@ -6,6 +6,7 @@ use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
@@ -14,6 +15,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Checks if there are more series to process and dispatches the next chain if needed.
@@ -168,6 +171,7 @@ class CheckSeriesImportProgress implements ShouldQueue
                 batchOffset: $offset,
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
+                syncRunId: $this->syncRunId, // so a failed batch can fail the pipeline phase
             );
         }
 
@@ -193,5 +197,41 @@ class CheckSeriesImportProgress implements ShouldQueue
         ]);
 
         Bus::chain($jobs)->dispatch();
+    }
+
+    /**
+     * Mirrors ProcessM3uImportSeriesEpisodes::failed() - if this checker job itself
+     * dies (rather than one of the batch jobs before it), the pipeline must still
+     * be failed explicitly instead of being left stuck in series_metadata.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        Log::error('CheckSeriesImportProgress failed', [
+            'playlist_id' => $this->playlist_id,
+            'sync_run_id' => $this->syncRunId,
+            'current_offset' => $this->currentOffset,
+            'error' => $exception?->getMessage(),
+        ]);
+
+        if ($this->playlist_id) {
+            $playlist = Playlist::find($this->playlist_id);
+            if ($playlist) {
+                $playlist->update([
+                    'processing' => [
+                        ...$playlist->processing ?? [],
+                        'series_processing' => false,
+                    ],
+                    'status' => Status::Failed,
+                    'errors' => $exception ? Str::limit($exception->getMessage(), 255) : 'Series metadata sync failed',
+                ]);
+            }
+        }
+
+        if ($this->syncRunId) {
+            $run = SyncRun::find($this->syncRunId);
+            if ($run) {
+                app(SyncPipelineService::class)->fail($run, 'Series metadata progress check failed: '.($exception?->getMessage() ?? 'unknown error'));
+            }
+        }
     }
 }

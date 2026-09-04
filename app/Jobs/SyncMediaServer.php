@@ -145,6 +145,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                     'aiostreams_catalogs' => $integration->aiostreams_catalogs,
                     'aiostreams_logo' => $integration->aiostreams_logo,
                     'aiostreams_selected_catalog_ids' => $integration->aiostreams_selected_catalog_ids,
+                    'aiostreams_meta_id_prefixes' => $integration->aiostreams_meta_id_prefixes,
                 ]);
 
                 $playlist->update([

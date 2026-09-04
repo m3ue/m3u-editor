@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
+use App\Exceptions\XtreamRateLimitedException;
 use App\Models\Playlist;
+use Carbon\CarbonImmutable;
 use Exception;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -13,6 +16,11 @@ use Illuminate\Support\Str;
  */
 class XtreamService
 {
+    /**
+     * How long to pause an account after it receives an HTTP 429.
+     */
+    protected const RATE_LIMIT_COOLDOWN_SECONDS = 900;
+
     protected string $server;
 
     protected string $user;
@@ -102,6 +110,12 @@ class XtreamService
             throw new Exception('Config not initialized. Call init() first with Playlist or Xtream config array.');
         }
 
+        // The limit is per account, and fallback URLs share the account's
+        // credentials, so check once here rather than per host below.
+        if ($retryAt = $this->activeRateLimitCooldownUntil()) {
+            throw new XtreamRateLimitedException($retryAt);
+        }
+
         $user_agent = $this->playlist?->user_agent ?? 'VLC/3.0.21 LibVLC/3.0.21';
         $verify = ! ($this->playlist?->disable_ssl_verification ?? false);
 
@@ -180,6 +194,14 @@ class XtreamService
                 if ($response->ok()) {
                     return $response->json();
                 }
+
+                if ($response->status() === 429) {
+                    // Account-wide limit: stop immediately instead of burning
+                    // through the retry budget on a host that just refused us.
+                    throw new XtreamRateLimitedException($this->beginRateLimitCooldown());
+                }
+            } catch (XtreamRateLimitedException $e) {
+                throw $e;
             } catch (Exception $e) {
                 // Connection error — continue retrying
             }
@@ -191,6 +213,39 @@ class XtreamService
         } while ($attempts < $this->retryLimit);
 
         return null;
+    }
+
+    /**
+     * Cache key for the rate-limit cooldown, scoped to the account
+     * (username + password) rather than the host — fallback URLs share the
+     * same credentials as the primary, so a 429 on any of them means the
+     * whole account is limited, not just that one host.
+     */
+    protected function rateLimitCacheKey(): string
+    {
+        return 'xtream-rate-limit:'.hash('sha256', mb_strtolower(trim($this->user)).'|'.$this->pass);
+    }
+
+    /**
+     * The time a rate-limited account may be called again, or null if it's
+     * not currently under cooldown.
+     */
+    protected function activeRateLimitCooldownUntil(): ?CarbonImmutable
+    {
+        $retryAt = Cache::get($this->rateLimitCacheKey());
+
+        return $retryAt && $retryAt->isFuture() ? $retryAt : null;
+    }
+
+    /**
+     * Start (or extend) the cooldown for this account after a 429.
+     */
+    protected function beginRateLimitCooldown(): CarbonImmutable
+    {
+        $retryAt = now()->addSeconds(self::RATE_LIMIT_COOLDOWN_SECONDS)->toImmutable();
+        Cache::put($this->rateLimitCacheKey(), $retryAt, $retryAt);
+
+        return $retryAt;
     }
 
     protected function makeUrl(string $action, array $extra = []): string

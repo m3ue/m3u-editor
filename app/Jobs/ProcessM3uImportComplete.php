@@ -411,7 +411,20 @@ class ProcessM3uImportComplete implements ShouldQueue
 
         // Clean up old series/categories from previous imports to prevent orphaned data.
         // This runs regardless of sync invalidation settings since it's a housekeeping step.
-        $this->seriesCleanup($playlist);
+        //
+        // Only run it when series import actually ran this sync (at least one series
+        // category was dispatched). If series import is disabled, or the provider's
+        // get_series_categories came back empty, skip cleanup entirely - deleting the
+        // user's whole series library on a disabled import or a provider blip is exactly
+        // the churn we want to avoid. A ProcessM3uImportSeriesChunk failure aborts the
+        // chain before this job runs, so a partial series import can never reach here.
+        if ($this->runningSeriesImport) {
+            $this->seriesCleanup($playlist);
+        } else {
+            Log::info('ProcessM3uImportComplete: skipping seriesCleanup (no series import ran this sync)', [
+                'playlist_id' => $playlist->id,
+            ]);
+        }
 
         // Hand off to the SyncPipeline.
         //

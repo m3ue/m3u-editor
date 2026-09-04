@@ -938,7 +938,8 @@ class VodGroupResource extends Resource implements CopilotResource
                 ->inline(false)
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
-                ->default(true),
+                ->default(true)
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
             Select::make('playlist_id')
                 ->required()
                 ->label(__('Playlist'))
@@ -959,7 +960,8 @@ class VodGroupResource extends Resource implements CopilotResource
                 ->relationship('streamFileSetting', 'name', fn ($query) => $query->forVod()->where('user_id', auth()->id())
                 )
                 ->nullable()
-                ->helperText(__('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.')),
+                ->helperText(__('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.'))
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
         ];
 
         return [

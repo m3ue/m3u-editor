@@ -98,7 +98,8 @@ class CategoryResource extends Resource implements CopilotResource
                 ->inline(false)
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
-                ->default(true),
+                ->default(true)
+                ->hidden(fn (?Category $record): bool => (bool) $record?->is_merged),
             TextInput::make('sort_order')
                 ->label(__('Sort Order'))
                 ->numeric()
@@ -110,7 +111,8 @@ class CategoryResource extends Resource implements CopilotResource
                 ->searchable()
                 ->relationship('streamFileSetting', 'name', fn ($query) => $query->forSeries()->where('user_id', auth()->id()))
                 ->nullable()
-                ->helperText(__('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.')),
+                ->helperText(__('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.'))
+                ->hidden(fn (?Category $record): bool => (bool) $record?->is_merged),
         ];
 
         return $schema

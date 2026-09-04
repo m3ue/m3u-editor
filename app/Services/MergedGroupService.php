@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use App\Filament\Resources\Categories\CategoryResource;
+use App\Filament\Resources\Groups\GroupResource;
+use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Tables\MergedCategoryChildrenTable;
 use App\Filament\Tables\MergedGroupChildrenTable;
 use App\Models\Category;
@@ -121,6 +124,7 @@ class MergedGroupService
                         ->orderBy('name')
                         ->pluck('name', 'id')
                         ->all())
+                    ->helperText(__('Select the playlist you would like to add the group to.'))
                     ->required()
                     ->searchable(),
                 TextInput::make('name')
@@ -131,7 +135,9 @@ class MergedGroupService
                 TextInput::make('sort_order')
                     ->label(__('Sort Order'))
                     ->numeric()
-                    ->default(0),
+                    ->default(9999)
+                    ->helperText(__('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.'))
+                    ->rules(['integer', 'min:0']),
             ])
             ->using(fn (array $data, string $model): Model => $model::create([
                 ...$data,
@@ -141,6 +147,9 @@ class MergedGroupService
                 'type' => $type,
                 'name_internal' => $data['name'],
             ]))
+            ->successRedirectUrl(fn (Model $record): string => $type === 'vod'
+                ? VodGroupResource::getUrl('edit', ['record' => $record])
+                : GroupResource::getUrl('edit', ['record' => $record]))
             ->successNotification(
                 Notification::make()
                     ->success()
@@ -176,7 +185,9 @@ class MergedGroupService
                 TextInput::make('sort_order')
                     ->label(__('Sort Order'))
                     ->numeric()
-                    ->default(0),
+                    ->default(9999)
+                    ->helperText(__('Enter a number to define the sort order (e.g., 1, 2, 3). Lower numbers appear first.'))
+                    ->rules(['integer', 'min:0']),
             ])
             ->using(fn (array $data, string $model): Model => $model::create([
                 ...$data,
@@ -184,6 +195,7 @@ class MergedGroupService
                 'is_merged' => true,
                 'name_internal' => $data['name'],
             ]))
+            ->successRedirectUrl(fn (Model $record): string => CategoryResource::getUrl('edit', ['record' => $record]))
             ->successNotification(
                 Notification::make()
                     ->success()

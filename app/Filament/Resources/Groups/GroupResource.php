@@ -748,7 +748,8 @@ class GroupResource extends Resource implements CopilotResource
                 ->inline(false)
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
-                ->default(true),
+                ->default(true)
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
             Select::make('playlist_id')
                 ->required()
                 ->label(__('Playlist'))
@@ -774,7 +775,8 @@ class GroupResource extends Resource implements CopilotResource
                 ->searchable()
                 ->preload()
                 ->nullable()
-                ->placeholder(__('None - use standard dummy EPG')),
+                ->placeholder(__('None - use standard dummy EPG'))
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
         ];
 
         return [

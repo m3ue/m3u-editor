@@ -78,6 +78,7 @@ class MediaServerIntegration extends Model
         'aiostreams_catalogs' => 'array',
         'aiostreams_enable_all_catalogs' => 'boolean',
         'aiostreams_selected_catalog_ids' => 'array',
+        'aiostreams_meta_id_prefixes' => 'array',
         'emby_publisher_writable_paths' => 'array',
         'emby_publisher_capabilities_updated_at' => 'datetime',
     ];

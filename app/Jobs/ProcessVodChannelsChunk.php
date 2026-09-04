@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\XtreamRateLimitedException;
 use App\Models\Playlist;
 use App\Services\XtreamService;
 use App\Traits\ProviderRequestDelay;
@@ -65,6 +66,19 @@ class ProcessVodChannelsChunk implements ShouldQueue
                 // Use provider throttling to limit concurrent requests and apply delay
                 // skipTmdb=true: TMDB IDs are fetched in bulk from ProcessVodChannelsComplete
                 $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream, skipTmdb: true));
+            } catch (XtreamRateLimitedException $e) {
+                // Account-wide cooldown: every remaining channel in this chunk
+                // (and every later chunk in the Bus::chain) would fail the same
+                // way. Rethrow so the chain's own ->catch() in ProcessVodChannels
+                // stops the chain and marks the playlist Failed, rather than
+                // silently rolling through the rest and reporting 100% complete.
+                Log::warning('ProcessVodChannelsChunk: aborting chunk, Xtream account is rate limited', [
+                    'playlist_id' => $playlist->id,
+                    'chunk_index' => $this->chunkIndex,
+                    'retry_at' => $e->retryAt->toIso8601String(),
+                ]);
+
+                throw $e;
             } catch (\Exception $e) {
                 // Log the error and continue processing other channels
                 Log::error('Failed to process VOD data for channel ID '.$channel->id.' in chunk '.$this->chunkIndex.': '.$e->getMessage());

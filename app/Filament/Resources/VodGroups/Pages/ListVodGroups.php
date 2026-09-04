@@ -44,7 +44,9 @@ class ListVodGroups extends ListRecords
                         ->success()
                         ->title(__('Group created'))
                         ->body(__('You can now assign channels to this group from the Channels section.')),
-                )->slideOver(),
+                )
+                ->successRedirectUrl(fn (Model $record): string => VodGroupResource::getUrl('edit', ['record' => $record]))
+                ->slideOver(),
             MergedGroupService::createMergedGroupAction('vod'),
             ActionGroup::make([
                 Action::make('find-replace')

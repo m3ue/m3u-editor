@@ -67,3 +67,79 @@ it('reports all valid catalogs when the manifest is well-formed', function () {
     expect($result['catalogs'])->toBe(2)
         ->and($integration->aiostreams_catalogs)->toHaveCount(2);
 });
+
+// ── aiostreams_meta_id_prefixes: computed from the manifest's `meta` resource
+// declaration so fetchMeta() can skip a guaranteed-404 call instead of always
+// trying AIOStreams first and falling back after the fact.
+
+it('stores an empty meta id prefix list when the manifest declares no meta resource', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'resources' => ['catalog', 'stream'],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_meta_id_prefixes)->toBe([]);
+});
+
+it('stores the top-level idPrefixes for a string-form meta resource', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'resources' => ['catalog', 'meta', 'stream'],
+            'idPrefixes' => ['tt'],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_meta_id_prefixes)->toBe(['tt']);
+});
+
+it('stores the per-resource idPrefixes for an object-form meta resource', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'resources' => [
+                'catalog',
+                ['name' => 'meta', 'types' => ['movie', 'series'], 'idPrefixes' => ['tt', 'kitsu:']],
+            ],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_meta_id_prefixes)->toBe(['tt', 'kitsu:']);
+});
+
+it('stores a wildcard when the manifest declares meta without restricting idPrefixes', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'resources' => ['catalog', 'meta', 'stream'],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_meta_id_prefixes)->toBe(['*']);
+});

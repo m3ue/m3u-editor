@@ -1,9 +1,11 @@
 <?php
 
+use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Categories\Pages\EditCategory;
 use App\Filament\Resources\Categories\Pages\ListCategories;
 use App\Filament\Resources\Categories\RelationManagers\ChildCategoriesRelationManager;
 use App\Filament\Resources\Categories\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\Groups\GroupResource;
 use App\Filament\Resources\Groups\Pages\EditGroup;
 use App\Filament\Resources\Groups\Pages\ListGroups;
 use App\Filament\Resources\Groups\RelationManagers\ChannelsRelationManager;
@@ -48,6 +50,56 @@ it('creates a merged group via the list header action, flagged is_merged and cus
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
     ]);
+});
+
+it('redirects to the edit page after creating a merged group', function () {
+    Livewire::test(ListGroups::class)
+        ->callAction('createMerged', [
+            'playlist_id' => $this->playlist->id,
+            'name' => 'Nordics',
+        ])
+        ->assertHasNoActionErrors()
+        ->assertRedirect(GroupResource::getUrl('edit', [
+            'record' => Group::query()->where('name', 'Nordics')->sole(),
+        ]));
+});
+
+it('defaults a merged group sort order to 9999 to match the custom group form', function () {
+    Livewire::test(ListGroups::class)
+        ->callAction('createMerged', [
+            'playlist_id' => $this->playlist->id,
+            'name' => 'Nordics',
+        ])
+        ->assertHasNoActionErrors();
+
+    expect((int) Group::query()->where('name', 'Nordics')->sole()->sort_order)->toBe(9999);
+});
+
+it('redirects to the edit page after creating a custom group', function () {
+    Livewire::test(ListGroups::class)
+        ->callAction('create', [
+            'name' => 'My Group',
+            'playlist_id' => $this->playlist->id,
+        ])
+        ->assertHasNoActionErrors()
+        ->assertRedirect(GroupResource::getUrl('edit', [
+            'record' => Group::query()->where('name', 'My Group')->sole(),
+        ]));
+});
+
+it('hides channel-only fields on the edit form for a merged group', function () {
+    $merged = liveGroup($this->user, $this->playlist, ['name' => 'Nordics', 'name_internal' => 'Nordics', 'custom' => true, 'is_merged' => true]);
+    $plain = liveGroup($this->user, $this->playlist, ['name' => 'Denmark', 'name_internal' => 'Denmark']);
+
+    Livewire::test(EditGroup::class, ['record' => $merged->getRouteKey()])
+        ->assertFormFieldIsHidden('enabled')
+        ->assertFormFieldIsHidden('aed_profile_id')
+        ->assertFormFieldExists('name')
+        ->assertFormFieldExists('sort_order');
+
+    Livewire::test(EditGroup::class, ['record' => $plain->getRouteKey()])
+        ->assertFormFieldIsVisible('enabled')
+        ->assertFormFieldIsVisible('aed_profile_id');
 });
 
 it('shows merged groups in the same table with the Merged Group and Parent columns', function () {
@@ -224,6 +276,31 @@ it('creates a merged category via the list header action', function () {
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
     ]);
+});
+
+it('redirects to the edit page after creating a merged category', function () {
+    Livewire::test(ListCategories::class)
+        ->callAction('createMerged', [
+            'playlist_id' => $this->playlist->id,
+            'name' => 'Nordic Shows',
+        ])
+        ->assertHasNoActionErrors()
+        ->assertRedirect(CategoryResource::getUrl('edit', [
+            'record' => Category::query()->where('name', 'Nordic Shows')->sole(),
+        ]));
+});
+
+it('hides series-only fields on the edit form for a merged category', function () {
+    $merged = Category::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'name' => 'Nordic Shows', 'name_internal' => 'Nordic Shows', 'is_merged' => true,
+    ]);
+
+    Livewire::test(EditCategory::class, ['record' => $merged->getRouteKey()])
+        ->assertFormFieldIsHidden('enabled')
+        ->assertFormFieldIsHidden('stream_file_setting_id')
+        ->assertFormFieldExists('name')
+        ->assertFormFieldExists('sort_order');
 });
 
 it('merges series categories through the row action and swaps the relation manager', function () {

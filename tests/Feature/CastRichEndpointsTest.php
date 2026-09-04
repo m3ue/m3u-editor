@@ -198,6 +198,76 @@ it('omits cast_list in get_series_info when persisted list is empty', function (
     $response->assertJsonMissingPath('info.cast_list');
 });
 
+// ---- cast_list photo proxying (logo proxy parity with cover/backdrop/clearlogo) ----
+
+it('proxies cast_list photos in get_vod_info when logo proxy is enabled', function () use ($vodCastList) {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $group = Group::factory()->for($this->user)->create();
+    $channel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Inception',
+        'last_metadata_fetch' => now(),
+        'info' => ['cast_list' => $vodCastList],
+    ]);
+
+    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
+
+    $response->assertOk();
+    $response->assertJsonPath('cast_list.0.photo', fn ($photo) => str_contains($photo, '/logo-proxy/'));
+    // Null photo stays null rather than being proxied into a placeholder URL.
+    $response->assertJsonPath('cast_list.1.photo', null);
+});
+
+it('proxies cast_list photos in get_series_info when logo proxy is enabled', function () use ($seriesCastList) {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'name' => 'Breaking Bad',
+        'tmdb_id' => 1396,
+        'metadata' => ['cast_list' => $seriesCastList],
+        'last_modified' => now(),
+    ]);
+
+    Season::factory()->create([
+        'series_id' => $series->id,
+        'season_number' => 1,
+        'episode_count' => 7,
+    ]);
+
+    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk();
+    $response->assertJsonPath('info.cast_list.0.photo', fn ($photo) => str_contains($photo, '/logo-proxy/'));
+    $response->assertJsonPath('info.cast_list.1.photo', null);
+});
+
+it('does not double-proxy an already app-hosted cast photo when logo proxy is enabled', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $localPhoto = url('/media-server-image-proxy/abc123/actor.jpg');
+    $group = Group::factory()->for($this->user)->create();
+    $channel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Inception',
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'cast_list' => [
+                ['id' => null, 'name' => 'An Actor', 'character' => 'Someone', 'photo' => $localPhoto],
+            ],
+        ],
+    ]);
+
+    $response = $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('cast_list.0.photo', $localPhoto);
+});
+
 // ---- clearlogo (transparent title logo) ----
 
 it('emits clearlogo in get_vod_info from channel info', function () {

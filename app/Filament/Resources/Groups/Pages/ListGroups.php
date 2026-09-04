@@ -43,7 +43,9 @@ class ListGroups extends ListRecords
                         ->success()
                         ->title(__('Group created'))
                         ->body(__('You can now assign channels to this group from the Channels section.')),
-                )->slideOver(),
+                )
+                ->successRedirectUrl(fn (Model $record): string => GroupResource::getUrl('edit', ['record' => $record]))
+                ->slideOver(),
             MergedGroupService::createMergedGroupAction('live'),
             ActionGroup::make([
                 Action::make('find-replace')
