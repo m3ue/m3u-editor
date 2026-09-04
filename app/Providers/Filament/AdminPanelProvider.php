@@ -17,6 +17,7 @@ use App\Filament\Pages\ReleaseLogs;
 use App\Filament\Pages\RequestContent;
 use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Filament\Resources\Assets\AssetResource;
+use App\Filament\Resources\Bouquets\BouquetResource;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
@@ -207,6 +208,7 @@ class AdminPanelProvider extends PanelProvider
                                 ...CustomPlaylistResource::getNavigationItems(),
                                 ...MergedPlaylistResource::getNavigationItems(),
                                 ...PlaylistAliasResource::getNavigationItems(),
+                                ...BouquetResource::getNavigationItems(),
                                 ...PlaylistViewerResource::getNavigationItems(),
                                 ...PlaylistAuthResource::getNavigationItems(),
                                 ...StreamFileSettingResource::getNavigationItems(),
