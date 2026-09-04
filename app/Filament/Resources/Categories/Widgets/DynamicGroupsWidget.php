@@ -37,11 +37,21 @@ class DynamicGroupsWidget extends BaseWidget
 
     /**
      * Heading moved into the wrapping `<x-filament::section>` in the
-     * shared widget view. Setting this to null prevents
-     * `TableWidget::getTableHeading()` from rendering a second duplicate
-     * heading inside the table's internal container.
+     * shared widget view instead (see `getSectionHeading()`). Setting this
+     * to null does NOT suppress `TableWidget`'s own heading -
+     * `TableWidget::makeTable()` falls back to a class-name-derived string
+     * ("Dynamic Groups", from `DynamicGroupsWidget`) whenever
+     * `getTableHeading()` returns null, which rendered as a second,
+     * wrongly-worded heading inside the table itself. `getTableHeading()`
+     * below returns an empty string instead - `??` only falls back on
+     * `null`, not `''`, so this suppresses it for real.
      */
     protected static ?string $heading = null;
+
+    protected function getTableHeading(): string
+    {
+        return '';
+    }
 
     protected int|string|array $columnSpan = 'full';
 
@@ -139,6 +149,17 @@ class DynamicGroupsWidget extends BaseWidget
         return __('Dynamic Categories (TMDB)');
     }
 
+    /**
+     * No `playlist.name` column here on purpose. Every row is already
+     * scoped to a single Playlist by the tab the user is on (and even in
+     * the "All" tab, drilling into a row's own view page shows its
+     * playlist) - it added nothing but a full `Playlist` model hydration
+     * per row on a page that isn't playlist-specific. This app dispatches
+     * a stats-refresh job the first time a Playlist's `xtream_status` is
+     * touched and isn't cached; keeping this footer widget from touching
+     * `Playlist` models at all avoids ever being the thing that triggers
+     * that on a page load/refresh.
+     */
     public function table(Table $table): Table
     {
         return $table
@@ -146,10 +167,6 @@ class DynamicGroupsWidget extends BaseWidget
             ->defaultSort('name')
             ->recordUrl(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record]))
             ->columns([
-                TextColumn::make('playlist.name')
-                    ->label(__('Playlist'))
-                    ->searchable()
-                    ->sortable(),
                 TextColumn::make('name')
                     ->searchable()
                     ->sortable(),

@@ -109,7 +109,15 @@ class DynamicGroupResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery()
-            ->withCount(['channels', 'series']);
+            ->withCount(['channels', 'series'])
+            // The View page's infolist only ever reads `playlist.name` and
+            // `playlist.source_type` - scope the eager load to just those
+            // columns so viewing/searching a DynamicGroup never pulls a full
+            // Playlist row. Avoids being on the hook for anything a future
+            // Playlist accessor/attribute might do (e.g. `xtream_status`,
+            // which dispatches a stats-refresh job on a cache miss) - this
+            // page has no business touching Playlist beyond its name/type.
+            ->with(['playlist:id,name,source_type']);
 
         // Per this repo's convention (see CLAUDE.md "Scope both `getEloquentQuery`
         // and `getGlobalSearchEloquentQuery()`"), admins see every user's rows,
@@ -126,7 +134,8 @@ class DynamicGroupResource extends Resource
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         $query = parent::getGlobalSearchEloquentQuery()
-            ->withCount(['channels', 'series']);
+            ->withCount(['channels', 'series'])
+            ->with(['playlist:id,name,source_type']);
 
         if (auth()->check() && ! auth()->user()->isAdmin()) {
             $query->where('dynamic_groups.user_id', auth()->id());

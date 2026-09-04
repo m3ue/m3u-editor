@@ -477,3 +477,38 @@ it('getDynamicGroupsHelpText() and getSectionHeading() use Group vs Category wor
     expect($vodHeading)->toBe('Dynamic Groups (TMDB)')
         ->and($seriesHeading)->toBe('Dynamic Categories (TMDB)');
 });
+
+it('suppresses TableWidget\'s own class-name-derived heading on both widgets', function () {
+    // TableWidget::makeTable() falls back to a heading derived from the
+    // class name ("Dynamic Groups", from DynamicGroupsWidget) whenever
+    // getTableHeading() returns null - that fallback rendered as a second,
+    // wrongly-worded heading inside the table itself even on the Categories
+    // page, alongside the (correct) "Dynamic Categories (TMDB)" section
+    // heading. getTableHeading() must return '' (not null) to suppress it.
+    $vodTable = Livewire::test(VodDynamicGroupsWidget::class)->instance()->getTable();
+    $seriesTable = Livewire::test(SeriesDynamicGroupsWidget::class)->instance()->getTable();
+
+    expect($vodTable->getHeading())->toBe('')
+        ->and($seriesTable->getHeading())->toBe('');
+});
+
+it('does not show a playlist column on either widget (avoids hydrating Playlist per row)', function () {
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
+    ]);
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Mine Too',
+    ]);
+
+    Livewire::test(VodDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertTableColumnDoesNotExist('playlist.name');
+
+    Livewire::test(SeriesDynamicGroupsWidget::class)
+        ->assertOk()
+        ->loadTable()
+        ->assertTableColumnDoesNotExist('playlist.name');
+});

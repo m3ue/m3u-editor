@@ -9,6 +9,7 @@ use App\Models\DynamicGroup;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Contracts\Support\Htmlable;
 
 /**
  * Read-only View surface for a DynamicGroup row.
@@ -42,6 +43,18 @@ class ViewDynamicGroup extends ViewRecord
      * closure typed `DynamicGroup $record` there throws a TypeError.
      */
     protected ?string $redirectUrlAfterDelete = null;
+
+    /**
+     * Default Filament title is "View {getModelLabel()}" - since the resource's
+     * model label is the type-mixed "Dynamic Group", a series-type record's
+     * page was titled "View Dynamic Group" instead of "View Dynamic Category".
+     * Override with the same Groups/Categories vocabulary split used
+     * everywhere else on this page.
+     */
+    public function getTitle(): string|Htmlable
+    {
+        return $this->isVodRecord($this->getRecord()) ? __('View Dynamic Group') : __('View Dynamic Category');
+    }
 
     /**
      * @return array<int|string, string>
@@ -80,14 +93,23 @@ class ViewDynamicGroup extends ViewRecord
     }
 
     /**
-     * The Groups/Categories index URL for this record's type - the natural
-     * parent list for a per-playlist VOD Group or Series Category row.
+     * The Groups/Categories index URL for this record's type, pre-selecting
+     * the owning playlist's tab - the natural parent *view* for a
+     * per-playlist VOD Group or Series Category row, not just the resource
+     * in general. `ListVodGroups`/`ListCategories` key their tabs by
+     * `playlist_id` (see `setupTabs()`) and bind `$activeTab` to the `tab`
+     * query string param via `#[Url(as: 'tab')]`
+     * (`Filament\Resources\Pages\ListRecords::$activeTab`), so appending
+     * `?tab={playlist_id}` lands the user back on exactly the tab they'd
+     * have drilled in from, instead of the unfiltered "All" view.
      */
     protected function rootIndexUrl(DynamicGroup $record): string
     {
-        return $this->isVodRecord($record)
+        $index = $this->isVodRecord($record)
             ? VodGroupResource::getUrl('index')
             : CategoryResource::getUrl('index');
+
+        return $index.'?'.http_build_query(['tab' => $record->playlist_id]);
     }
 
     /**
