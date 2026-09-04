@@ -326,7 +326,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->inline(false)
                         ->default(false)
-                        ->helperText(__('When enabled, dummy EPG data will be generated for the next 5 days. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel name and the set program length are used.')),
+                        ->helperText(__('When enabled, dummy EPG data will be generated for the number of days set below. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel name and the set program length are used.')),
                     Select::make('id_channel_by')
                         ->label(__('Preferred TVG ID output'))
                         ->helperText(__('How you would like to ID your channels in the EPG.'))
@@ -339,7 +339,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ])
                         ->required()
                         ->default('stream_id') // Default to stream_id
-                        ->columnSpan(1),
+                        ->columnSpan(2),
                     TextInput::make('dummy_epg_length')
                         ->label(__('Dummy program length (in minutes)'))
                         ->columnSpan(1)
@@ -348,6 +348,14 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                         ->default(120)
                         ->hidden(fn (Get $get): bool => ! $get('dummy_epg'))
                         ->required(),
+                    TextInput::make('dummy_epg_days')
+                        ->label(__('Dummy EPG length (in days)'))
+                        ->columnSpan(2)
+                        ->rules(['min:1', 'max:14'])
+                        ->type('number')
+                        ->default(5)
+                        ->helperText(__('How many days of dummy EPG data to generate. AED profiles can override this per profile.'))
+                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
                         ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))

@@ -309,6 +309,13 @@ class PlaylistAlias extends Model
         return $effectivePlaylist ? ($effectivePlaylist->dummy_epg_fallback_order ?? []) : [];
     }
 
+    public function getDummyEpgDaysAttribute(): int
+    {
+        $effectivePlaylist = $this->getEffectivePlaylist();
+
+        return $effectivePlaylist ? (int) ($effectivePlaylist->dummy_epg_days ?? 5) : 5;
+    }
+
     /**
      * Inherit the DVR setting from the effective playlist (Playlist or CustomPlaylist).
      */
