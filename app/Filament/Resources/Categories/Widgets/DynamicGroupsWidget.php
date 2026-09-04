@@ -167,14 +167,14 @@ class DynamicGroupsWidget extends BaseWidget
                     ->sortable(),
             ])
             ->recordActions([
+                DeleteAction::make()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
                 Action::make('view')
                     ->label(__('View'))
                     ->icon('heroicon-o-eye')
                     ->url(fn (DynamicGroup $record): string => DynamicGroupResource::getUrl('view', ['record' => $record]))
-                    ->button()
-                    ->size('sm')
-                    ->hiddenLabel(),
-                DeleteAction::make()
                     ->button()
                     ->size('sm')
                     ->hiddenLabel(),
