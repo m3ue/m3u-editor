@@ -10,6 +10,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
+use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Reactive;
 
 /**
@@ -31,9 +32,24 @@ class DynamicGroupsWidget extends BaseWidget
 {
     protected static bool $isLazy = false;
 
-    protected static ?string $heading = 'Dynamic Groups (TMDB)';
+    /**
+     * Heading moved into the wrapping `<x-filament::section>` in the
+     * shared widget view. Setting this to null prevents
+     * `TableWidget::getTableHeading()` from rendering a second duplicate
+     * heading inside the table's internal container.
+     */
+    protected static ?string $heading = null;
 
     protected int|string|array $columnSpan = 'full';
+
+    /**
+     * Custom view that wraps `{{ $this->table }}` in a collapsible
+     * `<x-filament::section>` with an always-visible "?" info tooltip in
+     * the header. Shared with the Series-side widget — single source of
+     * truth for the collapsible + tooltip UX so the two widgets can't
+     * drift apart.
+     */
+    protected string $view = 'filament.widgets.dynamic-groups-table-widget';
 
     /**
      * Bound from the parent page (`ListVodGroups::getWidgetData()`).
@@ -65,22 +81,58 @@ class DynamicGroupsWidget extends BaseWidget
         return (bool) config('feature.playlist_tmdb_dynamic_groups');
     }
 
+    /**
+     * Shared scoping for both the table's own query and the collapse-state
+     * check (`hasDynamicGroups()`) — so a widget that says "I have nothing
+     * to show" is reading from exactly the same row set as the table that
+     * would render those rows. Mirrors `DynamicGroupResource::getEloquentQuery()`:
+     * admin sees all, non-admin sees only their own; per-tab playlist scope
+     * when `$activePlaylistId` is set; type filter (vod here, series on the
+     * Series-side widget). Does NOT include `->withCount()` because the
+     * collapse-state check only needs `->exists()`.
+     */
+    protected function baseQuery(): Builder
+    {
+        return DynamicGroup::query()
+            ->where('type', 'vod')
+            ->when(
+                $this->activePlaylistId !== null && $this->activePlaylistId !== '',
+                fn ($query) => $query->where('playlist_id', (int) $this->activePlaylistId),
+            )
+            ->when(
+                auth()->check() && ! auth()->user()->isAdmin(),
+                fn ($query) => $query->where('dynamic_groups.user_id', auth()->id()),
+            );
+    }
+
+    /**
+     * Drives the widget's default collapsed state — collapsed when there's
+     * nothing to show for the current user + active playlist tab, expanded
+     * otherwise. Recomputed fresh on every render (CJ confirmed: no
+     * persisted collapse state across page loads), so a user who adds new
+     * dynamic groups sees the widget auto-expand on their next sync without
+     * needing to click it open.
+     */
+    public function hasDynamicGroups(): bool
+    {
+        return $this->baseQuery()->exists();
+    }
+
+    /**
+     * Single source of truth for the copy shown both as the table's
+     * empty-state description and as the always-visible header tooltip
+     * — if these ever diverge, this test catches it:
+     *   tests/Feature/DynamicGroupsWidgetTest.php -> `getDynamicGroupsHelpText()`.
+     */
+    public function getDynamicGroupsHelpText(): string
+    {
+        return __('Add Dynamic Groups in the Playlist form → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.');
+    }
+
     public function table(Table $table): Table
     {
         return $table
-            ->query(
-                DynamicGroup::query()
-                    ->where('type', 'vod')
-                    ->when(
-                        $this->activePlaylistId !== null && $this->activePlaylistId !== '',
-                        fn ($query) => $query->where('playlist_id', (int) $this->activePlaylistId),
-                    )
-                    ->when(
-                        auth()->check() && ! auth()->user()->isAdmin(),
-                        fn ($query) => $query->where('dynamic_groups.user_id', auth()->id()),
-                    )
-                    ->withCount('channels')
-            )
+            ->query($this->baseQuery()->withCount('channels'))
             ->defaultSort('name')
             ->columns([
                 TextColumn::make('playlist.name')
@@ -113,7 +165,7 @@ class DynamicGroupsWidget extends BaseWidget
                     ->hiddenLabel(),
             ], RecordActionsPosition::BeforeCells)
             ->emptyStateHeading(__('No Dynamic Groups configured'))
-            ->emptyStateDescription(__('Add Dynamic Groups in the Playlist form → Dynamic Groups (TMDB) section. Synced TMDB lists appear here with their current member counts.'))
+            ->emptyStateDescription($this->getDynamicGroupsHelpText())
             ->emptyStateIcon('heroicon-o-sparkles');
     }
 }

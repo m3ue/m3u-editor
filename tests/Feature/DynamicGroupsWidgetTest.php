@@ -309,3 +309,106 @@ it('the page-level wiring contract binds activePlaylistId correctly for both ini
         ->and($dataB)->toBe(['activePlaylistId' => '999'])
         ->and($dataNone)->toBe(['activePlaylistId' => null]);
 });
+
+it('hasDynamicGroups() returns false on the VOD widget when no matching rows exist for the current scope', function () {
+    // Drives the collapse-state prop in the new shared view: empty scope
+    // => collapsed by default. Mirrors the "no tab selected, no rows"
+    // case the section must collapse to.
+    expect(
+        Livewire::test(VodDynamicGroupsWidget::class)
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeFalse();
+});
+
+it('hasDynamicGroups() returns true on the VOD widget when a matching row exists', function () {
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
+    ]);
+
+    expect(
+        Livewire::test(VodDynamicGroupsWidget::class)
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeTrue();
+});
+
+it('hasDynamicGroups() respects activePlaylistId on the VOD widget (true for owning playlist, false for other)', function () {
+    $playlistB = Playlist::factory()->for($this->user)->create(['name' => 'Second Playlist']);
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'A',
+    ]);
+
+    // Filtering by the playlist that owns the row → it counts.
+    expect(
+        Livewire::test(VodDynamicGroupsWidget::class, ['activePlaylistId' => (string) $this->playlist->id])
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeTrue();
+
+    // Filtering by a different playlist → the row is out of scope, the
+    // widget should report "nothing to show" and default to collapsed.
+    expect(
+        Livewire::test(VodDynamicGroupsWidget::class, ['activePlaylistId' => (string) $playlistB->id])
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeFalse();
+});
+
+it('hasDynamicGroups() returns false on the Series widget when no matching rows exist', function () {
+    expect(
+        Livewire::test(SeriesDynamicGroupsWidget::class)
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeFalse();
+});
+
+it('hasDynamicGroups() returns true on the Series widget when a matching row exists', function () {
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Mine Series',
+    ]);
+
+    expect(
+        Livewire::test(SeriesDynamicGroupsWidget::class)
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeTrue();
+});
+
+it('hasDynamicGroups() respects activePlaylistId on the Series widget', function () {
+    $playlistB = Playlist::factory()->for($this->user)->create(['name' => 'Second Playlist']);
+    DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'A Series',
+    ]);
+
+    expect(
+        Livewire::test(SeriesDynamicGroupsWidget::class, ['activePlaylistId' => (string) $this->playlist->id])
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeTrue();
+
+    expect(
+        Livewire::test(SeriesDynamicGroupsWidget::class, ['activePlaylistId' => (string) $playlistB->id])
+            ->instance()
+            ->hasDynamicGroups()
+    )->toBeFalse();
+});
+
+it('getDynamicGroupsHelpText() returns the same non-empty help text on both widgets (single source of truth)', function () {
+    // The shared view passes this string to BOTH the empty-state
+    // description on the table AND the always-visible header tooltip.
+    // If the two widgets ever drift, this test catches it.
+    $vodText = Livewire::test(VodDynamicGroupsWidget::class)
+        ->instance()
+        ->getDynamicGroupsHelpText();
+    $seriesText = Livewire::test(SeriesDynamicGroupsWidget::class)
+        ->instance()
+        ->getDynamicGroupsHelpText();
+
+    expect($vodText)->toBeString()->not->toBe('')
+        ->and($seriesText)->toBe($vodText);
+});
