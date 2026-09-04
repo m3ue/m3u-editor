@@ -55,15 +55,15 @@ Open `Settings → TMDB Integration` and configure the following:
 2. Select the desired **Search Language**.
 3. Enable **Auto-lookup on metadata fetch**. This automatically populates TMDB
    IDs during the sync process, eliminating the need to fetch IDs manually for
-   normal imports.
-4. Enable **Auto-create groups/categories from TMDB genres**. This allows the
-   metadata process to create the genre groups and categories needed by
-   reclassification.
+   normal imports. **Only this first toggle is required for this guide.**
+4. Leave **Auto-create groups/categories from TMDB genres** disabled for this
+   practical configuration. Enable it only if you also want genre groups and
+   categories created automatically during metadata fetching.
 5. Set **Auto-lookup scope** to **Only enabled** unless you specifically want
    to process all new content or both enabled and new content.
 6. Select **Test Connection** and confirm the connection succeeds.
 
-![TMDB Integration settings](/screenshots/tmdb-integration-settings.png)
+![TMDB Integration settings — only Auto-lookup on metadata fetch is required](/screenshots/tmdb-integration-settings.png)
 
 ### Content requirements
 

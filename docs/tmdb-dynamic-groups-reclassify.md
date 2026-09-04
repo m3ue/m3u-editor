@@ -34,12 +34,11 @@ Manual verification procedure for two related features:
 
 - **TMDB API Key** (required)
 - **Search Language** (e.g. `English (US)`)
-- **Auto-lookup on metadata fetch** = **ON** ← *prereq that removes the manual "Fetch TMDB IDs" step*
-- **Auto-create groups/categories from TMDB genres** = **ON** ← *auto-creates genre groups/categories
-  for reclassify to target*
+- **Auto-lookup on metadata fetch** = **ON** ← *only this first toggle is required — prereq that removes the manual "Fetch TMDB IDs" step*
+- **Auto-create groups/categories from TMDB genres** = **OFF** for this flow (enable only if you also want genre groups/categories created automatically)
 - **Auto-lookup scope** = `Only enabled` (default)
 
-![TMDB Integration settings](/screenshots/tmdb-integration-settings.png)
+![TMDB Integration settings — only Auto-lookup on metadata fetch is required](/screenshots/tmdb-integration-settings.png)
 
 ---
 
