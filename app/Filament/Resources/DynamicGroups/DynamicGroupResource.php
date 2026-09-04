@@ -4,63 +4,26 @@ namespace App\Filament\Resources\DynamicGroups;
 
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\DynamicGroup;
 use App\Services\TmdbService;
-use BackedEnum;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\Resource;
-use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Tables\Columns\IconColumn;
-use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
-use Filament\Tables\Filters\TernaryFilter;
-use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 /**
- * Read-only Filament resource for viewing DynamicGroup membership and sync status.
- *
- * DynamicGroups are per-playlist virtual groups computed by `SyncDynamicGroups`
- * from TMDB list endpoints (Trending / Popular / In Theatres / Coming Soon /
- * Top Genre / By Network / By Streaming Service). The actual rule config lives
- * on `Playlist.dynamic_groups_config` and is edited in the Playlist form's
- * Dynamic Groups (TMDB) section. This resource does NOT create/edit/delete
- * rules - membership and config stay owned by the Playlist form. The resource
- * exists purely to show what's currently sitting in `dynamic_group_items` after
- * a sync, which is otherwise opaque.
+ * Read-only Filament resource for a DynamicGroup row. Rule config lives on
+ * the Playlist form's Dynamic Groups (TMDB) repeater, not here. Only the
+ * `view` route is registered — the `index` page is intentionally absent,
+ * see Pages\ViewDynamicGroup for the breadcrumb rationale.
  */
 class DynamicGroupResource extends Resource
 {
     protected static ?string $model = DynamicGroup::class;
-
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-sparkles';
-
-    public static function getNavigationGroup(): ?string
-    {
-        // Dynamic Groups are a per-playlist concept - nest under the Playlist
-        // nav group (matches PlaylistResource.php:122). `DynamicGroup` rows are
-        // type-mixed (vod or series), so they don't fit the content-type
-        // buckets used by `VodGroupResource` ("VOD Channels"),
-        // `GroupResource` ("Live Channels"), `CategoryResource` ("Series").
-        return __('Playlist');
-    }
-
-    public static function getNavigationLabel(): string
-    {
-        return __('Dynamic Groups');
-    }
-
-    public static function getModelLabel(): string
-    {
-        return __('Dynamic Group');
-    }
-
-    public static function getPluralModelLabel(): string
-    {
-        return __('Dynamic Groups');
-    }
 
     public static function canCreate(): bool
     {
@@ -68,24 +31,26 @@ class DynamicGroupResource extends Resource
     }
 
     /**
-     * Dynamic Groups are an experimental feature gated behind
-     * `config('feature.playlist_tmdb_dynamic_groups')`. When the flag is off,
-     * hide the resource entirely (navigation + routes + global search).
+     * Always hide from Filament's nav and global search — drill-in is only
+     * reachable from the per-playlist widgets, never as a top-level entry.
+     * Access is intentionally permissive so the view route resolves, just
+     * not advertised.
      */
     public static function canAccess(): bool
     {
-        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+        return true;
     }
 
     public static function shouldRegisterNavigation(): bool
     {
-        return (bool) config('feature.playlist_tmdb_dynamic_groups');
+        return false;
     }
 
     /**
      * Source slugs → human labels. Must stay in sync with the `Select::make('source')`
      * options in `PlaylistResource.php:1958-1974` (the Playlist form's Dynamic
-     * Groups (TMDB) section).
+     * Groups (TMDB) section). Used by the per-playlist widgets to render the
+     * source badge.
      *
      * @return array<string, string>
      */
@@ -115,8 +80,6 @@ class DynamicGroupResource extends Resource
      * key=value list. Resolves canonical IDs to names when a name can be sourced
      * cheaply (TV_NETWORKS is a local constant; genre/provider IDs require a TMDB
      * HTTP lookup and are left as the raw ID).
-     *
-     * Used by the view page's `tmdb_params` TextEntry.
      */
     public static function formatTmdbParams(array $params): string
     {
@@ -175,115 +138,69 @@ class DynamicGroupResource extends Resource
     public static function infolist(Schema $schema): Schema
     {
         return $schema->components([
-            Grid::make(2)
+            Section::make(__('Details'))
+                ->columns(2)
+                ->collapsible()
+                ->collapsed()
+                ->columnSpanFull()
                 ->schema([
-                    Section::make(__('Configuration'))
-                        ->columnSpan(1)
-                        ->schema([
-                            TextEntry::make('name'),
-                            TextEntry::make('type')
-                                ->badge()
-                                ->formatStateUsing(fn (string $state): string => match ($state) {
-                                    'vod' => __('VOD'),
-                                    'series' => __('Series'),
-                                    default => $state,
-                                }),
-                            TextEntry::make('source')
-                                ->formatStateUsing(function (DynamicGroup $record): string {
-                                    return static::sourceLabelFor($record->type)[$record->source] ?? $record->source;
-                                }),
-                            TextEntry::make('tmdb_params')
-                                ->formatStateUsing(function (DynamicGroup $record): string {
-                                    return static::formatTmdbParams((array) ($record->tmdb_params ?? []));
-                                })
-                                ->placeholder('-'),
-                            TextEntry::make('sort_order'),
-                            TextEntry::make('enabled')
-                                ->badge()
-                                ->formatStateUsing(fn (bool $state): string => $state ? __('Enabled') : __('Disabled'))
-                                ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
-                            TextEntry::make('last_synced_at')
-                                ->since()
-                                ->placeholder(__('Never')),
-                        ]),
-                    Section::make(__('Playlist'))
-                        ->columnSpan(1)
-                        ->schema([
-                            TextEntry::make('playlist.name'),
-                            TextEntry::make('playlist.source_type')
-                                ->label(__('Source Type')),
-                        ]),
+                    TextEntry::make('name'),
+                    TextEntry::make('playlist.source_type')
+                        ->label(__('Source Type')),
+                    TextEntry::make('type')
+                        ->badge()
+                        ->formatStateUsing(fn (string $state): string => match ($state) {
+                            'vod' => __('VOD'),
+                            'series' => __('Series'),
+                            default => $state,
+                        }),
+                    TextEntry::make('playlist.name'),
+                    TextEntry::make('source')
+                        ->formatStateUsing(function (DynamicGroup $record): string {
+                            return static::sourceLabelFor($record->type)[$record->source] ?? $record->source;
+                        }),
+                    TextEntry::make('tmdb_params')
+                        ->formatStateUsing(function (DynamicGroup $record): string {
+                            return static::formatTmdbParams((array) ($record->tmdb_params ?? []));
+                        })
+                        ->placeholder('-'),
+                    TextEntry::make('sort_order'),
+                    TextEntry::make('enabled')
+                        ->badge()
+                        ->formatStateUsing(fn (bool $state): string => $state ? __('Enabled') : __('Disabled'))
+                        ->color(fn (bool $state): string => $state ? 'success' : 'gray'),
+                    // Inline timestamp + diff chips + click-to-expand list of
+                    // titles. State is forced to null because the partial
+                    // reads $getRecord() and queries snapshots directly.
+                    ViewEntry::make('last_sync_diff')
+                        ->label(__('Last synced'))
+                        ->state(null)
+                        ->view('filament.partials.last-sync-diff'),
                 ]),
         ]);
     }
 
-    public static function table(Table $table): Table
+    /**
+     * The resource has no `index` page (see class docblock). Filament's
+     * breadcrumb + record-link rendering still calls `getIndexUrl()` for
+     * "go back to list" anchors, so point that at the Playlists index
+     * instead — the natural parent surface when navigating from a
+     * VOD/Series page.
+     *
+     * @param  array<mixed>  $parameters
+     */
+    public static function getIndexUrl(array $parameters = [], bool $isAbsolute = true, ?string $panel = null, ?Model $tenant = null, bool $shouldGuessMissingParameters = false): string
     {
-        return $table
-            ->modifyQueryUsing(function (Builder $query): Builder {
-                // `withCount(['channels', 'series'])` is set in getEloquentQuery();
-                // ensure it's always applied even when consumers override the query.
-                return $query->withCount(['channels', 'series']);
-            })
-            ->defaultSort('sort_order')
-            ->columns([
-                TextColumn::make('playlist.name')
-                    ->label(__('Playlist'))
-                    ->searchable()
-                    ->sortable(),
-                TextColumn::make('name')
-                    ->searchable()
-                    ->sortable(),
-                TextColumn::make('type')
-                    ->badge()
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'vod' => __('VOD'),
-                        'series' => __('Series'),
-                        default => $state,
-                    })
-                    ->color(fn (string $state): string => match ($state) {
-                        'vod' => 'info',
-                        'series' => 'success',
-                        default => 'gray',
-                    }),
-                TextColumn::make('source')
-                    ->formatStateUsing(function (DynamicGroup $record): string {
-                        return static::sourceLabelFor($record->type)[$record->source] ?? $record->source;
-                    })
-                    ->badge(),
-                IconColumn::make('enabled')
-                    ->boolean(),
-                TextColumn::make('item_count')
-                    ->label(__('Items'))
-                    ->state(function (DynamicGroup $record): int {
-                        return $record->type === 'vod'
-                            ? (int) $record->channels_count
-                            : (int) $record->series_count;
-                    }),
-                TextColumn::make('last_synced_at')
-                    ->since()
-                    ->placeholder(__('Never'))
-                    ->sortable(),
-            ])
-            ->filters([
-                SelectFilter::make('playlist_id')
-                    ->relationship('playlist', 'name')
-                    ->label(__('Playlist')),
-                SelectFilter::make('type')
-                    ->options([
-                        'vod' => __('VOD'),
-                        'series' => __('Series'),
-                    ]),
-                SelectFilter::make('source')
-                    ->options(fn () => array_unique(array_merge(
-                        static::sourceLabelFor('vod'),
-                        static::sourceLabelFor('series'),
-                    ), SORT_REGULAR))
-                    ->searchable(),
-                TernaryFilter::make('enabled'),
-            ]);
+        return PlaylistResource::getUrl('index', $parameters, $isAbsolute, $panel, $tenant, $shouldGuessMissingParameters);
     }
 
+    /**
+     * Both managers are registered even though only one tab will render
+     * per record (gating is done in `canViewForRecord` on each manager).
+     * Filament iterates `getRelations()` and picks the tabs that pass the
+     * gate — a vod-type group shows the Movies tab only, a series-type
+     * group shows the Series tab only.
+     */
     public static function getRelations(): array
     {
         return [
@@ -295,7 +212,6 @@ class DynamicGroupResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListDynamicGroups::route('/'),
             'view' => Pages\ViewDynamicGroup::route('/{record}'),
         ];
     }

@@ -5,17 +5,18 @@ namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 use App\Filament\Resources\Series\SeriesResource;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
-use Filament\Schemas\Schema;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
  * Series members of the parent DynamicGroup. Visible only when the parent's
- * `type` is `'series'` - see the parallel ChannelsRelationManager docblock for
- * the full rationale.
+ * `type` is `'series'` - DynamicGroups are single-type by construction, so a
+ * vod-type parent has zero series to show and the tab is hidden.
  *
- * Strictly read-only.
+ * Strictly read-only - no `recordActions()`, no `toolbarActions()`. Membership
+ * is computed by `SyncDynamicGroups` from the parent playlist's
+ * `dynamic_groups_config`; this manager is a transparency window, not an edit
+ * surface.
  */
 class SeriesRelationManager extends RelationManager
 {
@@ -40,17 +41,9 @@ class SeriesRelationManager extends RelationManager
             ->icon('heroicon-m-tv');
     }
 
-    public function form(Schema $schema): Schema
-    {
-        return $schema->components([]);
-    }
-
     public function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(function (Builder $query): Builder {
-                return $query;
-            })
             ->recordTitleAttribute('name')
             ->columns(SeriesResource::getTableColumns(showCategory: false, showPlaylist: false))
             ->filters(SeriesResource::getTableFilters(showPlaylist: false));

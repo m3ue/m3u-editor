@@ -83,8 +83,6 @@ it('the VOD widget\'s view action links to the DynamicGroupResource view route f
     Livewire::test(VodDynamicGroupsWidget::class)
         ->assertOk()
         ->loadTable()
-        // The action URL on the table row points at the same view route the
-        // resource exposes — same record key, same resource path.
         ->assertTableActionHasUrl('view', $expectedUrl, $group);
 });
 
@@ -102,7 +100,7 @@ it('the Series widget\'s view action links to the DynamicGroupResource view rout
         ->assertTableActionHasUrl('view', $expectedUrl, $group);
 });
 
-it('the VOD widget exposes no edit / delete / toolbar actions (read-only invariant)', function () {
+it('the VOD widget exposes no edit / delete actions (only a read-only view)', function () {
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
         'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
@@ -111,13 +109,10 @@ it('the VOD widget exposes no edit / delete / toolbar actions (read-only invaria
     Livewire::test(VodDynamicGroupsWidget::class)
         ->assertOk()
         ->loadTable()
-        // Only the `view` action should exist on each row — no `edit`,
-        // no `delete`, no `view` group with siblings.
         ->assertTableActionExists('view')
         ->assertTableActionDoesNotExist('edit')
         ->assertTableActionDoesNotExist('delete');
 
-    // The group should still exist after rendering the widget (no side effects).
     expect($group->refresh()->exists())->toBeTrue();
 });
 
