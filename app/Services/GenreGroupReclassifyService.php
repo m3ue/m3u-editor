@@ -42,6 +42,19 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
  *     auto_sync_to_custom_config with type 'vod_groups' / 'series_categories' AND
  *     group_filter = 'selected'. group_filter = 'new_only' rules carry no static
  *     group list and are out of scope (documented gap).
+ *   - DVR-created content (out of scope, not "user-protected"). Channels with
+ *     `dvr_recording_id IS NOT NULL` and Series with `import_batch_no = 'dvr'`
+ *     are created by DvrVodIntegrationService inside a dedicated "DVR Recordings"
+ *     group / category. Re-routing them by TMDB genre would silently break the
+ *     user's expectation that DVR content stays in its own bucket, and the
+ *     TMDB genre for a one-off recording is rarely meaningful anyway (often a
+ *     news/sports programme with no movie/tv-genre match). Excluded at query
+ *     level so they don't appear in `moved` / `protected` counters.
+ *     Note: `import_batch_no = 'dvr'` is only set on DvrVodIntegrationService's
+ *     Series::create() path. A provider-imported series that later gets a DVR
+ *     episode attached keeps its original batch number and stays eligible for
+ *     reclassification - correct, since that series lives in its provider
+ *     category, not "DVR Recordings".
  *
  * Performance: iteration is via `chunkById(100, ...)` (mirrors FetchTmdbIds.php's
  * own pattern - `cursor()` would risk "database is locked" on SQLite), and groups /
@@ -105,11 +118,15 @@ class GenreGroupReclassifyService
         // Iterate enabled VOD channels in chunks. Uncategorized is an eligible source
         // group: channels already parked there with genre data get re-evaluated and
         // routed out. Disabled channels are deliberately skipped - see class docblock.
+        // DVR-created channels (dvr_recording_id IS NOT NULL) are excluded entirely -
+        // they're owned by DvrVodIntegrationService and live in the "DVR Recordings"
+        // group, which re-routing would silently empty. See class docblock.
         Channel::query()
             ->where('playlist_id', $playlist->id)
             ->where('is_vod', true)
             ->where('enabled', true)
             ->whereNotNull('group_id')
+            ->whereNull('dvr_recording_id')
             ->select(['id', 'playlist_id', 'group_id', 'group', 'group_internal', 'info'])
             ->orderBy('id')
             ->chunkById(100, function ($channels) use (
@@ -264,6 +281,14 @@ class GenreGroupReclassifyService
             ->where('playlist_id', $playlist->id)
             ->where('enabled', true)
             ->whereNotNull('category_id')
+            // DVR-created Series (import_batch_no = 'dvr') live in the "DVR Recordings"
+            // category and are owned by DvrVodIntegrationService. Excluded from
+            // reclassification so they stay where the user expects them. See class
+            // docblock. `series.import_batch_no` is NOT NULL at the schema level, so a
+            // bare `!= 'dvr'` needs no `whereNull(...)->orWhere(...)` guard (contrast
+            // the 2026_09_04 cleanup_series_with_no_source_series_id migration, which
+            // guards it defensively).
+            ->where('import_batch_no', '!=', 'dvr')
             ->select(['id', 'playlist_id', 'category_id', 'genre'])
             ->orderBy('id')
             ->chunkById(100, function ($seriesItems) use (

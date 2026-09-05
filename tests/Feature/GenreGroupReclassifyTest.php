@@ -1,10 +1,12 @@
 <?php
 
+use App\Events\DvrRecordingStatusEvent;
 use App\Filament\Resources\VodGroups\Pages\EditVodGroup;
 use App\Filament\Resources\VodGroups\Pages\ListVodGroups;
 use App\Jobs\FetchTmdbIds;
 use App\Models\Category;
 use App\Models\Channel;
+use App\Models\DvrRecording;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
@@ -14,6 +16,7 @@ use App\Services\TmdbService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
@@ -826,4 +829,128 @@ it('Series toggle on, VOD toggle off: reclassifies Series categories but leaves 
         ->and((int) $series->refresh()->category_id)->toBe((int) $actionCategory->id)
         // VOD channel must NOT have moved — its group is still the original $vodSrc
         ->and((int) refreshChannel($vodCh)->group_id)->toBe((int) $vodSrc->id);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// DVR-created content exclusion tests
+//
+// DvrVodIntegrationService places every DVR VOD channel in a per-playlist
+// "DVR Recordings" group and every DVR-created Series in a per-playlist
+// "DVR Recordings" category. Re-routing them by TMDB genre would silently empty
+// that bucket on every sync. The reclassify service must leave them alone.
+// ────────────────────────────────────────────────────────────────────────────
+
+it('does not reclassify a VOD channel created from a DVR recording', function () {
+    mockTmdbForGenreTest();
+
+    // DvrRecording's `created` listener broadcasts a status event over Reverb
+    // which requires Redis; scope the fake so other listeners stay live.
+    Event::fake([DvrRecordingStatusEvent::class]);
+
+    $dvrGroup = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'DVR Recordings',
+    ]);
+    // Pre-existing genre-named group proves the bug's blast radius: a DVR
+    // channel with TMDB-detectable genre would have been moved here pre-fix.
+    $action = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'Action',
+    ]);
+
+    $recording = DvrRecording::factory()->for($this->user)->create();
+    $dvrCh = enabledChannel($this->playlist, $dvrGroup, $this->user, [
+        'is_vod' => true,
+        'is_custom' => true,
+        'dvr_recording_id' => $recording->id,
+        // Genre present - without the fix this would have routed the channel
+        // out of "DVR Recordings" into the "Action" group.
+        'info' => ['genre' => 'Action'],
+    ]);
+
+    $result = GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+
+    expect($result['moved'])->toBe(0)
+        ->and($result['protected'])->toBe(0)
+        ->and((int) refreshChannel($dvrCh)->group_id)->toBe((int) $dvrGroup->id)
+        // The pre-existing "Action" group must have stayed empty - reclassify
+        // must not have created a duplicate or moved anyone into it.
+        ->and(Channel::where('group_id', $action->id)->count())->toBe(0);
+});
+
+it('does not reclassify a Series created from a DVR recording (import_batch_no = dvr)', function () {
+    mockTmdbForGenreTest();
+
+    // See note above: fake the broadcast-only event so DvrRecording creation
+    // doesn't try to talk to Redis.
+    Event::fake([DvrRecordingStatusEvent::class]);
+
+    $dvrCategory = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'DVR Recordings',
+    ]);
+    $recording = DvrRecording::factory()->for($this->user)->create();
+    // DvrVodIntegrationService::findOrCreateSeries sets this marker on every
+    // DVR-created series - that's the reclassify exclusion key.
+    $dvrSeries = enabledSeries($this->playlist, $dvrCategory, $this->user, [
+        'import_batch_no' => 'dvr',
+        'genre' => 'Drama',
+    ]);
+
+    $result = GenreGroupReclassifyService::reclassifyCategories($this->playlist);
+
+    expect($result['moved'])->toBe(0)
+        ->and($result['protected'])->toBe(0)
+        ->and((int) $dvrSeries->refresh()->category_id)->toBe((int) $dvrCategory->id)
+        ->and(Category::where('name', 'Drama')->where('playlist_id', $this->playlist->id)->exists())->toBeFalse();
+});
+
+it('excludes DVR content but still reclassifies regular content on the same playlist', function () {
+    mockTmdbForGenreTest();
+
+    Event::fake([DvrRecordingStatusEvent::class]);
+
+    $dvrGroup = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'type' => 'vod', 'name' => 'DVR Recordings',
+    ]);
+    $dvrCategory = Category::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'DVR Recordings',
+    ]);
+    $srcVod = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Whatever']);
+    $srcSeries = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Whatever']);
+
+    $recording = DvrRecording::factory()->for($this->user)->create();
+    $dvrCh = enabledChannel($this->playlist, $dvrGroup, $this->user, [
+        'is_vod' => true,
+        'dvr_recording_id' => $recording->id,
+        'info' => ['genre' => 'Action'],
+    ]);
+    $dvrSeries = enabledSeries($this->playlist, $dvrCategory, $this->user, [
+        'import_batch_no' => 'dvr',
+        'genre' => 'Drama',
+    ]);
+
+    $regularCh = enabledChannel($this->playlist, $srcVod, $this->user, [
+        'is_vod' => true,
+        'dvr_recording_id' => null,
+        'info' => ['genre' => 'Action'],
+    ]);
+    $regularSeries = enabledSeries($this->playlist, $srcSeries, $this->user, [
+        'import_batch_no' => 'whatever',
+        'genre' => 'Drama',
+    ]);
+
+    $vodResult = GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+    $seriesResult = GenreGroupReclassifyService::reclassifyCategories($this->playlist);
+
+    $actionGroup = Group::where('name', 'Action')->where('type', 'vod')->where('playlist_id', $this->playlist->id)->first();
+    $dramaCategory = Category::where('name', 'Drama')->where('playlist_id', $this->playlist->id)->first();
+
+    // Regular content moved, DVR content stayed put.
+    expect($actionGroup)->not->toBeNull()
+        ->and($dramaCategory)->not->toBeNull()
+        ->and($vodResult['moved'])->toBe(1)
+        ->and($seriesResult['moved'])->toBe(1)
+        ->and((int) refreshChannel($regularCh)->group_id)->toBe((int) $actionGroup->id)
+        ->and((int) $regularSeries->refresh()->category_id)->toBe((int) $dramaCategory->id)
+        // DVR content untouched - still in their dedicated group / category.
+        ->and((int) refreshChannel($dvrCh)->group_id)->toBe((int) $dvrGroup->id)
+        ->and((int) $dvrSeries->refresh()->category_id)->toBe((int) $dvrCategory->id);
 });
