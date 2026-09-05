@@ -152,6 +152,11 @@ class CustomPlaylist extends Model
         return $this->hasMany(Channel::class);
     }
 
+    public function bouquets(): HasMany
+    {
+        return $this->hasMany(Bouquet::class);
+    }
+
     public function groups(): MorphToMany
     {
         return $this->groupTags();

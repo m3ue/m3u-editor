@@ -220,6 +220,7 @@ class VodGroupResource extends Resource implements CopilotResource
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'vod'),
+                    PlaylistService::getAddGroupsToBouquetAction(type: 'vod'),
                     MergedGroupService::manageChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
@@ -529,6 +530,7 @@ class VodGroupResource extends Resource implements CopilotResource
             ->toolbarActions([
                 BulkActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'vod'),
+                    PlaylistService::getAddGroupsToBouquetBulkAction(type: 'vod'),
                     BulkAction::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([

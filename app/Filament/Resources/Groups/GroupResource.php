@@ -216,6 +216,7 @@ class GroupResource extends Resource implements CopilotResource
             ->recordActions([
                 ActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistAction('add', 'channel'),
+                    PlaylistService::getAddGroupsToBouquetAction(type: 'live'),
                     MergedGroupService::manageChildrenAction(),
                     Action::make('move')
                         ->label(__('Move Channels to Group'))
@@ -438,6 +439,7 @@ class GroupResource extends Resource implements CopilotResource
             ->toolbarActions([
                 BulkActionGroup::make([
                     PlaylistService::getAddGroupsToPlaylistBulkAction('add', 'channel'),
+                    PlaylistService::getAddGroupsToBouquetBulkAction(type: 'live'),
                     BulkAction::make('move')
                         ->label(__('Move Channels to Group'))
                         ->schema([

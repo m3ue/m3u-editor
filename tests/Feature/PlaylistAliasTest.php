@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -588,5 +589,54 @@ describe('PlaylistAlias::series() category filter', function () {
 
         expect($first->toArray())->toBe($second->toArray())
             ->and($alias->resolvedCategoryIds)->toBe([10]);
+    });
+});
+
+// ── bouquet union end-to-end through channels() and series() ─────────────────
+
+describe('bouquet union end-to-end through channels() and series()', function () {
+    beforeEach(function () {
+        $this->user = User::factory()->create();
+        $this->playlist = Playlist::factory()->for($this->user)->create();
+    });
+
+    it('a bouquet-only alias filters channels without any manual filter', function () {
+        $alias = makeAlias($this->user, $this->playlist, ['group_filter' => null]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['Sports']],
+        ]);
+        $alias->bouquets()->attach($bouquet);
+        $alias->refresh();
+
+        Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'group_internal' => 'Sports', 'is_vod' => false, 'enabled' => true,
+        ]);
+        Channel::factory()->for($this->playlist)->for($this->user)->create([
+            'group_internal' => 'News', 'is_vod' => false, 'enabled' => true,
+        ]);
+
+        $groups = $alias->channels()->pluck('channels.group_internal');
+        expect($groups)->toContain('Sports')->and($groups)->not->toContain('News');
+    });
+
+    it('a bouquet category restricts series() via source_category_id resolution', function () {
+        $alias = makeAlias($this->user, $this->playlist, ['group_filter' => null]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_categories' => ['Drama']],
+        ]);
+        $alias->bouquets()->attach($bouquet);
+        $alias->refresh();
+
+        SourceCategory::create([
+            'playlist_id' => $this->playlist->id, 'name' => 'Drama', 'source_category_id' => 11,
+        ]);
+        Series::factory()->for($this->playlist)->for($this->user)->create(['source_category_id' => 11, 'enabled' => true]);
+        Series::factory()->for($this->playlist)->for($this->user)->create(['source_category_id' => 22, 'enabled' => true]);
+
+        expect($alias->series()->count())->toBe(1);
     });
 });

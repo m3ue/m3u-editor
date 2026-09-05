@@ -19,6 +19,7 @@ use App\Listeners\AlertOnJobFailed;
 use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
 use App\Livewire\TmdbSearch;
+use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\ChannelScrubber;
@@ -81,6 +82,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Laravel\Ai\AiManager;
 use Livewire\Livewire;
 use PDO;
@@ -752,6 +754,83 @@ class AppServiceProvider extends ServiceProvider
                 }
             });
 
+            // Custom playlist group/category tags: propagate renames into bouquets
+            // and alias group filters, which store tag names and would otherwise
+            // silently stop matching - same treatment the provider-rename pass in
+            // ProcessM3uImport gives standard playlists (issue #1391).
+            Tag::updated(function (Tag $tag) {
+                if (! $tag->wasChanged('name') || ! $tag->type) {
+                    return;
+                }
+
+                $oldName = json_decode($tag->getRawOriginal('name') ?? '', true)['en'] ?? null;
+                $newName = $tag->getTranslation('name', 'en');
+                if (! $oldName || ! $newName || $oldName === $newName) {
+                    return;
+                }
+
+                $isCategory = str_ends_with($tag->type, '-category');
+                $uuid = $isCategory ? substr($tag->type, 0, -strlen('-category')) : $tag->type;
+                $customPlaylist = CustomPlaylist::where('uuid', $uuid)->first();
+                if (! $customPlaylist) {
+                    return;
+                }
+
+                // Group tags are shared across live and VOD; category tags map to series.
+                $keys = $isCategory ? ['selected_categories'] : ['selected_groups', 'selected_vod_groups'];
+
+                $replaceName = function (array $names) use ($oldName, $newName): array {
+                    return array_values(array_unique(
+                        array_map(fn (string $name): string => $name === $oldName ? $newName : $name, $names)
+                    ));
+                };
+
+                $rewrite = function (array $lists) use ($keys, $oldName, $replaceName): array {
+                    foreach ($keys as $key) {
+                        $current = $lists[$key] ?? [];
+                        if (in_array($oldName, $current, true)) {
+                            $lists[$key] = $replaceName($current);
+                        }
+                    }
+
+                    return $lists;
+                };
+
+                Bouquet::where('custom_playlist_id', $customPlaylist->id)
+                    ->cursor()
+                    ->each(function (Bouquet $bouquet) use ($rewrite): void {
+                        $updated = $rewrite($bouquet->group_selections ?? []);
+                        if ($updated !== ($bouquet->group_selections ?? [])) {
+                            $bouquet->update(['group_selections' => $updated]);
+                        }
+                    });
+
+                // Custom-playlist aliases also carry a manual live-group sort order
+                // (fed by the same custom-variant picker as selected_groups), which
+                // goes stale the same way - but only group tags have a live-group
+                // sort order to rewrite; category tags don't touch it.
+                PlaylistAlias::where('custom_playlist_id', $customPlaylist->id)
+                    ->cursor()
+                    ->each(function (PlaylistAlias $alias) use ($rewrite, $replaceName, $isCategory, $oldName): void {
+                        $filter = $rewrite($alias->group_filter ?? []);
+
+                        if (! $isCategory) {
+                            $order = $filter['live_group_order'] ?? [];
+                            if (in_array($oldName, $order, true)) {
+                                $filter['live_group_order'] = $replaceName($order);
+                            }
+                        }
+
+                        if ($filter !== ($alias->group_filter ?? [])) {
+                            $alias->updateQuietly(['group_filter' => $filter]);
+                            // updateQuietly() skips the ::updating hook that clears the EPG
+                            // cache on target-FK changes, but a rewritten manual filter is
+                            // just as stale as one the user edited by hand - clear it here.
+                            EpgCacheService::clearPlaylistEpgCacheFile($alias);
+                        }
+                    });
+            });
+
             // Auto-generate UUID for channels
             Channel::creating(function (Channel $channel) {
                 if (empty($channel->uuid)) {
@@ -820,6 +899,68 @@ class AppServiceProvider extends ServiceProvider
                     ->delete();
 
                 return $playlistAlias;
+            });
+
+            // Bouquets (issue #1391)
+            //
+            // Auto-assign the owner before the ownership check below runs: `saving`
+            // fires before `creating` on a new model, so a bouquet created without an
+            // explicit user_id (relying on the auth()->id() fallback) would otherwise
+            // still be null here.
+            Bouquet::creating(function (Bouquet $bouquet) {
+                if (! $bouquet->user_id) {
+                    $bouquet->user_id = auth()->id();
+                }
+
+                return $bouquet;
+            });
+            Bouquet::saving(function (Bouquet $bouquet) {
+                if (! $bouquet->user_id) {
+                    $bouquet->user_id = auth()->id();
+                }
+
+                $hasPlaylist = $bouquet->playlist_id !== null;
+                $hasCustom = $bouquet->custom_playlist_id !== null;
+                if ($hasPlaylist === $hasCustom) {
+                    throw new InvalidArgumentException('A bouquet must target exactly one of playlist_id or custom_playlist_id.');
+                }
+                if ($hasCustom) {
+                    // Auto-include is a provider-sync concept; custom playlists never sync.
+                    $bouquet->auto_include_new_live = false;
+                    $bouquet->auto_include_new_vod = false;
+                }
+
+                // The hidden target FK is otherwise a name-existence oracle for other
+                // users' playlists (the staleness callout would reveal group/tag names
+                // on a playlist the requester doesn't own) - confirm the target actually
+                // belongs to this bouquet's user. No auth() dependency: this must also
+                // hold during queue-context saves (e.g. applyProviderRenames()).
+                $target = $hasPlaylist
+                    ? Playlist::find($bouquet->playlist_id)
+                    : CustomPlaylist::find($bouquet->custom_playlist_id);
+                if (! $target || $target->user_id !== $bouquet->user_id) {
+                    throw new InvalidArgumentException('A bouquet must target a playlist owned by its user.');
+                }
+
+                return $bouquet;
+            });
+            Bouquet::updated(function (Bouquet $bouquet) {
+                if ($bouquet->wasChanged('group_selections')) {
+                    // Selections feed attached aliases' effective filters - their cached
+                    // EPG XML was generated against the old selection.
+                    $bouquet->playlistAliases->each(
+                        fn (PlaylistAlias $alias) => EpgCacheService::clearPlaylistEpgCacheFile($alias)
+                    );
+                }
+            });
+            Bouquet::deleting(function (Bouquet $bouquet) {
+                // Pivot rows cascade at the DB level (no pivot events fire there), so
+                // clear the attached aliases' caches while they are still attached.
+                $bouquet->playlistAliases->each(
+                    fn (PlaylistAlias $alias) => EpgCacheService::clearPlaylistEpgCacheFile($alias)
+                );
+
+                return $bouquet;
             });
 
             // StreamProfile

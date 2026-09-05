@@ -3,11 +3,13 @@
 use App\Enums\ChannelLogoType;
 use App\Jobs\MergeChannels;
 use App\Jobs\UnmergeChannels;
+use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Season;
 use App\Models\Series;
@@ -1404,4 +1406,109 @@ it('returns valid json with episode count for dvr series info', function () {
     $seasons = $response->json('seasons');
     $this->assertCount(1, $seasons);
     $this->assertSame(2, $seasons[0]['episode_count']);
+});
+
+// ── Bouquet propagation into Xtream category listings (Task 10, issue #1391) ──
+//
+// The four PlaylistAlias accessors (getAllowedLiveGroupNames() etc.) union attached
+// bouquets' selections and channels()/series() enforce the result, so the Xtream
+// category endpoints - which read those same accessors to build aliasFilter arrays -
+// inherit bouquet filtering automatically. These tests pin that propagation.
+
+describe('Xtream API categories for a bouquet-narrowed standard playlist alias', function () {
+    beforeEach(function () {
+        $this->sports = Group::factory()->for($this->user)->for($this->playlist)->create([
+            'type' => 'live', 'name' => 'Sports', 'name_internal' => 'Sports',
+        ]);
+        $this->news = Group::factory()->for($this->user)->for($this->playlist)->create([
+            'type' => 'live', 'name' => 'News', 'name_internal' => 'News',
+        ]);
+        Channel::factory()->for($this->playlist)->for($this->user)->for($this->sports)->create([
+            'group_internal' => 'Sports', 'is_vod' => false, 'enabled' => true,
+        ]);
+        Channel::factory()->for($this->playlist)->for($this->user)->for($this->news)->create([
+            'group_internal' => 'News', 'is_vod' => false, 'enabled' => true,
+        ]);
+    });
+
+    it('narrows get_live_categories to a bouquet-attached alias\'s union without re-keying category ids', function () {
+        // An alias with no filter at all returns every group's own id - the baseline
+        // to prove the bouquet-narrowed response reuses the same ids (no re-keying).
+        PlaylistAlias::create([
+            'name' => 'Unfiltered Alias', 'uuid' => fake()->uuid(),
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'xtream_config' => null, 'username' => 'unfiltered_user', 'password' => 'unfiltered_pass',
+        ]);
+        $unfilteredCategories = $this->getJson(getXtreamApiUrl('unfiltered_user', 'unfiltered_pass', 'get_live_categories'))
+            ->assertOk()->json();
+        $unfilteredIdByName = collect($unfilteredCategories)->pluck('category_id', 'category_name');
+
+        $alias = PlaylistAlias::create([
+            'name' => 'Bouquet Alias', 'uuid' => fake()->uuid(),
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'xtream_config' => null, 'username' => 'bouquet_user', 'password' => 'bouquet_pass',
+        ]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['Sports']],
+        ]);
+        $alias->bouquets()->attach($bouquet);
+
+        $categories = $this->getJson(getXtreamApiUrl('bouquet_user', 'bouquet_pass', 'get_live_categories'))
+            ->assertOk()->json();
+
+        expect(array_column($categories, 'category_name'))->toBe(['Sports'])
+            ->and($categories[0]['category_id'])->toBe($unfilteredIdByName['Sports']);
+    });
+
+    it('falls back to the "all" category when a bouquet narrows to no matching group, exactly as an over-narrow manual filter', function () {
+        PlaylistAlias::create([
+            'name' => 'Manual Alias', 'uuid' => fake()->uuid(),
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'xtream_config' => null, 'username' => 'manual_user', 'password' => 'manual_pass',
+            'group_filter' => ['selected_groups' => ['Nonexistent Group']],
+        ]);
+        $manualCategories = $this->getJson(getXtreamApiUrl('manual_user', 'manual_pass', 'get_live_categories'))
+            ->assertOk()->json();
+
+        $bouquetAlias = PlaylistAlias::create([
+            'name' => 'Bouquet Alias', 'uuid' => fake()->uuid(),
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'xtream_config' => null, 'username' => 'bouquet_all_user', 'password' => 'bouquet_all_pass',
+        ]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['Nonexistent Group']],
+        ]);
+        $bouquetAlias->bouquets()->attach($bouquet);
+
+        $bouquetCategories = $this->getJson(getXtreamApiUrl('bouquet_all_user', 'bouquet_all_pass', 'get_live_categories'))
+            ->assertOk()->json();
+
+        expect($manualCategories)->toBe([['category_id' => 'all', 'category_name' => 'All', 'parent_id' => 0]])
+            ->and($bouquetCategories)->toBe($manualCategories);
+    });
+
+    it('rejects stream-time access to a channel outside the bouquet union and allows one inside it', function () {
+        $alias = PlaylistAlias::create([
+            'name' => 'Stream Time Alias', 'uuid' => fake()->uuid(),
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'xtream_config' => null, 'username' => 'streamtime_user', 'password' => 'streamtime_pass',
+        ]);
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['Sports']],
+        ]);
+        $alias->bouquets()->attach($bouquet);
+        $alias->refresh();
+
+        $sportsChannel = Channel::where('group_internal', 'Sports')->where('playlist_id', $this->playlist->id)->firstOrFail();
+        $newsChannel = Channel::where('group_internal', 'News')->where('playlist_id', $this->playlist->id)->firstOrFail();
+
+        // This is the exact membership query XtreamStreamController::getValidatedStreamFromPlaylist()
+        // runs to validate a live/vod stream request against the authenticated playlist:
+        // $playlist->channels()->where('channels.id', $streamId)->where('enabled', true)->first().
+        expect($alias->channels()->where('channels.id', $sportsChannel->id)->where('enabled', true)->exists())->toBeTrue()
+            ->and($alias->channels()->where('channels.id', $newsChannel->id)->where('enabled', true)->exists())->toBeFalse();
+    });
 });

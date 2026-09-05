@@ -6,11 +6,13 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
+use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
 use App\Models\SyncRun;
@@ -1699,6 +1701,11 @@ class ProcessM3uImport implements ShouldQueue
             $importPrefs = $playlist->import_prefs;
             $playlist->update(['import_prefs' => array_merge($importPrefs, [$selectedKey => $currentSelected])]);
             $playlist->refresh();
+
+            // Bouquets and alias manual filters store the same provider-stable
+            // names as import_prefs and go just as stale on a rename (issue #1391).
+            Bouquet::applyProviderRenames($playlistId, $type, $renames);
+            PlaylistAlias::applyProviderGroupRenames($playlistId, $type, $renames);
         }
 
         foreach ($groups->chunk(50) as $chunk) {
@@ -1741,6 +1748,13 @@ class ProcessM3uImport implements ShouldQueue
                 })
                 ->delete();
         }
+
+        $newNames = $groups->pluck('category_name')
+            ->unique()
+            ->reject(fn ($name) => $name === null || $nameIndex->has($name))
+            ->values()
+            ->all();
+        Bouquet::appendNewGroupNames($playlistId, $type, $newNames);
 
         return [$currentSelected, $groups->unique('category_name')->keyBy('category_name')];
     }

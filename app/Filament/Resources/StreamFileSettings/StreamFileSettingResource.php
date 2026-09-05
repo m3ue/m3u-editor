@@ -68,7 +68,7 @@ class StreamFileSettingResource extends Resource implements CopilotResource
 
     public static function getNavigationSort(): ?int
     {
-        return 7;
+        return 8;
     }
 
     public static function form(Schema $schema): Schema

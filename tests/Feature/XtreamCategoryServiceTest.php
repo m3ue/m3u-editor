@@ -1,11 +1,13 @@
 <?php
 
+use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\Group;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\XtreamCategoryService;
@@ -231,4 +233,54 @@ it('prepends dynamic groups for a standalone playlist but not for a merged playl
     // MergedPlaylist request → no source Playlist, left untouched.
     $merged = MergedPlaylist::factory()->for($this->user)->create();
     expect(XtreamCategoryService::prependDynamicGroups($base, $merged, isVod: true))->toBe($base);
+});
+
+it('suppresses dynamic groups for a bouquet-only alias exactly as a manual filter, but keeps them for a bouquet-less alias', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending', 'sort_order' => 0, 'enabled' => true,
+    ]);
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id, 'is_vod' => true, 'enabled' => true,
+    ]);
+    DB::table('dynamic_group_items')->insert([
+        'dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $channel->id,
+    ]);
+
+    $base = [['category_id' => '5', 'category_name' => 'Regular', 'parent_id' => 0]];
+    $dynamicId = (string) (DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $group->id);
+
+    // Bouquet-only alias: no manual group_filter, but an attached bouquet selects a
+    // VOD group - getAllowedVodGroupNames() unions that in, so the aliasFilter the
+    // controller passes through is non-empty and suppression must kick in exactly
+    // as it would for a manual filter.
+    $bouquetOnlyAlias = PlaylistAlias::create([
+        'name' => 'Bouquet Only Alias', 'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'xtream_config' => null, 'group_filter' => null,
+    ]);
+    $bouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'group_selections' => ['selected_vod_groups' => ['Movies']],
+    ]);
+    $bouquetOnlyAlias->bouquets()->attach($bouquet);
+    $bouquetOnlyAlias->refresh();
+
+    $suppressed = XtreamCategoryService::prependDynamicGroups(
+        $base, $this->playlist, isVod: true, aliasFilter: $bouquetOnlyAlias->getAllowedVodGroupNames(),
+    );
+    expect($suppressed)->toBe($base);
+
+    // Inverse: an alias with neither a manual filter nor an attached bouquet must
+    // still get its dynamic categories prepended.
+    $bouquetLessAlias = PlaylistAlias::create([
+        'name' => 'Bouquet Less Alias', 'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'xtream_config' => null, 'group_filter' => null,
+    ]);
+
+    $kept = XtreamCategoryService::prependDynamicGroups(
+        $base, $this->playlist, isVod: true, aliasFilter: $bouquetLessAlias->getAllowedVodGroupNames(),
+    );
+    expect(array_column($kept, 'category_id'))->toBe([$dynamicId, '5']);
 });

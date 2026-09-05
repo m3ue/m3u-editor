@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
+use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\CopilotTools\EpgMappingStateTool;
 use App\Filament\Pages\Backups;
 use App\Filament\Pages\BrowseShows;
@@ -32,7 +33,6 @@ use App\Filament\Resources\MergedEpgs\MergedEpgResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Networks\NetworkResource;
 use App\Filament\Resources\PersonalAccessTokens\PersonalAccessTokenResource;
-use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
 use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
@@ -179,6 +179,7 @@ class AdminPanelProvider extends PanelProvider
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
+            ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\\Filament\\Clusters')
             ->pages([
                 CustomDashboard::class,
             ])
@@ -206,7 +207,7 @@ class AdminPanelProvider extends PanelProvider
                                 ...PlaylistResource::getNavigationItems(),
                                 ...CustomPlaylistResource::getNavigationItems(),
                                 ...MergedPlaylistResource::getNavigationItems(),
-                                ...PlaylistAliasResource::getNavigationItems(),
+                                ...PlaylistAliasesCluster::getNavigationItems(),
                                 ...PlaylistViewerResource::getNavigationItems(),
                                 ...PlaylistAuthResource::getNavigationItems(),
                                 ...StreamFileSettingResource::getNavigationItems(),

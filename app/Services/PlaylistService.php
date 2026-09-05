@@ -10,6 +10,7 @@ use App\Jobs\MergeChannels;
 use App\Jobs\MergeEpisodes;
 use App\Jobs\UnmergeChannels;
 use App\Jobs\UnmergeEpisodes;
+use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -25,6 +26,7 @@ use Carbon\Carbon;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
+use Filament\Forms\Components\Field;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -1713,5 +1715,138 @@ class PlaylistService
             ->modalIcon('heroicon-o-play')
             ->modalDescription('Add the items to the chosen custom playlist.')
             ->modalSubmitActionLabel('Add now');
+    }
+
+    /**
+     * Schema for the Add-to-Bouquet group/category actions: one bouquet select
+     * scoped to the user's standard-target bouquets. No inline create - a bulk
+     * selection's playlist is unknown until the action runs, so a quick-created
+     * bouquet could not be targeted; the action validates the match instead.
+     *
+     * @return array<int, Field>
+     */
+    public static function getAddToBouquetSchema(): array
+    {
+        return [
+            Select::make('bouquet')
+                ->label(__('Bouquet'))
+                ->required()
+                ->searchable()
+                ->options(fn (): array => Bouquet::query()
+                    ->where('user_id', auth()->id())
+                    ->whereNotNull('playlist_id')
+                    ->with('playlist')
+                    ->orderBy('name')
+                    ->get()
+                    ->mapWithKeys(fn (Bouquet $bouquet): array => [
+                        $bouquet->id => $bouquet->name.' ('.($bouquet->playlist?->name ?? 'N/A').')',
+                    ])
+                    ->all())
+                ->helperText(__('Bouquets are scoped to a single playlist; the selected groups must belong to it. Create bouquets under Playlist Bouquets.')),
+        ];
+    }
+
+    /**
+     * Merge the selected Group/Category records' provider-stable names into a
+     * bouquet's selections. Public static so tests can exercise the handler
+     * directly. $type: 'live' | 'vod' | 'category'.
+     */
+    public static function addGroupRecordsToBouquet(\Illuminate\Support\Collection $records, int $bouquetId, string $type): void
+    {
+        $bouquet = Bouquet::where('user_id', auth()->id())->find($bouquetId);
+        if (! $bouquet || ! $bouquet->playlist_id) {
+            Notification::make()->danger()->title(__('Bouquet not found'))->send();
+
+            return;
+        }
+
+        // Custom groups (user-created, no matching SourceGroup row) only ever match
+        // is_custom channels via the fallback name path - provider channels moved into
+        // them never match. Adding them to a bouquet would make the staleness tooling
+        // falsely flag them, and "Clean up missing" would then delete a half-working
+        // selection. Category records have no `custom` column at all.
+        $originalCount = $records->count();
+        $records = $records->reject(fn ($record) => $record->custom ?? false)->values();
+        $skippedCustomCount = $originalCount - $records->count();
+
+        if ($records->isEmpty()) {
+            Notification::make()
+                ->danger()
+                ->title(__('Custom groups cannot be added to bouquets'))
+                ->send();
+
+            return;
+        }
+
+        $playlistIds = $records->pluck('playlist_id')->unique();
+        if ($playlistIds->count() !== 1 || (int) $playlistIds->first() !== $bouquet->playlist_id) {
+            Notification::make()
+                ->danger()
+                ->title(__('Playlist mismatch'))
+                ->body(__('Bouquets are scoped to a single playlist. Select groups from the bouquet\'s own playlist only.'))
+                ->send();
+
+            return;
+        }
+
+        $key = match ($type) {
+            'vod' => 'selected_vod_groups',
+            'category' => 'selected_categories',
+            default => 'selected_groups',
+        };
+
+        $names = $records
+            ->map(fn ($record) => $record->name_internal ?? $record->name)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $selections = $bouquet->group_selections ?? [];
+        $current = $selections[$key] ?? [];
+        $updated = array_values(array_unique(array_merge($current, $names->all())));
+        $added = count($updated) - count($current);
+        $selections[$key] = $updated;
+        $bouquet->update(['group_selections' => $selections]);
+
+        $body = __(':added added, :existing already present.', [
+            'added' => $added,
+            'existing' => $names->count() - $added,
+        ]);
+        if ($skippedCustomCount > 0) {
+            $body .= ' '.__(':skipped custom group(s) skipped.', ['skipped' => $skippedCustomCount]);
+        }
+
+        Notification::make()
+            ->success()
+            ->title(__('Added to bouquet'))
+            ->body($body)
+            ->send();
+    }
+
+    public static function getAddGroupsToBouquetBulkAction(string $name = 'add_to_bouquet', string $type = 'live'): BulkAction
+    {
+        return BulkAction::make($name)
+            ->label(__('Add to Bouquet'))
+            ->schema(self::getAddToBouquetSchema())
+            ->action(fn (Collection $records, array $data) => self::addGroupRecordsToBouquet($records, (int) $data['bouquet'], $type))
+            ->deselectRecordsAfterCompletion()
+            ->requiresConfirmation()
+            ->icon('heroicon-o-rectangle-stack')
+            ->modalIcon('heroicon-o-rectangle-stack')
+            ->modalDescription(__('Add the selected group(s) to the chosen bouquet.'))
+            ->modalSubmitActionLabel(__('Add now'));
+    }
+
+    public static function getAddGroupsToBouquetAction(string $name = 'add_to_bouquet', string $type = 'live'): Action
+    {
+        return Action::make($name)
+            ->label(__('Add to Bouquet'))
+            ->schema(self::getAddToBouquetSchema())
+            ->action(fn ($record, array $data) => self::addGroupRecordsToBouquet(collect([$record]), (int) $data['bouquet'], $type))
+            ->requiresConfirmation()
+            ->icon('heroicon-o-rectangle-stack')
+            ->modalIcon('heroicon-o-rectangle-stack')
+            ->modalDescription(__('Add this group to the chosen bouquet.'))
+            ->modalSubmitActionLabel(__('Add now'));
     }
 }

@@ -74,7 +74,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
 
     public static function getNavigationSort(): ?int
     {
-        return 6;
+        return 7;
     }
 
     public static function form(Schema $schema): Schema
