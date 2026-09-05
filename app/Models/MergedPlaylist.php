@@ -87,29 +87,6 @@ class MergedPlaylist extends Model
     }
 
     /**
-     * IDs of the source playlists, optionally limited to those contributing a
-     * content type ('live', 'vod' or 'series') via the per-source pivot toggles.
-     * Ordered by playlist id: without an ORDER BY, Postgres returns pivot rows in
-     * heap order, which changes as soon as a row is updated.
-     *
-     * @return array<int>
-     */
-    public function sourcePlaylistIds(?string $contentType = null): array
-    {
-        $sources = $this->playlists();
-
-        // Not when(): its callback receives the Eloquent builder, on which wherePivot()
-        // degrades to a dynamic where on a column literally named "pivot".
-        if ($contentType !== null) {
-            $sources->wherePivot("include_{$contentType}", true);
-        }
-
-        return $sources->orderBy('playlists.id')->pluck('playlists.id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
-    }
-
-    /**
      * Source playlists that expose an Xtream API URL, shaped for the PlaylistAlias
      * credential-swap form. Mirrors CustomPlaylist::getSourcePlaylistsForAlias().
      *

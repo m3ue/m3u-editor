@@ -3,7 +3,7 @@
 /**
  * Issue #1457 (Pass 1): a PlaylistAlias may wrap a MergedPlaylist so its output
  * can be handed out with replacement Xtream credentials. Per-alias group/category
- * filtering for merged aliases is covered by PlaylistAliasMergedPlaylistFilterTest.
+ * filtering is intentionally out of scope for Pass 1.
  */
 
 use App\Filament\Resources\PlaylistAliases\Pages\CreatePlaylistAlias;
