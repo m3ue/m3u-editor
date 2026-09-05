@@ -60,7 +60,7 @@ it('writes vod and category keys per type', function () {
 });
 
 it('writes nothing when every selected group is custom', function () {
-    // Custom groups (user-created, `custom = true`) have no matching SourceGroup row —
+    // Custom groups (user-created, `custom = true`) have no matching SourceGroup row -
     // the staleness tooling would falsely flag them, and only is_custom channels ever
     // match them via the fallback name path, so they cannot be added to a bouquet.
     $bouquet = Bouquet::factory()->create([

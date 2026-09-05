@@ -10,7 +10,7 @@ return new class extends Migration
      * User-defined, reusable selections of a playlist's groups (issue #1391).
      *
      * A bouquet targets exactly one of playlist_id / custom_playlist_id (enforced
-     * at the application layer — SQLite cannot ALTER in a CHECK). Membership is
+     * at the application layer - SQLite cannot ALTER in a CHECK). Membership is
      * stored as provider-stable NAME arrays in group_selections, mirroring
      * playlist_aliases.group_filter, so selections survive the source_groups
      * hard-delete / groups soft-delete churn and union cleanly with manual filters.

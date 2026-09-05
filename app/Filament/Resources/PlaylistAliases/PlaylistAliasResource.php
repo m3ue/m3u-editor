@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PlaylistAliases;
 
 use App\Facades\PlaylistFacade;
 use App\Filament\Actions\GeneratePasswordAction;
+use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
@@ -60,10 +61,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function getNavigationGroup(): ?string
-    {
-        return __('Playlist');
-    }
+    protected static ?string $cluster = PlaylistAliasesCluster::class;
 
     public static function getModelLabel(): string
     {
@@ -721,7 +719,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->preload()
                                 ->live()
                                 ->columnSpanFull()
-                                ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine — assigning a bouquet never removes anything the manual pickers allow.'))
+                                ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine - assigning a bouquet never removes anything the manual pickers allow.'))
                                 ->createOptionForm([
                                     Forms\Components\TextInput::make('name')->required(),
                                     Forms\Components\Textarea::make('description'),
@@ -1201,8 +1199,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             default => 'getSelectedLiveGroupNames',
         };
 
-        // Scope to the current user and the alias's active target — mirrors the
-        // Select's own modifyQueryUsing — so a tampered `bouquets` state (e.g. a
+        // Scope to the current user and the alias's active target - mirrors the
+        // Select's own modifyQueryUsing - so a tampered `bouquets` state (e.g. a
         // forged Livewire request with another user's bouquet IDs) can never leak
         // another user's bouquet contents through the picker badges or the
         // contribution callout below.

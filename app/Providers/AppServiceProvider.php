@@ -716,7 +716,7 @@ class AppServiceProvider extends ServiceProvider
 
             // Custom playlist group/category tags: propagate renames into bouquets
             // and alias group filters, which store tag names and would otherwise
-            // silently stop matching — same treatment the provider-rename pass in
+            // silently stop matching - same treatment the provider-rename pass in
             // ProcessM3uImport gives standard playlists (issue #1391).
             Tag::updated(function (Tag $tag) {
                 if (! $tag->wasChanged('name') || ! $tag->type) {
@@ -767,7 +767,7 @@ class AppServiceProvider extends ServiceProvider
 
                 // Custom-playlist aliases also carry a manual live-group sort order
                 // (fed by the same custom-variant picker as selected_groups), which
-                // goes stale the same way — but only group tags have a live-group
+                // goes stale the same way - but only group tags have a live-group
                 // sort order to rewrite; category tags don't touch it.
                 PlaylistAlias::where('custom_playlist_id', $customPlaylist->id)
                     ->cursor()
@@ -785,7 +785,7 @@ class AppServiceProvider extends ServiceProvider
                             $alias->updateQuietly(['group_filter' => $filter]);
                             // updateQuietly() skips the ::updating hook that clears the EPG
                             // cache on target-FK changes, but a rewritten manual filter is
-                            // just as stale as one the user edited by hand — clear it here.
+                            // just as stale as one the user edited by hand - clear it here.
                             EpgCacheService::clearPlaylistEpgCacheFile($alias);
                         }
                     });
@@ -892,7 +892,7 @@ class AppServiceProvider extends ServiceProvider
 
                 // The hidden target FK is otherwise a name-existence oracle for other
                 // users' playlists (the staleness callout would reveal group/tag names
-                // on a playlist the requester doesn't own) — confirm the target actually
+                // on a playlist the requester doesn't own) - confirm the target actually
                 // belongs to this bouquet's user. No auth() dependency: this must also
                 // hold during queue-context saves (e.g. applyProviderRenames()).
                 $target = $hasPlaylist
@@ -906,7 +906,7 @@ class AppServiceProvider extends ServiceProvider
             });
             Bouquet::updated(function (Bouquet $bouquet) {
                 if ($bouquet->wasChanged('group_selections')) {
-                    // Selections feed attached aliases' effective filters — their cached
+                    // Selections feed attached aliases' effective filters - their cached
                     // EPG XML was generated against the old selection.
                     $bouquet->playlistAliases->each(
                         fn (PlaylistAlias $alias) => EpgCacheService::clearPlaylistEpgCacheFile($alias)

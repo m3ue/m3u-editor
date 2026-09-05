@@ -174,8 +174,8 @@ describe('getChannelQuery custom live group ordering', function () {
 
     it('ranks a bouquet-contributed group in the CASE ELSE bucket after an explicitly ordered manual group', function () {
         // A Group's natural sort_order (1) would put it first; only the CASE
-        // ordering — with B Group explicitly ranked and A Group falling into the
-        // ELSE bucket — can put B Group first instead.
+        // ordering - with B Group explicitly ranked and A Group falling into the
+        // ELSE bucket - can put B Group first instead.
         $aGroup = makeLiveGroup($this->user, $this->playlist, 'A Group', 1);
         $bGroup = makeLiveGroup($this->user, $this->playlist, 'B Group', 2);
         $aCh = makeLiveChannel($this->user, $this->playlist, $aGroup, 'A Channel');
@@ -187,7 +187,7 @@ describe('getChannelQuery custom live group ordering', function () {
             'live_group_order' => ['B Group'],
         ]);
 
-        // Bouquet contributes 'A Group' to the union — it is never in the manual
+        // Bouquet contributes 'A Group' to the union - it is never in the manual
         // live_group_order, so it must land in the CASE ELSE bucket.
         $bouquet = Bouquet::factory()->create([
             'user_id' => $this->user->id,

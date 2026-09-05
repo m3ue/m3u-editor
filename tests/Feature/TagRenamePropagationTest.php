@@ -24,7 +24,7 @@ it('rewrites bouquet group selections (live and vod keys) when a group tag is re
         'group_selections' => [
             'selected_groups' => ['Old Group', 'Other'],
             'selected_vod_groups' => ['Old Group'],
-            'selected_categories' => ['Old Group'],  // same string, different namespace — must NOT change
+            'selected_categories' => ['Old Group'],  // same string, different namespace - must NOT change
         ],
     ]);
 

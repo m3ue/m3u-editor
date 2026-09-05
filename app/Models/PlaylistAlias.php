@@ -98,7 +98,7 @@ class PlaylistAlias extends Model
 
         $merged = ['selected_groups' => [], 'selected_vod_groups' => [], 'selected_categories' => []];
 
-        // Merged-playlist (and orphaned) aliases have no bouquet support — zero queries.
+        // Merged-playlist (and orphaned) aliases have no bouquet support - zero queries.
         if (! $this->playlist_id && ! $this->custom_playlist_id) {
             return $this->bouquetSelections = $merged;
         }

@@ -19,7 +19,7 @@ use Filament\Schemas\Components\Utilities\Set;
  * (unstable across syncs), while the persisted state is provider-stable names.
  * Reads the playlist from the sibling `playlist_id` form field / record
  * attribute, and reads/writes the record's `group_selections` for the
- * never-silently-shrink merge — i.e. this builder is bouquet-form-scoped;
+ * never-silently-shrink merge - i.e. this builder is bouquet-form-scoped;
  * parameterize the stored-selection lookup before reusing it on the alias form.
  *
  * $type: 'live' | 'vod' | 'categories'.

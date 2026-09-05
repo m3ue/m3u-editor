@@ -1412,7 +1412,7 @@ it('returns valid json with episode count for dvr series info', function () {
 //
 // The four PlaylistAlias accessors (getAllowedLiveGroupNames() etc.) union attached
 // bouquets' selections and channels()/series() enforce the result, so the Xtream
-// category endpoints — which read those same accessors to build aliasFilter arrays —
+// category endpoints - which read those same accessors to build aliasFilter arrays -
 // inherit bouquet filtering automatically. These tests pin that propagation.
 
 describe('Xtream API categories for a bouquet-narrowed standard playlist alias', function () {
@@ -1432,7 +1432,7 @@ describe('Xtream API categories for a bouquet-narrowed standard playlist alias',
     });
 
     it('narrows get_live_categories to a bouquet-attached alias\'s union without re-keying category ids', function () {
-        // An alias with no filter at all returns every group's own id — the baseline
+        // An alias with no filter at all returns every group's own id - the baseline
         // to prove the bouquet-narrowed response reuses the same ids (no re-keying).
         PlaylistAlias::create([
             'name' => 'Unfiltered Alias', 'uuid' => fake()->uuid(),

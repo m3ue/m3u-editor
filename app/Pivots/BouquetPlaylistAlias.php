@@ -19,7 +19,7 @@ class BouquetPlaylistAlias extends Pivot
     protected static function booted(): void
     {
         // Server-side attach invariant: a bouquet only ever applies to aliases of
-        // its own playlist — its stored names are meaningless anywhere else. The
+        // its own playlist - its stored names are meaningless anywhere else. The
         // Filament form pre-filters options; this guard covers API/console writes.
         // Custom pivot classes make attach()/detach()/sync() fire these events.
         static::creating(function (self $pivot): void {

@@ -11,8 +11,8 @@ declare(strict_types=1);
  * consumer that already reads those accessors inherits bouquet filtering automatically.
  * VodResource and SeriesResource in the guest panel (App\Filament\GuestPanel\Resources)
  * already call getAllowedVodGroupNames()/getAllowedCategoryNames() on a resolved
- * PlaylistAlias — see VodResource::getEloquentQuery() around line 111 and the mirrored
- * branch in SeriesResource — so no guest-panel-specific code was needed for bouquets to
+ * PlaylistAlias - see VodResource::getEloquentQuery() around line 111 and the mirrored
+ * branch in SeriesResource - so no guest-panel-specific code was needed for bouquets to
  * reach here; this file pins that it actually does.
  */
 
@@ -33,7 +33,7 @@ uses(RefreshDatabase::class);
  * Mirrors GuestBrowseShowsTest's setupGuestDvrContext(): sets the request attribute and
  * session keys HasPlaylist::getCurrentUuid()/getCurrentAuth() read so a direct call to a
  * guest-panel Resource's static query method resolves as if it were serving a real guest
- * request — without going through Livewire::test(), which (per GuestBrowseShowsTest's own
+ * request - without going through Livewire::test(), which (per GuestBrowseShowsTest's own
  * skip note) creates a synthetic request that cannot carry request-attribute context.
  *
  * The one adaptation from GuestBrowseShowsTest's harness: this keys the session/attribute

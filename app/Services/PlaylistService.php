@@ -1719,7 +1719,7 @@ class PlaylistService
 
     /**
      * Schema for the Add-to-Bouquet group/category actions: one bouquet select
-     * scoped to the user's standard-target bouquets. No inline create — a bulk
+     * scoped to the user's standard-target bouquets. No inline create - a bulk
      * selection's playlist is unknown until the action runs, so a quick-created
      * bouquet could not be targeted; the action validates the match instead.
      *
@@ -1761,7 +1761,7 @@ class PlaylistService
         }
 
         // Custom groups (user-created, no matching SourceGroup row) only ever match
-        // is_custom channels via the fallback name path — provider channels moved into
+        // is_custom channels via the fallback name path - provider channels moved into
         // them never match. Adding them to a bouquet would make the staleness tooling
         // falsely flag them, and "Clean up missing" would then delete a half-working
         // selection. Category records have no `custom` column at all.

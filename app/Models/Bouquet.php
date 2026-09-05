@@ -128,7 +128,7 @@ class Bouquet extends Model
      * Stored names that no longer resolve to a selectable group/category on the
      * target playlist, per selection key. Provider churn (standard targets) or
      * tag deletion/re-tagging (custom targets) makes entries stale; they are
-     * kept, never auto-pruned — this powers the UI staleness callout and the
+     * kept, never auto-pruned - this powers the UI staleness callout and the
      * explicit cleanup action only.
      *
      * @return array<string, array<string>>

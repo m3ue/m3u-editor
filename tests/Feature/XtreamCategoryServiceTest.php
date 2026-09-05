@@ -251,7 +251,7 @@ it('suppresses dynamic groups for a bouquet-only alias exactly as a manual filte
     $dynamicId = (string) (DynamicGroup::XTREAM_CATEGORY_ID_OFFSET + $group->id);
 
     // Bouquet-only alias: no manual group_filter, but an attached bouquet selects a
-    // VOD group — getAllowedVodGroupNames() unions that in, so the aliasFilter the
+    // VOD group - getAllowedVodGroupNames() unions that in, so the aliasFilter the
     // controller passes through is non-empty and suppression must kick in exactly
     // as it would for a manual filter.
     $bouquetOnlyAlias = PlaylistAlias::create([

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Bouquets;
 
+use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Forms\Components\CustomPlaylistGroupModalSelect;
 use App\Filament\Forms\Components\SourceGroupModalSelect;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
@@ -23,6 +24,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
@@ -35,9 +37,11 @@ class BouquetResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    public static function getNavigationGroup(): ?string
+    protected static ?string $cluster = PlaylistAliasesCluster::class;
+
+    public static function getNavigationLabel(): string
     {
-        return __('Playlist');
+        return __('Bouquets');
     }
 
     public static function getModelLabel(): string
@@ -131,7 +135,7 @@ class BouquetResource extends Resource
                             $set('custom_playlist_id', $isCustom ? $id : null);
                             self::resetSelections($set);
                         })
-                        ->helperText(__('The playlist cannot be changed after creation — the selected group names would not exist on another playlist. Create a new bouquet instead.')),
+                        ->helperText(__('The playlist cannot be changed after creation - the selected group names would not exist on another playlist. Create a new bouquet instead.')),
                     Forms\Components\Hidden::make('playlist_id'),
                     Forms\Components\Hidden::make('custom_playlist_id'),
                 ]),
@@ -220,7 +224,7 @@ class BouquetResource extends Resource
                     ->label(__('Live / VOD / Series'))
                     ->getStateUsing(fn (Bouquet $record): string => count($record->getSelectedLiveGroupNames())
                         .' / '.count($record->getSelectedVodGroupNames())
-                        .' / '.count($record->getSelectedCategoryNames())),
+                        .' / '.count($record->getSelectedCategoryNames()))->badge(),
                 Tables\Columns\TextColumn::make('playlist_aliases_count')
                     ->label(__('Aliases'))
                     ->badge()
@@ -231,7 +235,21 @@ class BouquetResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
-                EditAction::make()->slideOver(),
+                DeleteAction::make()
+                    ->modalDescription(function (Bouquet $record): string {
+                        $names = $record->playlistAliases()->pluck('name')->all();
+
+                        return empty($names)
+                            ? __('This bouquet is not assigned to any aliases.')
+                            : __('This bouquet is assigned to the following aliases; deleting it removes its groups from their filters:').' '.implode(', ', $names);
+                    })
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
+                EditAction::make()->slideOver()
+                    ->button()
+                    ->size('sm')
+                    ->hiddenLabel(),
                 Action::make('clean_up_missing')
                     ->label(__('Clean up missing'))
                     ->icon('heroicon-o-sparkles')
@@ -240,22 +258,16 @@ class BouquetResource extends Resource
                         $stale = $record->staleSelectionNames();
 
                         return $stale === []
-                            ? __('No missing entries found — nothing will be removed.')
+                            ? __('No missing entries found - nothing will be removed.')
                             : __('Remove these entries that are no longer selectable?').' '.implode(', ', $stale);
                     })
                     ->action(function (Bouquet $record): void {
                         $record->removeStaleSelectionNames();
                         Notification::make()->success()->title(__('Missing entries removed'))->send();
-                    }),
-                DeleteAction::make()
-                    ->modalDescription(function (Bouquet $record): string {
-                        $names = $record->playlistAliases()->pluck('name')->all();
-
-                        return empty($names)
-                            ? __('This bouquet is not assigned to any aliases.')
-                            : __('This bouquet is assigned to the following aliases; deleting it removes its groups from their filters:').' '.implode(', ', $names);
-                    }),
-            ])
+                    })
+                    ->button()
+                    ->size('sm'),
+            ], RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 DeleteBulkAction::make()
                     ->modalDescription(__('Assigned aliases lose these bouquets\' groups from their filters.')),
