@@ -1227,6 +1227,39 @@ class PlaylistService
                 ->columnSpanFull(),
         ];
 
+        if ($isVod) {
+            $schema[] = Fieldset::make('VOD Resolution Priority')
+                ->schema([
+                    Toggle::make('vod_resolution_priority_enabled')
+                        ->label('Promote higher-resolution duplicate when same TMDB ID found')
+                        ->inline(false)
+                        ->default(true)
+                        ->helperText('When enabled, the higher-resolution duplicate becomes the master when the same TMDB ID appears at multiple resolutions.'),
+                    Toggle::make('vod_use_filename_resolution')
+                        ->label('Parse resolution from title/URL when ffprobe data is missing')
+                        ->inline(false)
+                        ->default(true)
+                        ->helperText('Derive resolution from the title, name, or URL when the stream has not been probed with ffprobe.'),
+                    Select::make('vod_min_resolution_promote')
+                        ->label('Discard filename-derived resolution below this height')
+                        ->options([
+                            480 => '480p',
+                            720 => '720p',
+                            1080 => '1080p',
+                            2160 => '2160p',
+                        ])
+                        ->default(720)
+                        ->helperText('Channels whose filename-parsed resolution is below this threshold are treated as having no resolution signal. Probed resolution always passes through.'),
+                    Toggle::make('vod_verify_filename_via_probe')
+                        ->label('Verify filename-derived resolution via ffprobe after merge')
+                        ->inline(false)
+                        ->default(false)
+                        ->helperText('When enabled, channels whose resolution was derived from filename/title/URL (not probed) are queued for ffprobe after the merge completes. Next merge uses the probed value.'),
+                ])
+                ->columns(2)
+                ->columnSpanFull();
+        }
+
         if (! $isVod && ! $isSeries) {
             $schema[] = Fieldset::make(__('Fallback matching for channels without IDs'))
                 ->schema([
@@ -1391,7 +1424,7 @@ class PlaylistService
     /**
      * Build the weighted config array from merge form data.
      */
-    public static function buildMergeWeightedConfig(array $data): ?array
+    public static function buildMergeWeightedConfig(array $data, string $contentType = 'live'): ?array
     {
         $groupPriorities = $data['group_priorities'] ?? [];
         $priorityAttributes = collect($data['priority_attributes'] ?? [])
@@ -1400,17 +1433,55 @@ class PlaylistService
             ->values()
             ->toArray();
 
+        $isVod = $contentType === 'vod';
+        $vodResolutionPriorityEnabled = $isVod && ($data['vod_resolution_priority_enabled'] ?? true);
+
+        if ($vodResolutionPriorityEnabled) {
+            $priorityAttributes = self::vodPriorityAttributes($priorityAttributes);
+        }
+
         if (! empty($data['priority_keywords']) || ! empty($data['prefer_codec']) || ($data['exclude_disabled_groups'] ?? false) || ! empty($groupPriorities) || ! empty($priorityAttributes)) {
-            return [
+            $config = [
                 'priority_keywords' => $data['priority_keywords'] ?? [],
                 'prefer_codec' => $data['prefer_codec'] ?? null,
                 'exclude_disabled_groups' => $data['exclude_disabled_groups'] ?? false,
                 'group_priorities' => $groupPriorities,
                 'priority_attributes' => $priorityAttributes,
             ];
+
+            if ($isVod) {
+                $config['vod_resolution_priority_enabled'] = $vodResolutionPriorityEnabled;
+                $config['vod_use_filename_resolution'] = (bool) ($data['vod_use_filename_resolution'] ?? true);
+                $config['vod_min_resolution_promote'] = (int) ($data['vod_min_resolution_promote'] ?? 720);
+                $config['vod_verify_filename_via_probe'] = (bool) ($data['vod_verify_filename_via_probe'] ?? false);
+            }
+
+            return $config;
         }
 
         return null;
+    }
+
+    /**
+     * Compute the priority-attribute list used when VOD resolution priority is
+     * enabled. Injects 'resolution' ahead of any user-configured attributes, or
+     * returns the VOD default order when none are configured.
+     *
+     * @param  array<int, mixed>  $priorityAttributes
+     * @return array<int, string>
+     */
+    public static function vodPriorityAttributes(array $priorityAttributes): array
+    {
+        $normalized = collect($priorityAttributes)
+            ->map(fn ($item) => is_array($item) ? ($item['attribute'] ?? null) : $item)
+            ->filter(fn ($attr) => is_string($attr) && trim($attr) !== '' && trim($attr) !== 'resolution')
+            ->map(fn ($attr) => trim($attr))
+            ->values()
+            ->all();
+
+        return ! empty($normalized)
+            ? array_values(array_unique(array_merge(['resolution'], $normalized)))
+            : MergeChannels::VOD_DEFAULT_PRIORITY_ORDER;
     }
 
     /**
@@ -1461,7 +1532,7 @@ class PlaylistService
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
                             groupId: $record->id,
-                            weightedConfig: self::buildMergeWeightedConfig($data),
+                            weightedConfig: self::buildMergeWeightedConfig($data, $contentType),
                             fallbackMergeConfig: self::buildMergeFallbackConfig($data),
                             contentType: $contentType,
                             mergeKey: $data['merge_key'] ?? 'stream_id',
@@ -1490,7 +1561,7 @@ class PlaylistService
                             deactivateFailoverChannels: $data['deactivate_failover_channels'] ?? false,
                             forceCompleteRemerge: $data['force_complete_remerge'] ?? false,
                             preferCatchupAsPrimary: $data['prefer_catchup_as_primary'] ?? false,
-                            weightedConfig: self::buildMergeWeightedConfig($data),
+                            weightedConfig: self::buildMergeWeightedConfig($data, $contentType),
                             fallbackMergeConfig: self::buildMergeFallbackConfig($data),
                             contentType: $contentType,
                             mergeKey: $data['merge_key'] ?? 'stream_id',

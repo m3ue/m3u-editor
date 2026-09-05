@@ -2674,6 +2674,38 @@ class PlaylistResource extends Resource implements CopilotResource
                                     }
                                 }),
                         ]),
+
+                    Fieldset::make(__('VOD Resolution Priority'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled') || $get('auto_merge_config.merge_key') !== 'tmdb_id')
+                        ->schema([
+                            Toggle::make('auto_merge_config.vod_resolution_priority_enabled')
+                                ->label(__('Promote higher-resolution duplicate when same TMDB ID found'))
+                                ->inline(false)
+                                ->default(true)
+                                ->helperText(__('When enabled, the higher-resolution duplicate becomes the master when the same TMDB ID appears at multiple resolutions.')),
+                            Toggle::make('auto_merge_config.vod_use_filename_resolution')
+                                ->label(__('Parse resolution from title/URL when ffprobe data is missing'))
+                                ->inline(false)
+                                ->default(true)
+                                ->helperText(__('Derive resolution from the title, name, or URL when the stream has not been probed with ffprobe.')),
+                            Select::make('auto_merge_config.vod_min_resolution_promote')
+                                ->label(__('Discard filename-derived resolution below this height'))
+                                ->options([
+                                    480 => '480p',
+                                    720 => '720p',
+                                    1080 => '1080p',
+                                    2160 => '2160p',
+                                ])
+                                ->default(720)
+                                ->helperText(__('Channels whose filename-parsed resolution is below this threshold are treated as having no resolution signal. Probed resolution always passes through.')),
+                            Toggle::make('auto_merge_config.vod_verify_filename_via_probe')
+                                ->label(__('Verify filename-derived resolution via ffprobe after merge'))
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('When enabled, channels whose resolution was derived from filename/title/URL (not probed) are queued for ffprobe after the merge completes. Next merge uses the probed value.')),
+                        ]),
                 ]),
             Section::make(__('Find & Replace Rules'))
                 ->description(__('Define find & replace rules that automatically run after each playlist sync. Rules execute in order.'))
@@ -2922,15 +2954,22 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ];
 
                                     return match ($get('target')) {
-                                        'series_categories' => ['release_date' => 'Release Date'],
-                                        'vod_groups' => [...$alphaOptions, 'release_date' => 'Release Date'],
+                                        'series_categories' => [
+                                            'release_date' => 'Release Date',
+                                            'rating' => __('Rating'),
+                                        ],
+                                        'vod_groups' => [
+                                            ...$alphaOptions,
+                                            'release_date' => 'Release Date',
+                                            'rating' => __('Rating'),
+                                        ],
                                         default => $alphaOptions,
                                     };
                                 })
                                 ->live()
                                 ->default('title')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', ($state ?? '') === 'release_date' ? 'DESC' : 'ASC'))
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', in_array(($state ?? ''), ['release_date', 'rating'], true) ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))

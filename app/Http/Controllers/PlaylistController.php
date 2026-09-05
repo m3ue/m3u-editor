@@ -8,6 +8,7 @@ use App\Jobs\MergeChannels;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\M3uProxyService;
+use App\Services\PlaylistService;
 use App\Services\SyncPipelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -526,7 +527,7 @@ class PlaylistController extends Controller
         $preferCatchupAsPrimary = (bool) ($config['prefer_catchup_as_primary'] ?? false);
         $newChannelsOnly = (bool) ($config['new_channels_only'] ?? true);
         $groupId = array_key_exists('group_id', $validated) ? $validated['group_id'] : null;
-        $weightedConfig = $this->buildMergeWeightedConfig($config);
+        $weightedConfig = $this->buildMergeWeightedConfig($config, ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live');
 
         dispatch(new MergeChannels(
             user: $user,
@@ -594,7 +595,7 @@ class PlaylistController extends Controller
     /**
      * Build weighted merge config if weighted priority options are present.
      */
-    private function buildMergeWeightedConfig(array $config): ?array
+    private function buildMergeWeightedConfig(array $config, string $contentType = 'live'): ?array
     {
         $priorityAttributes = $this->normalizePriorityAttributes($config['priority_attributes'] ?? []);
         $priorityKeywords = collect($config['priority_keywords'] ?? [])
@@ -619,6 +620,13 @@ class PlaylistController extends Controller
             ? $config['prefer_codec']
             : null;
 
+        $isVod = $contentType === 'vod';
+        $vodResolutionPriorityEnabled = $isVod && ($config['vod_resolution_priority_enabled'] ?? true);
+
+        if ($vodResolutionPriorityEnabled) {
+            $priorityAttributes = PlaylistService::vodPriorityAttributes($priorityAttributes);
+        }
+
         $hasWeightedOptions = ! empty($priorityAttributes)
             || ! empty($groupPriorities)
             || ! empty($priorityKeywords)
@@ -629,13 +637,21 @@ class PlaylistController extends Controller
             return null;
         }
 
-        return [
+        $result = [
             'priority_attributes' => $priorityAttributes,
             'group_priorities' => $groupPriorities,
             'priority_keywords' => $priorityKeywords,
             'prefer_codec' => $preferCodec,
             'exclude_disabled_groups' => $config['exclude_disabled_groups'] ?? false,
         ];
+
+        if ($isVod) {
+            $result['vod_resolution_priority_enabled'] = $vodResolutionPriorityEnabled;
+            $result['vod_use_filename_resolution'] = (bool) ($config['vod_use_filename_resolution'] ?? true);
+            $result['vod_min_resolution_promote'] = (int) ($config['vod_min_resolution_promote'] ?? 720);
+        }
+
+        return $result;
     }
 
     /**
