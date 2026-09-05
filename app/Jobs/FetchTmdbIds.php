@@ -6,8 +6,10 @@ use App\Enums\SyncRunPhase;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Group;
+use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
@@ -149,6 +151,14 @@ class FetchTmdbIds implements ShouldQueue
             $this->processSeries($tmdb);
         }
 
+        // Reclassify non-genre-matching groups for any touched playlist that opted in.
+        // Only on the non-chunk inline path - chunk jobs would re-run this against the
+        // same playlist. The batched path triggers it from the Batch::finally() callback
+        // exactly once at the true end.
+        if (! $this->isChunkJob) {
+            $this->reclassifyGroupsForTouchedPlaylists();
+        }
+
         if ($this->isChunkJob) {
             $this->recordBatchStats();
         }
@@ -205,12 +215,14 @@ class FetchTmdbIds implements ShouldQueue
         $postCompletionJobs = $this->postCompletionJobs;
         $syncRunId = $this->syncRunId;
         $completionPhase = $this->completionPhase;
+        $vodPlaylistIds = $this->resolveTouchedVodPlaylistIds();
+        $seriesPlaylistIds = $this->resolveTouchedSeriesPlaylistIds();
 
         Bus::batch($jobs->all())
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->allowFailures()
-            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs, $syncRunId, $completionPhase): void {
+            ->finally(function (Batch $batch) use ($userId, $postCompletionJobs, $syncRunId, $completionPhase, $vodPlaylistIds, $seriesPlaylistIds): void {
                 if ($userId) {
                     $user = User::find($userId);
 
@@ -248,6 +260,13 @@ class FetchTmdbIds implements ShouldQueue
                         self::clearBatchStats($batch->id);
                     }
                 }
+
+                // Run the reclassify pass once per playlist per run, at the true end.
+                // Playlist IDs were resolved and captured as plain arrays *before* this
+                // closure was built - never capture $this/the job instance here, Laravel
+                // serializes this closure (batch callbacks can run in another process)
+                // and the job's GeneralSettings property isn't serializable.
+                self::reclassifyGroupsForPlaylistIds($vodPlaylistIds, $seriesPlaylistIds);
 
                 if ($syncRunId && $completionPhase) {
                     app(SyncPipelineService::class)->completePhase($syncRunId, $completionPhase);
@@ -1338,6 +1357,102 @@ class FetchTmdbIds implements ShouldQueue
         self::incrementBatchStat($batchId, 'not_found', $this->notFoundCount);
         self::incrementBatchStat($batchId, 'skipped', $this->skippedCount);
         self::incrementBatchStat($batchId, 'errors', $this->errorCount);
+    }
+
+    /**
+     * VOD playlist IDs touched by this job's current scope. Plain int array - safe to
+     * capture into a closure that Laravel will serialize (e.g. a Bus::batch()->finally()
+     * callback), unlike capturing $this/the job instance itself.
+     *
+     * Derives the IDs from buildVodQuery() so every scope is covered: whole-playlist,
+     * all-playlists, and the group- / channel-ID scoped runs (FetchTmdbIdsForGroupsAction).
+     *
+     * @return array<int>
+     */
+    protected function resolveTouchedVodPlaylistIds(): array
+    {
+        if ($this->vodPlaylistId) {
+            return [(int) $this->vodPlaylistId];
+        }
+
+        $vodQuery = $this->buildVodQuery();
+
+        return $vodQuery
+            ? (clone $vodQuery)->distinct()->pluck('playlist_id')->map(fn ($id): int => (int) $id)->all()
+            : [];
+    }
+
+    /**
+     * Series playlist IDs touched by this job's current scope. See resolveTouchedVodPlaylistIds().
+     *
+     * @return array<int>
+     */
+    protected function resolveTouchedSeriesPlaylistIds(): array
+    {
+        if ($this->seriesPlaylistId) {
+            return [(int) $this->seriesPlaylistId];
+        }
+
+        $seriesQuery = $this->buildSeriesQuery();
+
+        return $seriesQuery
+            ? (clone $seriesQuery)->distinct()->pluck('playlist_id')->map(fn ($id): int => (int) $id)->all()
+            : [];
+    }
+
+    /**
+     * Reclassify non-genre-matching VOD groups / Series categories for every playlist
+     * touched by this job that has either `reclassify_vod_groups_to_tmdb_genres` or
+     * `reclassify_series_categories_to_tmdb_genres` enabled.
+     *
+     * Reads the playlist column fresh (NOT a constructor arg) so the chunk-job path -
+     * which forwards only `overwriteExisting` + `lookupScope` to child jobs - still
+     * triggers the reclassify exactly once per playlist per run.
+     *
+     * Only safe to call from the non-batched inline path. The batched-chunk path must
+     * use self::reclassifyGroupsForPlaylistIds() with IDs resolved and captured as plain
+     * arrays *before* Bus::batch()->finally() - never capture $this/the job instance
+     * into that closure, Laravel serializes it and something under GeneralSettings
+     * throws "Serialization of 'WeakMap' is not allowed" when it does.
+     */
+    protected function reclassifyGroupsForTouchedPlaylists(): void
+    {
+        self::reclassifyGroupsForPlaylistIds($this->resolveTouchedVodPlaylistIds(), $this->resolveTouchedSeriesPlaylistIds());
+    }
+
+    /**
+     * Each playlist's reclassify pass is wrapped so a failure (a TMDB error, a DB
+     * constraint) is logged and skipped rather than thrown: this runs *before*
+     * completePhase() / Bus::chain($postCompletionJobs) on both the inline and the
+     * Bus::batch()->finally() paths, so an uncaught exception here would strand the
+     * whole sync pipeline (VodStrm, ProbeStreams, EPG, ChannelMerge, FindReplace).
+     *
+     * @param  array<int>  $vodPlaylistIds
+     * @param  array<int>  $seriesPlaylistIds
+     */
+    protected static function reclassifyGroupsForPlaylistIds(array $vodPlaylistIds, array $seriesPlaylistIds): void
+    {
+        foreach (Playlist::query()->whereIn('id', $vodPlaylistIds)->where('reclassify_vod_groups_to_tmdb_genres', true)->get() as $playlist) {
+            try {
+                GenreGroupReclassifyService::reclassifyVodGroups($playlist);
+            } catch (\Throwable $e) {
+                Log::error('FetchTmdbIds: VOD genre reclassify failed, continuing', [
+                    'playlist_id' => $playlist->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        foreach (Playlist::query()->whereIn('id', $seriesPlaylistIds)->where('reclassify_series_categories_to_tmdb_genres', true)->get() as $playlist) {
+            try {
+                GenreGroupReclassifyService::reclassifyCategories($playlist);
+            } catch (\Throwable $e) {
+                Log::error('FetchTmdbIds: Series genre reclassify failed, continuing', [
+                    'playlist_id' => $playlist->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**

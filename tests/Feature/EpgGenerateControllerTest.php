@@ -1,9 +1,11 @@
 <?php
 
 use App\Enums\EpgSourceType;
+use App\Events\CustomPlaylistCreated;
 use App\Events\EpgCreated;
 use App\Events\EpgDeleted;
 use App\Events\EpgUpdated;
+use App\Events\MergedPlaylistCreated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
@@ -11,8 +13,10 @@ use App\Facades\ProxyFacade;
 use App\Http\Controllers\LogoProxyController;
 use App\Models\AedProfile;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\EpgCacheService;
@@ -32,6 +36,8 @@ beforeEach(function () {
         PlaylistCreated::class,
         PlaylistDeleted::class,
         PlaylistUpdated::class,
+        CustomPlaylistCreated::class,
+        MergedPlaylistCreated::class,
     ]);
 
     // Clean up any leftover playlist EPG cache files from previous runs
@@ -792,4 +798,128 @@ test('aed dummy programmes do not fall back to channel branding for programme ar
     expect($xpath->query('//channel[@id="aed-dummy-channel"]/icon'))->toHaveCount(1)
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]/icon'))->toHaveCount(0);
+});
+
+test('playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'short-window-channel',
+        'title' => 'Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="short-window-channel"]'))->toHaveCount(2);
+});
+
+test('aed profile dummy_epg_days overrides the playlist dummy_epg_days for that channel', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_days' => 5,
+    ]);
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $user->id,
+        'name' => 'Short Window AED',
+        'event_duration_minutes' => 1440,
+        'dummy_epg_days' => 2,
+    ])->save();
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'aed-short-window-channel',
+        'title' => 'AED Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="aed-short-window-channel"]'))->toHaveCount(2);
+});
+
+test('custom playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $playlist = CustomPlaylist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+
+    $channel = Channel::factory()->for($user)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'custom-short-window-channel',
+        'title' => 'Custom Short Window Channel',
+        'aed_profile_id' => null,
+    ]);
+    $playlist->channels()->attach($channel->id);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="custom-short-window-channel"]'))->toHaveCount(2);
+});
+
+test('merged playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $sourcePlaylist = Playlist::factory()->for($user)->create();
+    $merged = MergedPlaylist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+    $merged->playlists()->attach($sourcePlaylist->id);
+
+    Channel::factory()->for($user)->for($sourcePlaylist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'merged-short-window-channel',
+        'title' => 'Merged Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$merged->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="merged-short-window-channel"]'))->toHaveCount(2);
 });

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ChannelLogoType;
 use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
+use App\Exceptions\XtreamRateLimitedException;
 use App\Jobs\FetchTmdbIds;
 use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Observers\ChannelObserver;
@@ -811,6 +812,12 @@ class Channel extends Model
             }
 
             return true;
+        } catch (XtreamRateLimitedException $e) {
+            // Let the account-wide cooldown propagate to the caller (e.g.
+            // ProcessVodChannelsChunk) instead of being swallowed here as a
+            // single-channel failure — the caller needs to know to stop
+            // trying the rest of its batch, not just this one channel.
+            throw $e;
         } catch (Exception $e) {
             Log::error('Failed to fetch metadata for VOD '.$this->id, ['exception' => $e]);
         }

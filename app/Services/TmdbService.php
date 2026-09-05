@@ -2081,23 +2081,28 @@ class TmdbService
      *
      * @param  string  $mediaType  'all', 'movie', or 'tv'
      * @param  string  $timeWindow  'day' or 'week'
+     * @param  int  $page  1-based TMDB page number. Each page returns ~20 items.
      * @return array<int, array<string, mixed>>
      */
-    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week'): array
+    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week', int $page = 1): array
     {
         if (! $this->isConfigured()) {
             return [];
         }
 
-        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$this->language}";
+        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$page}_{$this->language}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow) {
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow, $page) {
             $this->waitForRateLimit();
 
             try {
                 $response = Http::timeout(15)->get(
                     self::BASE_URL."/trending/{$mediaType}/{$timeWindow}",
-                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                    [
+                        'api_key' => $this->apiKey,
+                        'language' => $this->language,
+                        'page' => $page,
+                    ]
                 );
 
                 if (! $response->successful()) {
@@ -2290,28 +2295,40 @@ class TmdbService
             return [];
         }
 
-        return Cache::remember('tmdb_genres_movie_'.$this->language, now()->addHours(24), function () {
-            $this->waitForRateLimit();
+        $cacheKey = 'tmdb_genres_movie_'.$this->language;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
 
-            try {
-                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/movie/list', [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                ]);
+        $this->waitForRateLimit();
 
-                if (! $response->successful()) {
-                    return [];
-                }
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL.'/genre/movie/list', [
+                'api_key' => $this->apiKey,
+                'language' => $this->language,
+            ]);
 
-                return collect($response->json()['genres'] ?? [])
-                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
-                    ->all();
-            } catch (\Exception $e) {
-                Log::error('TMDB: getMovieGenres error', ['error' => $e->getMessage()]);
-
+            if (! $response->successful()) {
                 return [];
             }
-        });
+
+            $genres = collect($response->json()['genres'] ?? [])
+                ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                ->all();
+
+            // Only cache a real result - never a failed/empty lookup, or a single
+            // transient outage would suppress genre data for 24h.
+            if ($genres !== []) {
+                Cache::put($cacheKey, $genres, now()->addHours(24));
+            }
+
+            return $genres;
+        } catch (\Exception $e) {
+            Log::error('TMDB: getMovieGenres error', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /**
@@ -2325,28 +2342,39 @@ class TmdbService
             return [];
         }
 
-        return Cache::remember('tmdb_genres_tv_'.$this->language, now()->addHours(24), function () {
-            $this->waitForRateLimit();
+        $cacheKey = 'tmdb_genres_tv_'.$this->language;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
 
-            try {
-                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/tv/list', [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                ]);
+        $this->waitForRateLimit();
 
-                if (! $response->successful()) {
-                    return [];
-                }
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL.'/genre/tv/list', [
+                'api_key' => $this->apiKey,
+                'language' => $this->language,
+            ]);
 
-                return collect($response->json()['genres'] ?? [])
-                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
-                    ->all();
-            } catch (\Exception $e) {
-                Log::error('TMDB: getTvGenres error', ['error' => $e->getMessage()]);
-
+            if (! $response->successful()) {
                 return [];
             }
-        });
+
+            $genres = collect($response->json()['genres'] ?? [])
+                ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                ->all();
+
+            // See getMovieGenres(): never cache a failed/empty lookup.
+            if ($genres !== []) {
+                Cache::put($cacheKey, $genres, now()->addHours(24));
+            }
+
+            return $genres;
+        } catch (\Exception $e) {
+            Log::error('TMDB: getTvGenres error', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /**
@@ -2519,10 +2547,11 @@ class TmdbService
 
         switch ($source) {
             case 'trending':
-                // Trending already returns the merged list — ignore pages.
                 $mediaType = $type === 'series' ? 'tv' : 'movie';
                 $window = (string) ($params['time_window'] ?? 'week');
-                $results = $this->getTrending($mediaType, $window);
+                for ($p = 1; $p <= $pages; $p++) {
+                    $results = array_merge($results, $this->getTrending($mediaType, $window, $p));
+                }
                 break;
 
             case 'popular':

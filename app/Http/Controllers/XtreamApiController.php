@@ -1373,7 +1373,15 @@ class XtreamApiController extends Controller
             // photo}. Absent on unpatched / non-TMDB-enriched rows, so those
             // responses stay byte-identical to today.
             if (! empty($seriesItem->metadata['cast_list'])) {
-                $seriesInfo['cast_list'] = $seriesItem->metadata['cast_list'];
+                $castList = $seriesItem->metadata['cast_list'];
+                if ($playlist->enable_logo_proxy) {
+                    $castList = array_map(function ($member) {
+                        $member['photo'] = $this->proxyImageUrl($member['photo'] ?? null);
+
+                        return $member;
+                    }, $castList);
+                }
+                $seriesInfo['cast_list'] = $castList;
             }
 
             // Transparent title logo (clearlogo). Distinct wire key from `cover`
@@ -1894,7 +1902,15 @@ class XtreamApiController extends Controller
             // array_merge($defaultInfo, ...). Absent on unpatched /
             // non-TMDB-enriched rows, so those responses stay byte-identical.
             if (! empty($info['cast_list'])) {
-                $defaultInfo['cast_list'] = $info['cast_list'];
+                $castList = $info['cast_list'];
+                if ($playlist->enable_logo_proxy) {
+                    $castList = array_map(function ($member) {
+                        $member['photo'] = $this->proxyImageUrl($member['photo'] ?? null);
+
+                        return $member;
+                    }, $castList);
+                }
+                $defaultInfo['cast_list'] = $castList;
             }
 
             // Transparent title logo (clearlogo). Distinct wire key from the

@@ -1907,7 +1907,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ])->splitKeys(['Tab', 'Return']),
                 ]),
 
-            // Dynamic Groups (TMDB) — nested inside Playlist Processing
+            // Dynamic Groups (TMDB) - nested inside Playlist Processing
             // (per CJ's 2026-08-30 amendment: should sit alongside the
             // Live/VOD/Series processing fieldsets, not as a standalone
             // top-level section). Nested Section keeps ->description() and
@@ -1917,16 +1917,34 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->description(__('Per-playlist virtual groups computed from TMDB list endpoints (Trending, Popular, In Theatres, Coming Soon, Top <Genre>, by TV Network, by Streaming Service). Categories are prepended to the Xtream VOD/series category lists. Requires the TMDB API key in Settings → TMDB Integration.'))
                 ->columnSpanFull()
                 ->collapsible()
+                ->columns(2)
                 ->collapsed($creating)
                 ->schema([
+                    Toggle::make('reclassify_vod_groups_to_tmdb_genres')
+                        ->label(__('Auto-reclassify VOD groups to TMDB genres on sync'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('After each sync, route each enabled VOD channel out of any group that doesn\'t match a TMDB genre into its own genre group (or "Uncategorized" if no genre data). Groups referenced by an Auto-Add to Custom Playlist rule, or merged groups, are never touched.')
+                        )
+                        ->default(false)
+                        ->inline(false),
+                    Toggle::make('reclassify_series_categories_to_tmdb_genres')
+                        ->label(__('Auto-reclassify Series categories to TMDB genres on sync'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('After each sync, route each enabled series out of any category that doesn\'t match a TMDB genre into its own genre category (or "Uncategorized" if no genre data). Categories referenced by an Auto-Add to Custom Playlist rule, or merged categories, are never touched. Independent of the VOD toggle — turn this on/off separately if genre-based categorization doesn\'t fit how you organize series.')
+                        )
+                        ->default(false)
+                        ->inline(false),
                     Repeater::make('dynamic_groups_config')
-                        ->label('')
+                        ->label(__('Dynamic Groups Configuration'))
+                        ->columnSpanFull()
                         ->schema([
                             Toggle::make('enabled')
                                 ->label(__('Enabled'))
                                 ->default(true)
                                 ->inline(false)
-                                ->columnSpan(2),
+                                ->columnSpan(1),
                             Select::make('type')
                                 ->label(__('Content Type'))
                                 ->options([
@@ -2026,11 +2044,27 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->default('week')
                                 ->visible(fn (Get $get): bool => $get('source') === 'trending')
                                 ->columnSpan(5),
+                            Select::make('tmdb_params.pages')
+                                ->label(__('Pages to Fetch'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
+                                )
+                                ->options([
+                                    1 => '1 (~20 items)',
+                                    2 => '2 (~40 items)',
+                                    3 => '3 (~60 items, default)',
+                                    4 => '4 (~80 items)',
+                                    5 => '5 (~100 items, max)',
+                                ])
+                                ->default(3)
+                                ->native(false)
+                                ->columnSpan(3),
                             TextInput::make('name')
                                 ->label(__('Category Name'))
                                 ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
                                 ->required()
-                                ->columnSpan(5),
+                                ->columnSpan(3),
                         ])
                         ->columns(12)
                         ->reorderable()
@@ -2044,9 +2078,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->icon('heroicon-o-eye')
                                 ->color('info')
                                 ->tooltip(__('Preview the entries this rule currently matches'))
-                                // Matching runs against the playlist's synced VOD/series
-                                // rows, so there is nothing to preview until the
-                                // playlist exists.
+                        // Matching runs against the playlist's synced VOD/series
+                        // rows, so there is nothing to preview until the
+                        // playlist exists.
                                 ->visible(fn (?Playlist $record): bool => $record !== null)
                                 ->modalHeading(function (array $arguments, Repeater $component): string {
                                     $itemKey = $arguments['item'] ?? null;
@@ -2093,7 +2127,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
 
                             return $typeLabel
-                                ? "{$name} ({$typeLabel} — {$sourceLabel}){$disabled}"
+                                ? "{$name} ({$typeLabel} - {$sourceLabel}){$disabled}"
                                 : "{$name} ({$sourceLabel}){$disabled}";
                         }),
                 ])->hidden(! config('feature.playlist_tmdb_dynamic_groups')),
@@ -3391,7 +3425,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->inline(false)
                         ->default(false)
-                        ->helperText(__('When enabled, dummy EPG data will be generated for the next 5 days. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
+                        ->helperText(__('When enabled, dummy EPG data will be generated for the number of days set below. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
                     Select::make('id_channel_by')
                         ->label(__('Preferred TVG ID output'))
                         ->helperText(__('How you would like to ID your channels in the EPG.'))
@@ -3405,20 +3439,33 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->required()
                         ->default('stream_id') // Default to stream_id
                         ->columnSpan(1),
-                    Toggle::make('dummy_epg_category')
-                        ->label(__('Channel group as category'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->default(false)
-                        ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
-                    TextInput::make('dummy_epg_length')
-                        ->label(__('Dummy program length (in minutes)'))
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->default(120)
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                    Grid::make()
+                        ->columnSpanFull()
+                        ->columns(3)
+                        ->schema([
+                            Toggle::make('dummy_epg_category')
+                                ->label(__('Channel group as category'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_length')
+                                ->label(__('Dummy program length (in minutes)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1'])
+                                ->type('number')
+                                ->default(120)
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_days')
+                                ->label(__('Dummy EPG length (in days)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1', 'max:14'])
+                                ->type('number')
+                                ->default(5)
+                                ->helperText(__('How many days of dummy EPG data to generate. AED profiles can override this per profile.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                        ]),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
                         ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))

@@ -113,3 +113,66 @@ it('does not attempt a fallback for tmdb ids when no tmdb addon is configured', 
     expect($meta)->toBeNull();
     Http::assertSentCount(1);
 });
+
+// ── aiostreams_meta_id_prefixes: once a manifest sync has recorded that
+// AIOStreams has no addon for meta at all (or none for this id's prefix), skip
+// the guaranteed-404 primary call entirely instead of failing through to the
+// fallback on every single request.
+
+it('skips the AIOStreams call entirely when the manifest is known to have no meta resource', function () {
+    $this->integration->update(['aiostreams_meta_id_prefixes' => []]);
+
+    Http::fake([
+        'v3-cinemeta.strem.io/meta/movie/tt1234567.json*' => Http::response([
+            'meta' => ['id' => 'tt1234567', 'type' => 'movie', 'name' => 'Fallback Only'],
+        ], 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tt1234567');
+
+    expect($meta['meta']['name'])->toBe('Fallback Only');
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'aiostreams.test'));
+    Http::assertSentCount(1);
+});
+
+it('skips the AIOStreams call when the manifest supports meta only for a different id prefix', function () {
+    $this->integration->update(['aiostreams_meta_id_prefixes' => ['tt']]);
+
+    Http::fake([
+        // If this were hit, the test should fail via assertNotSent below.
+        'aiostreams.test/*' => Http::response(['meta' => ['name' => 'Should not be called']], 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tmdb:550');
+
+    expect($meta)->toBeNull();
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'aiostreams.test'));
+});
+
+it('still calls AIOStreams when the manifest supports meta for the requested id prefix', function () {
+    $this->integration->update(['aiostreams_meta_id_prefixes' => ['tt']]);
+
+    Http::fake([
+        'aiostreams.test/abc/meta/movie/tt1234567.json*' => Http::response([
+            'meta' => ['id' => 'tt1234567', 'type' => 'movie', 'name' => 'Native Movie'],
+        ], 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tt1234567');
+
+    expect($meta['meta']['name'])->toBe('Native Movie');
+});
+
+it('still calls AIOStreams when the manifest supports meta without idPrefixes restriction', function () {
+    $this->integration->update(['aiostreams_meta_id_prefixes' => ['*']]);
+
+    Http::fake([
+        'aiostreams.test/abc/meta/movie/tmdb:550.json*' => Http::response([
+            'meta' => ['id' => 'tmdb:550', 'type' => 'movie', 'name' => 'Wildcard Movie'],
+        ], 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tmdb:550');
+
+    expect($meta['meta']['name'])->toBe('Wildcard Movie');
+});

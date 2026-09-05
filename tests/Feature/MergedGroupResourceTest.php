@@ -72,7 +72,7 @@ it('defaults a merged group sort order to 9999 to match the custom group form', 
         ])
         ->assertHasNoActionErrors();
 
-    expect(Group::query()->where('name', 'Nordics')->sole()->sort_order)->toBe(9999);
+    expect((int) Group::query()->where('name', 'Nordics')->sole()->sort_order)->toBe(9999);
 });
 
 it('redirects to the edit page after creating a custom group', function () {

@@ -9,6 +9,7 @@ use App\Models\Epg;
 use App\Models\PostProcess;
 use App\Models\PostProcessLog;
 use App\Settings\GeneralSettings;
+use App\Support\PrivateNetworkGuard;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -389,7 +390,7 @@ class RunPostProcess implements ShouldQueue
 
         $ip = gethostbyname($host);
 
-        return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        return PrivateNetworkGuard::ipIsPrivate($ip);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
+use App\Exceptions\XtreamRateLimitedException;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\SyncRun;
@@ -241,9 +242,28 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                 ->get();
 
             foreach ($seriesChunk as $series) {
-                // Suppress per-series sync/TMDB dispatch — handled in bulk by CheckSeriesImportProgress
-                $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false, dispatchTmdb: false);
-                $processedCount++;
+                try {
+                    // Suppress per-series sync/TMDB dispatch — handled in bulk by CheckSeriesImportProgress
+                    $this->fetchMetadataForSeries($series, $global_sync_settings, dispatchSync: false, dispatchTmdb: false);
+                    $processedCount++;
+                } catch (XtreamRateLimitedException $e) {
+                    // Account-wide cooldown: every remaining series in this batch
+                    // (and every later batch already queued in this chain) would
+                    // fail the same way. Rethrow — CheckSeriesImportProgress advances
+                    // its offset arithmetically per batch without verifying actual
+                    // success, so silently returning here would let the run report
+                    // 100% complete despite skipping every series after this one.
+                    // failed() below fails the pipeline/run honestly instead.
+                    Log::warning('ProcessM3uImportSeriesEpisodes: aborting batch, Xtream account is rate limited', [
+                        'user_id' => $this->user_id,
+                        'playlist_id' => $this->playlist_id,
+                        'batch' => $this->currentBatch,
+                        'processed' => $processedCount,
+                        'retry_at' => $e->retryAt->toIso8601String(),
+                    ]);
+
+                    throw $e;
+                }
             }
 
             // Clear memory after each mini-chunk

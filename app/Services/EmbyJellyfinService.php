@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
  * EmbyJellyfinService - The "Brain" for Emby/Jellyfin integration
@@ -57,15 +58,18 @@ class EmbyJellyfinService implements MediaServer
     /**
      * Get a configured HTTP client for the media server.
      */
-    protected function client(): PendingRequest
+    protected function client(bool $withoutRedirecting = false): PendingRequest
     {
-        return Http::baseUrl($this->baseUrl)
+        $client = Http::baseUrl($this->baseUrl)
             ->timeout(30)
-            ->retry(2, 1000)
             ->withHeaders([
                 'X-Emby-Token' => $this->apiKey,
                 'Accept' => 'application/json',
             ]);
+
+        return $withoutRedirecting
+            ? $client->withoutRedirecting()
+            : $client->retry(2, 1000);
     }
 
     /**
@@ -112,10 +116,10 @@ class EmbyJellyfinService implements MediaServer
      *
      * @return Collection<int, array{id: string, name: string, type: string, item_count: int}>
      */
-    public function fetchLibraries(): Collection
+    public function fetchLibraries(bool $withoutRedirecting = false, bool $failClosed = false): Collection
     {
         try {
-            $response = $this->client()->get('/Library/VirtualFolders');
+            $response = $this->client($withoutRedirecting)->get('/Library/VirtualFolders');
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -149,12 +153,20 @@ class EmbyJellyfinService implements MediaServer
                 'status' => $response->status(),
             ]);
 
+            if ($failClosed) {
+                throw new RuntimeException('Emby library inventory request failed.');
+            }
+
             return collect();
         } catch (Exception $e) {
             Log::error('EmbyJellyfinService: Error fetching libraries', [
                 'integration_id' => $this->integration->id,
                 'error' => $e->getMessage(),
             ]);
+
+            if ($failClosed) {
+                throw $e;
+            }
 
             return collect();
         }
@@ -215,8 +227,7 @@ class EmbyJellyfinService implements MediaServer
                 $containsPath = false;
                 foreach ($library['paths'] ?? [] as $libraryPath) {
                     if (is_string($libraryPath)
-                        && MediaServerIntegration::isPathWithinWritableRoot($path, $libraryPath)
-                        && MediaServerIntegration::isPathWithinWritableRoot($libraryPath, $path)) {
+                        && MediaServerIntegration::isPathWithinWritableRoot($path, $libraryPath)) {
                         $containsPath = true;
 
                         break;
@@ -236,7 +247,7 @@ class EmbyJellyfinService implements MediaServer
             && $containsRequestedPaths($library);
 
         try {
-            $existingLibraries = $this->fetchLibraries();
+            $existingLibraries = $this->fetchLibraries(withoutRedirecting: true, failClosed: true);
             $existingLibrary = $libraryId === null
                 ? null
                 : $existingLibraries->firstWhere('id', $libraryId);
@@ -263,7 +274,25 @@ class EmbyJellyfinService implements MediaServer
                 return $this->libraryResult(false, false, 'An Emby library with this name has different settings.', $conflictingLibrary, true);
             }
 
-            $response = $this->client()->post('/Library/VirtualFolders', [
+            $conflictingPathLibrary = $existingLibraries->first(function (array $library) use ($paths): bool {
+                foreach ($library['paths'] ?? [] as $libraryPath) {
+                    foreach ($paths as $path) {
+                        if (is_string($libraryPath)
+                            && (MediaServerIntegration::isPathWithinWritableRoot($path, $libraryPath)
+                                || MediaServerIntegration::isPathWithinWritableRoot($libraryPath, $path))) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            });
+
+            if ($conflictingPathLibrary !== null) {
+                return $this->libraryResult(false, false, 'An Emby library already uses this managed path.', $conflictingPathLibrary, true);
+            }
+
+            $response = $this->client(withoutRedirecting: true)->post('/Library/VirtualFolders', [
                 'Name' => $name,
                 'CollectionType' => $collectionType,
                 'Paths' => $paths,
@@ -278,7 +307,7 @@ class EmbyJellyfinService implements MediaServer
                 true,
                 true,
                 'Emby library created.',
-                $this->fetchLibraries()->first($matchesRequest),
+                $this->fetchLibraries(withoutRedirecting: true, failClosed: true)->first($matchesRequest),
             );
         } catch (Exception $exception) {
             Log::warning('EmbyJellyfinService: Library creation failed', [

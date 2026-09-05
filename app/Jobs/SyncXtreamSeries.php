@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\XtreamRateLimitedException;
 use App\Models\Playlist;
 use App\Services\XtreamService;
 use App\Traits\ProviderRequestDelay;
@@ -114,6 +115,17 @@ class SyncXtreamSeries implements ShouldQueue
                 if ($playlistSeries->enabled) {
                     dispatch(new ProcessM3uImportSeriesEpisodes($playlistSeries));
                 }
+            } catch (XtreamRateLimitedException $e) {
+                // Account-wide cooldown: every remaining series in this batch
+                // would fail the same way, so stop instead of grinding
+                // through the rest one throttled failure at a time.
+                Log::warning('SyncXtreamSeries: aborting remaining series, Xtream account is rate limited', [
+                    'playlist_id' => $playlist->id,
+                    'category_id' => $this->catId,
+                    'retry_at' => $e->retryAt->toIso8601String(),
+                ]);
+
+                return;
             } catch (\Throwable $e) {
                 // Skip this series and continue — a single bad or hung provider
                 // series should not abort the entire category import.

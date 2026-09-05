@@ -79,7 +79,8 @@ class EmbyPublicationCatalogService
                 'name' => $mapping->target_library_name,
                 'collection_type' => $mapping->collection_type,
                 'output_path' => $mapping->output_path,
-                'managed' => $mapping->is_managed,
+                // The companion owns published files even when the Emby library already existed.
+                'managed' => true,
             ],
             'options' => $mapping->options,
             'full_snapshot' => true,

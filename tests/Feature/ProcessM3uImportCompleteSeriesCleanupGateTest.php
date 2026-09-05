@@ -34,7 +34,7 @@ function seedStaleSeriesFor(Playlist $playlist, User $user): Series
     ]);
 }
 
-function runImportComplete(User $user, Playlist $playlist, bool $runningSeriesImport): void
+function runSeriesCleanupImportComplete(User $user, Playlist $playlist, bool $runningSeriesImport): void
 {
     $settings = app(GeneralSettings::class);
     $settings->suppress_success_notifications = true;
@@ -64,7 +64,7 @@ it('does not delete stale series when series import did not run this sync', func
     $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create());
     $series = seedStaleSeriesFor($playlist, $user);
 
-    runImportComplete($user, $playlist, runningSeriesImport: false);
+    runSeriesCleanupImportComplete($user, $playlist, runningSeriesImport: false);
 
     expect(Series::find($series->id))->not->toBeNull();
 });
@@ -76,7 +76,7 @@ it('still cleans up stale series when series import did run this sync', function
     $playlist = Playlist::withoutEvents(fn (): Playlist => Playlist::factory()->for($user)->create());
     $series = seedStaleSeriesFor($playlist, $user);
 
-    runImportComplete($user, $playlist, runningSeriesImport: true);
+    runSeriesCleanupImportComplete($user, $playlist, runningSeriesImport: true);
 
     expect(Series::find($series->id))->toBeNull();
 });

@@ -34,13 +34,7 @@ class EmbyLibraryMappingFactory extends Factory
             'collection_type' => 'movies',
             'output_path' => '/media/m3u-editor/'.fake()->slug(),
             'is_managed' => true,
-            'options' => [
-                'naming' => 'media-year',
-                'nfo' => true,
-                'versions' => true,
-                'cleanup' => 'replace',
-                'refresh' => true,
-            ],
+            'options' => EmbyLibraryMapping::DEFAULT_OPTIONS,
         ];
     }
 }

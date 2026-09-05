@@ -78,8 +78,12 @@ class MediaServerIntegration extends Model
         'aiostreams_catalogs' => 'array',
         'aiostreams_enable_all_catalogs' => 'boolean',
         'aiostreams_selected_catalog_ids' => 'array',
+        'aiostreams_meta_id_prefixes' => 'array',
         'emby_publisher_writable_paths' => 'array',
         'emby_publisher_capabilities_updated_at' => 'datetime',
+        'emby_managed_setup_binding_id' => 'integer',
+        'emby_managed_setup_capability_version' => 'integer',
+        'emby_managed_setup_contract_version' => 'integer',
     ];
 
     /**
@@ -193,8 +197,11 @@ class MediaServerIntegration extends Model
     public function getBaseUrlAttribute(): string
     {
         $protocol = $this->ssl ? 'https' : 'http';
+        $host = str_contains((string) $this->host, ':')
+            ? '['.trim((string) $this->host, '[]').']'
+            : $this->host;
 
-        return "{$protocol}://{$this->host}:{$this->port}";
+        return "{$protocol}://{$host}:{$this->port}";
     }
 
     /**
@@ -362,6 +369,14 @@ class MediaServerIntegration extends Model
     public function getEmbyPublisherWritablePaths(): array
     {
         $paths = [];
+
+        if (is_string($this->emby_managed_setup_root)) {
+            $managedRoot = trim($this->emby_managed_setup_root);
+
+            if (static::isSafeWritablePath($managedRoot)) {
+                $paths[$managedRoot] = $managedRoot;
+            }
+        }
 
         foreach (array_slice($this->emby_publisher_writable_paths ?? [], 0, 50) as $path) {
             if (! is_string($path)) {
@@ -552,11 +567,11 @@ class MediaServerIntegration extends Model
     public function getImportLibraryIdsForType(string $type): ?array
     {
         $managedMappings = $this->embyLibraryMappings()
-            ->where('is_managed', true)
             ->where('collection_type', $type)
+            ->where('enabled', true)
             ->where(fn (Builder $query): Builder => $query
                 ->whereNotNull('target_library_id')
-                ->orWhere('enabled', true))
+                ->orWhere('is_managed', true))
             ->select(['id', 'target_library_id'])
             ->cursor();
 

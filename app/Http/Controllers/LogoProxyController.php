@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\LogoCacheService;
 use App\Settings\GeneralSettings;
+use App\Support\PrivateNetworkGuard;
 use Carbon\Carbon;
 use Illuminate\Http\Client\Response as HttpClientResponse;
 use Illuminate\Http\Request;
@@ -235,7 +236,7 @@ class LogoProxyController extends Controller
 
         $ip = gethostbyname($host);
 
-        return ! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        return PrivateNetworkGuard::ipIsPrivate($ip);
     }
 
     /**

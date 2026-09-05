@@ -389,6 +389,17 @@ class AedProfileResource extends Resource implements CopilotResource
                             ->placeholder(__('Sports'))
                             ->maxLength(100),
                     ]),
+
+                    Grid::make(2)->schema([
+                        TextInput::make('dummy_epg_days')
+                            ->label(__('Dummy EPG Length (days)'))
+                            ->numeric()
+                            ->minValue(1)
+                            ->maxValue(14)
+                            ->columnSpanFull()
+                            ->placeholder(__('Use playlist default'))
+                            ->helperText(__('How many days of EPG data to generate for channels using this profile. Leave blank to use the playlist\'s dummy EPG length.')),
+                    ]),
                 ]),
 
             Actions::make([

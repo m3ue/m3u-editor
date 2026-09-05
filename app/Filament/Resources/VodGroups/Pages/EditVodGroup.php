@@ -8,7 +8,9 @@ use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
@@ -191,6 +193,34 @@ class EditVodGroup extends EditRecord
                     ->modalSubmitActionLabel(__('Yes, process now')),
 
                 FetchTmdbIdsForGroupsAction::make('vod'),
+
+                Action::make('reclassify_tmdb_genres')
+                    ->label(__('Reclassify to TMDB Genres'))
+                    ->icon('heroicon-o-tag')
+                    ->action(function (Group $record, Action $action): void {
+                        if (! app(TmdbService::class)->isConfigured()) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                ->duration(10000)
+                                ->send();
+                            $action->halt();
+                        }
+
+                        GenreGroupReclassifyService::reclassifyVodGroups($record->playlist);
+                    })
+                    ->after(function ($livewire): void {
+                        $livewire->dispatch('refreshRelation');
+                        Notification::make()
+                            ->success()
+                            ->title(__('Groups Reclassified'))
+                            ->body(__('Channels in non-genre-matching groups have been moved to Uncategorized.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-tag')
+                    ->modalDescription(__('Reclassify this playlist\'s VOD groups to TMDB genres now? Channels in non-genre-matching groups will be moved to Uncategorized. Groups protected by an Auto-Add to Custom Playlist rule are skipped.')),
 
                 Action::make('sync_vod')
                     ->label(__('Sync VOD .strm file'))

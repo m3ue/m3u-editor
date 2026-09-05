@@ -8,7 +8,9 @@ use App\Filament\Resources\Categories\CategoryResource;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Select;
@@ -81,6 +83,33 @@ class EditCategory extends EditRecord
                     ->requiresConfirmation()
                     ->modalIcon('heroicon-o-calendar-days')
                     ->modalDescription(__('Sort all series in this category by release date? This will update the sort order.')),
+                Action::make('reclassify_tmdb_genres')
+                    ->label(__('Reclassify to TMDB Genres'))
+                    ->icon('heroicon-o-tag')
+                    ->action(function (Category $record, Action $action): void {
+                        if (! app(TmdbService::class)->isConfigured()) {
+                            Notification::make()
+                                ->danger()
+                                ->title(__('TMDB API Key Required'))
+                                ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                ->duration(10000)
+                                ->send();
+                            $action->halt();
+                        }
+
+                        GenreGroupReclassifyService::reclassifyCategories($record->playlist);
+                    })
+                    ->after(function ($livewire): void {
+                        $livewire->dispatch('refreshRelation');
+                        Notification::make()
+                            ->success()
+                            ->title(__('Categories Reclassified'))
+                            ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-tag')
+                    ->modalDescription(__('Reclassify this playlist\'s Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                 Action::make('process')
                     ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')

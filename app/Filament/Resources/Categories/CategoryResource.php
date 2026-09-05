@@ -15,10 +15,13 @@ use App\Jobs\CategoryFindAndReplaceReset;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Models\Playlist;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -295,6 +298,32 @@ class CategoryResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all series in this category by release date? This will update the sort order.')),
+                    Action::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Category $record, Action $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            GenreGroupReclassifyService::reclassifyCategories($record->playlist);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify this playlist\'s Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     Action::make('process')
                         ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
@@ -469,6 +498,39 @@ class CategoryResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all series in the selected categories by release date? This will update the sort order.')),
+                    BulkAction::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Collection $records, BulkAction $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            // Per-playlist scope: reclassify the whole playlist's categories.
+                            foreach ($records->pluck('playlist_id')->unique() as $playlistId) {
+                                $playlist = Playlist::find($playlistId);
+                                if ($playlist) {
+                                    GenreGroupReclassifyService::reclassifyCategories($playlist);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify the selected playlists\' Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     BulkAction::make('process')
                         ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')

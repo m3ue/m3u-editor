@@ -7,6 +7,7 @@ use App\Models\CustomPlaylist;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Group;
 use App\Models\MediaServerIntegration;
+use App\Services\EmbyManagedSetupService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\MediaServerService;
 use Filament\Actions\Action;
@@ -15,6 +16,7 @@ use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -33,7 +35,10 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -62,6 +67,12 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
      */
     private array $outputPathOptionsCache = [];
 
+    /** @var array<string, array<string, string>> */
+    private array $simpleBulkSourceDescriptionsCache = [];
+
+    /** @var array<string, array<string, string>> */
+    private array $simpleBulkSourceOptionsCache = [];
+
     public function isReadOnly(): bool
     {
         return false;
@@ -87,6 +98,87 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     {
         return $schema
             ->components([
+                Fieldset::make(__('Publish to Emby'))
+                    ->schema([
+                        ToggleButtons::make('publication_type')
+                            ->label(__('What do you want to publish?'))
+                            ->options([
+                                'movies' => __('Movies'),
+                                'tvshows' => __('TV shows'),
+                            ])
+                            ->icons([
+                                'movies' => 'heroicon-o-film',
+                                'tvshows' => 'heroicon-o-tv',
+                            ])
+                            ->default('movies')
+                            ->required()
+                            ->grouped()
+                            ->live()
+                            ->afterStateUpdated(function (Set $set): void {
+                                $set('sources', []);
+                                $set('publish_all', false);
+                                $set('destination', null);
+                                $set('new_library_name', null);
+                            })
+                            ->columnSpanFull(),
+                        Toggle::make('publish_all')
+                            ->label(__('Publish all eligible items as one source'))
+                            ->helperText(fn (Get $get): string => array_key_exists(
+                                'all:'.$get('publication_type'),
+                                $this->simpleBulkSourceDescriptions($get('publication_type')),
+                            )
+                                ? __('Already published')
+                                : __('Leave this off to create one managed mapping and subfolder per selected group or category.'))
+                            ->default(false)
+                            ->live()
+                            ->disabled(fn (Get $get): bool => array_key_exists(
+                                'all:'.$get('publication_type'),
+                                $this->simpleBulkSourceDescriptions($get('publication_type')),
+                            ))
+                            ->afterStateUpdated(fn (Set $set) => $set('sources', []))
+                            ->columnSpanFull(),
+                        CheckboxList::make('sources')
+                            ->label(fn (Get $get): string => $get('publication_type') === 'tvshows'
+                                ? __('Series categories')
+                                : __('Movie groups'))
+                            ->options(fn (Get $get): array => $this->simpleBulkSourceOptions($get('publication_type')))
+                            ->descriptions(fn (Get $get): array => $this->simpleBulkSourceDescriptions($get('publication_type')))
+                            ->disableOptionWhen(fn (string $value, Get $get): bool => array_key_exists(
+                                $value,
+                                $this->simpleBulkSourceDescriptions($get('publication_type')),
+                            ))
+                            ->required(fn (Get $get): bool => ! $get('publish_all'))
+                            ->visible(fn (Get $get): bool => ! $get('publish_all'))
+                            ->searchable()
+                            ->bulkToggleable()
+                            ->live()
+                            ->afterStateUpdated(function (Set $set): void {
+                                $set('destination', null);
+                                $set('new_library_name', null);
+                            })
+                            ->columnSpanFull(),
+                        Select::make('destination')
+                            ->label(__('Emby library'))
+                            ->options(fn (Get $get): array => [
+                                '__new__' => __('Create a new library'),
+                            ] + $this->simpleLibraryOptionsForCollectionType($get('publication_type')))
+                            ->required()
+                            ->searchable()
+                            ->live()
+                            ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                if ($state !== '__new__') {
+                                    $set('new_library_name', null);
+                                }
+                            })
+                            ->columnSpanFull(),
+                        TextInput::make('new_library_name')
+                            ->label(__('Library name'))
+                            ->required(fn (Get $get): bool => $get('destination') === '__new__')
+                            ->visible(fn (Get $get): bool => $get('destination') === '__new__')
+                            ->maxLength(255),
+                    ])
+                    ->visible(fn (?EmbyLibraryMapping $record): bool => $record === null)
+                    ->columnSpanFull(),
                 Fieldset::make(__('Emby library'))
                     ->schema([
                         Toggle::make('enabled')
@@ -205,6 +297,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->columnSpanFull(),
                         ]),
                     ])
+                    ->visible(fn (?EmbyLibraryMapping $record): bool => $record !== null)
                     ->columnSpanFull(),
                 Fieldset::make(__('Source'))
                     ->schema([
@@ -315,6 +408,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->searchable(),
                         ]),
                     ])
+                    ->visible(fn (?EmbyLibraryMapping $record): bool => $record !== null)
                     ->columnSpanFull(),
                 Fieldset::make(__('Publishing options'))
                     ->schema([
@@ -358,6 +452,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                                 ->hintIcon('heroicon-m-question-mark-circle', tooltip: __('Disable this only if Emby scans the destination on its own schedule.')),
                         ]),
                     ])
+                    ->visible(fn (?EmbyLibraryMapping $record): bool => $record !== null)
                     ->columnSpanFull(),
             ]);
     }
@@ -418,13 +513,9 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->url('https://github.com/Serph91P/m3u-editor-for-emby')
                     ->openUrlInNewTab(),
                 CreateAction::make()
-                    ->label(__('Create mapping'))
-                    ->mutateDataUsing(fn (array $data): array => [
-                        ...$this->prepareMappingData($data),
-                        'media_server_integration_id' => $this->ownerRecord->id,
-                        'user_id' => $this->ownerRecord->user_id,
-                        'status' => 'idle',
-                    ])
+                    ->label(__('Publish to Emby'))
+                    ->modalSubmitActionLabel(__('Publish to Emby'))
+                    ->using(fn (array $data): Model => $this->publish($data))
                     ->slideOver(),
             ])
             ->recordActions([
@@ -479,6 +570,465 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function publish(array $data): EmbyLibraryMapping
+    {
+        try {
+            return Cache::lock("emby-publish:{$this->ownerRecord->id}", 900)->block(1, function () use ($data): EmbyLibraryMapping {
+                $sources = $this->resolveSimpleSources($data);
+                $collectionType = $data['publication_type'] ?? null;
+                if (! in_array($collectionType, EmbyLibraryMapping::COLLECTION_TYPES, true)) {
+                    throw ValidationException::withMessages([
+                        'destination' => __('Choose a compatible Emby library.'),
+                    ]);
+                }
+                $existingSourceKeys = $this->ownerRecord->embyLibraryMappings()
+                    ->where('collection_type', $collectionType)
+                    ->get(['source_kind', 'source_identifier', 'source_label'])
+                    ->map(fn (EmbyLibraryMapping $mapping): string => implode("\0", [
+                        $mapping->source_kind,
+                        $mapping->source_identifier,
+                        $mapping->source_label,
+                    ]))
+                    ->flip();
+
+                foreach ($sources as $source) {
+                    if ($source['collection_type'] !== null && $source['collection_type'] !== $collectionType) {
+                        throw ValidationException::withMessages([
+                            'sources' => __('Choose sources that match the selected library type.'),
+                        ]);
+                    }
+                    if ($source['kind'] === 'custom_playlist_group') {
+                        $validLabels = $this->sourceLabelOptions(
+                            $source['kind'],
+                            $source['identifier'],
+                            $collectionType,
+                        );
+                        if (! array_key_exists($source['label'], $validLabels)) {
+                            throw ValidationException::withMessages([
+                                'sources' => __('Choose an available group or category from this Custom Playlist.'),
+                            ]);
+                        }
+                    }
+
+                    $sourceKey = implode("\0", [$source['kind'], $source['identifier'], $source['label']]);
+                    if ($existingSourceKeys->has($sourceKey)) {
+                        throw ValidationException::withMessages([
+                            'sources' => __('This source is already published to an Emby library of this type.'),
+                        ]);
+                    }
+                }
+
+                $setup = app(EmbyManagedSetupService::class)->setup($this->ownerRecord);
+                if (! $setup['success']) {
+                    throw ValidationException::withMessages([
+                        'destination' => __($setup['message']),
+                    ]);
+                }
+
+                $destination = $this->resolveSimpleDestination($data, $collectionType);
+
+                $mapping = DB::transaction(function () use ($sources, $destination): EmbyLibraryMapping {
+                    $created = collect();
+                    // An existing library's root is never fully owned by M3U Editor, so its content
+                    // must always be isolated to a source-specific subdirectory. Only a library this
+                    // PR just created (managed) may use its root directly for a single "all" source.
+                    $usesSourceSubdirectories = ! $destination['managed']
+                        || count($sources) > 1
+                        || $sources[0]['kind'] !== 'all';
+                    foreach ($sources as $source) {
+                        $mappingDestination = $destination;
+                        if ($usesSourceSubdirectories) {
+                            $mappingDestination['path'] = $this->managedSourcePath($destination['path'], $source);
+                        }
+
+                        $mapping = EmbyLibraryMapping::create([
+                            'media_server_integration_id' => $this->ownerRecord->id,
+                            'user_id' => $this->ownerRecord->user_id,
+                            'enabled' => true,
+                            'source_kind' => $source['kind'],
+                            'source_identifier' => $source['identifier'],
+                            'source_label' => $source['label'],
+                            'target_library_id' => $mappingDestination['library_id'],
+                            'target_library_name' => $mappingDestination['name'],
+                            'collection_type' => $mappingDestination['collection_type'],
+                            'output_path' => $mappingDestination['path'],
+                            'is_managed' => $mappingDestination['managed'],
+                            'options' => EmbyLibraryMapping::DEFAULT_OPTIONS,
+                            'status' => 'idle',
+                        ]);
+                        $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
+                        $mapping->updateQuietly([
+                            'last_planned_revision' => $catalog['revision'],
+                            'status' => 'planned',
+                            'status_summary' => __('Revision planned for companion sync.'),
+                            'error_summary' => null,
+                        ]);
+                        $created->push($mapping->refresh());
+                    }
+
+                    return $created->firstOrFail();
+                });
+                $this->simpleBulkSourceDescriptionsCache = [];
+                $this->simpleBulkSourceOptionsCache = [];
+
+                return $mapping;
+            });
+        } catch (LockTimeoutException) {
+            throw ValidationException::withMessages([
+                'destination' => __('Another Emby publication is already in progress. Retry when it finishes.'),
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return list<array{kind: string, identifier: string, label: string, collection_type: string|null}>
+     */
+    private function resolveSimpleSources(array $data): array
+    {
+        $publicationType = is_string($data['publication_type'] ?? null)
+            ? $data['publication_type']
+            : null;
+        if (($data['publish_all'] ?? false) === true) {
+            if (! in_array($publicationType, EmbyLibraryMapping::COLLECTION_TYPES, true)) {
+                throw ValidationException::withMessages([
+                    'publication_type' => __('Choose movies or TV shows.'),
+                ]);
+            }
+
+            return [$this->resolveSimpleSource(['source' => "all:{$publicationType}"])];
+        }
+
+        $sourceValues = is_array($data['sources'] ?? null) ? $data['sources'] : [];
+        if ($sourceValues === [] && is_string($data['source'] ?? null)) {
+            $sourceValues = [$data['source']];
+        }
+        $sourceValues = array_values(array_unique(array_filter(
+            $sourceValues,
+            fn (mixed $source): bool => is_string($source) && $source !== '',
+        )));
+        if ($sourceValues === []) {
+            throw ValidationException::withMessages([
+                'sources' => __('Choose at least one group or category.'),
+            ]);
+        }
+
+        return array_map(
+            fn (string $source): array => $this->resolveSimpleSource([...$data, 'source' => $source]),
+            $sourceValues,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{kind: string, identifier: string, label: string, collection_type: string|null}
+     */
+    private function resolveSimpleSource(array $data): array
+    {
+        $source = is_string($data['source'] ?? null) ? $data['source'] : '';
+        [$kind, $identifier, $encodedLabel] = array_pad(explode(':', $source, 3), 3, null);
+
+        if ($kind === 'all' && in_array($identifier, EmbyLibraryMapping::COLLECTION_TYPES, true)) {
+            return [
+                'kind' => 'all',
+                'identifier' => '*',
+                'label' => __('All eligible items'),
+                'collection_type' => $identifier,
+            ];
+        }
+
+        $record = match ($kind) {
+            'vod' => Group::query()
+                ->where('user_id', $this->ownerRecord->user_id)
+                ->where('type', 'vod')
+                ->find($identifier),
+            'series_category' => Category::query()
+                ->where('user_id', $this->ownerRecord->user_id)
+                ->find($identifier),
+            'custom_playlist' => CustomPlaylist::query()
+                ->where('user_id', $this->ownerRecord->user_id)
+                ->find($identifier),
+            default => null,
+        };
+        if ($record === null) {
+            throw ValidationException::withMessages([
+                'source' => __('Choose an available source.'),
+            ]);
+        }
+
+        $sourceLabel = $record->name;
+        $sourceKind = match ($kind) {
+            'vod' => 'vod_group',
+            'series_category' => 'series_category',
+            default => 'custom_playlist_group',
+        };
+        $collectionType = match ($kind) {
+            'vod' => 'movies',
+            'series_category' => 'tvshows',
+            default => null,
+        };
+
+        if ($kind === 'custom_playlist') {
+            $sourceLabel = is_string($encodedLabel) && $encodedLabel !== ''
+                ? rawurldecode($encodedLabel)
+                : (is_string($data['custom_playlist_selection'] ?? null)
+                    ? $data['custom_playlist_selection']
+                    : '');
+        }
+
+        return [
+            'kind' => $sourceKind,
+            'identifier' => (string) $record->getKey(),
+            'label' => $sourceLabel,
+            'collection_type' => $collectionType,
+        ];
+    }
+
+    /**
+     * Build the "{kind}:{identifier}[:{urlencoded_label}]" key used to identify a source in
+     * the "sources" CheckboxList. This is the single place that owns the encoding so the
+     * options list, the "already published" descriptions, and resolveSimpleSource() can't drift.
+     */
+    private function encodeSimpleSourceKey(string $sourceKind, string $identifier, ?string $label = null): string
+    {
+        return match ($sourceKind) {
+            'vod_group' => "vod:{$identifier}",
+            'series_category' => "series_category:{$identifier}",
+            default => "custom_playlist:{$identifier}:".rawurlencode((string) $label),
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{library_id: string, name: string, collection_type: string, path: string, managed: bool}
+     */
+    private function resolveSimpleDestination(array $data, ?string $sourceCollectionType): array
+    {
+        $destinationValue = $data['destination'] ?? null;
+        $destination = is_string($destinationValue) || is_int($destinationValue)
+            ? (string) $destinationValue
+            : '';
+        if ($destination !== '__new__') {
+            $library = $this->library($destination);
+            $collectionType = $library['type'] ?? null;
+            $paths = array_keys($this->compatibleLibraryPathOptions($destination));
+            if ($library === null || ! is_string($library['name'] ?? null)
+                || ! in_array($collectionType, EmbyLibraryMapping::COLLECTION_TYPES, true)
+                || ($sourceCollectionType !== null && $sourceCollectionType !== $collectionType)
+                || $paths === []) {
+                throw ValidationException::withMessages([
+                    'destination' => __('Choose a compatible Emby library.'),
+                ]);
+            }
+
+            return [
+                'library_id' => $destination,
+                'name' => $library['name'],
+                'collection_type' => $collectionType,
+                'path' => $paths[0],
+                'managed' => false,
+            ];
+        }
+
+        $name = is_string($data['new_library_name'] ?? null) ? trim($data['new_library_name']) : '';
+        $collectionType = $sourceCollectionType ?? ($data['new_library_type'] ?? null);
+        $root = $this->ownerRecord->emby_managed_setup_root;
+        if ($name === '' || mb_strlen($name) > 255
+            || ! in_array($collectionType, EmbyLibraryMapping::COLLECTION_TYPES, true)
+            || ! is_string($root) || ! MediaServerIntegration::isSafeWritablePath($root)) {
+            throw ValidationException::withMessages([
+                'destination' => __('Choose a valid new Emby library.'),
+            ]);
+        }
+
+        $path = $this->managedLibraryPath($root, $name);
+        if (! MediaServerIntegration::isSafeWritablePath($path)) {
+            throw ValidationException::withMessages([
+                'destination' => __('Choose a valid new Emby library.'),
+            ]);
+        }
+        $result = MediaServerService::make($this->ownerRecord)->createLibrary(
+            $name,
+            $collectionType,
+            [$path],
+            false,
+        );
+        $libraryId = $result['library']['id'] ?? null;
+        if (! $result['success'] || ! is_string($libraryId) || $libraryId === '') {
+            throw ValidationException::withMessages([
+                'destination' => __('Emby could not create the managed library. Retry after checking the companion version and administrator credential.'),
+            ]);
+        }
+
+        return [
+            'library_id' => $libraryId,
+            'name' => $name,
+            'collection_type' => $collectionType,
+            'path' => $path,
+            'managed' => true,
+        ];
+    }
+
+    private function managedLibraryPath(string $root, string $name): string
+    {
+        $separator = str_contains($root, '\\') ? '\\' : '/';
+        $directory = Str::slug($name);
+        if ($directory === '') {
+            $directory = 'library-'.substr(hash('sha256', $name), 0, 12);
+        }
+
+        return rtrim($root, '/\\').$separator.$directory;
+    }
+
+    /**
+     * @param  array{kind: string, identifier: string, label: string, collection_type: string|null}  $source
+     */
+    private function managedSourcePath(string $root, array $source): string
+    {
+        $separator = str_contains($root, '\\') ? '\\' : '/';
+        $slug = Str::slug($source['label']);
+        if ($slug === '') {
+            $slug = 'source';
+        }
+        $slug = substr($slug, 0, 80);
+        $identity = implode("\0", [$source['kind'], $source['identifier'], $source['label']]);
+
+        return rtrim($root, '/\\').$separator.$slug.'-'.substr(hash('sha256', $identity), 0, 10);
+    }
+
+    /** @return array<string, string> */
+    private function simpleBulkSourceOptions(?string $collectionType): array
+    {
+        if ($collectionType !== null && array_key_exists($collectionType, $this->simpleBulkSourceOptionsCache)) {
+            return $this->simpleBulkSourceOptionsCache[$collectionType];
+        }
+
+        $sourceKind = match ($collectionType) {
+            'movies' => 'vod_group',
+            'tvshows' => 'series_category',
+            default => null,
+        };
+        if ($sourceKind === null) {
+            return [];
+        }
+
+        $model = $sourceKind === 'vod_group' ? Group::class : Category::class;
+        $query = $model::query()
+            ->where('user_id', $this->ownerRecord->user_id)
+            ->with('playlist:id,name')
+            ->when($sourceKind === 'vod_group', fn ($builder) => $builder->where('type', 'vod'));
+        $options = [];
+        foreach ($query->orderBy('name')->get() as $record) {
+            $options[$this->encodeSimpleSourceKey($sourceKind, (string) $record->id)] = $record->playlist?->name
+                ? "{$record->name} ({$record->playlist->name})"
+                : $record->name;
+        }
+
+        $customPlaylistRelations = $collectionType === 'movies'
+            ? ['channels' => fn ($builder) => $builder
+                ->where('channels.enabled', true)
+                ->where('channels.is_vod', true)
+                ->with('tags')]
+            : ['series' => fn ($builder) => $builder
+                ->where('series.enabled', true)
+                ->with(['category', 'tags'])];
+        $customPlaylists = CustomPlaylist::query()
+            ->where('user_id', $this->ownerRecord->user_id)
+            ->with($customPlaylistRelations)
+            ->orderBy('name')
+            ->get();
+
+        foreach ($customPlaylists as $playlist) {
+            $items = $collectionType === 'movies' ? $playlist->channels : $playlist->series;
+            $tagType = $collectionType === 'movies' ? $playlist->uuid : $playlist->uuid.'-category';
+            $labels = [];
+
+            foreach ($items as $item) {
+                $matchingTags = $item->tags->where('type', $tagType);
+                if ($matchingTags->isNotEmpty()) {
+                    foreach ($matchingTags as $tag) {
+                        $label = $tag->getTranslation('name', 'en');
+                        if ($label !== '') {
+                            $labels[$label] = $label;
+                        }
+                    }
+
+                    continue;
+                }
+
+                $label = $collectionType === 'movies' ? $item->group : $item->category?->name;
+                if (is_string($label) && $label !== '') {
+                    $labels[$label] = $label;
+                }
+            }
+
+            natcasesort($labels);
+            foreach ($labels as $label) {
+                $key = $this->encodeSimpleSourceKey('custom_playlist_group', (string) $playlist->id, $label);
+                $options[$key] = "{$playlist->name}: {$label}";
+            }
+        }
+
+        return $this->simpleBulkSourceOptionsCache[$collectionType] = array_diff_key(
+            $options,
+            $this->simpleBulkSourceDescriptions($collectionType),
+        );
+    }
+
+    /** @return array<string, string> */
+    private function simpleBulkSourceDescriptions(?string $collectionType): array
+    {
+        if (! in_array($collectionType, EmbyLibraryMapping::COLLECTION_TYPES, true)) {
+            return [];
+        }
+
+        if (array_key_exists($collectionType, $this->simpleBulkSourceDescriptionsCache)) {
+            return $this->simpleBulkSourceDescriptionsCache[$collectionType];
+        }
+
+        $expectedKind = $collectionType === 'movies' ? 'vod_group' : 'series_category';
+
+        return $this->simpleBulkSourceDescriptionsCache[$collectionType] = $this->ownerRecord->embyLibraryMappings()
+            ->where('collection_type', $collectionType)
+            ->whereIn('source_kind', [$expectedKind, 'custom_playlist_group', 'all'])
+            ->get(['source_kind', 'source_identifier', 'source_label'])
+            ->mapWithKeys(function (EmbyLibraryMapping $mapping) use ($collectionType): array {
+                $key = $mapping->source_kind === 'all'
+                    ? "all:{$collectionType}"
+                    : $this->encodeSimpleSourceKey($mapping->source_kind, $mapping->source_identifier, $mapping->source_label);
+
+                return [$key => __('Already published')];
+            })
+            ->all();
+    }
+
+    /** @return array<string, string> */
+    private function simpleLibraryOptionsForCollectionType(?string $collectionType): array
+    {
+        $hasConfirmedWritableRoots = $this->ownerRecord->getEmbyPublisherWritablePaths() !== [];
+
+        return collect($this->ownerRecord->available_libraries ?? [])
+            ->filter(function (array $library) use ($collectionType, $hasConfirmedWritableRoots): bool {
+                $type = $library['type'] ?? null;
+                $hasSafePath = collect($library['paths'] ?? [])
+                    ->contains(fn (mixed $path): bool => is_string($path)
+                        && MediaServerIntegration::isSafeWritablePath($path));
+
+                return in_array($type, EmbyLibraryMapping::COLLECTION_TYPES, true)
+                    && ($collectionType === null || $type === $collectionType)
+                    && ($hasConfirmedWritableRoots
+                        ? $this->compatibleLibraryPathOptions((string) ($library['id'] ?? '')) !== []
+                        : $hasSafePath);
+            })
+            ->mapWithKeys(fn (array $library): array => [
+                (string) $library['id'] => $library['name'] ?? __('Unnamed library'),
+            ])
+            ->all();
     }
 
     /** @return array<string, string> */

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\VodGroups\Pages;
 
 use App\Filament\Resources\VodGroups\VodGroupResource;
+use App\Filament\Resources\VodGroups\Widgets\DynamicGroupsWidget;
 use App\Jobs\GroupFindAndReplace;
 use App\Jobs\GroupFindAndReplaceReset;
 use App\Models\Playlist;
@@ -109,6 +110,27 @@ class ListVodGroups extends ListRecords
         return static::getResource()::getEloquentQuery()
             ->where('user_id', auth()->id())
             ->where('type', 'vod');
+    }
+
+    protected function getFooterWidgets(): array
+    {
+        return [
+            DynamicGroupsWidget::class,
+        ];
+    }
+
+    /**
+     * Pass the currently-active playlist tab into the registered footer
+     * widgets so the Dynamic Groups table can follow the active playlist
+     * (matches `setupTabs()` which keys tabs by `$playlist->id`).
+     *
+     * @return array<string, mixed>
+     */
+    public function getWidgetData(): array
+    {
+        return [
+            'activePlaylistId' => $this->activeTab,
+        ];
     }
 
     public function getTabs(): array
