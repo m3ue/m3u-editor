@@ -145,6 +145,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                     'aiostreams_catalogs' => $integration->aiostreams_catalogs,
                     'aiostreams_logo' => $integration->aiostreams_logo,
                     'aiostreams_selected_catalog_ids' => $integration->aiostreams_selected_catalog_ids,
+                    'aiostreams_meta_id_prefixes' => $integration->aiostreams_meta_id_prefixes,
                 ]);
 
                 $playlist->update([
@@ -325,6 +326,59 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * Build the rich cast_list wire shape ({id, name, character, photo}) from a
+     * media server People array.
+     *
+     * Emby/Jellyfin/Plex only expose their own internal person ids, never a
+     * TMDB person id, so `id` is always null here. The m3u-tv client treats
+     * cast_list as display-only (photo / name / character) and tolerates a
+     * null id, so this stays useful without a resolvable id.
+     *
+     * @param  array<int, array<string, mixed>>  $people
+     * @return array<int, array{id: null, name: string, character: string, photo: ?string}>
+     */
+    protected function buildCastList(array $people, MediaServer $service): array
+    {
+        return collect($people)
+            ->filter(fn ($p) => ($p['Type'] ?? '') === 'Actor' && ! empty($p['Name']))
+            ->take(15)
+            ->map(function ($p) use ($service) {
+                $photo = null;
+                if (! empty($p['PrimaryImageUrl'])) {
+                    $photo = $p['PrimaryImageUrl'];
+                } elseif (! empty($p['Id']) && ! empty($p['PrimaryImageTag'])) {
+                    $photo = $service->getImageUrl((string) $p['Id'], 'Primary');
+                }
+
+                return [
+                    'id' => null,
+                    'name' => $p['Name'],
+                    'character' => $p['Role'] ?? '',
+                    'photo' => $photo,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Resolve a transparent title logo (clearlogo) for a media server item.
+     *
+     * Only Emby/Jellyfin expose a distinct Logo image; Plex has no clearlogo
+     * equivalent and never sets ImageTags['Logo'], so this returns null there.
+     *
+     * @param  array<string, mixed>  $item
+     */
+    protected function resolveClearLogo(array $item, string $itemId, MediaServer $service): ?string
+    {
+        if (empty($item['ImageTags']['Logo'])) {
+            return null;
+        }
+
+        return $service->getImageUrl($itemId, 'Logo');
+    }
+
+    /**
      * Sync a single movie as a VOD channel.
      */
     protected function syncMovie(
@@ -363,6 +417,10 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'Name'
         ), 0, 10);
 
+        // Rich cast list (id null - media servers only expose internal person ids) + clearlogo
+        $castList = $this->buildCastList($movie['People'] ?? [], $service);
+        $clearLogo = $this->resolveClearLogo($movie, $itemId, $service);
+
         // Handle ProductionLocations - might be array or string
         $locations = $movie['ProductionLocations'] ?? [];
         $country = is_array($locations) ? implode(', ', $locations) : (string) $locations;
@@ -389,6 +447,13 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'youtube_trailer' => null,
             'country' => $country,
         ];
+
+        if (! empty($castList)) {
+            $syncInfo['cast_list'] = $castList;
+        }
+        if (! empty($clearLogo)) {
+            $syncInfo['clearlogo'] = $clearLogo;
+        }
 
         // Find or create the channel
         $sourceId = "media-server-{$integration->id}-{$itemId}";
@@ -583,6 +648,10 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'Name'
         );
 
+        // Rich cast list (id null - media servers only expose internal person ids) + clearlogo
+        $castList = $this->buildCastList($people, $service);
+        $clearLogo = $this->resolveClearLogo($seriesData, $seriesId, $service);
+
         // Extract external IDs (Plex uses ProviderIds, Emby uses ProviderIds directly)
         $providerIds = $seriesData['ProviderIds'] ?? [];
         $tmdbId = $providerIds['Tmdb'] ?? $providerIds['Tmdb'] ?? null;
@@ -621,6 +690,27 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         $syncCast = ! empty($actors) ? implode(', ', $actors) : null;
         $syncDirector = ! empty($directors) ? implode(', ', $directors) : null;
 
+        // Preserve a prior TMDB-enriched cast_list / clearlogo when this sync
+        // pass carries none (local libraries return no People / Logo).
+        $syncCastList = ! empty($castList)
+            ? $castList
+            : ($isNewSeries ? null : ($series->metadata['cast_list'] ?? null));
+        $syncClearLogo = $clearLogo
+            ?: ($isNewSeries ? null : ($series->metadata['clearlogo'] ?? null));
+
+        $seriesMetadata = [
+            'media_server_id' => $seriesId,
+            'media_server_type' => $integration->type,
+            'official_rating' => $seriesData['OfficialRating'] ?? null,
+            'original_title' => $seriesData['OriginalTitle'] ?? null,
+        ];
+        if (! empty($syncCastList)) {
+            $seriesMetadata['cast_list'] = $syncCastList;
+        }
+        if (! empty($syncClearLogo)) {
+            $seriesMetadata['clearlogo'] = $syncClearLogo;
+        }
+
         // For existing series that have been TMDB-enriched, preserve the TMDB genre/category
         // instead of overwriting with the library folder name (e.g., "tv")
         $hasTmdbGenre = ! $isNewSeries && $series->last_metadata_fetch !== null
@@ -647,12 +737,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'tmdb_id' => $tmdbId ?: ($isNewSeries ? null : $series->tmdb_id),
             'tvdb_id' => $tvdbId ?: ($isNewSeries ? null : $series->tvdb_id),
             'imdb_id' => $imdbId ?: ($isNewSeries ? null : $series->imdb_id),
-            'metadata' => [
-                'media_server_id' => $seriesId,
-                'media_server_type' => $integration->type,
-                'official_rating' => $seriesData['OfficialRating'] ?? null,
-                'original_title' => $seriesData['OriginalTitle'] ?? null,
-            ],
+            'metadata' => $seriesMetadata,
         ]);
 
         // Only reset last_metadata_fetch for new local-style media series (existing ones keep their timestamp)

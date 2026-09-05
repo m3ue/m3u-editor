@@ -86,6 +86,7 @@ describe('NfoService series provider fields', function () {
                 'imdb_id' => 'tt0000002',
                 'poster_path' => 'https://images.example/legacy-poster.jpg',
                 'backdrop_path' => 'https://images.example/legacy-backdrop.jpg',
+                'clearlogo' => 'https://images.example/current-logo.png',
             ],
         ]);
 
@@ -98,6 +99,7 @@ describe('NfoService series provider fields', function () {
             ->toContain('<imdbid>tt26923358</imdbid>')
             ->toContain('https://images.example/current-poster.jpg')
             ->toContain('https://images.example/current-backdrop.jpg')
+            ->toContain('<thumb aspect="clearlogo">https://images.example/current-logo.png</thumb>')
             ->not->toContain('https://images.example/legacy-poster.jpg')
             ->not->toContain('https://images.example/legacy-backdrop.jpg');
 

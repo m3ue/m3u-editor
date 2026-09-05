@@ -6,6 +6,7 @@ use App\Facades\PlaylistFacade;
 use App\Models\MediaServerIntegration;
 use App\Models\PlaylistAuth;
 use App\Services\AIOStreamsAuthorizationService;
+use App\Services\AIOStreamsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -121,10 +122,13 @@ class AIOStreamsProxyController extends Controller
 
         $cacheKey = "aiostreams.meta.{$integrationId}.{$type}.{$id}";
 
+        // Delegates to AIOStreamsService::fetchMeta(), which falls back to the
+        // public Stremio meta addons (Cinemeta / Kitsu / TMDB) when the operator's
+        // AIOStreams instance has no metadata addon configured and 404s the
+        // request. Keeps this proxy path and the admin/guest browse UI on one
+        // implementation.
         $data = Cache::remember($cacheKey, 300, function () use ($integration, $type, $id) {
-            $response = Http::timeout(15)->get("{$integration->manifest_base_url}/meta/{$type}/{$id}.json");
-
-            return $response->successful() ? $response->json() : null;
+            return AIOStreamsService::make($integration)->fetchMeta($type, $id);
         });
 
         if ($data === null) {

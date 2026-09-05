@@ -14,11 +14,14 @@ use App\Jobs\GroupFindAndReplaceReset;
 use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
+use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -373,7 +376,7 @@ class VodGroupResource extends Resource implements CopilotResource
                                 ->label(__('Sort Order'))
                                 ->options([
                                     'DESC' => 'Newest first (2026 to 1950)',
-                                    'ASC' => 'Newest first (1950 to 2026)',
+                                    'ASC' => 'Oldest first (1950 to 2026)',
                                 ])
                                 ->default('DESC')
                                 ->required(),
@@ -393,7 +396,7 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalDescription(__('Sort all channels in this group by release date? This will update the sort order.')),
 
                     Action::make('process_vod')
-                        ->label(__('Fetch Metadata'))
+                        ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->schema([
                             Toggle::make('overwrite_existing')
@@ -424,6 +427,33 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalSubmitActionLabel(__('Yes, process now')),
 
                     FetchTmdbIdsForGroupsAction::make('vod'),
+
+                    Action::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Group $record, Action $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            GenreGroupReclassifyService::reclassifyVodGroups($record->playlist);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Groups Reclassified'))
+                                ->body(__('Channels in non-genre-matching groups have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify this playlist\'s VOD groups to TMDB genres now? Channels in non-genre-matching groups will be moved to Uncategorized. Groups protected by an Auto-Add to Custom Playlist rule are skipped.')),
 
                     Action::make('sync_vod')
                         ->label(__('Sync VOD .strm file'))
@@ -647,8 +677,74 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalDescription(__('Disable the selected group(s) channels now?'))
                         ->modalSubmitActionLabel(__('Yes, disable now')),
 
+                    BulkAction::make('sort_release_date_bulk')
+                        ->label(__('Sort by Release Date'))
+                        ->icon('heroicon-o-calendar-days')
+                        ->schema([
+                            Select::make('sort')
+                                ->label(__('Sort Order'))
+                                ->options([
+                                    'DESC' => 'Newest first (2026 to 1950)',
+                                    'ASC' => 'Oldest first (1950 to 2026)',
+                                ])
+                                ->default('DESC')
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            foreach ($records as $record) {
+                                SortFacade::bulkSortGroupChannelsByReleaseDate($record, $data['sort'] ?? 'DESC');
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Channels Sorted by Release Date'))
+                                ->body(__('The channels in the selected groups have been sorted by release date.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-calendar-days')
+                        ->modalDescription(__('Sort all channels in the selected groups by release date? This will update the sort order.')),
+
+                    BulkAction::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Collection $records, BulkAction $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            // Per-playlist scope: reclassify the whole playlist's groups, not
+                            // just the selected rows. Mirrors the GenreGroupReclassifyService
+                            // contract.
+                            foreach ($records->pluck('playlist_id')->unique() as $playlistId) {
+                                $playlist = Playlist::find($playlistId);
+                                if ($playlist) {
+                                    GenreGroupReclassifyService::reclassifyVodGroups($playlist);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Groups Reclassified'))
+                                ->body(__('Channels in non-genre-matching groups have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify the selected playlists\' VOD groups to TMDB genres now? Channels in non-genre-matching groups will be moved to Uncategorized. Groups protected by an Auto-Add to Custom Playlist rule are skipped.')),
+
                     BulkAction::make('process_bulk_vod')
-                        ->label(__('Fetch Metadata'))
+                        ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->schema([
                             Toggle::make('overwrite_existing')
@@ -865,7 +961,8 @@ class VodGroupResource extends Resource implements CopilotResource
                 ->inline(false)
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
-                ->default(true),
+                ->default(true)
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
             Select::make('playlist_id')
                 ->required()
                 ->label(__('Playlist'))
@@ -886,7 +983,8 @@ class VodGroupResource extends Resource implements CopilotResource
                 ->relationship('streamFileSetting', 'name', fn ($query) => $query->forVod()->where('user_id', auth()->id())
                 )
                 ->nullable()
-                ->helperText(__('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.')),
+                ->helperText(__('Select a Stream File Setting profile for all VOD channels in this group. VOD-level settings take priority. Leave empty to use global settings.'))
+                ->hidden(fn (?Group $record): bool => (bool) $record?->is_merged),
         ];
 
         return [

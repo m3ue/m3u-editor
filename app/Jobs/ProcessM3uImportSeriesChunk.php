@@ -105,22 +105,34 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ->withOptions(['verify' => $verify])
             ->timeout(60) // set timeout to 1 minute
             ->throw()->get($seriesStreamsUrl));
+
+        // A failed or unusable provider response must abort the whole import chain.
+        // If we returned here, this category's series would silently miss the current
+        // import_batch_no and ProcessM3uImportComplete::seriesCleanup() would then
+        // delete every one of them - the "my series vanished and reappeared" churn.
+        // Throwing lets the chain ->catch() mark the run failed and leaves existing
+        // data untouched for the next sync.
         if (! $seriesStreamsResponse->ok()) {
-            return; // skip this category if there's an error
+            throw new \RuntimeException(
+                "get_series returned HTTP {$seriesStreamsResponse->status()} for category {$sourceCategoryId} (playlist {$playlistId})"
+            );
         }
 
         // Guard against providers that return a non-JSON body (e.g. a PNG error image)
-        // with a 200 OK status. JsonMachine will throw a SyntaxError on the first byte
-        // if the body is not JSON, which would crash the entire import chain.
+        // with a 200 OK status. JsonMachine would throw a SyntaxError on the first byte,
+        // but abort explicitly here for the same reason as above - a partial series
+        // import must never be allowed to land.
         $firstChar = ltrim($seriesStreamsResponse->body())[0] ?? '';
         if ($firstChar !== '[' && $firstChar !== '{') {
-            Log::warning('ProcessM3uImportSeriesChunk: Non-JSON response for series category, skipping', [
+            Log::warning('ProcessM3uImportSeriesChunk: Non-JSON response for series category, aborting import', [
                 'source_category_id' => $sourceCategoryId,
                 'playlist_id' => $playlistId,
                 'content_preview' => substr($seriesStreamsResponse->body(), 0, 12),
             ]);
 
-            return;
+            throw new \RuntimeException(
+                "get_series returned a non-JSON body for category {$sourceCategoryId} (playlist {$playlistId})"
+            );
         }
 
         // Single-pass stream: pluck existing rows once for O(1) lookup, then iterate
@@ -140,6 +152,21 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         foreach (Items::fromString($seriesStreamsResponse->body()) as $item) {
             $itemName = trim((string) ($item->name ?? $item->title ?? ''));
             if ($itemName === '') {
+                continue;
+            }
+
+            // Drop malformed provider rows that carry no series_id. Importing one
+            // creates a Series with a null source_series_id, which later blows up
+            // the series_metadata phase (XtreamService::getSeriesInfo(string) is
+            // handed null -> TypeError). This is rejecting garbage, not a partial
+            // sync, so skip the row and keep importing the rest of the category.
+            if (blank($item->series_id ?? null)) {
+                Log::warning('ProcessM3uImportSeriesChunk: series entry has no series_id, skipping', [
+                    'source_category_id' => $sourceCategoryId,
+                    'playlist_id' => $playlistId,
+                    'name' => $itemName,
+                ]);
+
                 continue;
             }
 

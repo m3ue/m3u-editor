@@ -82,6 +82,109 @@ class TmdbService
     }
 
     /**
+     * Search for bounded movie candidates without loading related resources.
+     *
+     * @return list<array{tmdb_id: int, title: mixed, original_title: mixed, release_date: mixed, overview: mixed}>
+     */
+    public function searchMovieCandidates(string $title, ?int $year = null, int $limit = 5): array
+    {
+        return $this->searchCandidates(
+            'movie',
+            $title,
+            $year,
+            $limit,
+            ['title', 'original_title', 'release_date', 'overview'],
+            'year',
+        );
+    }
+
+    /**
+     * Search for bounded TV candidates without loading related resources.
+     *
+     * @return list<array{tmdb_id: int, name: mixed, original_name: mixed, first_air_date: mixed, overview: mixed}>
+     */
+    public function searchTvSeriesCandidates(string $name, ?int $year = null, int $limit = 5): array
+    {
+        return $this->searchCandidates(
+            'tv',
+            $name,
+            $year,
+            $limit,
+            ['name', 'original_name', 'first_air_date', 'overview'],
+            'first_air_date_year',
+        );
+    }
+
+    /**
+     * @param  list<string>  $fields
+     * @return list<array<string, mixed>>
+     */
+    private function searchCandidates(
+        string $mediaType,
+        string $query,
+        ?int $year,
+        int $limit,
+        array $fields,
+        string $yearKey,
+    ): array {
+        if (! $this->isConfigured()) {
+            return [];
+        }
+
+        $normalizedQuery = $this->normalizeTitle($query);
+        if ($normalizedQuery === '') {
+            return [];
+        }
+
+        $limit = max(1, min(10, $limit));
+
+        try {
+            $this->waitForRateLimit();
+
+            $params = [
+                'api_key' => $this->apiKey,
+                'query' => $normalizedQuery,
+                'language' => $this->language,
+                'include_adult' => false,
+            ];
+            if ($year !== null) {
+                $params[$yearKey] = $year;
+            }
+
+            $response = Http::timeout(15)->get(self::BASE_URL."/search/{$mediaType}", $params);
+            if (! $response->successful()) {
+                return [];
+            }
+
+            $results = $response->json('results', []);
+            if (! is_array($results) || ! array_is_list($results)) {
+                return [];
+            }
+
+            $candidates = [];
+            foreach (array_slice($results, 0, $limit) as $result) {
+                if (! is_array($result) || ! is_int($result['id'] ?? null) || $result['id'] < 1) {
+                    return [];
+                }
+
+                $candidate = ['tmdb_id' => $result['id']];
+                foreach ($fields as $field) {
+                    if (! array_key_exists($field, $result)
+                        || ($result[$field] !== null && ! is_scalar($result[$field]))) {
+                        return [];
+                    }
+                    $candidate[$field] = $result[$field];
+                }
+                $candidates[] = $candidate;
+            }
+
+            return $candidates;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * Search for a movie by title and optionally year.
      *
      * @param  string  $title  The movie title to search for
@@ -789,7 +892,8 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos',
+                    'append_to_response' => 'external_ids,credits,videos,images',
+                    'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
 
@@ -819,6 +923,9 @@ class TmdbService
             if (! empty($data['backdrop_path'])) {
                 $backdropUrl = 'https://image.tmdb.org/t/p/original'.$data['backdrop_path'];
             }
+
+            // Transparent title logo (clearlogo), language-ranked
+            $logoUrl = $this->pickBestLogo($data['images']['logos'] ?? []);
 
             // Extract genres as comma-separated string
             $genres = collect($data['genres'] ?? [])->pluck('name')->implode(', ');
@@ -873,6 +980,7 @@ class TmdbService
                 'overview' => $data['overview'] ?? null,
                 'poster_url' => $posterUrl,
                 'backdrop_url' => $backdropUrl,
+                'logo_url' => $logoUrl,
                 'first_air_date' => $data['first_air_date'] ?? null,
                 'genres' => $genres,
                 'vote_average' => $data['vote_average'] ?? null,
@@ -912,7 +1020,8 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos',
+                    'append_to_response' => 'external_ids,credits,videos,images',
+                    'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
 
@@ -938,6 +1047,9 @@ class TmdbService
             if (! empty($data['backdrop_path'])) {
                 $backdropUrl = 'https://image.tmdb.org/t/p/original'.$data['backdrop_path'];
             }
+
+            // Transparent title logo (clearlogo), language-ranked
+            $logoUrl = $this->pickBestLogo($data['images']['logos'] ?? []);
 
             // Extract genres as comma-separated string
             $genres = collect($data['genres'] ?? [])->pluck('name')->implode(', ');
@@ -986,6 +1098,7 @@ class TmdbService
                 'overview' => $data['overview'] ?? null,
                 'poster_url' => $posterUrl,
                 'backdrop_url' => $backdropUrl,
+                'logo_url' => $logoUrl,
                 'release_date' => $data['release_date'] ?? null,
                 'genres' => $genres,
                 'vote_average' => $data['vote_average'] ?? null,
@@ -1008,18 +1121,59 @@ class TmdbService
     }
 
     /**
+     * Pick the best transparent title logo from a TMDB `images.logos` array.
+     *
+     * Preference order: the configured language, then English, then a
+     * language-neutral logo. Within a language the highest-voted file wins.
+     * Returns null when the payload carries no usable logo.
+     *
+     * @param  array<int, array<string, mixed>>  $logos
+     */
+    private function pickBestLogo(array $logos): ?string
+    {
+        if (empty($logos)) {
+            return null;
+        }
+
+        $preferred = substr($this->language, 0, 2);
+        $languageRank = fn (?string $code): int => match ($code) {
+            $preferred => 0,
+            'en' => 1,
+            default => 2,
+        };
+
+        $candidates = array_values(array_filter(
+            $logos,
+            fn ($logo) => ! empty($logo['file_path'])
+        ));
+
+        usort($candidates, function ($a, $b) use ($languageRank) {
+            $rankDelta = $languageRank($a['iso_639_1'] ?? null) <=> $languageRank($b['iso_639_1'] ?? null);
+            if ($rankDelta !== 0) {
+                return $rankDelta;
+            }
+
+            return (float) ($b['vote_average'] ?? 0) <=> (float) ($a['vote_average'] ?? 0);
+        });
+
+        return isset($candidates[0]['file_path'])
+            ? 'https://image.tmdb.org/t/p/w500'.$candidates[0]['file_path']
+            : null;
+    }
+
+    /**
      * Reshape a raw TMDB `credits.cast` array into the m3u-tv wire contract.
      * Top 15 billed members, one entry per person.
      *
      * @param  array<int, array<string, mixed>>  $rawCast
-     * @return array<int, array{id: int, name: string, character: string, photo: ?string}>
+     * @return array<int, array{id: ?int, name: string, character: string, photo: ?string}>
      */
     private function reshapeRichCast(array $rawCast): array
     {
         return collect($rawCast)
             ->take(15)
             ->map(fn ($p) => [
-                'id' => (int) ($p['id'] ?? 0),
+                'id' => isset($p['id']) ? (int) $p['id'] : null,
                 'name' => $p['name'] ?? '',
                 'character' => $p['character'] ?? '',
                 'photo' => ! empty($p['profile_path'])
@@ -1927,23 +2081,28 @@ class TmdbService
      *
      * @param  string  $mediaType  'all', 'movie', or 'tv'
      * @param  string  $timeWindow  'day' or 'week'
+     * @param  int  $page  1-based TMDB page number. Each page returns ~20 items.
      * @return array<int, array<string, mixed>>
      */
-    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week'): array
+    public function getTrending(string $mediaType = 'all', string $timeWindow = 'week', int $page = 1): array
     {
         if (! $this->isConfigured()) {
             return [];
         }
 
-        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$this->language}";
+        $cacheKey = "tmdb_trending_{$mediaType}_{$timeWindow}_{$page}_{$this->language}";
 
-        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow) {
+        return Cache::remember($cacheKey, now()->addMinutes(30), function () use ($mediaType, $timeWindow, $page) {
             $this->waitForRateLimit();
 
             try {
                 $response = Http::timeout(15)->get(
                     self::BASE_URL."/trending/{$mediaType}/{$timeWindow}",
-                    ['api_key' => $this->apiKey, 'language' => $this->language]
+                    [
+                        'api_key' => $this->apiKey,
+                        'language' => $this->language,
+                        'page' => $page,
+                    ]
                 );
 
                 if (! $response->successful()) {
@@ -2136,28 +2295,40 @@ class TmdbService
             return [];
         }
 
-        return Cache::remember('tmdb_genres_movie_'.$this->language, now()->addHours(24), function () {
-            $this->waitForRateLimit();
+        $cacheKey = 'tmdb_genres_movie_'.$this->language;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
 
-            try {
-                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/movie/list', [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                ]);
+        $this->waitForRateLimit();
 
-                if (! $response->successful()) {
-                    return [];
-                }
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL.'/genre/movie/list', [
+                'api_key' => $this->apiKey,
+                'language' => $this->language,
+            ]);
 
-                return collect($response->json()['genres'] ?? [])
-                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
-                    ->all();
-            } catch (\Exception $e) {
-                Log::error('TMDB: getMovieGenres error', ['error' => $e->getMessage()]);
-
+            if (! $response->successful()) {
                 return [];
             }
-        });
+
+            $genres = collect($response->json()['genres'] ?? [])
+                ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                ->all();
+
+            // Only cache a real result - never a failed/empty lookup, or a single
+            // transient outage would suppress genre data for 24h.
+            if ($genres !== []) {
+                Cache::put($cacheKey, $genres, now()->addHours(24));
+            }
+
+            return $genres;
+        } catch (\Exception $e) {
+            Log::error('TMDB: getMovieGenres error', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /**
@@ -2171,28 +2342,39 @@ class TmdbService
             return [];
         }
 
-        return Cache::remember('tmdb_genres_tv_'.$this->language, now()->addHours(24), function () {
-            $this->waitForRateLimit();
+        $cacheKey = 'tmdb_genres_tv_'.$this->language;
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && $cached !== []) {
+            return $cached;
+        }
 
-            try {
-                $response = Http::timeout(15)->get(self::BASE_URL.'/genre/tv/list', [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                ]);
+        $this->waitForRateLimit();
 
-                if (! $response->successful()) {
-                    return [];
-                }
+        try {
+            $response = Http::timeout(15)->get(self::BASE_URL.'/genre/tv/list', [
+                'api_key' => $this->apiKey,
+                'language' => $this->language,
+            ]);
 
-                return collect($response->json()['genres'] ?? [])
-                    ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
-                    ->all();
-            } catch (\Exception $e) {
-                Log::error('TMDB: getTvGenres error', ['error' => $e->getMessage()]);
-
+            if (! $response->successful()) {
                 return [];
             }
-        });
+
+            $genres = collect($response->json()['genres'] ?? [])
+                ->map(fn ($g) => ['id' => (int) $g['id'], 'name' => $g['name']])
+                ->all();
+
+            // See getMovieGenres(): never cache a failed/empty lookup.
+            if ($genres !== []) {
+                Cache::put($cacheKey, $genres, now()->addHours(24));
+            }
+
+            return $genres;
+        } catch (\Exception $e) {
+            Log::error('TMDB: getTvGenres error', ['error' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /**
@@ -2365,10 +2547,11 @@ class TmdbService
 
         switch ($source) {
             case 'trending':
-                // Trending already returns the merged list — ignore pages.
                 $mediaType = $type === 'series' ? 'tv' : 'movie';
                 $window = (string) ($params['time_window'] ?? 'week');
-                $results = $this->getTrending($mediaType, $window);
+                for ($p = 1; $p <= $pages; $p++) {
+                    $results = array_merge($results, $this->getTrending($mediaType, $window, $p));
+                }
                 break;
 
             case 'popular':

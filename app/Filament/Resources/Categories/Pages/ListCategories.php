@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Categories\Pages;
 
 use App\Filament\Resources\Categories\CategoryResource;
+use App\Filament\Resources\Categories\Widgets\DynamicGroupsWidget;
 use App\Jobs\CategoryFindAndReplace;
 use App\Jobs\CategoryFindAndReplaceReset;
 use App\Models\Playlist;
@@ -88,6 +89,27 @@ class ListCategories extends ListRecords
     {
         return static::getResource()::getEloquentQuery()
             ->where('user_id', auth()->id());
+    }
+
+    protected function getFooterWidgets(): array
+    {
+        return [
+            DynamicGroupsWidget::class,
+        ];
+    }
+
+    /**
+     * Pass the currently-active playlist tab into the registered footer
+     * widgets so the Dynamic Groups table can follow the active playlist
+     * (matches `setupTabs()` which keys tabs by `$playlist->id`).
+     *
+     * @return array<string, mixed>
+     */
+    public function getWidgetData(): array
+    {
+        return [
+            'activePlaylistId' => $this->activeTab,
+        ];
     }
 
     public function getTabs(): array

@@ -65,6 +65,7 @@ class NfoService
             $backdrop = $this->getFirstUsableImage($series->backdrop_path, $metadata['backdrop_path'] ?? null);
             $this->appendImage($xml, 'thumb', $poster, useProxy: false, attrs: ['aspect' => 'poster']);
             $this->appendImage($xml, 'fanart', $backdrop);
+            $this->appendImage($xml, 'thumb', $metadata['clearlogo'] ?? null, useProxy: false, attrs: ['aspect' => 'clearlogo']);
 
             // Unique IDs (important for scrapers)
             if (! empty($tmdbId)) {
@@ -265,6 +266,7 @@ class NfoService
 
             $this->appendImage($xml, 'thumb', $info['poster_path'] ?? $movieData['cover_big'] ?? $movieData['movie_image'] ?? null, useProxy: false, attrs: ['aspect' => 'poster']);
             $this->appendImage($xml, 'fanart', $info['backdrop_path'] ?? $movieData['backdrop_path'] ?? null);
+            $this->appendImage($xml, 'thumb', $info['clearlogo'] ?? $movieData['clearlogo'] ?? null, useProxy: false, attrs: ['aspect' => 'clearlogo']);
 
             // Country (mixed string|array of strings|array of {name|iso_3166_1})
             $country = $info['production_countries'] ?? $movieData['country'] ?? null;
@@ -640,6 +642,7 @@ class NfoService
             $this->appendGenres($xml, $tmdb['genres'] ?? null);
             $this->appendImage($xml, 'thumb', $tmdb['poster_url'] ?? $tmdb['poster_path'] ?? null, $useProxy, ['aspect' => 'poster']);
             $this->appendImage($xml, 'fanart', $tmdb['backdrop_url'] ?? $tmdb['backdrop_path'] ?? null, $useProxy);
+            $this->appendImage($xml, 'thumb', $tmdb['logo_url'] ?? $tmdb['clearlogo'] ?? null, $useProxy, ['aspect' => 'clearlogo']);
 
             $tmdbId = $this->getScalarValue($tmdb['id'] ?? null);
             if (! empty($tmdbId)) {
@@ -765,6 +768,7 @@ class NfoService
             $this->appendGenres($xml, $tmdbShow['genres'] ?? null);
             $this->appendImage($xml, 'thumb', $tmdbShow['poster_url'] ?? $tmdbShow['poster_path'] ?? null, $useProxy, ['aspect' => 'poster']);
             $this->appendImage($xml, 'fanart', $tmdbShow['backdrop_url'] ?? $tmdbShow['backdrop_path'] ?? null, $useProxy);
+            $this->appendImage($xml, 'thumb', $tmdbShow['logo_url'] ?? $tmdbShow['clearlogo'] ?? null, $useProxy, ['aspect' => 'clearlogo']);
 
             $tmdbId = $this->getScalarValue($tmdbShow['id'] ?? null);
             if (! empty($tmdbId)) {

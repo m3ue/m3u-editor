@@ -16,6 +16,7 @@ class AedProfile extends Model
         'user_id' => 'integer',
         'override' => 'boolean',
         'event_duration_minutes' => 'integer',
+        'dummy_epg_days' => 'integer',
     ];
 
     public function user(): BelongsTo

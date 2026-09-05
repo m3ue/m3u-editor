@@ -23,6 +23,10 @@ beforeEach(function () {
     // talks to Redis. We don't want any of that during these tests.
     Bus::fake();
 
+    // Dynamic Groups are gated behind an experimental feature flag that
+    // ships disabled. Enable it so the Playlist form section renders.
+    config()->set('feature.playlist_tmdb_dynamic_groups', true);
+
     $this->user = User::factory()->create();
     $this->actingAs($this->user);
 

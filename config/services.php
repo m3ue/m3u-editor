@@ -56,6 +56,27 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Stremio Public Meta Addons
+    |--------------------------------------------------------------------------
+    |
+    | Fallback metadata sources used when a user's AIOStreams instance has no
+    | metadata addon configured and answers /meta requests with a 404
+    | ("no addon to handle meta resource"). These are the same public addons
+    | Stremio itself falls back to, keyed by the id scheme of the requested
+    | item ("tt..." -> Cinemeta, "kitsu:..." -> Kitsu, "tmdb:..." -> TMDB).
+    | Blank any entry in your .env to disable that particular fallback.
+    |
+    */
+    'stremio' => [
+        'meta_addons' => [
+            'cinemeta' => env('STREMIO_CINEMETA_URL', 'https://v3-cinemeta.strem.io'),
+            'kitsu' => env('STREMIO_KITSU_URL', 'https://anime-kitsu.strem.fun'),
+            'tmdb' => env('STREMIO_TMDB_ADDON_URL', ''),
+        ],
+    ],
+
     'oidc' => [
         'enabled' => env('OIDC_ENABLED', false),
         'client_id' => env('OIDC_CLIENT_ID'),

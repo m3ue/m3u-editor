@@ -349,12 +349,18 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalDescription(__('Move the series to another category.'))
                     ->modalSubmitActionLabel(__('Move now')),
                 Action::make('fetch_tmdb_ids')
-                    ->label(__('Fetch TMDB/TVDB IDs'))
+                    ->label(__('Fetch TMDB Metadata'))
                     ->icon('heroicon-o-film')
                     ->modalIcon('heroicon-o-film')
-                    ->modalDescription(__('Fetch TMDB, TVDB, and IMDB IDs for this series from The Movie Database.'))
-                    ->modalSubmitActionLabel(__('Fetch IDs now'))
-                    ->action(function ($record) {
+                    ->modalDescription(__('Fetch full metadata (plot, artwork, cast, genres, episodes) plus TMDB, TVDB and IMDB IDs for this title from The Movie Database.'))
+                    ->modalSubmitActionLabel(__('Fetch metadata now'))
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing TMDB metadata? If disabled, only series missing metadata are fetched.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $settings = app(GeneralSettings::class);
                         if (empty($settings->tmdb_api_key)) {
                             Notification::make()
@@ -370,14 +376,14 @@ class SeriesResource extends Resource implements CopilotResource
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
                                 seriesIds: [$record->id],
-                                overwriteExisting: true,
+                                overwriteExisting: (bool) ($data['overwrite_existing'] ?? false),
                                 user: auth()->user(),
                             ));
 
                         Notification::make()
                             ->success()
                             ->title(__('TMDB Search Started'))
-                            ->body(__('Searching for TMDB/TVDB IDs. Check the logs or refresh the page in a few seconds.'))
+                            ->body(__('Fetching metadata from TMDB. Check the logs or refresh the page in a few seconds.'))
                             ->duration(8000)
                             ->send();
                     })
@@ -477,7 +483,7 @@ class SeriesResource extends Resource implements CopilotResource
                             ]),
                     ]),
                 Action::make('process')
-                    ->label(__('Fetch Series Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->schema([
                         Toggle::make('overwrite_existing')
                             ->label(__('Overwrite Existing Metadata'))
@@ -718,7 +724,7 @@ class SeriesResource extends Resource implements CopilotResource
             // -- Series Metadata --
             BulkModalActionGroup::section('Series Metadata', [
                 BulkAction::make('process')
-                    ->label(__('Fetch Series Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->schema([
                         Toggle::make('overwrite_existing')
@@ -748,12 +754,12 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalDescription(__('Process selected series now? This will fetch all episodes and seasons for this series. This may take a while depending on the number of series selected.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 BulkAction::make('fetch_tmdb_ids')
-                    ->label(__('Fetch TMDB/TVDB IDs'))
+                    ->label(__('Fetch TMDB Metadata'))
                     ->icon('heroicon-o-magnifying-glass')
                     ->schema([
                         Toggle::make('overwrite_existing')
-                            ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\'t already have them.'))
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing TMDB metadata? If disabled, only series missing metadata are fetched.'))
                             ->default(false),
                     ])
                     ->action(function ($records, $data) {
@@ -782,15 +788,15 @@ class SeriesResource extends Resource implements CopilotResource
                         Notification::make()
                             ->success()
                             ->title('Fetching TMDB/TVDB IDs for '.count($seriesIds).' series')
-                            ->body(__('The TMDB ID lookup has been started. You will be notified when it is complete.'))
+                            ->body(__('The TMDB metadata fetch has been started. You will be notified when it is complete.'))
                             ->duration(10000)
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion()
                     ->requiresConfirmation()
                     ->modalIcon('heroicon-o-magnifying-glass')
-                    ->modalDescription(__('Search TMDB for matching TV series and populate TMDB/TVDB/IMDB IDs for the selected series? This enables Trash Guides compatibility for Sonarr.'))
-                    ->modalSubmitActionLabel(__('Yes, fetch IDs now')),
+                    ->modalDescription(__('Search TMDB for matching TV series and fetch full metadata (plot, artwork, cast, genres, seasons and episodes) plus TMDB, TVDB and IMDB IDs for the selected series? This also enables Trash Guides compatibility for Sonarr.'))
+                    ->modalSubmitActionLabel(__('Yes, fetch metadata now')),
                 BulkAction::make('sync')
                     ->label(__('Sync Series .strm files'))
                     ->action(function ($records) {

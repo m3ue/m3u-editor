@@ -57,6 +57,8 @@
             $tmdbId = $record->tmdb_id ?? ($info['tmdb_id'] ?? ($movieInfo['tmdb_id'] ?? null));
             $imdbId = $record->imdb_id ?? ($info['imdb_id'] ?? ($movieInfo['imdb_id'] ?? null));
             $youtubeTrailer = $info['youtube_trailer'] ?? ($movieInfo['youtube_trailer'] ?? null);
+            $clearLogo = $info['clearlogo'] ?? ($movieInfo['clearlogo'] ?? null);
+            $castList = $info['cast_list'] ?? ($movieInfo['cast_list'] ?? []);
 
             // Format duration safely
             $formattedDuration = null;
@@ -82,9 +84,9 @@
             $backdrop = null;
             $cover = null;
             $tmdbId = $imdbId = $youtubeTrailer = null;
+            $clearLogo = null;
+            $castList = [];
         }
-
-        $playerArgs = json_encode($record->getFloatingPlayerAttributes(username: $username, password: $password));
     @endphp
 
     @if ($hasError ?? false)
@@ -123,7 +125,15 @@
 
                 {{-- Info --}}
                 <div class="flex-1 space-y-4 text-white">
-                    <h1 class="text-4xl font-bold">{{ $title }}</h1>
+                    @if ($clearLogo)
+                        <img
+                            src="{{ $clearLogo }}"
+                            alt="{{ $title }}"
+                            class="max-h-24 w-auto max-w-md object-contain drop-shadow-lg"
+                        />
+                    @else
+                        <h1 class="text-4xl font-bold">{{ $title }}</h1>
+                    @endif
 
                     {{-- Metadata Badges --}}
                     <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -182,31 +192,26 @@
                     @endif
 
                     {{-- Actions Row --}}
-                    <div class="flex gap-3 pt-4">
-                        {{-- Play Button --}}
-                        <button
-                            type="button"
-                            wire:click="$dispatch('openFloatingStream', [{{ $playerArgs }}])"
-                            class="bg-primary-600 hover:bg-primary-700 inline-flex items-center gap-2 rounded-lg px-6 py-3 font-semibold text-white transition-colors"
-                        >
-                            <x-heroicon-s-play class="h-5 w-5" />
-                            Play Movie
-                        </button>
+                    <div class="flex flex-wrap gap-3 pt-4">
+                        <x-filament::button type="button" icon="heroicon-s-play" wire:click="playFloatingStream">
+                            {{ __('Play Movie') }}
+                        </x-filament::button>
 
                         @if ($youtubeTrailer)
-                            <a
+                            <x-filament::button
+                                tag="a"
                                 href="https://www.youtube.com/watch?v={{ $youtubeTrailer }}"
                                 target="_blank"
-                                class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-3 text-white transition-colors hover:bg-red-700"
+                                color="danger"
+                                icon="heroicon-s-play"
                             >
-                                <x-heroicon-s-play class="h-5 w-5" />
-                                Watch Trailer
-                            </a>
+                                {{ __('Watch Trailer') }}
+                            </x-filament::button>
                         @endif
                     </div>
 
-                    {{-- Cast & Director --}}
-                    @if ($director || $cast)
+                    {{-- Cast & Director (plain-text cast only when there's no rich cast row below) --}}
+                    @if ($director || ($cast && empty($castList)))
                         <div class="space-y-2 border-t border-white/10 pt-4">
                             @if ($director)
                                 <p class="text-sm">
@@ -214,7 +219,7 @@
                                     <span class="text-white">{{ $director }}</span>
                                 </p>
                             @endif
-                            @if ($cast)
+                            @if ($cast && empty($castList))
                                 <p class="text-sm">
                                     <span class="text-gray-400">Cast:</span>
                                     <span class="text-white">{{ Str::limit($cast, 200) }}</span>
@@ -246,7 +251,15 @@
 
                 {{-- Info --}}
                 <div class="flex-1 space-y-3">
-                    <h1 class="text-2xl font-bold">{{ $title }}</h1>
+                    @if ($clearLogo)
+                        <img
+                            src="{{ $clearLogo }}"
+                            alt="{{ $title }}"
+                            class="max-h-16 w-auto max-w-xs object-contain"
+                        />
+                    @else
+                        <h1 class="text-2xl font-bold">{{ $title }}</h1>
+                    @endif
 
                     <div class="flex flex-wrap items-center gap-2 text-sm">
                         @if ($year)
@@ -277,23 +290,30 @@
                     @endif
 
                     {{-- Play Button --}}
-                    <div class="flex gap-3 pt-2">
-                        <button
-                            type="button"
-                            wire:click="$dispatch('openFloatingStream', [{{ $playerArgs }}])"
-                            class="bg-primary-600 hover:bg-primary-700 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white transition-colors"
-                        >
-                            <x-heroicon-s-play class="h-4 w-4" />
-                            Play Movie
-                        </button>
+                    <div class="flex flex-wrap gap-3 pt-2">
+                        <x-filament::button type="button" icon="heroicon-s-play" wire:click="playFloatingStream">
+                            {{ __('Play Movie') }}
+                        </x-filament::button>
+
+                        @if ($youtubeTrailer)
+                            <x-filament::button
+                                tag="a"
+                                href="https://www.youtube.com/watch?v={{ $youtubeTrailer }}"
+                                target="_blank"
+                                color="danger"
+                                icon="heroicon-s-play"
+                            >
+                                {{ __('Watch Trailer') }}
+                            </x-filament::button>
+                        @endif
                     </div>
 
-                    @if ($director || $cast)
+                    @if ($director || ($cast && empty($castList)))
                         <div class="space-y-1 pt-2 text-sm">
                             @if ($director)
                                 <p><span class="text-gray-500">Director:</span> {{ $director }}</p>
                             @endif
-                            @if ($cast)
+                            @if ($cast && empty($castList))
                                 <p><span class="text-gray-500">Cast:</span> {{ Str::limit($cast, 150) }}</p>
                             @endif
                         </div>
@@ -302,6 +322,9 @@
             </div>
         </div>
     @endif
+
+    {{-- Cast --}}
+    @include('filament.partials.cast-section', ['cast' => $castList])
 
     {{-- Technical Details --}}
     <div class="mb-6">

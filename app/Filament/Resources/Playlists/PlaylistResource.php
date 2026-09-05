@@ -563,7 +563,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     })
                     ->modalSubmitActionLabel(__('Yes, sync now')),
                 Action::make('process_series')
-                    ->label(__('Fetch Series Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(function ($record) {
                         $record->update([
@@ -588,7 +588,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch Series metadata for this playlist now? Only enabled Series will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 Action::make('process_vod')
-                    ->label(__('Fetch VOD Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(function ($record) {
                         $record->update([
@@ -1905,198 +1905,232 @@ class PlaylistResource extends Resource implements CopilotResource
                             '.mkv',
                             '.mp4',
                         ])->splitKeys(['Tab', 'Return']),
-
-                    // Dynamic Groups (TMDB) — nested inside Playlist Processing
-                    // (per CJ's 2026-08-30 amendment: should sit alongside the
-                    // Live/VOD/Series processing fieldsets, not as a standalone
-                    // top-level section). Nested Section keeps ->description() and
-                    // ->collapsible() semantics. columnSpanFull() is preserved
-                    // because the parent section uses ->columns(2).
-                    Section::make(__('Dynamic Groups (TMDB)'))
-                        ->description(__('Per-playlist virtual groups computed from TMDB list endpoints (Trending, Popular, In Theatres, Coming Soon, Top <Genre>, by TV Network, by Streaming Service). Categories are prepended to the Xtream VOD/series category lists. Requires the TMDB API key in Settings → TMDB Integration.'))
-                        ->columnSpanFull()
-                        ->collapsible()
-                        ->collapsed($creating)
-                        ->schema([
-                            Repeater::make('dynamic_groups_config')
-                                ->label('')
-                                ->schema([
-                                    Toggle::make('enabled')
-                                        ->label(__('Enabled'))
-                                        ->default(true)
-                                        ->inline(false)
-                                        ->columnSpan(2),
-                                    Select::make('type')
-                                        ->label(__('Content Type'))
-                                        ->options([
-                                            'vod' => __('VOD (Movies)'),
-                                            'series' => __('Series'),
-                                        ])
-                                        ->live()
-                                        ->required()
-                                        ->afterStateUpdated(function (Set $set): void {
-                                            // Reset source-dependent fields so the user
-                                            // cannot keep a provider/genre/network that
-                                            // is no longer relevant after switching
-                                            // between vod and series.
-                                            $set('source', null);
-                                            $set('tmdb_params', []);
-                                        })
-                                        ->columnSpan(2),
-                                    Select::make('source')
-                                        ->label(__('Source'))
-                                        ->options(function (Get $get): array {
-                                            $type = $get('type');
-
-                                            if ($type === 'series') {
-                                                return [
-                                                    'trending' => __('Trending'),
-                                                    'popular' => __('Popular'),
-                                                    'top_genre' => __('Top Genre'),
-                                                    'tmdb_network' => __('By TV Network'),
-                                                    'provider' => __('By Streaming Service'),
-                                                ];
-                                            }
-
-                                            return [
-                                                'trending' => __('Trending'),
-                                                'popular' => __('Popular'),
-                                                'now_playing' => __('In Theatres'),
-                                                'upcoming' => __('Coming Soon'),
-                                                'top_genre' => __('Top Genre'),
-                                                'provider' => __('By Streaming Service'),
-                                            ];
-                                        })
-                                        ->live()
-                                        ->required()
-                                        ->columnSpan(3),
-                                    Select::make('tmdb_params.genre_id')
-                                        ->label(__('Genre'))
-                                        ->options(function (Get $get): array {
-                                            $tmdb = app(TmdbService::class);
-                                            if (! $tmdb->isConfigured()) {
-                                                return [];
-                                            }
-                                            $genres = $get('type') === 'series'
-                                                ? $tmdb->getTvGenres()
-                                                : $tmdb->getMovieGenres();
-
-                                            return array_column($genres, 'name', 'id');
-                                        })
-                                        ->required()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
-                                        ->columnSpan(5),
-                                    Select::make('tmdb_params.network_id')
-                                        ->label(__('TV Network'))
-                                        ->options(TmdbService::TV_NETWORKS)
-                                        ->required()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
-                                        ->columnSpan(5),
-                                    Select::make('tmdb_params.provider_id')
-                                        ->label(__('Streaming Service'))
-                                        ->options(function (Get $get): array {
-                                            $tmdb = app(TmdbService::class);
-                                            if (! $tmdb->isConfigured()) {
-                                                return [];
-                                            }
-                                            $region = $get('tmdb_params.region') ?: 'US';
-                                            $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
-                                            $providers = $tmdb->getWatchProviders($mediaType, $region);
-
-                                            return array_column($providers, 'name', 'id');
-                                        })
-                                        ->required()
-                                        ->live()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                        ->columnSpan(4),
-                                    TextInput::make('tmdb_params.region')
-                                        ->label(__('Region'))
-                                        ->placeholder('US')
-                                        ->maxLength(2)
-                                        ->live()
-                                        ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                        ->columnSpan(1),
-                                    Select::make('tmdb_params.time_window')
-                                        ->label(__('Time Window'))
-                                        ->options([
-                                            'day' => __('Today'),
-                                            'week' => __('This Week'),
-                                        ])
-                                        ->default('week')
-                                        ->visible(fn (Get $get): bool => $get('source') === 'trending')
-                                        ->columnSpan(5),
-                                    TextInput::make('name')
-                                        ->label(__('Category Name'))
-                                        ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
-                                        ->required()
-                                        ->columnSpan(5),
-                                ])
-                                ->columns(12)
-                                ->reorderable()
-                                ->reorderableWithButtons()
-                                ->collapsible()
-                                ->defaultItems(0)
-                                ->addActionLabel(__('Add dynamic group'))
-                                ->extraItemActions([
-                                    Action::make('preview_dynamic_group')
-                                        ->label(__('Preview'))
-                                        ->icon('heroicon-o-eye')
-                                        ->color('info')
-                                        ->tooltip(__('Preview the entries this rule currently matches'))
-                                        // Matching runs against the playlist's synced VOD/series
-                                        // rows, so there is nothing to preview until the
-                                        // playlist exists.
-                                        ->visible(fn (?Playlist $record): bool => $record !== null)
-                                        ->modalHeading(function (array $arguments, Repeater $component): string {
-                                            $itemKey = $arguments['item'] ?? null;
-                                            $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
-                                            $name = trim((string) ($rule['name'] ?? ''));
-
-                                            return $name !== ''
-                                                ? __('Preview: :name', ['name' => $name])
-                                                : __('Preview dynamic group');
-                                        })
-                                        ->modalWidth('2xl')
-                                        ->modalSubmitAction(false)
-                                        ->modalCancelActionLabel(__('Close'))
-                                        ->modalContent(function (array $arguments, Repeater $component, ?Playlist $record) {
-                                            // Raw (unvalidated) state so the preview reflects the
-                                            // rule as currently edited, before the form is saved.
-                                            $itemKey = $arguments['item'] ?? null;
-                                            $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
-
-                                            return view(
-                                                'filament.forms.dynamic-group-preview',
-                                                self::getDynamicGroupPreviewData($rule, $record),
-                                            );
-                                        }),
-                                ])
-                                ->itemLabel(function (array $state): ?string {
-                                    $name = $state['name'] ?? null;
-                                    if (! $name) {
-                                        return null;
-                                    }
-                                    $type = $state['type'] ?? null;
-                                    $source = $state['source'] ?? null;
-                                    $typeLabel = $type === 'series' ? 'Series' : ($type === 'vod' ? 'VOD' : null);
-                                    $sourceLabel = match ($source) {
-                                        'trending' => 'Trending',
-                                        'popular' => 'Popular',
-                                        'now_playing' => 'In Theatres',
-                                        'upcoming' => 'Coming Soon',
-                                        'top_genre' => 'Top Genre',
-                                        'tmdb_network' => 'By Network',
-                                        'provider' => 'By Provider',
-                                        default => $source,
-                                    };
-                                    $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
-
-                                    return $typeLabel
-                                        ? "{$name} ({$typeLabel} — {$sourceLabel}){$disabled}"
-                                        : "{$name} ({$sourceLabel}){$disabled}";
-                                }),
-                        ]),
                 ]),
+
+            // Dynamic Groups (TMDB) - nested inside Playlist Processing
+            // (per CJ's 2026-08-30 amendment: should sit alongside the
+            // Live/VOD/Series processing fieldsets, not as a standalone
+            // top-level section). Nested Section keeps ->description() and
+            // ->collapsible() semantics. columnSpanFull() is preserved
+            // because the parent section uses ->columns(2).
+            Section::make(__('Dynamic Groups (TMDB)'))
+                ->description(__('Per-playlist virtual groups computed from TMDB list endpoints (Trending, Popular, In Theatres, Coming Soon, Top <Genre>, by TV Network, by Streaming Service). Categories are prepended to the Xtream VOD/series category lists. Requires the TMDB API key in Settings → TMDB Integration.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->columns(2)
+                ->collapsed($creating)
+                ->schema([
+                    Toggle::make('reclassify_vod_groups_to_tmdb_genres')
+                        ->label(__('Auto-reclassify VOD groups to TMDB genres on sync'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('After each sync, route each enabled VOD channel out of any group that doesn\'t match a TMDB genre into its own genre group (or "Uncategorized" if no genre data). Groups referenced by an Auto-Add to Custom Playlist rule, or merged groups, are never touched.')
+                        )
+                        ->default(false)
+                        ->inline(false),
+                    Toggle::make('reclassify_series_categories_to_tmdb_genres')
+                        ->label(__('Auto-reclassify Series categories to TMDB genres on sync'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('After each sync, route each enabled series out of any category that doesn\'t match a TMDB genre into its own genre category (or "Uncategorized" if no genre data). Categories referenced by an Auto-Add to Custom Playlist rule, or merged categories, are never touched. Independent of the VOD toggle — turn this on/off separately if genre-based categorization doesn\'t fit how you organize series.')
+                        )
+                        ->default(false)
+                        ->inline(false),
+                    Repeater::make('dynamic_groups_config')
+                        ->label(__('Dynamic Groups Configuration'))
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('enabled')
+                                ->label(__('Enabled'))
+                                ->default(true)
+                                ->inline(false)
+                                ->columnSpan(1),
+                            Select::make('type')
+                                ->label(__('Content Type'))
+                                ->options([
+                                    'vod' => __('VOD (Movies)'),
+                                    'series' => __('Series'),
+                                ])
+                                ->live()
+                                ->required()
+                                ->afterStateUpdated(function (Set $set): void {
+                                    // Reset source-dependent fields so the user
+                                    // cannot keep a provider/genre/network that
+                                    // is no longer relevant after switching
+                                    // between vod and series.
+                                    $set('source', null);
+                                    $set('tmdb_params', []);
+                                })
+                                ->columnSpan(2),
+                            Select::make('source')
+                                ->label(__('Source'))
+                                ->options(function (Get $get): array {
+                                    $type = $get('type');
+
+                                    if ($type === 'series') {
+                                        return [
+                                            'trending' => __('Trending'),
+                                            'popular' => __('Popular'),
+                                            'top_genre' => __('Top Genre'),
+                                            'tmdb_network' => __('By TV Network'),
+                                            'provider' => __('By Streaming Service'),
+                                        ];
+                                    }
+
+                                    return [
+                                        'trending' => __('Trending'),
+                                        'popular' => __('Popular'),
+                                        'now_playing' => __('In Theatres'),
+                                        'upcoming' => __('Coming Soon'),
+                                        'top_genre' => __('Top Genre'),
+                                        'provider' => __('By Streaming Service'),
+                                    ];
+                                })
+                                ->live()
+                                ->required()
+                                ->columnSpan(3),
+                            Select::make('tmdb_params.genre_id')
+                                ->label(__('Genre'))
+                                ->options(function (Get $get): array {
+                                    $tmdb = app(TmdbService::class);
+                                    if (! $tmdb->isConfigured()) {
+                                        return [];
+                                    }
+                                    $genres = $get('type') === 'series'
+                                        ? $tmdb->getTvGenres()
+                                        : $tmdb->getMovieGenres();
+
+                                    return array_column($genres, 'name', 'id');
+                                })
+                                ->required()
+                                ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
+                                ->columnSpan(5),
+                            Select::make('tmdb_params.network_id')
+                                ->label(__('TV Network'))
+                                ->options(TmdbService::TV_NETWORKS)
+                                ->required()
+                                ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
+                                ->columnSpan(5),
+                            Select::make('tmdb_params.provider_id')
+                                ->label(__('Streaming Service'))
+                                ->options(function (Get $get): array {
+                                    $tmdb = app(TmdbService::class);
+                                    if (! $tmdb->isConfigured()) {
+                                        return [];
+                                    }
+                                    $region = $get('tmdb_params.region') ?: 'US';
+                                    $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
+                                    $providers = $tmdb->getWatchProviders($mediaType, $region);
+
+                                    return array_column($providers, 'name', 'id');
+                                })
+                                ->required()
+                                ->live()
+                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                                ->columnSpan(4),
+                            TextInput::make('tmdb_params.region')
+                                ->label(__('Region'))
+                                ->placeholder('US')
+                                ->maxLength(2)
+                                ->live()
+                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                                ->columnSpan(1),
+                            Select::make('tmdb_params.time_window')
+                                ->label(__('Time Window'))
+                                ->options([
+                                    'day' => __('Today'),
+                                    'week' => __('This Week'),
+                                ])
+                                ->default('week')
+                                ->visible(fn (Get $get): bool => $get('source') === 'trending')
+                                ->columnSpan(5),
+                            Select::make('tmdb_params.pages')
+                                ->label(__('Pages to Fetch'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
+                                )
+                                ->options([
+                                    1 => '1 (~20 items)',
+                                    2 => '2 (~40 items)',
+                                    3 => '3 (~60 items, default)',
+                                    4 => '4 (~80 items)',
+                                    5 => '5 (~100 items, max)',
+                                ])
+                                ->default(3)
+                                ->native(false)
+                                ->columnSpan(3),
+                            TextInput::make('name')
+                                ->label(__('Category Name'))
+                                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
+                                ->required()
+                                ->columnSpan(3),
+                        ])
+                        ->columns(12)
+                        ->reorderable()
+                        ->reorderableWithButtons()
+                        ->collapsible()
+                        ->defaultItems(0)
+                        ->addActionLabel(__('Add dynamic group'))
+                        ->extraItemActions([
+                            Action::make('preview_dynamic_group')
+                                ->label(__('Preview'))
+                                ->icon('heroicon-o-eye')
+                                ->color('info')
+                                ->tooltip(__('Preview the entries this rule currently matches'))
+                        // Matching runs against the playlist's synced VOD/series
+                        // rows, so there is nothing to preview until the
+                        // playlist exists.
+                                ->visible(fn (?Playlist $record): bool => $record !== null)
+                                ->modalHeading(function (array $arguments, Repeater $component): string {
+                                    $itemKey = $arguments['item'] ?? null;
+                                    $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
+                                    $name = trim((string) ($rule['name'] ?? ''));
+
+                                    return $name !== ''
+                                        ? __('Preview: :name', ['name' => $name])
+                                        : __('Preview dynamic group');
+                                })
+                                ->modalWidth('2xl')
+                                ->modalSubmitAction(false)
+                                ->modalCancelActionLabel(__('Close'))
+                                ->modalContent(function (array $arguments, Repeater $component, ?Playlist $record) {
+                                    // Raw (unvalidated) state so the preview reflects the
+                                    // rule as currently edited, before the form is saved.
+                                    $itemKey = $arguments['item'] ?? null;
+                                    $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
+
+                                    return view(
+                                        'filament.forms.dynamic-group-preview',
+                                        self::getDynamicGroupPreviewData($rule, $record),
+                                    );
+                                }),
+                        ])
+                        ->itemLabel(function (array $state): ?string {
+                            $name = $state['name'] ?? null;
+                            if (! $name) {
+                                return null;
+                            }
+                            $type = $state['type'] ?? null;
+                            $source = $state['source'] ?? null;
+                            $typeLabel = $type === 'series' ? 'Series' : ($type === 'vod' ? 'VOD' : null);
+                            $sourceLabel = match ($source) {
+                                'trending' => 'Trending',
+                                'popular' => 'Popular',
+                                'now_playing' => 'In Theatres',
+                                'upcoming' => 'Coming Soon',
+                                'top_genre' => 'Top Genre',
+                                'tmdb_network' => 'By Network',
+                                'provider' => 'By Provider',
+                                default => $source,
+                            };
+                            $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+
+                            return $typeLabel
+                                ? "{$name} ({$typeLabel} - {$sourceLabel}){$disabled}"
+                                : "{$name} ({$sourceLabel}){$disabled}";
+                        }),
+                ])->hidden(! config('feature.playlist_tmdb_dynamic_groups')),
 
             Section::make(__('URL Find & Replace Preprocessing'))
                 ->description(__('Define find & replace rules that run against each provider stream URL during import, before channels are saved. Useful for cleaning up malformed provider URLs (e.g. fixing a wrong scheme or port). Rules execute in order and only affect newly imported data - existing channel URLs are not modified until the next sync.'))
@@ -3391,7 +3425,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->inline(false)
                         ->default(false)
-                        ->helperText(__('When enabled, dummy EPG data will be generated for the next 5 days. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
+                        ->helperText(__('When enabled, dummy EPG data will be generated for the number of days set below. Thus, it is possible to assign channels for which no EPG data is available. As program information, the channel title and the set program length are used.')),
                     Select::make('id_channel_by')
                         ->label(__('Preferred TVG ID output'))
                         ->helperText(__('How you would like to ID your channels in the EPG.'))
@@ -3405,20 +3439,33 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->required()
                         ->default('stream_id') // Default to stream_id
                         ->columnSpan(1),
-                    Toggle::make('dummy_epg_category')
-                        ->label(__('Channel group as category'))
-                        ->columnSpan(1)
-                        ->inline(false)
-                        ->default(false)
-                        ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
-                    TextInput::make('dummy_epg_length')
-                        ->label(__('Dummy program length (in minutes)'))
-                        ->columnSpan(1)
-                        ->rules(['min:1'])
-                        ->type('number')
-                        ->default(120)
-                        ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                    Grid::make()
+                        ->columnSpanFull()
+                        ->columns(3)
+                        ->schema([
+                            Toggle::make('dummy_epg_category')
+                                ->label(__('Channel group as category'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('When enabled, the channel group will be assigned to the dummy EPG as a <category> tag.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_length')
+                                ->label(__('Dummy program length (in minutes)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1'])
+                                ->type('number')
+                                ->default(120)
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                            TextInput::make('dummy_epg_days')
+                                ->label(__('Dummy EPG length (in days)'))
+                                ->columnSpan(1)
+                                ->rules(['min:1', 'max:14'])
+                                ->type('number')
+                                ->default(5)
+                                ->helperText(__('How many days of dummy EPG data to generate. AED profiles can override this per profile.'))
+                                ->hidden(fn (Get $get): bool => ! $get('dummy_epg')),
+                        ]),
                     Repeater::make('dummy_epg_fallback_order')
                         ->label(__('Dummy EPG Title Source'))
                         ->helperText(__('Which field to use as the programme title for dummy EPG entries. Tried in order - first non-empty value wins. Leave empty to use the channel title.'))
@@ -3862,7 +3909,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     })
                     ->visible(fn (Playlist $record) => $record->isProcessing() && ! ($record->is_network_playlist || $record->isMediaServerPlaylist())),
                 Action::make('process_series')
-                    ->label(__('Fetch Series Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(function ($record) {
                         $record->update([
@@ -3887,7 +3934,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch Series metadata for this playlist now? Only enabled Series will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 Action::make('process_vod')
-                    ->label(__('Fetch VOD Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(function ($record) {
                         $record->update([

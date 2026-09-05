@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PlaylistSourceType;
+use App\Exceptions\XtreamRateLimitedException;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Tags\HasTags;
@@ -262,6 +264,17 @@ class Series extends Model
             return true;
         }
 
+        // A series with no upstream id can't be fetched from the provider -
+        // XtreamService::getSeriesInfo(string) would be handed null and throw a
+        // TypeError. New imports are guarded at ingest (ProcessM3uImportSeriesChunk),
+        // this covers rows that predate that guard. Treat as "nothing to fetch",
+        // not a failure, so it doesn't abort the series_metadata phase.
+        if (blank($this->source_series_id)) {
+            Log::warning("Series {$this->id} ({$this->name}) has no source_series_id; skipping provider metadata fetch.");
+
+            return true;
+        }
+
         // Skip the provider call if data is still fresh (unless a forced refresh is requested).
         $isFresh = $this->isMetadataFresh($refresh);
 
@@ -386,6 +399,10 @@ class Series extends Model
                             if (! $title) {
                                 $title = $ep['title'] ?? "Episode {$ep['episode_num']}";
                             }
+                            // episodes.title is varchar(255). Some providers hand back
+                            // absurdly long titles (e.g. a hyphen-joined year list); clamp
+                            // so one bad title can't fail the whole episode upsert.
+                            $title = Str::limit($title, 255, '');
                             $bulk[] = [
                                 'title' => $title,
                                 'source_episode_id' => (int) $ep['id'],
@@ -433,6 +450,37 @@ class Series extends Model
                             ]
                         );
                     }
+
+                    // Reconcile: the provider is the source of truth for episodes within a
+                    // season it actually sent us this fetch, so anything in that season we
+                    // didn't just touch has been removed or renumbered upstream and is dead
+                    // weight (unplayable - the stream URL 404s). Scoped to $eps's own season
+                    // keys only, never the whole series: a season absent from this response
+                    // (truncated/rate-limited answer, or a real removal - we can't tell which
+                    // from one fetch) is left untouched rather than assumed gone. Only
+                    // provider-sourced rows are ever considered, so locally created episodes
+                    // (DVR recordings, manual entries) are never touched.
+                    $seasonsInResponse = array_map('intval', array_keys($eps));
+                    DB::transaction(function () use ($seasonsInResponse, $batchNo) {
+                        $removedEpisodes = $this->episodes()
+                            ->whereIn('season', $seasonsInResponse)
+                            ->whereNotNull('source_episode_id')
+                            ->where('import_batch_no', '!=', $batchNo)
+                            ->delete();
+
+                        $removedSeasons = $this->seasons()
+                            ->whereIn('season_number', $seasonsInResponse)
+                            ->whereDoesntHave('episodes')
+                            ->delete();
+
+                        if ($removedEpisodes > 0 || $removedSeasons > 0) {
+                            Log::info("Series {$this->id} ({$this->name}): removed stale episodes no longer listed by the provider", [
+                                'episodes_removed' => $removedEpisodes,
+                                'seasons_removed' => $removedSeasons,
+                                'seasons_in_response' => $seasonsInResponse,
+                            ]);
+                        }
+                    });
                 }
 
                 // Update last fetched timestamp for the series (always, regardless of episode count).
@@ -460,7 +508,17 @@ class Series extends Model
 
             // Data is fresh, return true
             return true;
-        } catch (\Exception $e) {
+        } catch (XtreamRateLimitedException $e) {
+            // Let the account-wide cooldown propagate to the caller instead of
+            // being swallowed here as a single-series failure — callers that
+            // loop over many series (e.g. ProcessM3uImportSeriesEpisodes::processBatch)
+            // need to know to stop, not just skip this one series.
+            throw $e;
+        } catch (\Throwable $e) {
+            // Catch Throwable, not Exception: a TypeError/Error here (e.g. bad
+            // provider payload shape) would otherwise escape, kill the batch job,
+            // and strand the series_metadata pipeline phase forever. Returning
+            // false lets the caller decide - in a sync run it aborts the phase.
             Log::error('Failed to fetch metadata for series '.$this->id, ['exception' => $e]);
         }
 

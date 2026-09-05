@@ -1,9 +1,11 @@
 <?php
 
 use App\Enums\EpgSourceType;
+use App\Events\CustomPlaylistCreated;
 use App\Events\EpgCreated;
 use App\Events\EpgDeleted;
 use App\Events\EpgUpdated;
+use App\Events\MergedPlaylistCreated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
@@ -11,8 +13,10 @@ use App\Facades\ProxyFacade;
 use App\Http\Controllers\LogoProxyController;
 use App\Models\AedProfile;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\EpgCacheService;
@@ -32,6 +36,8 @@ beforeEach(function () {
         PlaylistCreated::class,
         PlaylistDeleted::class,
         PlaylistUpdated::class,
+        CustomPlaylistCreated::class,
+        MergedPlaylistCreated::class,
     ]);
 
     // Clean up any leftover playlist EPG cache files from previous runs
@@ -445,6 +451,7 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         'stream_id' => 'schedules-direct-channel',
         'title' => 'Schedules Direct Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
     $baseUrl = rtrim(ProxyFacade::getBaseUrl(), '/');
@@ -465,14 +472,7 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
     $userinfoImage = "{$userinfoBaseUrl}/schedules-direct/{$epg->uuid}/image/userinfo-image";
     $externalIcon = 'https://public-artwork.example.test/external-icon.jpg';
     $externalImage = 'https://public-artwork.example.test/external-image.jpg';
-    $date = now()->format('Y-m-d');
-    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
-
-    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
-        'cache_created' => time(),
-        'cache_version' => 'v2',
-    ], JSON_THROW_ON_ERROR));
-    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", collect([
+    seedEpgProgrammeCache($epg, collect([
         [
             'title' => 'First-party artwork',
             'icon' => $schedulesDirectIcon,
@@ -517,20 +517,17 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
                 ['url' => $externalImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
             ],
         ],
-    ])->map(function (array $programme, int $index): string {
-        return json_encode([
-            'channel' => 'source.schedules-direct',
-            'programme' => array_merge([
-                'start' => now()->startOfDay()->addHours($index + 1)->toISOString(),
-                'stop' => now()->startOfDay()->addHours($index + 2)->toISOString(),
-                'subtitle' => '',
-                'desc' => '',
-                'category' => '',
-                'rating' => '',
-                'new' => false,
-            ], $programme),
-        ], JSON_THROW_ON_ERROR);
-    })->implode("\n")."\n");
+    ])->map(function (array $programme, int $index): array {
+        return ['source.schedules-direct', array_merge([
+            'start' => now()->startOfDay()->addHours($index + 1)->toISOString(),
+            'stop' => now()->startOfDay()->addHours($index + 2)->toISOString(),
+            'subtitle' => '',
+            'desc' => '',
+            'category' => '',
+            'rating' => '',
+            'new' => false,
+        ], $programme)];
+    })->all());
 
     $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
 
@@ -585,20 +582,14 @@ test('cached Schedules Direct artwork built on a different host than the serving
         'stream_id' => 'schedules-direct-mismatched-host-channel',
         'title' => 'Schedules Direct Mismatched Host Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
     // Built with a different host/scheme/port than whatever the test request resolves to.
     $mismatchedHostIcon = "https://queue-internal.example:8443/schedules-direct/{$epg->uuid}/image/mismatched-host-artwork";
-    $date = now()->format('Y-m-d');
-    $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
 
-    Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
-        'cache_created' => time(),
-        'cache_version' => 'v2',
-    ], JSON_THROW_ON_ERROR));
-    Storage::disk('local')->put("{$cacheDirectory}/programmes-{$date}.jsonl", json_encode([
-        'channel' => 'source.schedules-direct-mismatched-host',
-        'programme' => [
+    seedEpgProgrammeCache($epg, [
+        ['source.schedules-direct-mismatched-host', [
             'start' => now()->startOfDay()->addHour()->toISOString(),
             'stop' => now()->startOfDay()->addHours(2)->toISOString(),
             'title' => 'Mismatched host artwork',
@@ -609,8 +600,8 @@ test('cached Schedules Direct artwork built on a different host than the serving
             'new' => false,
             'icon' => $mismatchedHostIcon,
             'images' => [],
-        ],
-    ], JSON_THROW_ON_ERROR)."\n");
+        ]],
+    ]);
 
     $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
 
@@ -646,8 +637,16 @@ test('legacy scalar episode numbers emit only valid xmltv namespace identities',
         'stream_id' => 'legacy-channel',
         'title' => 'Legacy Channel',
         'channel' => 1,
+        'group_id' => null,
     ]);
 
+    // Deliberately a legacy JSONL fixture (no `programmes.sqlite`): a programme
+    // that carries only the scalar `episode_num` and no `episode_nums` array can
+    // only come from a v1 cache written before that field existed. Every cache
+    // the current parser writes - JSONL or SQLite - always seeds `episode_nums`
+    // (via EpgProgrammeStore::EMPTY_PROGRAMME), so the scalar-legacy branch in
+    // EpisodeNumberNormalizer::forProgramme() is unreachable from the SQLite
+    // store by construction. This pins that fallback on the format it applies to.
     $date = now()->format('Y-m-d');
     $cacheDirectory = "epg-cache/{$epg->uuid}/v2";
     Storage::disk('local')->put("{$cacheDirectory}/metadata.json", json_encode([
@@ -799,4 +798,128 @@ test('aed dummy programmes do not fall back to channel branding for programme ar
     expect($xpath->query('//channel[@id="aed-dummy-channel"]/icon'))->toHaveCount(1)
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[@channel="aed-dummy-channel"]/icon'))->toHaveCount(0);
+});
+
+test('playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'short-window-channel',
+        'title' => 'Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="short-window-channel"]'))->toHaveCount(2);
+});
+
+test('aed profile dummy_epg_days overrides the playlist dummy_epg_days for that channel', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_days' => 5,
+    ]);
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $user->id,
+        'name' => 'Short Window AED',
+        'event_duration_minutes' => 1440,
+        'dummy_epg_days' => 2,
+    ])->save();
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'aed-short-window-channel',
+        'title' => 'AED Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="aed-short-window-channel"]'))->toHaveCount(2);
+});
+
+test('custom playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $playlist = CustomPlaylist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+
+    $channel = Channel::factory()->for($user)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'custom-short-window-channel',
+        'title' => 'Custom Short Window Channel',
+        'aed_profile_id' => null,
+    ]);
+    $playlist->channels()->attach($channel->id);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="custom-short-window-channel"]'))->toHaveCount(2);
+});
+
+test('merged playlist dummy_epg_days controls the number of standard dummy programmes generated', function () {
+    $user = User::factory()->create();
+    $sourcePlaylist = Playlist::factory()->for($user)->create();
+    $merged = MergedPlaylist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_length' => 1440,
+        'dummy_epg_days' => 2,
+    ]);
+    $merged->playlists()->attach($sourcePlaylist->id);
+
+    Channel::factory()->for($user)->for($sourcePlaylist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'merged-short-window-channel',
+        'title' => 'Merged Short Window Channel',
+        'channel' => 1,
+        'aed_profile_id' => null,
+    ]);
+
+    $response = $this->get("/{$merged->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+
+    expect($xpath->query('//programme[@channel="merged-short-window-channel"]'))->toHaveCount(2);
 });

@@ -87,7 +87,7 @@ class ListVod extends ListRecords
                     }),
 
                 Action::make('process_vod')
-                    ->label(__('Fetch Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->schema([
                         Toggle::make('overwrite_existing')
@@ -123,12 +123,12 @@ class ListVod extends ListRecords
                     ->modalDescription(__('Fetch and process VOD metadata for the selected Playlist? Only enabled VOD channels will be processed.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 Action::make('fetch_tmdb_ids')
-                    ->label(__('Fetch TMDB IDs'))
+                    ->label(__('Fetch TMDB Metadata'))
                     ->icon('heroicon-o-magnifying-glass')
                     ->schema([
                         Toggle::make('overwrite_existing')
-                            ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\'t have them.'))
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing TMDB metadata? If disabled, only items missing metadata are fetched.'))
                             ->default(false),
                         Select::make('playlist')
                             ->label(__('Playlist'))
@@ -186,14 +186,14 @@ class ListVod extends ListRecords
                         Notification::make()
                             ->success()
                             ->title("Fetching TMDB IDs for {$vodCount} VOD channel(s)")
-                            ->body(__('The TMDB ID lookup has been started. You will be notified when it is complete.'))
+                            ->body(__('The TMDB metadata fetch has been started. You will be notified when it is complete.'))
                             ->duration(10000)
                             ->send();
                     })
                     ->requiresConfirmation()
                     ->modalIcon('heroicon-o-magnifying-glass')
-                    ->modalDescription(__('Search TMDB for matching movies and populate TMDB/IMDB IDs for all VOD channels in the selected playlist? This enables Trash Guides compatibility for Radarr.'))
-                    ->modalSubmitActionLabel(__('Yes, fetch IDs now')),
+                    ->modalDescription(__('Search TMDB for matching movies and fetch full metadata (plot, artwork, cast, genres) plus TMDB and IMDB IDs for all VOD channels in the selected playlist? This also enables Trash Guides compatibility for Radarr.'))
+                    ->modalSubmitActionLabel(__('Yes, fetch metadata now')),
                 Action::make('sync')
                     ->label(__('Sync VOD .strm files'))
                     ->schema([
@@ -238,7 +238,7 @@ class ListVod extends ListRecords
                             ->label(__('Sort Order'))
                             ->options([
                                 'DESC' => 'Newest first (2026 to 1950)',
-                                'ASC' => 'Newest first (1950 to 2026)',
+                                'ASC' => 'Oldest first (1950 to 2026)',
                             ])
                             ->default('DESC')
                             ->required(),

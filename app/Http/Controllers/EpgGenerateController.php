@@ -428,8 +428,9 @@ class EpgGenerateController extends Controller
         if (count($dummyEpgChannels) > 0) {
             // Pre-calculate standard repeating time slots once (used for non-AED channels)
             $timeSlots = [];
+            $dummyEpgDays = (int) ($playlist->dummy_epg_days ?? 5);
             $startTime = Carbon::now()->startOf('day')->subMinutes($dummyEpgLength);
-            $iterations = (int) ((5 * 24 * 60) / $dummyEpgLength);
+            $iterations = (int) (($dummyEpgDays * 24 * 60) / $dummyEpgLength);
 
             for ($i = 0; $i < $iterations; $i++) {
                 $startTime->addMinutes($dummyEpgLength);
@@ -486,7 +487,7 @@ class EpgGenerateController extends Controller
 
                         $slotMinutes = $aedProfile->event_duration_minutes;
                         $windowStart = Carbon::now()->startOfDay();
-                        $windowEnd = Carbon::now()->startOfDay()->addDays(5);
+                        $windowEnd = Carbon::now()->startOfDay()->addDays($aedProfile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5);
                         $postTitle = $aedExtractor->postEventTitle($aedProfile, $rawTitle, $aedEvent);
                         $postTitleEscaped = $postTitle !== null ? $this->escapeXml($postTitle) : null;
 
@@ -552,8 +553,9 @@ class EpgGenerateController extends Controller
                             ? $this->escapeXml($aedEvent->description)
                             : $aedTitle;
                         $aedSlotLength = $aedProfile->event_duration_minutes;
+                        $aedDays = (int) ($aedProfile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5);
                         $aedStart = Carbon::now()->startOf('day')->subMinutes($aedSlotLength);
-                        $aedIterations = (int) ((5 * 24 * 60) / $aedSlotLength);
+                        $aedIterations = (int) (($aedDays * 24 * 60) / $aedSlotLength);
 
                         for ($i = 0; $i < $aedIterations; $i++) {
                             $aedStart->addMinutes($aedSlotLength);

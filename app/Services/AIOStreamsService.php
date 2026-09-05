@@ -109,6 +109,7 @@ class AIOStreamsService implements MediaServer
 
         $this->integration->aiostreams_catalogs = $catalogs;
         $this->integration->aiostreams_logo = $manifest['logo'] ?? null;
+        $this->integration->aiostreams_meta_id_prefixes = $this->extractMetaIdPrefixes($manifest);
 
         // Prune any selected catalog IDs that no longer exist in the manifest.
         if (! $this->integration->aiostreams_enable_all_catalogs) {
@@ -213,21 +214,165 @@ class AIOStreamsService implements MediaServer
     /**
      * Fetch metadata for a piece of content.
      *
+     * AIOStreams only exposes the Stremio `meta` resource when the operator has
+     * configured a metadata addon (Cinemeta, TMDB, ...) inside their instance;
+     * a stream-only setup 404s every meta request with "no addon to handle meta
+     * resource". `aiostreams_meta_id_prefixes` (computed from the manifest in
+     * testConnection()) tells us in advance whether that's the case, so a
+     * known-unsupported id skips straight to the Stremio-addon fallback instead
+     * of making a guaranteed-to-fail round trip first.
+     *
      * @return array{meta: array<string, mixed>}|null
      */
     public function fetchMeta(string $type, string $id): ?array
     {
+        if (! $this->manifestSupportsMetaFor($id)) {
+            return $this->fetchMetaFromStremioAddon($type, $id);
+        }
+
         $this->waitForRateLimit();
 
-        $response = Http::timeout(15)->retry(2, 1000)->get("{$this->baseUrl}/meta/{$type}/{$id}.json");
+        // No retry: a 404 ("no addon to handle meta resource") from a stream-only
+        // AIOStreams instance is deterministic, so retrying it just adds latency.
+        // The Stremio-addon fallback below is what provides resilience here.
+        $response = Http::timeout(15)->get("{$this->baseUrl}/meta/{$type}/{$id}.json");
 
-        if (! $response->successful()) {
-            Log::warning("AIOStreams meta fetch failed for {$type}/{$id}: HTTP {$response->status()}");
+        if ($response->successful()) {
+            $data = $response->json();
 
+            // Some AIOStreams versions answer 200 with an error envelope
+            // ({"success": false, ...}) rather than a real meta object.
+            if (is_array($data) && ! empty($data['meta'])) {
+                return $data;
+            }
+        }
+
+        // The manifest flag says this should have worked (or we've never synced
+        // it), so this is a genuine surprise — try the fallback as a safety net
+        // rather than trusting a possibly-stale flag, but still log it.
+        $fallback = $this->fetchMetaFromStremioAddon($type, $id);
+
+        if ($fallback !== null) {
+            return $fallback;
+        }
+
+        Log::warning("AIOStreams meta fetch failed for {$type}/{$id}: HTTP {$response->status()}");
+
+        return null;
+    }
+
+    /**
+     * Whether the manifest (as of the last testConnection()/sync) declares meta
+     * support for this id. A `null` flag means the integration predates this
+     * check or hasn't synced yet, so it defaults to "try it" rather than
+     * assuming no support.
+     */
+    protected function manifestSupportsMetaFor(string $id): bool
+    {
+        $prefixes = $this->integration->aiostreams_meta_id_prefixes;
+
+        if ($prefixes === null) {
+            return true;
+        }
+
+        if (in_array('*', $prefixes, true)) {
+            return true;
+        }
+
+        foreach ($prefixes as $prefix) {
+            if (is_string($prefix) && $prefix !== '' && str_starts_with($id, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine which id prefixes (if any) the manifest's `meta` resource
+     * supports, from either resource shape Stremio addons use:
+     *   - `resources: ["meta", ...]` with top-level `idPrefixes`
+     *   - `resources: [{"name": "meta", "idPrefixes": [...]}, ...]`
+     *
+     * @param  array<string, mixed>  $manifest
+     * @return array<int, string> Empty when the manifest declares no `meta`
+     *                            resource at all; `["*"]` when it declares one
+     *                            without restricting idPrefixes.
+     */
+    protected function extractMetaIdPrefixes(array $manifest): array
+    {
+        $resources = $manifest['resources'] ?? [];
+
+        if (! is_array($resources)) {
+            return [];
+        }
+
+        $declaresMeta = false;
+        $prefixes = [];
+
+        foreach ($resources as $resource) {
+            if (is_string($resource) && $resource === 'meta') {
+                $declaresMeta = true;
+                $prefixes = array_merge($prefixes, $this->normalizeIdPrefixes($manifest['idPrefixes'] ?? null));
+            } elseif (is_array($resource) && ($resource['name'] ?? null) === 'meta') {
+                $declaresMeta = true;
+                $prefixes = array_merge($prefixes, $this->normalizeIdPrefixes($resource['idPrefixes'] ?? $manifest['idPrefixes'] ?? null));
+            }
+        }
+
+        if (! $declaresMeta) {
+            return [];
+        }
+
+        $prefixes = array_values(array_unique($prefixes));
+
+        return $prefixes ?: ['*'];
+    }
+
+    /**
+     * @param  mixed  $idPrefixes
+     * @return array<int, string>
+     */
+    protected function normalizeIdPrefixes($idPrefixes): array
+    {
+        if (! is_array($idPrefixes)) {
+            return [];
+        }
+
+        return array_values(array_filter($idPrefixes, 'is_string'));
+    }
+
+    /**
+     * Fetch a Stremio meta object from the canonical public meta addon for the
+     * item's id scheme, mirroring Stremio's own default meta resolution:
+     * "tt..." -> Cinemeta, "kitsu:..." -> Kitsu addon, "tmdb:..." -> TMDB addon.
+     *
+     * @return array{meta: array<string, mixed>}|null
+     */
+    protected function fetchMetaFromStremioAddon(string $type, string $id): ?array
+    {
+        $addons = config('services.stremio.meta_addons', []);
+
+        $base = match (true) {
+            str_starts_with($id, 'tt') => $addons['cinemeta'] ?? null,
+            str_starts_with($id, 'kitsu:') => $addons['kitsu'] ?? null,
+            str_starts_with($id, 'tmdb:') => $addons['tmdb'] ?? null,
+            default => null,
+        };
+
+        if (! is_string($base) || $base === '') {
             return null;
         }
 
-        return $response->json();
+        $response = Http::timeout(15)->get(rtrim($base, '/')."/meta/{$type}/{$id}.json");
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $data = $response->json();
+
+        return is_array($data) && ! empty($data['meta']) ? $data : null;
     }
 
     // -------------------------------------------------------------------------

@@ -17,6 +17,8 @@ use Filament\Actions\Action as FilamentAction;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
@@ -57,6 +59,25 @@ function embyCompatibleLibraryPathOptions($component, ?string $libraryId): array
     return $method->invoke($instance, $libraryId);
 }
 
+/** Invokes the relation manager's private bulk source helpers directly. */
+function embyBulkSourceOptions($component, ?string $collectionType): array
+{
+    $instance = $component->instance();
+    $method = new ReflectionMethod($instance, 'simpleBulkSourceOptions');
+    $method->setAccessible(true);
+
+    return $method->invoke($instance, $collectionType);
+}
+
+function embyBulkSourceDescriptions($component, ?string $collectionType): array
+{
+    $instance = $component->instance();
+    $method = new ReflectionMethod($instance, 'simpleBulkSourceDescriptions');
+    $method->setAccessible(true);
+
+    return $method->invoke($instance, $collectionType);
+}
+
 it('shows managed library mappings only on authorized Emby integrations', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
@@ -74,7 +95,692 @@ it('shows managed library mappings only on authorized Emby integrations', functi
     expect(EmbyLibraryMappingsRelationManager::canViewForRecord($foreignEmby, EditMediaServerIntegration::class))->toBeTrue();
 });
 
-it('creates an owned mapping from eligible sources and companion writable paths', function () {
+it('renders only the simple managed publishing controls in the create modal', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->assertMountedActionModalSee('What do you want to publish?')
+        ->assertMountedActionModalSee('Create a new library')
+        ->assertMountedActionModalSee('Publish to Emby')
+        ->assertMountedActionModalDontSee('Source type')
+        ->assertMountedActionModalDontSee('Mapped group')
+        ->assertMountedActionModalDontSee('Output path')
+        ->assertMountedActionModalDontSee('Managed')
+        ->assertMountedActionModalDontSee('Publishing options')
+        ->assertMountedActionModalDontSee('Naming')
+        ->assertMountedActionModalDontSee('Cleanup')
+        ->assertMountedActionModalDontSee('Publish local NFO')
+        ->assertMountedActionModalDontSee('Publish visible versions')
+        ->assertMountedActionModalDontSee('Refresh Emby after successful sync');
+});
+
+it('separates movie groups from series categories and hides published sources', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly(['name' => 'Provider']);
+    $movieGroup = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $unpublishedMovieGroup = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Comedy',
+        'type' => 'vod',
+    ]);
+    $liveGroup = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'News',
+        'type' => 'live',
+    ]);
+    $seriesCategory = Category::factory()->for($user)->for($playlist)->create([
+        'name' => 'Drama',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    EmbyLibraryMapping::factory()->for($integration, 'integration')->for($user)->create([
+        'source_kind' => 'vod_group',
+        'source_identifier' => (string) $movieGroup->id,
+        'source_label' => $movieGroup->name,
+        'collection_type' => 'movies',
+    ]);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    expect(embyBulkSourceOptions($component, 'movies'))
+        ->not->toHaveKey('vod:'.$movieGroup->id)
+        ->toHaveKey('vod:'.$unpublishedMovieGroup->id, 'Comedy (Provider)')
+        ->not->toHaveKey('series_category:'.$seriesCategory->id)
+        ->not->toHaveKey('vod:'.$liveGroup->id)
+        ->and(embyBulkSourceOptions($component, 'tvshows'))
+        ->toHaveKey('series_category:'.$seriesCategory->id, 'Drama (Provider)')
+        ->not->toHaveKey('vod:'.$movieGroup->id)
+        ->and(embyBulkSourceDescriptions($component, 'movies'))
+        ->toHaveKey('vod:'.$movieGroup->id, 'Already published');
+});
+
+it('bounds queries while rendering every bulk source option', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly(['name' => 'Movies']);
+    Group::factory()->count(8)->for($user)->for($playlist)->create(['type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+
+    embyBulkSourceOptions($component, 'movies');
+    for ($iteration = 0; $iteration < 10; $iteration++) {
+        embyBulkSourceDescriptions($component, 'movies');
+    }
+
+    expect(DB::getQueryLog())->toHaveCount(4);
+    DB::disableQueryLog();
+});
+
+it('bounds Custom Playlist queries while rendering bulk movie and series sources', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly(['name' => 'Source']);
+    $movieGroup = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Fixture Movies',
+        'type' => 'vod',
+    ]);
+    $movie = Channel::factory()->for($user)->for($playlist)->for($movieGroup)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'group' => 'Fixture Movies',
+    ]);
+    $seriesCategory = Category::factory()->for($user)->for($playlist)->create([
+        'name' => 'Fixture Series',
+    ]);
+    $series = Series::factory()->for($user)->for($playlist)->for($seriesCategory, 'category')->create([
+        'enabled' => true,
+    ]);
+    $customPlaylists = CustomPlaylist::factory()->count(8)->for($user)->createQuietly();
+    foreach ($customPlaylists as $customPlaylist) {
+        $customPlaylist->channels()->attach($movie);
+        $customPlaylist->series()->attach($series);
+    }
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    $movieOptions = embyBulkSourceOptions($component, 'movies');
+    $movieQueryCount = count(DB::getQueryLog());
+
+    DB::flushQueryLog();
+    $seriesOptions = embyBulkSourceOptions($component, 'tvshows');
+    $seriesQueryCount = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect(array_filter(array_keys($movieOptions), fn (string $key): bool => str_starts_with($key, 'custom_playlist:')))
+        ->toHaveCount(8)
+        ->and(array_filter(array_keys($seriesOptions), fn (string $key): bool => str_starts_with($key, 'custom_playlist:')))
+        ->toHaveCount(8)
+        ->and($movieQueryCount)->toBeLessThanOrEqual(6)
+        ->and($seriesQueryCount)->toBeLessThanOrEqual(7);
+});
+
+it('keeps an existing all-items publication disabled in the create modal', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    EmbyLibraryMapping::factory()->for($integration, 'integration')->for($user)->create([
+        'source_kind' => 'all',
+        'source_identifier' => '*',
+        'source_label' => 'All movies',
+        'collection_type' => 'movies',
+    ]);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->assertMountedActionModalSee('Already published');
+
+    expect(embyBulkSourceDescriptions($component, 'movies'))
+        ->toHaveKey('all:movies', 'Already published');
+});
+
+it('publishes a first-time movie source to a new Emby library with safe derived defaults', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    $managedPath = '/config/plugins/m3u-editor/managed-publishing/managed-movies';
+    $baselineTransactionLevel = DB::transactionLevel();
+    $transactionLevels = [];
+    $libraryRequestCount = 0;
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) use ($integration, $managedPath, &$libraryRequestCount, &$transactionLevels) {
+        $transactionLevels[] = DB::transactionLevel();
+
+        if (str_ends_with($request->url(), '/M3uEditor/Managed/Setup/V1')) {
+            return Http::response([
+                'CapabilityVersion' => 1,
+                'IntegrationId' => $integration->id,
+                'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+                'Ready' => true,
+                'Result' => 'Ready',
+            ]);
+        }
+
+        $libraryRequestCount++;
+
+        return match ($libraryRequestCount) {
+            1 => Http::response([]),
+            2 => Http::response([], 204),
+            default => Http::response([[
+                'ItemId' => 'managed-library-1',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => [$managedPath],
+            ]]),
+        };
+    });
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
+    ])->assertHasNoActionErrors()
+        ->assertNotified();
+
+    $mapping = EmbyLibraryMapping::query()->sole();
+    expect($mapping)
+        ->source_kind->toBe('vod_group')
+        ->source_identifier->toBe((string) $group->id)
+        ->source_label->toBe('Action')
+        ->collection_type->toBe('movies')
+        ->target_library_id->toBe('managed-library-1')
+        ->target_library_name->toBe('Managed Movies')
+        ->output_path->toStartWith($managedPath.'/')
+        ->is_managed->toBeTrue()
+        ->options->toBe([
+            'naming' => 'media-year',
+            'nfo' => true,
+            'versions' => true,
+            'cleanup' => 'replace',
+            'refresh' => true,
+        ])
+        ->status->toBe('planned')
+        ->and($mapping->last_planned_revision)->toBeString()->not->toBeEmpty()
+        ->and($transactionLevels)->each->toBe($baselineTransactionLevel);
+});
+
+it('publishes multiple movie groups into distinct subpaths of one existing library', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $action = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $comedy = Group::factory()->for($user)->for($playlist)->create(['name' => 'Comedy', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => '267078',
+            'name' => 'Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->set('mountedActions.0.data.publication_type', 'movies')
+        ->set('mountedActions.0.data.sources', ['vod:'.$action->id, 'vod:'.$comedy->id])
+        ->set('mountedActions.0.data.destination', 267078)
+        ->callMountedAction()
+        ->assertHasNoActionErrors()
+        ->assertNotified();
+
+    $mappings = EmbyLibraryMapping::query()->orderBy('source_label')->get();
+    expect($mappings)->toHaveCount(2)
+        ->and($mappings->pluck('source_label')->all())->toBe(['Action', 'Comedy'])
+        ->and($mappings->pluck('target_library_id')->unique()->all())->toBe(['267078'])
+        ->and($mappings->pluck('output_path')->unique())->toHaveCount(2)
+        ->and($mappings->pluck('output_path')->every(
+            fn (string $path): bool => str_starts_with($path, '/srv/emby/managed/movies/'),
+        ))->toBeTrue()
+        ->and($mappings->pluck('status')->unique()->all())->toBe(['planned']);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->assertCanSeeTableRecords($mappings);
+});
+
+it('keeps distinct managed subpaths across sequential single-source publishes', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $action = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $comedy = Group::factory()->for($user)->for($playlist)->create(['name' => 'Comedy', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'movie-library',
+            'name' => 'Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
+
+    foreach ([$action, $comedy] as $group) {
+        Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+            'ownerRecord' => $integration,
+            'pageClass' => EditMediaServerIntegration::class,
+        ])->callAction(TestAction::make('create')->table(), [
+            'publication_type' => 'movies',
+            'sources' => ['vod:'.$group->id],
+            'destination' => 'movie-library',
+        ])->assertHasNoActionErrors();
+    }
+
+    $paths = EmbyLibraryMapping::query()->orderBy('id')->pluck('output_path');
+    expect($paths)->toHaveCount(2)
+        ->and($paths->unique())->toHaveCount(2)
+        ->and($paths->every(
+            fn (string $path): bool => str_starts_with($path, '/srv/emby/managed/movies/'),
+        ))->toBeTrue();
+});
+
+it('creates one managed Emby library for a bulk selection', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $action = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $comedy = Group::factory()->for($user)->for($playlist)->create(['name' => 'Comedy', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    $libraryRoot = '/srv/emby/managed/managed-movies';
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 204)
+            ->push([[
+                'ItemId' => 'managed-library',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => [$libraryRoot],
+            ]], 200),
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$action->id, 'vod:'.$comedy->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
+    ])->assertHasNoActionErrors();
+
+    $createRequests = Http::recorded(fn ($request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://emby.test:8096/Library/VirtualFolders')->values();
+    $mappings = EmbyLibraryMapping::query()->get();
+    expect($createRequests)->toHaveCount(1)
+        ->and($createRequests[0][0]['Paths'])->toBe([$libraryRoot])
+        ->and($mappings)->toHaveCount(2)
+        ->and($mappings->pluck('target_library_id')->unique()->all())->toBe(['managed-library'])
+        ->and($mappings->pluck('output_path')->unique())->toHaveCount(2)
+        ->and($mappings->pluck('output_path')->every(
+            fn (string $path): bool => str_starts_with($path, $libraryRoot.'/'),
+        ))->toBeTrue();
+});
+
+it('offers only source-compatible libraries with a companion-approved writable path', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_publisher_writable_paths' => ['/srv/emby/legacy'],
+        'available_libraries' => [
+            [
+                'id' => 'compatible-movies',
+                'name' => 'Compatible Movies',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/managed/movies'],
+            ],
+            [
+                'id' => 'legacy-movies',
+                'name' => 'Legacy Movies',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/legacy/movies'],
+            ],
+            [
+                'id' => 'unwritable-movies',
+                'name' => 'Unwritable Movies',
+                'type' => 'movies',
+                'paths' => ['/srv/emby/private/movies'],
+            ],
+            [
+                'id' => 'compatible-tv',
+                'name' => 'Compatible TV',
+                'type' => 'tvshows',
+                'paths' => ['/srv/emby/managed/tv'],
+            ],
+        ],
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->set('mountedActions.0.data.publication_type', 'movies')
+        ->assertMountedActionModalSee('Compatible Movies')
+        ->assertMountedActionModalSee('Legacy Movies')
+        ->assertMountedActionModalDontSee('Unwritable Movies')
+        ->assertMountedActionModalDontSee('Compatible TV');
+});
+
+it('shows one actionable version error and persists nothing when managed setup is unavailable', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([], 404),
+    ]);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
+    ]);
+
+    $errorBag = $component->instance()->getErrorBag();
+    $errors = $errorBag->all();
+    expect($errors)->toHaveCount(1)
+        ->and($errors[0])->toContain('managed setup version 1', 'retry')
+        ->not->toContain('emby-secret', '/config/', 'integration ID', 'output path')
+        ->and(EmbyLibraryMapping::query()->count())->toBe(0)
+        ->and($integration->refresh())
+        ->emby_managed_setup_binding_id->toBeNull()
+        ->emby_managed_setup_root->toBeNull();
+});
+
+it('includes unpublished and hides published Custom Playlist groups', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $customPlaylist = CustomPlaylist::factory()->for($user)->createQuietly(['name' => 'Favorites']);
+    $unpublishedCustomPlaylist = CustomPlaylist::factory()->for($user)->createQuietly(['name' => 'Watch Later']);
+    $vodChannel = Channel::factory()->for($user)->for($playlist)->createQuietly([
+        'group' => 'Action & Adventure',
+        'is_vod' => true,
+        'enabled' => true,
+    ]);
+    $customPlaylist->channels()->attach([$vodChannel->id]);
+    $unpublishedCustomPlaylist->channels()->attach([$vodChannel->id]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    EmbyLibraryMapping::factory()->for($integration, 'integration')->for($user)->create([
+        'source_kind' => 'custom_playlist_group',
+        'source_identifier' => (string) $customPlaylist->id,
+        'source_label' => 'Action & Adventure',
+        'collection_type' => 'movies',
+    ]);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+    $source = 'custom_playlist:'.$customPlaylist->id.':'.rawurlencode('Action & Adventure');
+    $unpublishedSource = 'custom_playlist:'.$unpublishedCustomPlaylist->id.':'.rawurlencode('Action & Adventure');
+
+    expect(embyBulkSourceOptions($component, 'movies'))
+        ->not->toHaveKey($source)
+        ->toHaveKey($unpublishedSource, 'Watch Later: Action & Adventure')
+        ->and(embyBulkSourceOptions($component, 'tvshows'))
+        ->not->toHaveKey($source, $unpublishedSource)
+        ->and(embyBulkSourceDescriptions($component, 'movies'))
+        ->toHaveKey($source, 'Already published');
+});
+
+it('switches between movie and series sources and clears stale selections', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $category = Category::factory()->for($user)->for($playlist)->create(['name' => 'Drama']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->mountAction(TestAction::make('create')->table())
+        ->assertMountedActionModalSee('Movie groups')
+        ->set('mountedActions.0.data.sources', ['vod:'.$group->id])
+        ->set('mountedActions.0.data.destination', '__new__')
+        ->set('mountedActions.0.data.publication_type', 'tvshows')
+        ->assertSet('mountedActions.0.data.sources', [])
+        ->assertSet('mountedActions.0.data.destination', null)
+        ->assertMountedActionModalSee('Series categories');
+
+    expect(embyBulkSourceOptions($component, 'tvshows'))
+        ->toHaveKey('series_category:'.$category->id, 'Drama ('.$playlist->name.')');
+});
+
+it('publishes to an existing compatible library using only source and destination choices', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'existing-library',
+            'name' => 'Existing Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => 'existing-library',
+        'source_kind' => 'all',
+        'source_label' => 'Spoofed label',
+        'collection_type' => 'tvshows',
+        'output_path' => '/browser/supplied/path',
+        'is_managed' => true,
+    ])->assertHasNoActionErrors();
+
+    $mapping = EmbyLibraryMapping::query()->sole();
+
+    expect($mapping)
+        ->source_kind->toBe('vod_group')
+        ->source_identifier->toBe((string) $group->id)
+        ->source_label->toBe('Action')
+        ->target_library_id->toBe('existing-library')
+        ->target_library_name->toBe('Existing Movies')
+        ->collection_type->toBe('movies')
+        ->output_path->toStartWith('/srv/emby/managed/movies/')
+        ->is_managed->toBeFalse()
+        ->and(app(EmbyPublicationCatalogService::class)->buildMapping($mapping)['target_library']['managed'])
+        ->toBeTrue()
+        ->and($integration->refresh()->getImportLibraryIdsForType('movies'))
+        ->toBe([]);
+});
+
+it('keeps confirmed setup while rolling back mapping state when Emby rejects library creation', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 401)
+            ->push([], 401),
+    ]);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
+    ]);
+
+    $errors = $component->instance()->getErrorBag()->all();
+    expect($errors)->toHaveCount(1)
+        ->and($errors[0])->not->toContain(
+            'emby-secret',
+            '/config/plugins/m3u-editor/managed-publishing',
+        )
+        ->and(EmbyLibraryMapping::query()->count())->toBe(0)
+        ->and($integration->refresh())
+        ->emby_managed_setup_binding_id->toBe($integration->id)
+        ->emby_managed_setup_root->toBe('/config/plugins/m3u-editor/managed-publishing')
+        ->emby_publisher_writable_paths->toBeNull()
+        ->and($integration->getEmbyPublisherWritablePaths())
+        ->toBe(['/config/plugins/m3u-editor/managed-publishing']);
+});
+
+it('creates an owned mapping from eligible unified source and destination choices', function () {
     config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
@@ -82,36 +788,100 @@ it('creates an owned mapping from eligible sources and companion writable paths'
     $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
-        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_publisher_writable_paths' => ['/srv/emby/managed'],
+        'available_libraries' => [[
+            'id' => 'existing-library',
+            'name' => 'Managed Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
     ]);
 
     Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('create')->table(), [
-        'enabled' => true,
-        'source_kind' => 'vod_group',
-        'source_identifier' => (string) $group->id,
-        'source_label' => 'Action',
-        'target_library_id' => null,
-        'target_library_name' => 'Managed Movies',
-        'collection_type' => 'movies',
-        'output_path' => '/srv/emby/managed/movies',
-        'is_managed' => true,
-        'options' => [
-            'naming' => 'media-year',
-            'nfo' => true,
-            'versions' => true,
-            'cleanup' => 'replace',
-            'refresh' => true,
-        ],
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => 'existing-library',
     ])->assertHasNoActionErrors();
 
     $mapping = EmbyLibraryMapping::query()->sole();
     expect($mapping->user_id)->toBe($user->id)
         ->and($mapping->media_server_integration_id)->toBe($integration->id)
         ->and($mapping->source_identifier)->toBe((string) $group->id)
-        ->and($mapping->output_path)->toBe('/srv/emby/managed/movies');
+        ->and($mapping->output_path)->toStartWith('/srv/emby/managed/movies/');
+});
+
+it('publishes to a companion-confirmed existing library on first setup', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => null,
+        'emby_publisher_writable_paths' => null,
+        'available_libraries' => [[
+            'id' => 'existing-library',
+            'name' => 'Managed Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+        ]),
+    ]);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+    $method = new ReflectionMethod($component->instance(), 'simpleLibraryOptionsForCollectionType');
+    $method->setAccessible(true);
+
+    expect($method->invoke($component->instance(), 'movies'))->toHaveKey(
+        'existing-library',
+        'Managed Movies',
+    );
+
+    $component->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => 'existing-library',
+    ])
+        ->assertHasNoActionErrors();
+
+    expect(EmbyLibraryMapping::query()->sole())
+        ->target_library_id->toBe('existing-library')
+        ->output_path->toStartWith('/srv/emby/managed/movies/')
+        ->is_managed->toBeFalse();
 });
 
 it('derives compatible existing-library destinations from Emby paths and companion roots', function () {
@@ -154,11 +924,18 @@ it('derives compatible existing-library destinations from Emby paths and compani
     ])->and(embyCompatibleLibraryPathOptions($component, 'none'))->toBe([]);
 });
 
-it('shows only the focused existing-library destination controls', function () {
+it('does not offer an existing library without a companion-approved writable path', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['type' => 'vod']);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
         'emby_publisher_writable_paths' => ['/srv/emby/managed'],
         'available_libraries' => [[
             'id' => 'library-1',
@@ -172,20 +949,25 @@ it('shows only the focused existing-library destination controls', function () {
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
-        ->set('mountedActions.0.data.destination_mode', 'existing')
-        ->set('mountedActions.0.data.target_library_id', 'library-1')
-        ->assertMountedActionModalDontSee('Library name')
-        ->assertMountedActionModalDontSee('Library type')
-        ->assertMountedActionModalDontSee('Create and manage this Emby library')
+        ->set('mountedActions.0.data.publication_type', 'movies')
+        ->assertMountedActionModalDontSee('Existing Movies')
         ->assertMountedActionModalDontSee('Compatible library path')
-        ->assertMountedActionModalSee('No compatible writable destination is available. Register a writable root in the Emby companion, then refresh this integration.');
+        ->assertMountedActionModalDontSee('Register a writable root')
+        ->assertMountedActionModalSee('Create a new library');
 });
 
-it('automatically selects one compatible existing path and asks when several are available', function () {
+it('keeps existing-library path selection server-side when libraries have one or several paths', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['type' => 'vod']);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
         'emby_publisher_writable_paths' => ['/srv/emby/managed'],
         'available_libraries' => [
             [
@@ -202,18 +984,15 @@ it('automatically selects one compatible existing path and asks when several are
             ],
         ],
     ]);
-    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table())
-        ->set('mountedActions.0.data.destination_mode', 'existing')
-        ->set('mountedActions.0.data.target_library_id', 'single')
-        ->assertSet('mountedActions.0.data.output_path', '/srv/emby/managed/movies')
-        ->assertMountedActionModalDontSee('Compatible library path');
-
-    $component->set('mountedActions.0.data.target_library_id', 'multiple')
-        ->assertSet('mountedActions.0.data.output_path', null)
-        ->assertMountedActionModalSee('Compatible library path');
+        ->set('mountedActions.0.data.publication_type', 'movies')
+        ->assertMountedActionModalSee('Single')
+        ->assertMountedActionModalSee('Multiple')
+        ->assertMountedActionModalDontSee('Compatible library path')
+        ->assertMountedActionModalDontSee('/srv/emby/managed/movies-4k');
 });
 
 it('derives existing library values instead of accepting redundant submitted fields', function () {
@@ -222,6 +1001,11 @@ it('derives existing library values instead of accepting redundant submitted fie
     $this->actingAs($user);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_managed_setup_root' => '/srv/emby/managed',
         'emby_publisher_writable_paths' => ['/srv/emby/managed'],
         'available_libraries' => [[
             'id' => 'library-1',
@@ -230,28 +1014,29 @@ it('derives existing library values instead of accepting redundant submitted fie
             'paths' => ['/srv/emby/managed/movies'],
         ]],
     ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
 
-    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('create')->table(), [
-        'destination_mode' => 'existing',
-        'enabled' => true,
+        'publication_type' => 'movies',
+        'publish_all' => true,
+        'destination' => 'library-1',
         'source_kind' => 'all',
-        'source_identifier' => '*',
-        'source_label' => 'All eligible items',
-        'target_library_id' => 'library-1',
         'target_library_name' => 'Spoofed name',
         'collection_type' => 'tvshows',
-        'output_path' => '/srv/emby/managed/movies',
+        'output_path' => '/browser/path',
         'is_managed' => true,
-        'options' => [
-            'naming' => 'media-year',
-            'nfo' => true,
-            'versions' => true,
-            'cleanup' => 'replace',
-            'refresh' => true,
-        ],
     ])->assertHasNoActionErrors();
 
     expect(EmbyLibraryMapping::query()->sole())
@@ -266,35 +1051,143 @@ it('creates a managed library from only its required destination choices', funct
     $this->actingAs($user);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
-        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 204)
+            ->push([[
+                'ItemId' => 'managed-library',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => ['/srv/emby/managed/managed-movies'],
+            ]], 200),
     ]);
 
     Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('create')->table(), [
-        'destination_mode' => 'new',
-        'enabled' => true,
-        'source_kind' => 'all',
-        'source_identifier' => '*',
-        'source_label' => 'All eligible items',
+        'publication_type' => 'movies',
+        'publish_all' => true,
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
         'target_library_id' => 'spoofed-library',
-        'target_library_name' => 'Managed Movies',
-        'collection_type' => 'movies',
-        'output_path' => '/srv/emby/managed/movies',
+        'output_path' => '/browser/path',
         'is_managed' => false,
-        'options' => [
-            'naming' => 'media-year',
-            'nfo' => true,
-            'versions' => true,
-            'cleanup' => 'replace',
-            'refresh' => true,
-        ],
     ])->assertHasNoActionErrors();
 
     expect(EmbyLibraryMapping::query()->sole())
-        ->target_library_id->toBeNull()
+        ->target_library_id->toBe('managed-library')
+        ->output_path->toBe('/srv/emby/managed/managed-movies')
         ->is_managed->toBeTrue();
+});
+
+it('uses a safe stable directory when a library name has no ASCII slug', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ]);
+    $method = new ReflectionMethod($component->instance(), 'managedLibraryPath');
+    $method->setAccessible(true);
+
+    $path = $method->invoke($component->instance(), '/srv/emby/managed', '日本語');
+
+    expect($path)->toStartWith('/srv/emby/managed/library-')
+        ->not->toBe('/srv/emby/managed/');
+});
+
+it('rejects a duplicate publication before contacting the companion or Emby', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $newGroup = Group::factory()->for($user)->for($playlist)->create(['name' => 'Comedy', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+    ]);
+    EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
+        'source_kind' => 'vod_group',
+        'source_identifier' => (string) $group->id,
+        'source_label' => 'Action',
+        'collection_type' => 'movies',
+    ]);
+    Http::preventStrayRequests();
+    Http::fake();
+
+    expect(EmbyLibraryMapping::query()
+        ->where('media_server_integration_id', $integration->id)
+        ->where('source_kind', 'vod_group')
+        ->where('source_identifier', (string) $group->id)
+        ->where('source_label', 'Action')
+        ->where('collection_type', 'movies')
+        ->exists())->toBeTrue();
+
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$newGroup->id, 'vod:'.$group->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Duplicate Movies',
+    ])->assertHasActionErrors();
+
+    Http::assertNothingSent();
+    expect(EmbyLibraryMapping::query()->count())->toBe(1);
+});
+
+it('returns an actionable error when another publish is already running', function () {
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $lock = Cache::lock("emby-publish:{$integration->id}", 900);
+    $lock->acquire();
+    Http::preventStrayRequests();
+    Http::fake();
+
+    try {
+        $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+            'ownerRecord' => $integration,
+            'pageClass' => EditMediaServerIntegration::class,
+        ])->callAction(TestAction::make('create')->table(), [
+            'publication_type' => 'movies',
+            'sources' => ['vod:'.$group->id],
+            'destination' => '__new__',
+            'new_library_name' => 'Managed Movies',
+        ])->assertHasActionErrors();
+
+        expect($component->instance()->getErrorBag()->all())->toContain(
+            'Another Emby publication is already in progress. Retry when it finishes.',
+        );
+    } finally {
+        $lock->release();
+    }
+
+    Http::assertNothingSent();
+    expect(EmbyLibraryMapping::query()->count())->toBe(0);
 });
 
 it('registers companion writable paths before creating the first owned mapping', function () {
@@ -333,32 +1226,42 @@ it('registers companion writable paths before creating the first owned mapping',
         ->toBe(['/srv/emby/managed/movies'])
         ->and($integration->emby_publisher_capabilities_updated_at)->not->toBeNull();
 
+    $integration->update([
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'available_libraries' => [[
+            'id' => 'existing-library',
+            'name' => 'Managed Movies',
+            'type' => 'movies',
+            'paths' => ['/srv/emby/managed/movies'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed/movies',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
+
     Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('create')->table(), [
-        'enabled' => true,
-        'source_kind' => 'vod_group',
-        'source_identifier' => (string) $group->id,
-        'source_label' => 'Action',
-        'target_library_id' => null,
-        'target_library_name' => 'Managed Movies',
-        'collection_type' => 'movies',
-        'output_path' => '/srv/emby/managed/movies',
-        'is_managed' => true,
-        'options' => [
-            'naming' => 'media-year',
-            'nfo' => true,
-            'versions' => true,
-            'cleanup' => 'replace',
-            'refresh' => true,
-        ],
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$group->id],
+        'destination' => 'existing-library',
     ])->assertHasNoActionErrors();
 
     $mapping = EmbyLibraryMapping::query()->sole();
     expect($mapping->user_id)->toBe($user->id)
         ->and($mapping->media_server_integration_id)->toBe($integration->id)
-        ->and($mapping->output_path)->toBe('/srv/emby/managed/movies');
+        ->and($mapping->output_path)->toStartWith('/srv/emby/managed/movies/');
 });
 
 it('rejects foreign sources and unadvertised output paths', function () {
@@ -374,32 +1277,38 @@ it('rejects foreign sources and unadvertised output paths', function () {
     ]);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
         'type' => 'emby',
-        'emby_publisher_writable_paths' => ['/srv/emby/managed/movies'],
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
     ]);
 
-    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('create')->table(), [
-        'enabled' => true,
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$foreignGroup->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
         'source_kind' => 'vod_group',
-        'source_identifier' => (string) $foreignGroup->id,
         'source_label' => 'Foreign',
-        'target_library_name' => 'Managed Movies',
-        'collection_type' => 'movies',
         'output_path' => '/unadvertised/path',
-        'is_managed' => true,
-        'options' => [
-            'naming' => 'media-year',
-            'cleanup' => 'replace',
-        ],
-    ])->assertHasActionErrors([
-        'source_identifier',
-        'source_label',
-        'output_path',
     ]);
 
-    expect(EmbyLibraryMapping::query()->count())->toBe(0);
+    expect($component->instance()->getErrorBag()->all())->toHaveCount(1)
+        ->and(EmbyLibraryMapping::query()->count())->toBe(0);
 });
 
 it('shows mapping state and toggles publishing without deleting state', function () {
@@ -785,33 +1694,31 @@ it('scopes Mapped group options to VOD groups for movies and series categories f
         ->toBe(['Drama' => 'Drama']);
 });
 
-it('does not prematurely populate Mapped group with the custom playlist\'s own name', function () {
+it('rejects mixed movie and series source payloads without partial writes', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
     $playlist = Playlist::factory()->for($user)->createQuietly();
-    $customPlaylist = CustomPlaylist::factory()->for($user)->createQuietly(['name' => 'Sports']);
-    $vodChannel = Channel::factory()->for($user)->for($playlist)->createQuietly([
-        'group' => 'Action', 'is_vod' => true, 'enabled' => true,
+    $movieGroup = Group::factory()->for($user)->for($playlist)->create([
+        'name' => 'Action',
+        'type' => 'vod',
     ]);
-    $customPlaylist->channels()->attach([$vodChannel->id]);
-
+    $seriesCategory = Category::factory()->for($user)->for($playlist)->create(['name' => 'Drama']);
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    Http::preventStrayRequests();
+    Http::fake();
 
-    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
-    ])->mountAction(TestAction::make('create')->table());
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'sources' => ['vod:'.$movieGroup->id, 'series_category:'.$seriesCategory->id],
+        'destination' => '__new__',
+        'new_library_name' => 'Mixed Library',
+    ])->assertHasActionErrors();
 
-    // sourceOptions('custom_playlist_group') labels are the CustomPlaylist's
-    // own name ("Sports") — selecting it as "Source" must not leak that into
-    // "Mapped group", which is only ever populated from sourceLabelOptions().
-    $component->set('mountedActions.0.data.source_kind', 'custom_playlist_group')
-        ->set('mountedActions.0.data.source_identifier', (string) $customPlaylist->id)
-        ->assertSet('mountedActions.0.data.source_label', null);
-
-    // Nor should picking a library type resurrect the stale value.
-    $component->set('mountedActions.0.data.collection_type', 'movies')
-        ->assertSet('mountedActions.0.data.source_label', null);
+    Http::assertNothingSent();
+    expect(EmbyLibraryMapping::query()->count())->toBe(0);
 });
 
 it('disambiguates same-named VOD groups across playlists in the Source search, without leaking the suffix into Mapped group', function () {
@@ -846,9 +1753,8 @@ it('disambiguates same-named VOD groups across playlists in the Source search, w
         'pageClass' => EditMediaServerIntegration::class,
     ])->mountAction(TestAction::make('create')->table());
 
-    $action->set('mountedActions.0.data.source_kind', 'vod_group')
-        ->set('mountedActions.0.data.source_identifier', (string) $groupB->id)
-        ->assertSet('mountedActions.0.data.source_label', 'Action');
+    $action->set('mountedActions.0.data.sources', ['vod:'.$groupB->id])
+        ->assertSet('mountedActions.0.data.sources', ['vod:'.$groupB->id]);
 });
 
 it('caps the number of items rendered in the Preview modal without affecting the actual revision hash', function () {

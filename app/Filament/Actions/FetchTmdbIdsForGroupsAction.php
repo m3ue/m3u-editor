@@ -60,25 +60,25 @@ final class FetchTmdbIdsForGroupsAction
     private static function configure(Action $action, bool $isVod): Action
     {
         return $action
-            ->label($isVod ? __('Fetch TMDB IDs') : __('Fetch TMDB/TVDB IDs'))
+            ->label(__('Fetch TMDB Metadata'))
             ->icon('heroicon-o-magnifying-glass')
             ->modalIcon('heroicon-o-magnifying-glass')
             ->modalDescription($isVod
-                ? __('Search TMDB for matching movies and populate TMDB/IMDB IDs for the enabled VOD channels in the selected group(s)? This enables Trash Guides compatibility for Radarr.')
-                : __('Search TMDB for matching TV series and populate TMDB/TVDB/IMDB IDs for the enabled series in the selected category(ies)? This enables Trash Guides compatibility for Sonarr.'))
-            ->modalSubmitActionLabel(__('Yes, fetch IDs now'))
+                ? __('Search TMDB for matching movies and fetch full metadata (plot, artwork, cast, genres) plus TMDB and IMDB IDs for the enabled VOD channels in the selected group(s)? This also enables Trash Guides compatibility for Radarr.')
+                : __('Search TMDB for matching TV series and fetch full metadata (plot, artwork, cast, genres, seasons and episodes) plus TMDB, TVDB and IMDB IDs for the enabled series in the selected category(ies)? This also enables Trash Guides compatibility for Sonarr.'))
+            ->modalSubmitActionLabel(__('Yes, fetch metadata now'))
             ->schema([
                 Toggle::make('overwrite_existing')
-                    ->label(__('Overwrite Existing IDs'))
+                    ->label(__('Overwrite Existing Metadata'))
                     ->helperText($isVod
-                        ? __('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\'t already have them.')
-                        : __('Overwrite existing TMDB/TVDB/IMDB IDs? If disabled, it will only fetch IDs for series that don\'t already have them.'))
+                        ? __('Overwrite existing TMDB metadata? If disabled, only items missing metadata are fetched.')
+                        : __('Overwrite existing TMDB metadata? If disabled, only series missing metadata are fetched.'))
                     ->default(false),
             ])
             ->successNotification(
                 Notification::make()
                     ->success()
-                    ->title(__('TMDB ID lookup started'))
+                    ->title(__('TMDB metadata fetch started'))
                     ->body($isVod
                         ? __('Only enabled VOD channels in the selected group(s) will be processed. You will be notified when it is complete.')
                         : __('Only enabled series in the selected category(ies) will be processed. You will be notified when it is complete.'))

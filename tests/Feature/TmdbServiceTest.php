@@ -948,6 +948,51 @@ it('returns a rich cast_list from getTvSeriesDetails for downstream persistence'
     ]);
 });
 
+it('picks the language-ranked clearlogo from getMovieDetails', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/27205*' => Http::response([
+            'id' => 27205,
+            'title' => 'Inception',
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+            'external_ids' => [],
+            'images' => [
+                'logos' => [
+                    ['file_path' => '/de-low.png', 'iso_639_1' => 'de', 'vote_average' => 9.0],
+                    ['file_path' => '/en-low.png', 'iso_639_1' => 'en', 'vote_average' => 1.0],
+                    ['file_path' => '/en-high.png', 'iso_639_1' => 'en', 'vote_average' => 8.0],
+                    ['file_path' => '/neutral.png', 'iso_639_1' => null, 'vote_average' => 10.0],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetails(27205);
+
+    // en-US configured -> prefer 'en', highest vote within that language.
+    expect($details['logo_url'])->toBe('https://image.tmdb.org/t/p/w500/en-high.png');
+});
+
+it('returns a null clearlogo when TMDB carries no logos', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/1396*' => Http::response([
+            'id' => 1396,
+            'name' => 'Breaking Bad',
+            'genres' => [],
+            'external_ids' => [],
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+            'images' => ['logos' => []],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getTvSeriesDetails(1396);
+
+    expect($details['logo_url'])->toBeNull();
+});
+
 it('returns empties when API key is not configured for now playing', function () {
     $settings = new GeneralSettings;
     $settings->tmdb_api_key = null;

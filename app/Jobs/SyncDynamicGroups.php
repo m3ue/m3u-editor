@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
+use App\Models\DynamicGroupItemSnapshot;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Services\SyncPipelineService;
@@ -151,7 +152,7 @@ class SyncDynamicGroups implements ShouldQueue
                     ],
                 );
 
-                $this->syncMembership($group, $type, $playlist->id, $tmdbIds);
+                $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
 
                 $validKeys[] = $triple;
             }
@@ -201,9 +202,16 @@ class SyncDynamicGroups implements ShouldQueue
      * Replace the dynamic_group_items rows for a group with the current
      * matching item ids, in chunks. Set-based — never hydrates models.
      *
+     * When `$syncRunId` is set, also append the new membership to
+     * `dynamic_group_item_snapshots` so the View page can render a
+     * "what changed since last sync" diff. Cron runs (syncRunId = null)
+     * skip capture — diff display is only meaningful for pipeline-attributable
+     * runs, and the cron path runs multiple times per day so its snapshots
+     * would dominate storage with low signal.
+     *
      * @param  array<int, string>  $tmdbIds
      */
-    private function syncMembership(DynamicGroup $group, string $type, int $playlistId, array $tmdbIds): void
+    private function syncMembership(DynamicGroup $group, string $type, int $playlistId, array $tmdbIds, ?int $syncRunId = null): void
     {
         $morphClass = $type === 'vod' ? Channel::class : Series::class;
         $itemIds = DynamicGroup::itemsMatchingTmdbIds($type, $playlistId, $tmdbIds)
@@ -222,6 +230,15 @@ class SyncDynamicGroups implements ShouldQueue
         // enabled on demand, so toggling an item's enabled flag does not
         // require touching this table.
         if ($itemIds === []) {
+            // Empty membership is still worth snapshotting if a prior run had
+            // rows — the diff view will then show everything as removed. Skip
+            // when there's no run to attribute to (cron) or when the snapshot
+            // would be empty regardless (first run, no prior membership).
+            if ($syncRunId === null) {
+                return;
+            }
+            $this->writeSnapshot($group->id, $morphClass, [], $syncRunId);
+
             return;
         }
 
@@ -231,6 +248,34 @@ class SyncDynamicGroups implements ShouldQueue
                     'dynamic_group_id' => $group->id,
                     'item_type' => $morphClass,
                     'item_id' => $id,
+                ], $chunk),
+            );
+        }
+
+        if ($syncRunId !== null) {
+            $this->writeSnapshot($group->id, $morphClass, $itemIds, $syncRunId);
+        }
+    }
+
+    /**
+     * Append the freshly-computed membership to the snapshot table in chunks.
+     * Set-based — never hydrates models. The table is narrow and indexed on
+     * `(dynamic_group_id, sync_run_id)` so this stays cheap even at the
+     * 30-day / ~9k-rows-per-playlist steady state.
+     *
+     * @param  array<int, int>  $itemIds
+     */
+    private function writeSnapshot(int $groupId, string $itemType, array $itemIds, int $syncRunId): void
+    {
+        $now = now();
+        foreach (array_chunk($itemIds, self::MEMBERSHIP_CHUNK_SIZE) as $chunk) {
+            DynamicGroupItemSnapshot::insert(
+                array_map(fn (int $id): array => [
+                    'dynamic_group_id' => $groupId,
+                    'sync_run_id' => $syncRunId,
+                    'item_type' => $itemType,
+                    'item_id' => $id,
+                    'captured_at' => $now,
                 ], $chunk),
             );
         }

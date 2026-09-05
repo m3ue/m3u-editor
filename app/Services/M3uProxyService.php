@@ -1305,6 +1305,18 @@ class M3uProxyService
         // Get any custom headers for the current playlist
         $headers = $playlist->custom_headers ?? [];
 
+        // Per-channel #EXTVLCOPT / #KODIPROP overrides captured at import (channels.extvlcopt,
+        // channels.kodidrop). Until now these were only ever re-emitted verbatim in our own
+        // generated M3U for players like Kodi/VLC to read directly - the proxy itself never saw
+        // them. Some CDN edges require the Referer/Cookie/User-Agent the source M3U specified for
+        // this specific channel and will reject the proxy's fetch without it, even though the
+        // same URL plays fine outside the proxy (in a player that honors these tags itself).
+        [$channelUserAgent, $channelHeaders] = $this->resolveChannelHeaderOverrides($channel);
+        if ($channelUserAgent) {
+            $userAgent = $channelUserAgent;
+        }
+        $headers = array_merge($headers, $channelHeaders);
+
         // Media-server-backed channels (Plex/Emby/Jellyfin/WebDAV) store our own API-key-hiding
         // proxy URL (e.g. /media-server/{id}/stream/{item}.{ext}) as their channel URL, since that
         // URL is also handed directly to external clients when the proxy is disabled. When we ARE
@@ -2584,6 +2596,59 @@ class M3uProxyService
     {
         // Transcode route is the same logic as direct now
         return $this->buildProxyUrl($streamId, $format, $username);
+    }
+
+    /**
+     * Extract a User-Agent / header overrides from a channel's `#EXTVLCOPT:` and `#KODIPROP:`
+     * tags (captured at M3U import into `channels.extvlcopt` / `channels.kodidrop`), so the
+     * proxy's upstream fetch carries what the source M3U specified for this specific channel.
+     * Recognizes `#EXTVLCOPT:http-user-agent` / `http-referrer` / `http-origin` / `http-cookie`,
+     * and `#KODIPROP:inputstream.adaptive.stream_headers` (a `Key1=Val1&Key2=Val2` string used
+     * by Kodi's inputstream.adaptive, commonly carrying Referer/Origin/Cookie/User-Agent).
+     * KODIPROP wins over EXTVLCOPT for the same header since it's the more complete convention.
+     *
+     * @return array{0: ?string, 1: array<int, array{header: string, value: string}>}
+     */
+    protected function resolveChannelHeaderOverrides(Channel $channel): array
+    {
+        $userAgent = null;
+        $headers = [];
+
+        foreach ($channel->extvlcopt ?? [] as $opt) {
+            $key = strtolower($opt['key'] ?? '');
+            $value = $opt['value'] ?? null;
+            if ($value === null || $value === '') {
+                continue;
+            }
+            match ($key) {
+                'http-user-agent' => $userAgent = $value,
+                'http-referrer', 'http-referer' => $headers['Referer'] = $value,
+                'http-origin' => $headers['Origin'] = $value,
+                'http-cookie' => $headers['Cookie'] = $value,
+                default => null,
+            };
+        }
+
+        foreach ($channel->kodidrop ?? [] as $prop) {
+            $key = strtolower($prop['key'] ?? '');
+            $value = $prop['value'] ?? null;
+            if ($key !== 'inputstream.adaptive.stream_headers' || $value === null || $value === '') {
+                continue;
+            }
+            parse_str(str_replace('&amp;', '&', $value), $parsedHeaders);
+            foreach ($parsedHeaders as $headerName => $headerValue) {
+                if (strtolower((string) $headerName) === 'user-agent') {
+                    $userAgent = $headerValue;
+                } else {
+                    $headers[$headerName] = $headerValue;
+                }
+            }
+        }
+
+        return [
+            $userAgent,
+            collect($headers)->map(fn ($value, $header) => ['header' => $header, 'value' => $value])->values()->all(),
+        ];
     }
 
     /**

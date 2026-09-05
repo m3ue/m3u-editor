@@ -280,6 +280,12 @@ class PlexService implements MediaServer
                 'Name' => $p['tag'] ?? $p['name'] ?? null,
                 'Type' => 'Actor',
                 'Role' => $p['role'] ?? null,
+                // Plex exposes only its own agent id (tagKey), never a TMDB
+                // person id - left out so downstream cast_list keeps id = null.
+                // `thumb` is an absolute URL when present (metadata-static.plex.tv).
+                'PrimaryImageUrl' => isset($p['thumb']) && str_starts_with((string) $p['thumb'], 'http')
+                    ? $p['thumb']
+                    : null,
             ], $people),
             'Directors' => array_map(fn ($d) => $d['tag'], $directors),
             'ImageTags' => [

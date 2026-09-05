@@ -15,10 +15,13 @@ use App\Jobs\CategoryFindAndReplaceReset;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
+use App\Models\Playlist;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GenreGroupReclassifyService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
+use App\Services\TmdbService;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
@@ -96,7 +99,8 @@ class CategoryResource extends Resource implements CopilotResource
                 ->inline(false)
                 ->label(__('Auto Enable New Channels'))
                 ->helperText(__('Automatically enable newly added channels to this group.'))
-                ->default(true),
+                ->default(true)
+                ->hidden(fn (?Category $record): bool => (bool) $record?->is_merged),
             TextInput::make('sort_order')
                 ->label(__('Sort Order'))
                 ->numeric()
@@ -108,7 +112,8 @@ class CategoryResource extends Resource implements CopilotResource
                 ->searchable()
                 ->relationship('streamFileSetting', 'name', fn ($query) => $query->forSeries()->where('user_id', auth()->id()))
                 ->nullable()
-                ->helperText(__('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.')),
+                ->helperText(__('Select a Stream File Setting profile for all series in this category. Series-level settings take priority. Leave empty to use global settings.'))
+                ->hidden(fn (?Category $record): bool => (bool) $record?->is_merged),
         ];
 
         return $schema
@@ -276,7 +281,7 @@ class CategoryResource extends Resource implements CopilotResource
                                 ->label(__('Sort Order'))
                                 ->options([
                                     'DESC' => 'Newest first (2026 to 1950)',
-                                    'ASC' => 'Newest first (1950 to 2026)',
+                                    'ASC' => 'Oldest first (1950 to 2026)',
                                 ])
                                 ->default('DESC')
                                 ->required(),
@@ -294,8 +299,34 @@ class CategoryResource extends Resource implements CopilotResource
                         ->requiresConfirmation()
                         ->modalIcon('heroicon-o-calendar-days')
                         ->modalDescription(__('Sort all series in this category by release date? This will update the sort order.')),
+                    Action::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Category $record, Action $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            GenreGroupReclassifyService::reclassifyCategories($record->playlist);
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify this playlist\'s Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     Action::make('process')
-                        ->label(__('Fetch Series Metadata'))
+                        ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->action(function ($record) {
                             foreach ($record->enabled_series as $series) {
@@ -440,8 +471,70 @@ class CategoryResource extends Resource implements CopilotResource
                         ->modalDescription(__('Move the category series to another category.'))
                         ->modalSubmitActionLabel(__('Move now')),
                     MergedGroupService::addToMergedCategoryBulkAction(),
+                    BulkAction::make('sort_release_date_bulk')
+                        ->label(__('Sort by Release Date'))
+                        ->icon('heroicon-o-calendar-days')
+                        ->schema([
+                            Select::make('sort')
+                                ->label(__('Sort Order'))
+                                ->options([
+                                    'DESC' => 'Newest first (2026 to 1950)',
+                                    'ASC' => 'Oldest first (1950 to 2026)',
+                                ])
+                                ->default('DESC')
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data): void {
+                            foreach ($records as $record) {
+                                SortFacade::bulkSortCategorySeriesByReleaseDate($record, $data['sort'] ?? 'DESC');
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Series Sorted by Release Date'))
+                                ->body(__('The series in the selected categories have been sorted by release date.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-calendar-days')
+                        ->modalDescription(__('Sort all series in the selected categories by release date? This will update the sort order.')),
+                    BulkAction::make('reclassify_tmdb_genres')
+                        ->label(__('Reclassify to TMDB Genres'))
+                        ->icon('heroicon-o-tag')
+                        ->action(function (Collection $records, BulkAction $action): void {
+                            if (! app(TmdbService::class)->isConfigured()) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title(__('TMDB API Key Required'))
+                                    ->body(__('Please configure your TMDB API key in Settings > TMDB before using this feature.'))
+                                    ->duration(10000)
+                                    ->send();
+                                $action->halt();
+                            }
+
+                            // Per-playlist scope: reclassify the whole playlist's categories.
+                            foreach ($records->pluck('playlist_id')->unique() as $playlistId) {
+                                $playlist = Playlist::find($playlistId);
+                                if ($playlist) {
+                                    GenreGroupReclassifyService::reclassifyCategories($playlist);
+                                }
+                            }
+                        })
+                        ->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Categories Reclassified'))
+                                ->body(__('Series in non-genre-matching categories have been moved to Uncategorized.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-tag')
+                        ->modalDescription(__('Reclassify the selected playlists\' Series categories to TMDB genres now? Series in non-genre-matching categories will be moved to Uncategorized. Categories protected by an Auto-Add to Custom Playlist rule are skipped.')),
                     BulkAction::make('process')
-                        ->label(__('Fetch Series Metadata'))
+                        ->label(__('Fetch Provider Metadata'))
                         ->icon('heroicon-o-arrow-down-tray')
                         ->action(function (Collection $records) {
                             foreach ($records as $record) {

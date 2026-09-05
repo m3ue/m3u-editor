@@ -1196,12 +1196,14 @@ class XtreamApiController extends Controller
                         $backdropPaths = json_decode($backdropPaths, true) ?? [];
                     }
                     $backdropPaths = array_filter($backdropPaths);
+                    $clearLogo = $seriesItem->metadata['clearlogo'] ?? null;
                     if ($playlist->enable_logo_proxy) {
                         $cover = $this->proxyImageUrl($cover);
                         $backdropPaths = array_map(fn ($path) => $this->proxyImageUrl($path), $backdropPaths);
+                        $clearLogo = $clearLogo ? $this->proxyImageUrl($clearLogo) : null;
                     }
 
-                    echo json_encode([
+                    $seriesRow = [
                         'num' => $num,
                         'name' => $seriesItem->name,
                         'series_id' => (int) $seriesItem->id,
@@ -1231,7 +1233,15 @@ class XtreamApiController extends Controller
                             [(int) $seriesCategoryId],
                             $dynamicCategoryIdsBySeries[(int) $seriesItem->id] ?? [],
                         ))),
-                    ]);
+                    ];
+
+                    // Transparent title logo (clearlogo). Absent on
+                    // non-TMDB-enriched rows, keeping those payloads unchanged.
+                    if (! empty($clearLogo)) {
+                        $seriesRow['clearlogo'] = $clearLogo;
+                    }
+
+                    echo json_encode($seriesRow);
                     $first = false;
                     if (ob_get_level() > 0) {
                         ob_flush();
@@ -1314,9 +1324,11 @@ class XtreamApiController extends Controller
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
             $backdropPaths = array_filter($backdropPaths);
+            $clearLogo = $seriesItem->metadata['clearlogo'] ?? null;
             if ($playlist->enable_logo_proxy) {
                 $cover = $this->proxyImageUrl($cover);
                 $backdropPaths = array_map(fn ($path) => $this->proxyImageUrl($path), $backdropPaths);
+                $clearLogo = $clearLogo ? $this->proxyImageUrl($clearLogo) : null;
             }
 
             // Report the merged category id when this series' category is folded into one,
@@ -1361,7 +1373,22 @@ class XtreamApiController extends Controller
             // photo}. Absent on unpatched / non-TMDB-enriched rows, so those
             // responses stay byte-identical to today.
             if (! empty($seriesItem->metadata['cast_list'])) {
-                $seriesInfo['cast_list'] = $seriesItem->metadata['cast_list'];
+                $castList = $seriesItem->metadata['cast_list'];
+                if ($playlist->enable_logo_proxy) {
+                    $castList = array_map(function ($member) {
+                        $member['photo'] = $this->proxyImageUrl($member['photo'] ?? null);
+
+                        return $member;
+                    }, $castList);
+                }
+                $seriesInfo['cast_list'] = $castList;
+            }
+
+            // Transparent title logo (clearlogo). Distinct wire key from `cover`
+            // (poster). Absent on non-TMDB-enriched rows, so those responses
+            // stay byte-identical to today.
+            if (! empty($clearLogo)) {
+                $seriesInfo['clearlogo'] = $clearLogo;
             }
 
             $seasons = [];
@@ -1801,10 +1828,12 @@ class XtreamApiController extends Controller
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
             $backdropPaths = array_filter($backdropPaths);
+            $clearLogo = $info['clearlogo'] ?? null;
             if ($playlist->enable_logo_proxy) {
                 $cover = $this->proxyImageUrl($cover);
                 $movieImage = $this->proxyImageUrl($movieImage);
                 $backdropPaths = array_map(fn ($path) => $this->proxyImageUrl($path), $backdropPaths);
+                $clearLogo = $clearLogo ? $this->proxyImageUrl($clearLogo) : null;
             }
 
             // Fill in missing info fields with channel data
@@ -1873,7 +1902,22 @@ class XtreamApiController extends Controller
             // array_merge($defaultInfo, ...). Absent on unpatched /
             // non-TMDB-enriched rows, so those responses stay byte-identical.
             if (! empty($info['cast_list'])) {
-                $defaultInfo['cast_list'] = $info['cast_list'];
+                $castList = $info['cast_list'];
+                if ($playlist->enable_logo_proxy) {
+                    $castList = array_map(function ($member) {
+                        $member['photo'] = $this->proxyImageUrl($member['photo'] ?? null);
+
+                        return $member;
+                    }, $castList);
+                }
+                $defaultInfo['cast_list'] = $castList;
+            }
+
+            // Transparent title logo (clearlogo). Distinct wire key from the
+            // root `logo` (poster/icon). Absent on non-TMDB-enriched rows, so
+            // those responses stay byte-identical.
+            if (! empty($clearLogo)) {
+                $defaultInfo['clearlogo'] = $clearLogo;
             }
 
             // Build movie_data section - use channel's movie_data field if available, otherwise build from channel data

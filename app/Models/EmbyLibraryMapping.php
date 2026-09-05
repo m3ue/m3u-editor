@@ -19,6 +19,14 @@ class EmbyLibraryMapping extends Model
 
     public const SOURCE_KINDS = ['vod_group', 'series_category', 'custom_playlist_group', 'all'];
 
+    public const DEFAULT_OPTIONS = [
+        'naming' => 'media-year',
+        'nfo' => true,
+        'versions' => true,
+        'cleanup' => 'replace',
+        'refresh' => true,
+    ];
+
     protected $fillable = [
         'media_server_integration_id',
         'user_id',

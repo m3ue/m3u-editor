@@ -55,6 +55,22 @@ class ViewVod extends ViewRecord
         return implode(' • ', $parts) ?: null;
     }
 
+    /**
+     * Open the floating player for this VOD. Called from the detail view's
+     * Play button - the payload is built server-side rather than inlined into
+     * a `wire:click="$dispatch(...)"` expression, whose naive parser breaks on
+     * parentheses/quotes inside the JSON (e.g. a movie title like "Movie (2009)").
+     */
+    public function playFloatingStream(): void
+    {
+        $auth = $this->getAuth();
+
+        $this->dispatch('openFloatingStream', $this->record->getFloatingPlayerAttributes(
+            username: $auth['username'] ?? null,
+            password: $auth['password'] ?? null,
+        ));
+    }
+
     protected function getHeaderActions(): array
     {
         return [

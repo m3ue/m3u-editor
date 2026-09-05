@@ -513,12 +513,18 @@ class VodResource extends Resource implements CopilotResource
         return [
             ActionGroup::make([
                 Action::make('fetch_tmdb_ids')
-                    ->label(__('Fetch TMDB/TVDB IDs'))
+                    ->label(__('Fetch TMDB Metadata'))
                     ->icon('heroicon-o-film')
                     ->modalIcon('heroicon-o-film')
-                    ->modalDescription(__('Fetch TMDB, TVDB, and IMDB IDs for this series from The Movie Database.'))
-                    ->modalSubmitActionLabel(__('Fetch IDs now'))
-                    ->action(function ($record) {
+                    ->modalDescription(__('Fetch full metadata (plot, artwork, cast, genres, episodes) plus TMDB, TVDB and IMDB IDs for this title from The Movie Database.'))
+                    ->modalSubmitActionLabel(__('Fetch metadata now'))
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing TMDB metadata? If disabled, only items missing metadata are fetched.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $settings = app(GeneralSettings::class);
                         if (empty($settings->tmdb_api_key)) {
                             Notification::make()
@@ -534,14 +540,14 @@ class VodResource extends Resource implements CopilotResource
                         app('Illuminate\Contracts\Bus\Dispatcher')
                             ->dispatch(new FetchTmdbIds(
                                 vodChannelIds: [$record->id],
-                                overwriteExisting: true,
+                                overwriteExisting: (bool) ($data['overwrite_existing'] ?? false),
                                 user: auth()->user(),
                             ));
 
                         Notification::make()
                             ->success()
                             ->title(__('TMDB Search Started'))
-                            ->body(__('Searching for TMDB/TVDB IDs. Check the logs or refresh the page in a few seconds.'))
+                            ->body(__('Fetching metadata from TMDB. Check the logs or refresh the page in a few seconds.'))
                             ->duration(8000)
                             ->send();
                     })
@@ -636,7 +642,7 @@ class VodResource extends Resource implements CopilotResource
                             ]),
                     ]),
                 Action::make('process_vod')
-                    ->label(__('Fetch Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->schema([
                         Toggle::make('overwrite_existing')
@@ -933,7 +939,7 @@ class VodResource extends Resource implements CopilotResource
             // -- VOD Metadata --
             BulkModalActionGroup::section('VOD Metadata', [
                 BulkAction::make('process_vod')
-                    ->label(__('Fetch Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->schema([
                         Toggle::make('overwrite_existing')
@@ -968,12 +974,12 @@ class VodResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch and process VOD metadata for the selected channels? Only enabled VOD channels will be processed.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 BulkAction::make('fetch_tmdb_ids')
-                    ->label(__('Fetch TMDB IDs'))
+                    ->label(__('Fetch TMDB Metadata'))
                     ->icon('heroicon-o-magnifying-glass')
                     ->schema([
                         Toggle::make('overwrite_existing')
-                            ->label(__('Overwrite Existing IDs'))
-                            ->helperText(__('Overwrite existing TMDB/IMDB IDs? If disabled, it will only fetch IDs for items that don\'t already have them.'))
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing TMDB metadata? If disabled, only items missing metadata are fetched.'))
                             ->default(false),
                     ])
                     ->action(function ($records, $data) {
@@ -1002,15 +1008,15 @@ class VodResource extends Resource implements CopilotResource
                         Notification::make()
                             ->success()
                             ->title('Fetching TMDB IDs for '.count($vodIds).' VOD channel(s)')
-                            ->body(__('The TMDB ID lookup has been started. You will be notified when it is complete.'))
+                            ->body(__('The TMDB metadata fetch has been started. You will be notified when it is complete.'))
                             ->duration(10000)
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion()
                     ->requiresConfirmation()
                     ->modalIcon('heroicon-o-magnifying-glass')
-                    ->modalDescription(__('Search TMDB for matching movies and populate TMDB/IMDB IDs for the selected VOD channels? This enables Trash Guides compatibility for Radarr/Sonarr.'))
-                    ->modalSubmitActionLabel(__('Yes, fetch IDs now')),
+                    ->modalDescription(__('Search TMDB for matching movies and fetch full metadata (plot, artwork, cast, genres) plus TMDB and IMDB IDs for the selected VOD channels? This also enables Trash Guides compatibility for Radarr/Sonarr.'))
+                    ->modalSubmitActionLabel(__('Yes, fetch metadata now')),
                 BulkAction::make('sync')
                     ->label(__('Sync VOD .strm files'))
                     ->action(function ($records) {

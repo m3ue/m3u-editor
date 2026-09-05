@@ -1,15 +1,21 @@
 <?php
 
+use App\Exceptions\XtreamRateLimitedException;
 use App\Models\Epg;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\XtreamHealthService;
 use App\Services\XtreamService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
     Queue::fake();
+    // The rate-limit circuit breaker persists cooldowns in cache keyed only
+    // by account credentials, so tests reusing the same testuser/testpass
+    // fixture would otherwise bleed a cooldown from one test into the next.
+    Cache::flush();
 });
 
 // ── Playlist Model: getOrderedXtreamUrls ─────────────────────────────────────
@@ -477,5 +483,116 @@ describe('XtreamService failover', function () {
         $service = XtreamService::make(playlist: $playlist, retryLimit: 1);
 
         expect(fn () => $service->userInfo())->toThrow(Exception::class);
+    });
+});
+
+// ── XtreamService rate-limit circuit breaker ─────────────────────────────────
+
+describe('XtreamService rate-limit circuit breaker', function () {
+    it('throws immediately on a 429 without exhausting the retry budget', function () {
+        Http::fake([
+            'primary.example.com:8080/*' => Http::response('Too Many Requests', 429),
+        ]);
+
+        $playlist = Playlist::factory()->for(User::factory())->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'testuser',
+                'password' => 'testpass',
+            ],
+            'xtream_fallback_urls' => null,
+        ]);
+
+        $service = XtreamService::make(playlist: $playlist, retryLimit: 5);
+
+        expect(fn () => $service->userInfo())->toThrow(XtreamRateLimitedException::class);
+        Http::assertSentCount(1);
+    });
+
+    it('does not try fallback URLs on a 429, the limit is per account, not per host', function () {
+        Http::fake([
+            'primary.example.com:8080/*' => Http::response('Too Many Requests', 429),
+            'fallback1.example.com:8080/*' => Http::response(['user_info' => ['status' => 'Active']], 200),
+        ]);
+
+        $playlist = Playlist::factory()->for(User::factory())->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'testuser',
+                'password' => 'testpass',
+            ],
+            'xtream_fallback_urls' => [
+                'http://fallback1.example.com:8080',
+            ],
+        ]);
+
+        $service = XtreamService::make(playlist: $playlist, retryLimit: 1);
+
+        expect(fn () => $service->userInfo())->toThrow(XtreamRateLimitedException::class);
+        Http::assertNotSent(fn ($request) => str_contains((string) $request->url(), 'fallback1.example.com'));
+    });
+
+    it('blocks a later call for the same account during the cooldown without hitting the network', function () {
+        Http::fake([
+            'primary.example.com:8080/*' => Http::response('Too Many Requests', 429),
+        ]);
+
+        $playlist = Playlist::factory()->for(User::factory())->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'testuser',
+                'password' => 'testpass',
+            ],
+            'xtream_fallback_urls' => null,
+        ]);
+
+        // The first call is itself the one that trips the 429 and records
+        // the cooldown, so it's expected to throw too.
+        expect(fn () => XtreamService::make(playlist: $playlist, retryLimit: 1)->userInfo())
+            ->toThrow(XtreamRateLimitedException::class);
+        Http::assertSentCount(1);
+
+        // A brand new service instance for the same account should still be
+        // fenced by the cooldown recorded above, and never touch the network.
+        $service = XtreamService::make(playlist: $playlist, retryLimit: 1);
+
+        expect(fn () => $service->userInfo())->toThrow(XtreamRateLimitedException::class);
+        Http::assertSentCount(1);
+    });
+
+    it('does not cross-throttle a different account that happens to share the same host', function () {
+        Http::fakeSequence('primary.example.com:8080/*')
+            ->push('Too Many Requests', 429)
+            ->push(['user_info' => ['status' => 'Active']], 200);
+
+        $limitedAccount = Playlist::factory()->for(User::factory())->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'account-a',
+                'password' => 'password-a',
+            ],
+            'xtream_fallback_urls' => null,
+        ]);
+
+        $otherAccount = Playlist::factory()->for(User::factory())->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://primary.example.com:8080',
+                'username' => 'account-b',
+                'password' => 'password-b',
+            ],
+            'xtream_fallback_urls' => null,
+        ]);
+
+        expect(fn () => XtreamService::make(playlist: $limitedAccount, retryLimit: 1)->userInfo())
+            ->toThrow(XtreamRateLimitedException::class);
+
+        $result = XtreamService::make(playlist: $otherAccount, retryLimit: 1)->userInfo();
+
+        expect($result['user_info']['status'])->toBe('Active');
     });
 });

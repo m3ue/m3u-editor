@@ -21,6 +21,8 @@
         $username = $auth['username'] ?? null;
         $password = $auth['password'] ?? null;
         $seriesRatingSuppressed = \App\Support\TmdbRating::isVoteCountBelowThreshold($record->metadata['vote_count'] ?? null);
+        $clearLogo = $record->metadata['clearlogo'] ?? null;
+        $castList = $record->metadata['cast_list'] ?? [];
     @endphp
 
     @if ($backdropUrl)
@@ -54,7 +56,15 @@
 
                 {{-- Info --}}
                 <div class="flex-1 space-y-4 text-white">
-                    <h1 class="text-4xl font-bold">{{ $record->name }}</h1>
+                    @if ($clearLogo)
+                        <img
+                            src="{{ $clearLogo }}"
+                            alt="{{ $record->name }}"
+                            class="max-h-24 w-auto max-w-md object-contain drop-shadow-lg"
+                        />
+                    @else
+                        <h1 class="text-4xl font-bold">{{ $record->name }}</h1>
+                    @endif
 
                     {{-- Metadata Badges --}}
                     <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -127,20 +137,21 @@
 
                     {{-- YouTube Trailer --}}
                     @if ($record->youtube_trailer)
-                        <div class="pt-2">
-                            <a
+                        <div class="flex flex-wrap gap-3 pt-2">
+                            <x-filament::button
+                                tag="a"
                                 href="https://www.youtube.com/watch?v={{ $record->youtube_trailer }}"
                                 target="_blank"
-                                class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700"
+                                color="danger"
+                                icon="heroicon-s-play"
                             >
-                                <x-heroicon-s-play class="h-5 w-5" />
-                                Watch Trailer
-                            </a>
+                                {{ __('Watch Trailer') }}
+                            </x-filament::button>
                         </div>
                     @endif
 
-                    {{-- Cast & Director --}}
-                    @if ($record->director || $record->cast)
+                    {{-- Cast & Director (plain-text cast only when there's no rich cast row below) --}}
+                    @if ($record->director || ($record->cast && empty($castList)))
                         <div class="space-y-2 border-t border-white/10 pt-4">
                             @if ($record->director)
                                 <p class="text-sm">
@@ -148,7 +159,7 @@
                                     <span class="text-white">{{ $record->director }}</span>
                                 </p>
                             @endif
-                            @if ($record->cast)
+                            @if ($record->cast && empty($castList))
                                 <p class="text-sm">
                                     <span class="text-gray-400">Cast:</span>
                                     <span class="text-white">{{ Str::limit($record->cast, 200) }}</span>
@@ -205,12 +216,12 @@
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($record->plot, 300) }}</p>
                     @endif
 
-                    @if ($record->director || $record->cast)
+                    @if ($record->director || ($record->cast && empty($castList)))
                         <div class="space-y-1 text-sm">
                             @if ($record->director)
                                 <p><span class="text-gray-500">Director:</span> {{ $record->director }}</p>
                             @endif
-                            @if ($record->cast)
+                            @if ($record->cast && empty($castList))
                                 <p><span class="text-gray-500">Cast:</span> {{ Str::limit($record->cast, 150) }}</p>
                             @endif
                         </div>
@@ -219,6 +230,9 @@
             </div>
         </div>
     @endif
+
+    {{-- Cast --}}
+    @include('filament.partials.cast-section', ['cast' => $castList, 'collapsed' => true])
 
     {{-- Probed Stream Info (aggregated across episodes) --}}
     @include('filament.partials.probed-stream-info-series', ['record' => $record])

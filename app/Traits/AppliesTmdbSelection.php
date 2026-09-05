@@ -181,6 +181,10 @@ trait AppliesTmdbSelection
                 $info['backdrop_path'] = [$details['backdrop_url']];
             }
 
+            if (! empty($details['logo_url'])) {
+                $info['clearlogo'] = $details['logo_url'];
+            }
+
             if (! empty($details['cast'])) {
                 $info['cast'] = is_array($details['cast']) ? implode(', ', $details['cast']) : $details['cast'];
             }
@@ -339,6 +343,10 @@ trait AppliesTmdbSelection
 
             if (! empty($details['backdrop_url'])) {
                 $updateData['backdrop_path'] = json_encode([$details['backdrop_url']]);
+            }
+
+            if (! empty($details['logo_url'])) {
+                $seriesMetadata['clearlogo'] = $details['logo_url'];
             }
 
             if (! empty($details['cast'])) {

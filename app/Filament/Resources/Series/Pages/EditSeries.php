@@ -24,7 +24,7 @@ class EditSeries extends EditRecord
                 ->icon('heroicon-s-eye'),
             ActionGroup::make([
                 Action::make('process')
-                    ->label(__('Fetch Series Metadata'))
+                    ->label(__('Fetch Provider Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
                     ->action(function ($record) {
                         app('Illuminate\Contracts\Bus\Dispatcher')

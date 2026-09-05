@@ -57,7 +57,7 @@ it('dispatches FetchTmdbIds from the VOD group record action', function () {
         ->loadTable()
         ->callAction(TestAction::make('fetch_tmdb_ids')->table($group), ['overwrite_existing' => true])
         ->assertHasNoActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($group) {
         return $job->vodGroupIds === [$group->id]
@@ -75,7 +75,7 @@ it('dispatches FetchTmdbIds from the VOD group bulk action with overwrite off', 
         ->loadTable()
         ->callTableBulkAction('fetch_tmdb_ids', [$g1, $g2], ['overwrite_existing' => false])
         ->assertHasNoTableBulkActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($g1, $g2) {
         return $job->vodGroupIds !== null
@@ -91,7 +91,7 @@ it('dispatches FetchTmdbIds from the EditVodGroup header action', function () {
     Livewire::test(EditVodGroup::class, ['record' => $group->id])
         ->callAction('fetch_tmdb_ids', ['overwrite_existing' => false])
         ->assertHasNoActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($group) {
         return $job->vodGroupIds === [$group->id]
@@ -108,7 +108,7 @@ it('dispatches FetchTmdbIds from the series category record action', function ()
         ->loadTable()
         ->callAction(TestAction::make('fetch_tmdb_ids')->table($category), ['overwrite_existing' => true])
         ->assertHasNoActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($category) {
         return $job->seriesCategoryIds === [$category->id]
@@ -126,7 +126,7 @@ it('dispatches FetchTmdbIds from the series category bulk action', function () {
         ->loadTable()
         ->callTableBulkAction('fetch_tmdb_ids', [$c1, $c2], ['overwrite_existing' => false])
         ->assertHasNoTableBulkActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($c1, $c2) {
         return $job->seriesCategoryIds !== null
@@ -142,7 +142,7 @@ it('dispatches FetchTmdbIds from the EditCategory header action', function () {
     Livewire::test(EditCategory::class, ['record' => $category->id])
         ->callAction('fetch_tmdb_ids', ['overwrite_existing' => false])
         ->assertHasNoActionErrors()
-        ->assertNotified('TMDB ID lookup started');
+        ->assertNotified('TMDB metadata fetch started');
 
     Bus::assertDispatched(FetchTmdbIds::class, function (FetchTmdbIds $job) use ($category) {
         return $job->seriesCategoryIds === [$category->id]
@@ -178,7 +178,7 @@ it('does not show the "lookup started" notification when the TMDB API key is mis
     Livewire::test(ListVodGroups::class)
         ->loadTable()
         ->callAction(TestAction::make('fetch_tmdb_ids')->table($group), ['overwrite_existing' => false])
-        ->assertNotNotified('TMDB ID lookup started');
+        ->assertNotNotified('TMDB metadata fetch started');
 
     Bus::assertNotDispatched(FetchTmdbIds::class);
 });
