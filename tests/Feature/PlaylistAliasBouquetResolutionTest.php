@@ -27,13 +27,16 @@ beforeEach(function () {
 });
 
 describe('accessor union', function () {
-    it('returns the manual arrays unchanged when no bouquets are attached (identity fast path)', function () {
+    it('returns just the manual selection when no bouquets are attached', function () {
         $alias = makeResolutionAlias($this->user, $this->playlist, [
             'group_filter' => ['selected_groups' => ['Sports', 'Sports']],  // duplicate on purpose
         ]);
 
-        // Bit-for-bit: no dedupe, no re-index on the bouquet-less path.
-        expect($alias->getAllowedLiveGroupNames())->toBe(['Sports', 'Sports'])
+        // The bouquet-less path returns the manual selection with no bouquet
+        // union. The accessor normalises the stored selection (dedupe, and parse
+        // the {playlist_id, name} pair shape merged aliases use) via
+        // PlaylistAlias::selectionNames(), so a stored duplicate collapses.
+        expect($alias->getAllowedLiveGroupNames())->toBe(['Sports'])
             ->and($alias->getAllowedVodGroupNames())->toBe([])
             ->and($alias->getAllowedCategoryNames())->toBe([]);
     });
