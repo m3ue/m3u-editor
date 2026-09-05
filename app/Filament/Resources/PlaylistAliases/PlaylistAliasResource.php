@@ -710,9 +710,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     modifyQueryUsing: function (Builder $query, Get $get): Builder {
                                         $query->where('user_id', auth()->id());
 
-                                        return $get('custom_playlist_id')
-                                            ? $query->where('custom_playlist_id', (int) $get('custom_playlist_id'))
-                                            : $query->where('playlist_id', (int) $get('playlist_id'));
+                                        return match (true) {
+                                            (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
+                                            (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
+                                            default => $query->where('playlist_id', (int) $get('playlist_id')),
+                                        };
                                     },
                                 )
                                 ->multiple()
@@ -730,8 +732,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                         'name' => $data['name'],
                                         'description' => $data['description'] ?? null,
                                         'user_id' => auth()->id(),
-                                        'playlist_id' => $get('custom_playlist_id') ? null : ((int) $get('playlist_id') ?: null),
+                                        'playlist_id' => (! $get('custom_playlist_id') && ! $get('merged_playlist_id')) ? ((int) $get('playlist_id') ?: null) : null,
                                         'custom_playlist_id' => $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
+                                        'merged_playlist_id' => $get('merged_playlist_id') ? (int) $get('merged_playlist_id') : null,
                                     ]);
 
                                     Notification::make()
@@ -1354,11 +1357,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         // contribution callout below.
         return Bouquet::whereIn('id', $bouquetIds)
             ->where('user_id', auth()->id())
-            ->when(
-                $get('custom_playlist_id'),
-                fn (Builder $query) => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
-                fn (Builder $query) => $query->where('playlist_id', (int) $get('playlist_id')),
-            )
+            ->where(fn (Builder $query) => match (true) {
+                (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
+                (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
+                default => $query->where('playlist_id', (int) $get('playlist_id')),
+            })
             ->get()
             ->flatMap(fn (Bouquet $bouquet): array => $bouquet->{$method}())
             ->unique()

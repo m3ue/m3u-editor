@@ -29,8 +29,11 @@ class PlaylistAlias extends Model
     /** @var array<string, array<string, int>> Memoised custom playlist tag name => id maps, keyed by tag type. */
     private array $resolvedCustomTagIds = [];
 
-    /** @var array{selected_groups: array<string>, selected_vod_groups: array<string>, selected_categories: array<string>}|null Memoised union of attached bouquets' selections. */
+    /** @var array{selected_groups: array<string>, selected_vod_groups: array<string>, selected_categories: array<string>}|null Memoised union of attached bouquets' selections, reduced to names. */
     private ?array $bouquetSelections = null;
+
+    /** @var array{selected_groups: array<int, array{playlist_id: int, name: string}>, selected_vod_groups: array<int, array{playlist_id: int, name: string}>, selected_categories: array<int, array{playlist_id: int, name: string}>}|null Memoised union of attached merged-target bouquets' {playlist_id, name} pairs. */
+    private ?array $bouquetSelectionPairs = null;
 
     /** @var array<int, array<int>>|null Memoised playlist id => source_category_id list for the merged series() filter. */
     private ?array $resolvedSourceCategoryIds = null;
@@ -101,8 +104,18 @@ class PlaylistAlias extends Model
 
         $merged = ['selected_groups' => [], 'selected_vod_groups' => [], 'selected_categories' => []];
 
-        // Merged-playlist (and orphaned) aliases have no bouquet support - zero queries.
-        if (! $this->playlist_id && ! $this->custom_playlist_id) {
+        // Orphaned aliases (no target) have no bouquet support - zero queries.
+        if (! $this->playlist_id && ! $this->custom_playlist_id && ! $this->merged_playlist_id) {
+            return $this->bouquetSelections = $merged;
+        }
+
+        // Merged aliases store pairs; reduce them to names so the name accessors
+        // and the has*Filter() predicates stay correct.
+        if ($this->merged_playlist_id) {
+            foreach ($this->bouquetSelectionPairs() as $key => $pairs) {
+                $merged[$key] = self::selectionNames($pairs);
+            }
+
             return $this->bouquetSelections = $merged;
         }
 
@@ -110,7 +123,7 @@ class PlaylistAlias extends Model
 
         foreach ($bouquets as $bouquet) {
             foreach ($merged as $key => $existing) {
-                $names = $bouquet->group_selections[$key] ?? [];
+                $names = self::selectionNames($bouquet->group_selections[$key] ?? []);
                 if (! empty($names)) {
                     $merged[$key] = array_merge($existing, $names);
                 }
@@ -118,6 +131,40 @@ class PlaylistAlias extends Model
         }
 
         return $this->bouquetSelections = $merged;
+    }
+
+    /**
+     * The merged {playlist_id, name} pairs of every attached bouquet, for a
+     * merged-playlist alias. Empty for every other target type (their bouquets
+     * carry bare names and are unioned by bouquetSelections()). Memoised.
+     *
+     * @return array{selected_groups: array<int, array{playlist_id: int, name: string}>, selected_vod_groups: array<int, array{playlist_id: int, name: string}>, selected_categories: array<int, array{playlist_id: int, name: string}>}
+     */
+    private function bouquetSelectionPairs(): array
+    {
+        if ($this->bouquetSelectionPairs !== null) {
+            return $this->bouquetSelectionPairs;
+        }
+
+        $merged = ['selected_groups' => [], 'selected_vod_groups' => [], 'selected_categories' => []];
+
+        if (! $this->merged_playlist_id) {
+            return $this->bouquetSelectionPairs = $merged;
+        }
+
+        $bouquets = $this->relationLoaded('bouquets') ? $this->bouquets : $this->bouquets()->get();
+
+        foreach ($bouquets as $bouquet) {
+            foreach ($merged as $key => $existing) {
+                $merged[$key] = array_merge($existing, self::selectionPairs($bouquet->group_selections[$key] ?? []));
+            }
+        }
+
+        foreach ($merged as $key => $pairs) {
+            $merged[$key] = self::selectionPairs($pairs);
+        }
+
+        return $this->bouquetSelectionPairs = $merged;
     }
 
     /**
@@ -154,14 +201,15 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * Source-scoped live group selection for merged-playlist aliases: one
-     * {playlist_id, name} pair per allowed provider group (empty = no restriction).
+     * Source-scoped live group selection for merged-playlist aliases: the manual
+     * group_filter pairs unioned with every attached bouquet's pairs, one
+     * {playlist_id, name} per allowed provider group (empty = no restriction).
      *
      * @return array<int, array{playlist_id: int, name: string}>
      */
     public function getAllowedLiveGroupSelections(): array
     {
-        return self::selectionPairs($this->group_filter['selected_groups'] ?? []);
+        return $this->allowedPairsFor('selected_groups');
     }
 
     /**
@@ -171,7 +219,7 @@ class PlaylistAlias extends Model
      */
     public function getAllowedVodGroupSelections(): array
     {
-        return self::selectionPairs($this->group_filter['selected_vod_groups'] ?? []);
+        return $this->allowedPairsFor('selected_vod_groups');
     }
 
     /**
@@ -181,7 +229,26 @@ class PlaylistAlias extends Model
      */
     public function getAllowedCategorySelections(): array
     {
-        return self::selectionPairs($this->group_filter['selected_categories'] ?? []);
+        return $this->allowedPairsFor('selected_categories');
+    }
+
+    /**
+     * The manual group_filter pairs for a key unioned with every attached
+     * bouquet's pairs (merged-playlist aliases only; the union is empty for the
+     * other target types).
+     *
+     * @return array<int, array{playlist_id: int, name: string}>
+     */
+    private function allowedPairsFor(string $key): array
+    {
+        $manual = self::selectionPairs($this->group_filter[$key] ?? []);
+        $bouquet = $this->bouquetSelectionPairs()[$key];
+
+        if (empty($bouquet)) {
+            return $manual;
+        }
+
+        return self::selectionPairs(array_merge($manual, $bouquet));
     }
 
     /**

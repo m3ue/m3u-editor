@@ -29,6 +29,7 @@ class BouquetPlaylistAlias extends Pivot
             $matches = $bouquet && $alias && (
                 ($bouquet->playlist_id !== null && $bouquet->playlist_id === $alias->playlist_id)
                 || ($bouquet->custom_playlist_id !== null && $bouquet->custom_playlist_id === $alias->custom_playlist_id)
+                || ($bouquet->merged_playlist_id !== null && $bouquet->merged_playlist_id === $alias->merged_playlist_id)
             );
 
             if (! $matches) {

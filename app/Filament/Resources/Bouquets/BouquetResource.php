@@ -4,12 +4,15 @@ namespace App\Filament\Resources\Bouquets;
 
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Forms\Components\CustomPlaylistGroupModalSelect;
+use App\Filament\Forms\Components\MergedSourceGroupModalSelect;
 use App\Filament\Forms\Components\SourceGroupModalSelect;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
+use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Traits\HasUserFiltering;
 use Filament\Actions\Action;
@@ -91,13 +94,14 @@ class BouquetResource extends Resource
             Schemas\Components\Fieldset::make(__('Target Playlist'))
                 ->columnSpanFull()
                 ->schema([
-                    // Same UI-only type+id pattern as the alias form (minus merged):
-                    // the hidden FK fields are the persisted state.
+                    // Same UI-only type+id pattern as the alias form: the hidden FK
+                    // fields (exactly one set) are the persisted state.
                     Forms\Components\Select::make('target_type')
                         ->label(__('Playlist type'))
                         ->options([
                             'playlist' => __('Standard Playlist'),
                             'custom_playlist' => __('Custom Playlist'),
+                            'merged_playlist' => __('Merged Playlist'),
                         ])
                         ->default('playlist')
                         ->selectablePlaceholder(false)
@@ -105,11 +109,16 @@ class BouquetResource extends Resource
                         ->dehydrated(false)
                         ->live()
                         ->disabledOn('edit')
-                        ->formatStateUsing(fn (?Bouquet $record): string => $record?->custom_playlist_id !== null ? 'custom_playlist' : 'playlist')
+                        ->formatStateUsing(fn (?Bouquet $record): string => match (true) {
+                            $record?->custom_playlist_id !== null => 'custom_playlist',
+                            $record?->merged_playlist_id !== null => 'merged_playlist',
+                            default => 'playlist',
+                        })
                         ->afterStateUpdated(function (Set $set): void {
                             $set('target_id', null);
                             $set('playlist_id', null);
                             $set('custom_playlist_id', null);
+                            $set('merged_playlist_id', null);
                             self::resetSelections($set);
                         }),
                     Forms\Components\Select::make('target_id')
@@ -117,9 +126,11 @@ class BouquetResource extends Resource
                         ->options(function (Get $get): array {
                             $userId = auth()->id();
 
-                            return $get('target_type') === 'custom_playlist'
-                                ? CustomPlaylist::query()->where('user_id', $userId)->orderBy('name')->pluck('name', 'id')->all()
-                                : Playlist::query()->where('user_id', $userId)->orderBy('name')->pluck('name', 'id')->all();
+                            return match ($get('target_type')) {
+                                'custom_playlist' => CustomPlaylist::query()->where('user_id', $userId)->orderBy('name')->pluck('name', 'id')->all(),
+                                'merged_playlist' => MergedPlaylist::query()->where('user_id', $userId)->orderBy('name')->pluck('name', 'id')->all(),
+                                default => Playlist::query()->where('user_id', $userId)->orderBy('name')->pluck('name', 'id')->all(),
+                            };
                         })
                         ->searchable()
                         ->preload()
@@ -127,17 +138,19 @@ class BouquetResource extends Resource
                         ->dehydrated(false)
                         ->live()
                         ->disabledOn('edit')
-                        ->formatStateUsing(fn (?Bouquet $record): ?int => $record?->custom_playlist_id ?? $record?->playlist_id)
+                        ->formatStateUsing(fn (?Bouquet $record): ?int => $record?->custom_playlist_id ?? $record?->merged_playlist_id ?? $record?->playlist_id)
                         ->afterStateUpdated(function (Set $set, Get $get, $state): void {
                             $id = $state ? (int) $state : null;
-                            $isCustom = $get('target_type') === 'custom_playlist';
-                            $set('playlist_id', $isCustom ? null : $id);
-                            $set('custom_playlist_id', $isCustom ? $id : null);
+                            $type = $get('target_type');
+                            $set('playlist_id', $type === 'playlist' ? $id : null);
+                            $set('custom_playlist_id', $type === 'custom_playlist' ? $id : null);
+                            $set('merged_playlist_id', $type === 'merged_playlist' ? $id : null);
                             self::resetSelections($set);
                         })
                         ->helperText(__('The playlist cannot be changed after creation - the selected group names would not exist on another playlist. Create a new bouquet instead.')),
                     Forms\Components\Hidden::make('playlist_id'),
                     Forms\Components\Hidden::make('custom_playlist_id'),
+                    Forms\Components\Hidden::make('merged_playlist_id'),
                 ]),
 
             Schemas\Components\Callout::make(__('Some saved entries are missing'))
@@ -156,10 +169,13 @@ class BouquetResource extends Resource
                     CustomPlaylistGroupModalSelect::make('group_selections.selected_groups', 'live')
                         ->label(__('Live groups'))
                         ->helperText(__('Aliases using this bouquet will include live channels from these groups.')),
+                    MergedSourceGroupModalSelect::make('group_selections.selected_groups', 'live')
+                        ->label(__('Live groups'))
+                        ->helperText(__('Aliases using this bouquet will include live channels from these groups. Each selection is scoped to the source playlist it was picked from.')),
                     Forms\Components\Toggle::make('auto_include_new_live')
                         ->label(__('Automatically include new live groups'))
                         ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
+                        ->visible(fn (Get $get): bool => (bool) $get('playlist_id') || (bool) $get('merged_playlist_id'))
                         ->helperText(__('Newly appearing live groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.')),
                 ]),
 
@@ -172,10 +188,13 @@ class BouquetResource extends Resource
                     CustomPlaylistGroupModalSelect::make('group_selections.selected_vod_groups', 'vod')
                         ->label(__('VOD groups'))
                         ->helperText(__('Aliases using this bouquet will include VOD channels from these groups.')),
+                    MergedSourceGroupModalSelect::make('group_selections.selected_vod_groups', 'vod')
+                        ->label(__('VOD groups'))
+                        ->helperText(__('Aliases using this bouquet will include VOD channels from these groups. Each selection is scoped to the source playlist it was picked from.')),
                     Forms\Components\Toggle::make('auto_include_new_vod')
                         ->label(__('Automatically include new VOD groups'))
                         ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('playlist_id'))
+                        ->visible(fn (Get $get): bool => (bool) $get('playlist_id') || (bool) $get('merged_playlist_id'))
                         ->helperText(__('Newly appearing VOD groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.')),
                 ]),
 
@@ -188,6 +207,9 @@ class BouquetResource extends Resource
                     CustomPlaylistGroupModalSelect::make('group_selections.selected_categories', 'categories')
                         ->label(__('Series categories'))
                         ->helperText(__('Aliases using this bouquet will include series from these categories.')),
+                    MergedSourceGroupModalSelect::make('group_selections.selected_categories', 'categories')
+                        ->label(__('Series categories'))
+                        ->helperText(__('Aliases using this bouquet will include series from these categories. Each selection is scoped to the source playlist it was picked from.')),
                 ]),
         ];
     }
@@ -205,7 +227,7 @@ class BouquetResource extends Resource
     {
         return $table
             ->modifyQueryUsing(fn (Builder $query) => $query
-                ->with(['playlist', 'customPlaylist'])
+                ->with(['playlist', 'customPlaylist', 'mergedPlaylist'])
                 ->withCount('playlistAliases'))
             ->columns([
                 Tables\Columns\TextColumn::make('name')
@@ -214,12 +236,16 @@ class BouquetResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('target')
                     ->label(__('Playlist'))
-                    ->getStateUsing(fn (Bouquet $record): string => $record->playlist_id
-                        ? ($record->playlist?->name ?? 'N/A').' ('.__('Playlist').')'
-                        : ($record->customPlaylist?->name ?? 'N/A').' ('.__('Custom Playlist').')')
-                    ->url(fn (Bouquet $record): ?string => $record->playlist_id
-                        ? ($record->playlist ? PlaylistResource::getUrl('edit', ['record' => $record->playlist_id]) : null)
-                        : ($record->customPlaylist ? CustomPlaylistResource::getUrl('edit', ['record' => $record->custom_playlist_id]) : null)),
+                    ->getStateUsing(fn (Bouquet $record): string => match (true) {
+                        $record->custom_playlist_id !== null => ($record->customPlaylist?->name ?? 'N/A').' ('.__('Custom Playlist').')',
+                        $record->merged_playlist_id !== null => ($record->mergedPlaylist?->name ?? 'N/A').' ('.__('Merged Playlist').')',
+                        default => ($record->playlist?->name ?? 'N/A').' ('.__('Playlist').')',
+                    })
+                    ->url(fn (Bouquet $record): ?string => match (true) {
+                        $record->custom_playlist_id !== null => $record->customPlaylist ? CustomPlaylistResource::getUrl('edit', ['record' => $record->custom_playlist_id]) : null,
+                        $record->merged_playlist_id !== null => $record->mergedPlaylist ? MergedPlaylistResource::getUrl('edit', ['record' => $record->merged_playlist_id]) : null,
+                        default => $record->playlist ? PlaylistResource::getUrl('edit', ['record' => $record->playlist_id]) : null,
+                    }),
                 Tables\Columns\TextColumn::make('selection_counts')
                     ->label(__('Live / VOD / Series'))
                     ->getStateUsing(fn (Bouquet $record): string => count($record->getSelectedLiveGroupNames())

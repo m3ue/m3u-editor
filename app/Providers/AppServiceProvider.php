@@ -921,8 +921,9 @@ class AppServiceProvider extends ServiceProvider
 
                 $hasPlaylist = $bouquet->playlist_id !== null;
                 $hasCustom = $bouquet->custom_playlist_id !== null;
-                if ($hasPlaylist === $hasCustom) {
-                    throw new InvalidArgumentException('A bouquet must target exactly one of playlist_id or custom_playlist_id.');
+                $hasMerged = $bouquet->merged_playlist_id !== null;
+                if (($hasPlaylist ? 1 : 0) + ($hasCustom ? 1 : 0) + ($hasMerged ? 1 : 0) !== 1) {
+                    throw new InvalidArgumentException('A bouquet must target exactly one of playlist_id, custom_playlist_id or merged_playlist_id.');
                 }
                 if ($hasCustom) {
                     // Auto-include is a provider-sync concept; custom playlists never sync.
@@ -935,9 +936,11 @@ class AppServiceProvider extends ServiceProvider
                 // on a playlist the requester doesn't own) - confirm the target actually
                 // belongs to this bouquet's user. No auth() dependency: this must also
                 // hold during queue-context saves (e.g. applyProviderRenames()).
-                $target = $hasPlaylist
-                    ? Playlist::find($bouquet->playlist_id)
-                    : CustomPlaylist::find($bouquet->custom_playlist_id);
+                $target = match (true) {
+                    $hasPlaylist => Playlist::find($bouquet->playlist_id),
+                    $hasCustom => CustomPlaylist::find($bouquet->custom_playlist_id),
+                    default => MergedPlaylist::find($bouquet->merged_playlist_id),
+                };
                 if (! $target || $target->user_id !== $bouquet->user_id) {
                     throw new InvalidArgumentException('A bouquet must target a playlist owned by its user.');
                 }

@@ -196,12 +196,30 @@ describe('query cost', function () {
         expect($bouquetQueries)->toHaveCount(1);
     });
 
-    it('runs zero bouquet queries for a merged-playlist alias', function () {
+    it('memoizes the bouquet lookup for a merged-playlist alias too', function () {
         $merged = MergedPlaylist::create(['name' => 'MP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
         $alias = makeResolutionAlias($this->user, $this->playlist, [
             'playlist_id' => null,
             'merged_playlist_id' => $merged->id,
         ]);
+        $alias = PlaylistAlias::find($alias->id);
+
+        DB::enableQueryLog();
+        $alias->getAllowedLiveGroupNames();
+        $alias->getAllowedLiveGroupSelections();
+        $alias->getAllowedCategorySelections();
+        $alias->hasGroupFilter();
+        $bouquetQueries = collect(DB::getQueryLog())
+            ->filter(fn (array $entry): bool => str_contains($entry['query'], 'bouquet'));
+        DB::disableQueryLog();
+
+        // Merged aliases resolve bouquets (pair shape); the lookup is memoised to
+        // one pivot query no matter how many name/pair/predicate accessors run.
+        expect($bouquetQueries)->toHaveCount(1);
+    });
+
+    it('runs zero bouquet queries for an alias with no target', function () {
+        $alias = makeResolutionAlias($this->user, $this->playlist, ['playlist_id' => null]);
         $alias = PlaylistAlias::find($alias->id);
 
         DB::enableQueryLog();
