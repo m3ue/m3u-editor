@@ -22,7 +22,12 @@ class SourceCategoriesTable
             ->modifyQueryUsing(function (Builder $query) use ($table): Builder {
                 $arguments = $table->getArguments();
 
-                if ($playlistId = $arguments['playlist_id'] ?? null) {
+                // Scoped by a single playlist_id (playlist import preferences) or a
+                // playlist_ids list (a merged-playlist alias picking across its sources).
+                // An explicit empty list yields no rows rather than every row.
+                if (array_key_exists('playlist_ids', $arguments)) {
+                    $query->whereIn('playlist_id', (array) $arguments['playlist_ids'])->with('playlist');
+                } elseif ($playlistId = $arguments['playlist_id'] ?? null) {
                     $query->where('playlist_id', $playlistId);
                 }
 
@@ -34,6 +39,9 @@ class SourceCategoriesTable
                     ->label(__('Category Name'))
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('playlist.name')
+                    ->label(__('Source Playlist'))
+                    ->visible(fn (): bool => count((array) ($table->getArguments()['playlist_ids'] ?? [])) > 1),
                 IconColumn::make('in_bouquet')
                     ->label(__('In bouquet'))
                     ->visible(fn (): bool => ! empty($table->getArguments()['bouquet_group_names'] ?? []))
