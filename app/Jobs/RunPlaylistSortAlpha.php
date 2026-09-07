@@ -68,6 +68,13 @@ class RunPlaylistSortAlpha implements ShouldQueue
                     continue;
                 }
 
+                if ($column === 'rating' && $isAll) {
+                    SortFacade::bulkSortPlaylistVodByRating($this->playlist, $order);
+                    $vodRulesRun++;
+
+                    continue;
+                }
+
                 $query = $this->playlist->vodGroups();
                 if (! $isAll) {
                     $query = $query->whereIn('name_internal', $selectedGroups);
@@ -75,6 +82,8 @@ class RunPlaylistSortAlpha implements ShouldQueue
                 $query->each(function ($group) use ($column, $order): void {
                     if ($column === 'release_date') {
                         SortFacade::bulkSortGroupChannelsByReleaseDate($group, $order);
+                    } elseif ($column === 'rating') {
+                        SortFacade::bulkSortGroupChannelsByRating($group, $order);
                     } else {
                         SortFacade::bulkSortGroupChannels($group, $order, $column);
                     }
@@ -89,6 +98,16 @@ class RunPlaylistSortAlpha implements ShouldQueue
                             ->whereIn('name_internal', $selectedGroups)
                             ->each(function ($category) use ($order): void {
                                 SortFacade::bulkSortCategorySeriesByReleaseDate($category, $order);
+                            });
+                    }
+                } elseif ($column === 'rating') {
+                    if ($isAll) {
+                        SortFacade::bulkSortPlaylistSeriesByRating($this->playlist, $order);
+                    } else {
+                        $this->playlist->categories()
+                            ->whereIn('name_internal', $selectedGroups)
+                            ->each(function ($category) use ($order): void {
+                                SortFacade::bulkSortCategorySeriesByRating($category, $order);
                             });
                     }
                 }

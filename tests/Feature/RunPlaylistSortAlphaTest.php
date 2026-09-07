@@ -292,6 +292,176 @@ it('sorts only selected series categories by release date', function () {
         ->toBe(['Newer unselected', 'Older unselected']);
 });
 
+it('sorts all vod groups by rating across the playlist', function () {
+    $this->playlist->update([
+        'sort_alpha_config' => [
+            ['enabled' => true, 'target' => 'vod_groups', 'group' => ['all'], 'column' => 'rating', 'sort' => 'DESC'],
+        ],
+    ]);
+
+    $firstGroup = Group::factory()->for($this->playlist)->for($this->user)->create(['type' => 'vod']);
+    $low = Channel::factory()->for($this->user)->for($this->playlist)->for($firstGroup)->create([
+        'title' => 'Low',
+        'is_vod' => true,
+        'rating_5based' => 3.0,
+        'sort' => 1,
+    ]);
+    $high = Channel::factory()->for($this->user)->for($this->playlist)->for($firstGroup)->create([
+        'title' => 'High',
+        'is_vod' => true,
+        'rating_5based' => 8.5,
+        'sort' => 2,
+    ]);
+
+    $secondGroup = Group::factory()->for($this->playlist)->for($this->user)->create(['type' => 'vod']);
+    $middle = Channel::factory()->for($this->user)->for($this->playlist)->for($secondGroup)->create([
+        'title' => 'Middle',
+        'is_vod' => true,
+        'rating_5based' => 5.0,
+        'sort' => 1,
+    ]);
+    $unrated = Channel::factory()->for($this->user)->for($this->playlist)->for($secondGroup)->create([
+        'title' => 'Unrated',
+        'is_vod' => true,
+        'rating_5based' => null,
+        'sort' => 2,
+    ]);
+
+    (new RunPlaylistSortAlpha($this->playlist))->handle();
+
+    expect($this->playlist->vod_channels()->orderBy('sort')->pluck('id')->all())
+        ->toBe([$high->id, $middle->id, $low->id, $unrated->id]);
+});
+
+it('sorts only selected vod groups by rating', function () {
+    $this->playlist->update([
+        'sort_alpha_config' => [
+            ['enabled' => true, 'target' => 'vod_groups', 'group' => ['Selected VOD'], 'column' => 'rating', 'sort' => 'DESC'],
+        ],
+    ]);
+
+    $selectedGroup = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'type' => 'vod',
+        'name_internal' => 'Selected VOD',
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($selectedGroup)->create([
+        'title' => 'Lower selected',
+        'is_vod' => true,
+        'rating_5based' => 2.0,
+        'sort' => 1,
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($selectedGroup)->create([
+        'title' => 'Higher selected',
+        'is_vod' => true,
+        'rating_5based' => 9.0,
+        'sort' => 2,
+    ]);
+
+    $unselectedGroup = Group::factory()->for($this->playlist)->for($this->user)->create([
+        'type' => 'vod',
+        'name_internal' => 'Unselected VOD',
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($unselectedGroup)->create([
+        'title' => 'Higher unselected',
+        'is_vod' => true,
+        'rating_5based' => 9.0,
+        'sort' => 1,
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($unselectedGroup)->create([
+        'title' => 'Lower unselected',
+        'is_vod' => true,
+        'rating_5based' => 2.0,
+        'sort' => 2,
+    ]);
+
+    (new RunPlaylistSortAlpha($this->playlist))->handle();
+
+    expect($selectedGroup->channels()->orderBy('sort')->pluck('title')->all())
+        ->toBe(['Higher selected', 'Lower selected'])
+        ->and($unselectedGroup->channels()->orderBy('sort')->pluck('title')->all())
+        ->toBe(['Higher unselected', 'Lower unselected']);
+});
+
+it('sorts all series categories by rating across the playlist', function () {
+    $this->playlist->update([
+        'sort_alpha_config' => [
+            ['enabled' => true, 'target' => 'series_categories', 'group' => ['all'], 'column' => 'rating', 'sort' => 'DESC'],
+        ],
+    ]);
+
+    $firstCategory = Category::factory()->for($this->playlist)->for($this->user)->create();
+    $low = Series::factory()->for($this->user)->for($this->playlist)->for($firstCategory)->create([
+        'name' => 'Low',
+        'rating_5based' => 1,
+        'sort' => 1,
+    ]);
+    $high = Series::factory()->for($this->user)->for($this->playlist)->for($firstCategory)->create([
+        'name' => 'High',
+        'rating_5based' => 5,
+        'sort' => 2,
+    ]);
+
+    $secondCategory = Category::factory()->for($this->playlist)->for($this->user)->create();
+    $middle = Series::factory()->for($this->user)->for($this->playlist)->for($secondCategory)->create([
+        'name' => 'Middle',
+        'rating_5based' => 3,
+        'sort' => 1,
+    ]);
+    $unrated = Series::factory()->for($this->user)->for($this->playlist)->for($secondCategory)->create([
+        'name' => 'Unrated',
+        'rating_5based' => null,
+        'sort' => 2,
+    ]);
+
+    (new RunPlaylistSortAlpha($this->playlist))->handle();
+
+    expect($this->playlist->series()->orderBy('sort')->pluck('id')->all())
+        ->toBe([$high->id, $middle->id, $low->id, $unrated->id]);
+});
+
+it('sorts only selected series categories by rating', function () {
+    $this->playlist->update([
+        'sort_alpha_config' => [
+            ['enabled' => true, 'target' => 'series_categories', 'group' => ['Selected Series'], 'column' => 'rating', 'sort' => 'DESC'],
+        ],
+    ]);
+
+    $selectedCategory = Category::factory()->for($this->playlist)->for($this->user)->create([
+        'name_internal' => 'Selected Series',
+    ]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($selectedCategory)->create([
+        'name' => 'Lower selected',
+        'rating_5based' => 2,
+        'sort' => 1,
+    ]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($selectedCategory)->create([
+        'name' => 'Higher selected',
+        'rating_5based' => 9,
+        'sort' => 2,
+    ]);
+
+    $unselectedCategory = Category::factory()->for($this->playlist)->for($this->user)->create([
+        'name_internal' => 'Unselected Series',
+    ]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($unselectedCategory)->create([
+        'name' => 'Higher unselected',
+        'rating_5based' => 9,
+        'sort' => 1,
+    ]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($unselectedCategory)->create([
+        'name' => 'Lower unselected',
+        'rating_5based' => 2,
+        'sort' => 2,
+    ]);
+
+    (new RunPlaylistSortAlpha($this->playlist))->handle();
+
+    expect($selectedCategory->series()->orderBy('sort')->pluck('name')->all())
+        ->toBe(['Higher selected', 'Lower selected'])
+        ->and($unselectedCategory->series()->orderBy('sort')->pluck('name')->all())
+        ->toBe(['Higher unselected', 'Lower unselected']);
+});
+
 it('summarizes executed live vod and series rules in the notification', function () {
     $this->playlist->update([
         'sort_alpha_config' => [

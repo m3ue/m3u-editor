@@ -263,6 +263,31 @@ return [
         '53e3187b2a5f',
         'a215f7e698e0',
 
+        // SortService rating-sort methods: same guarantees as the release-date
+        // methods above — $expression is a compile-time SQL constant
+        // ("rating_5based IS NULL, rating_5based {$direction}") with a hardcoded
+        // column name and a ternary-validated $direction ('ASC'|'DESC'); $table and
+        // the WHERE clause are hardcoded literals with ? placeholders bound to
+        // existing DB primary keys. No user input reaches the interpolated SQL.
+        '4a1682e93f25',
+        'c12738aab5ff',
+        '81e30ea0dc34',
+        'cb9e8d47448c',
+        '415d1affe987',
+        'ec805cca58a8',
+        'd57f12822690',
+        'cc59da459115',
+        // playlist-level variants (bulkSortPlaylistVodByRating /
+        // bulkSortPlaylistSeriesByRating): mysql/pgsql/sqlite/fallback branches
+        // hit the same hardcoded-SQL + bound-placeholder guarantee. The SQLite
+        // branches repeat the WHERE clause so they produce distinct hashes;
+        // the fallback orderByRaw() calls share one hash. Still no user input
+        // reaches the interpolated SQL.
+        'ac8931725930',
+        '88053eeb4c28',
+        '7afdcc058548',
+        '21c185a4fbbc',
+
         // SortService natural-sort rewrite (issue #1369): same guarantees as the
         // original SortService entries above, just on new lines/hashes.
         // $orderByColumn/$fallbackOrderByColumn come from a match() that throws

@@ -448,6 +448,207 @@ class SortService
     }
 
     /**
+     * Bulk-update VOD channels' sort order within a group by rating.
+     * Rows without a rating (NULL) always sort last, regardless of direction.
+     */
+    public function bulkSortGroupChannelsByRating(Group $record, string $order = 'DESC'): void
+    {
+        $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        $expression = "rating_5based IS NULL, rating_5based {$direction}";
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
+
+            return;
+        }
+
+        if ($this->isPostgres($driver)) {
+            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
+
+            return;
+        }
+
+        // Fallback: CASE update
+        $ids = $record->channels()->orderByRaw("rating_5based IS NULL, rating_5based {$direction}")->pluck('id')->all();
+        if (empty($ids)) {
+            return;
+        }
+
+        $cases = [];
+        $i = 1;
+        foreach ($ids as $id) {
+            $cases[] = "WHEN {$id} THEN {$i}";
+            $i++;
+        }
+
+        $casesSql = implode(' ', $cases);
+        $idsSql = implode(',', $ids);
+
+        DB::statement("UPDATE channels SET sort = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+    }
+
+    /**
+     * Bulk-update series' sort order within a category by rating.
+     * Rows without a rating (NULL) always sort last, regardless of direction.
+     */
+    public function bulkSortCategorySeriesByRating(Category $record, string $order = 'DESC'): void
+    {
+        $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        $expression = "rating_5based IS NULL, rating_5based {$direction}";
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            DB::statement("UPDATE series s JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE category_id = ?) t ON s.id = t.id SET s.sort = t.rn", [$record->id]);
+
+            return;
+        }
+
+        if ($this->isPostgres($driver)) {
+            DB::statement("UPDATE series SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE category_id = ?) t WHERE series.id = t.id", [$record->id]);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE category_id = ?) UPDATE series SET sort = (SELECT rn FROM ranked WHERE ranked.id = series.id) WHERE category_id = ?", [$record->id, $record->id]);
+
+            return;
+        }
+
+        // Fallback: CASE update
+        $ids = $record->series()->orderByRaw("rating_5based IS NULL, rating_5based {$direction}")->pluck('id')->all();
+        if (empty($ids)) {
+            return;
+        }
+
+        $cases = [];
+        $i = 1;
+        foreach ($ids as $id) {
+            $cases[] = "WHEN {$id} THEN {$i}";
+            $i++;
+        }
+
+        $casesSql = implode(' ', $cases);
+        $idsSql = implode(',', $ids);
+
+        DB::statement("UPDATE series SET sort = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+    }
+
+    /**
+     * Sort ALL VOD channels in a playlist globally by rating.
+     * Assigns unique sort numbers 1..N across all groups so there are no collisions.
+     * Rows without a rating (NULL) always sort last, regardless of direction.
+     */
+    public function bulkSortPlaylistVodByRating(Playlist $playlist, string $order = 'DESC'): void
+    {
+        $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        $expression = "rating_5based IS NULL, rating_5based {$direction}";
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE playlist_id = ? AND is_vod = 1) t ON c.id = t.id SET c.sort = t.rn", [$playlist->id]);
+
+            return;
+        }
+
+        if ($this->isPostgres($driver)) {
+            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE playlist_id = ? AND is_vod = true) t WHERE channels.id = t.id", [$playlist->id]);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM channels WHERE playlist_id = ? AND is_vod = 1) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE playlist_id = ? AND is_vod = 1", [$playlist->id, $playlist->id]);
+
+            return;
+        }
+
+        // Fallback: ORDER BY SELECT then CASE update
+        $ids = Channel::where('playlist_id', $playlist->id)
+            ->where('is_vod', true)
+            ->orderByRaw("rating_5based IS NULL, rating_5based {$direction}")
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (empty($ids)) {
+            return;
+        }
+
+        $cases = [];
+        foreach ($ids as $i => $id) {
+            $cases[] = "WHEN {$id} THEN ".($i + 1);
+        }
+
+        $casesSql = implode(' ', $cases);
+        $idsSql = implode(',', $ids);
+
+        DB::statement("UPDATE channels SET sort = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+    }
+
+    /**
+     * Sort ALL series in a playlist globally by rating.
+     * Assigns unique sort numbers 1..N across all categories so there are no collisions.
+     * Rows without a rating (NULL) always sort last, regardless of direction.
+     */
+    public function bulkSortPlaylistSeriesByRating(Playlist $playlist, string $order = 'DESC'): void
+    {
+        $direction = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+
+        $expression = "rating_5based IS NULL, rating_5based {$direction}";
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            DB::statement("UPDATE series s JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE playlist_id = ?) t ON s.id = t.id SET s.sort = t.rn", [$playlist->id]);
+
+            return;
+        }
+
+        if ($this->isPostgres($driver)) {
+            DB::statement("UPDATE series SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE playlist_id = ?) t WHERE series.id = t.id", [$playlist->id]);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$expression}) AS rn FROM series WHERE playlist_id = ?) UPDATE series SET sort = (SELECT rn FROM ranked WHERE ranked.id = series.id) WHERE playlist_id = ?", [$playlist->id, $playlist->id]);
+
+            return;
+        }
+
+        // Fallback: ORDER BY SELECT then CASE update
+        $ids = Series::where('playlist_id', $playlist->id)
+            ->orderByRaw("rating_5based IS NULL, rating_5based {$direction}")
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if (empty($ids)) {
+            return;
+        }
+
+        $cases = [];
+        foreach ($ids as $i => $id) {
+            $cases[] = "WHEN {$id} THEN ".($i + 1);
+        }
+
+        $casesSql = implode(' ', $cases);
+        $idsSql = implode(',', $ids);
+
+        DB::statement("UPDATE series SET sort = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+    }
+
+    /**
      * Bulk recount channel numbers.
      *
      * When $activeOnly is true, only enabled channels are renumbered via SQL;

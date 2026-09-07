@@ -1,9 +1,11 @@
 <?php
 
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use App\Services\SortService;
 use Illuminate\Support\Facades\DB;
@@ -223,3 +225,86 @@ it('rejects invalid column for custom playlist sort', function () {
 
     $this->service->bulkSortAlphaCustomPlaylistChannels($customPlaylist, $channels, 'ASC', 'created_at');
 })->throws(InvalidArgumentException::class, 'Invalid sort column provided.');
+
+// ---------------------------------------------------------------------------
+// Rating-based sorting (bulkSort*ByRating)
+// ---------------------------------------------------------------------------
+
+it('sorts group channels by rating DESC with nulls last', function () {
+    $vodGroup = Group::factory()->for($this->playlist)->for($this->user)->create(['type' => 'vod']);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($vodGroup)->create(['title' => 'Low', 'rating_5based' => 3.0, 'sort' => 1]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($vodGroup)->create(['title' => 'Unrated', 'rating_5based' => null, 'sort' => 2]);
+    Channel::factory()->for($this->user)->for($this->playlist)->for($vodGroup)->create(['title' => 'High', 'rating_5based' => 8.5, 'sort' => 3]);
+
+    $this->service->bulkSortGroupChannelsByRating($vodGroup, 'DESC');
+
+    expect($vodGroup->channels()->orderBy('sort')->pluck('title')->toArray())
+        ->toBe(['High', 'Low', 'Unrated']);
+});
+
+it('sorts all playlist VOD channels by rating DESC with nulls last', function () {
+    $firstGroup = Group::factory()->for($this->playlist)->for($this->user)->create(['type' => 'vod']);
+    $low = Channel::factory()->for($this->user)->for($this->playlist)->for($firstGroup)->create([
+        'title' => 'Low',
+        'is_vod' => true,
+        'rating_5based' => 2.5,
+        'sort' => 1,
+    ]);
+
+    $secondGroup = Group::factory()->for($this->playlist)->for($this->user)->create(['type' => 'vod']);
+    $high = Channel::factory()->for($this->user)->for($this->playlist)->for($secondGroup)->create([
+        'title' => 'High',
+        'is_vod' => true,
+        'rating_5based' => 9.0,
+        'sort' => 1,
+    ]);
+    $unrated = Channel::factory()->for($this->user)->for($this->playlist)->for($secondGroup)->create([
+        'title' => 'Unrated',
+        'is_vod' => true,
+        'rating_5based' => null,
+        'sort' => 2,
+    ]);
+
+    $this->service->bulkSortPlaylistVodByRating($this->playlist, 'DESC');
+
+    expect($this->playlist->vod_channels()->orderBy('sort')->pluck('id')->all())
+        ->toBe([$high->id, $low->id, $unrated->id]);
+});
+
+it('sorts category series by rating DESC with nulls last', function () {
+    $category = Category::factory()->for($this->playlist)->for($this->user)->create();
+    Series::factory()->for($this->user)->for($this->playlist)->for($category)->create(['name' => 'Low', 'rating_5based' => 1, 'sort' => 1]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($category)->create(['name' => 'Unrated', 'rating_5based' => null, 'sort' => 2]);
+    Series::factory()->for($this->user)->for($this->playlist)->for($category)->create(['name' => 'High', 'rating_5based' => 5, 'sort' => 3]);
+
+    $this->service->bulkSortCategorySeriesByRating($category, 'DESC');
+
+    expect($category->series()->orderBy('sort')->pluck('name')->toArray())
+        ->toBe(['High', 'Low', 'Unrated']);
+});
+
+it('sorts all playlist series by rating DESC with nulls last', function () {
+    $firstCategory = Category::factory()->for($this->playlist)->for($this->user)->create();
+    $low = Series::factory()->for($this->user)->for($this->playlist)->for($firstCategory)->create([
+        'name' => 'Low',
+        'rating_5based' => 1,
+        'sort' => 1,
+    ]);
+
+    $secondCategory = Category::factory()->for($this->playlist)->for($this->user)->create();
+    $high = Series::factory()->for($this->user)->for($this->playlist)->for($secondCategory)->create([
+        'name' => 'High',
+        'rating_5based' => 5,
+        'sort' => 1,
+    ]);
+    $unrated = Series::factory()->for($this->user)->for($this->playlist)->for($secondCategory)->create([
+        'name' => 'Unrated',
+        'rating_5based' => null,
+        'sort' => 2,
+    ]);
+
+    $this->service->bulkSortPlaylistSeriesByRating($this->playlist, 'DESC');
+
+    expect($this->playlist->series()->orderBy('sort')->pluck('id')->all())
+        ->toBe([$high->id, $low->id, $unrated->id]);
+});
