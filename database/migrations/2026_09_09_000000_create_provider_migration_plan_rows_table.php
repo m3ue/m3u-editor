@@ -51,6 +51,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index('session_key');
+            $table->index('created_at');
             $table->index(['user_id', 'source_playlist_id', 'target_playlist_id'], 'pmpr_owner_pair_idx');
             $table->index(['session_key', 'bucket']);
         });

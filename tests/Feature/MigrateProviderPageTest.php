@@ -4,6 +4,7 @@ use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Jobs\CopyAttributesToPlaylist;
 use App\Models\Channel;
 use App\Models\Playlist;
+use App\Models\ProviderMigrationPlanRow;
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
@@ -51,7 +52,6 @@ it('renders for the playlist owner', function () {
 it('is not reachable for a user who does not own the playlist', function () {
     $source = Playlist::factory()->create(['user_id' => User::factory()->create()->id]);
 
-    // Resource route binding is scoped to the current user, so a non-owner cannot resolve it.
     expect(fn () => Livewire::test(MigrateProvider::class, ['record' => $source->id]))
         ->toThrow(ModelNotFoundException::class);
 });
@@ -63,19 +63,23 @@ it('is not found for a network playlist', function () {
         ->assertNotFound();
 });
 
-it('builds a preview and dispatches the migration job in migration mode', function () {
+it('materializes plan rows and dispatches the migration job in migration mode', function () {
     ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee, 'targetZee' => $targetZee] = pageFixture($this->user);
 
-    Livewire::test(MigrateProvider::class, ['record' => $source->id])
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
         ->set('data.target_playlist_id', $target->id)
         ->set('data.fields', ['enabled', 'group', 'channel'])
-        ->call('buildPreview')
-        ->assertSet('data.mappings', function (array $mappings) use ($sourceZee, $targetZee) {
-            return count($mappings) === 1
-                && (int) $mappings[0]['source_id'] === $sourceZee->id
-                && (int) $mappings[0]['target_id'] === $targetZee->id;
-        })
-        ->call('apply');
+        ->call('buildPreview');
+
+    $rows = ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->get();
+    expect($rows)->toHaveCount(1);
+
+    $matched = $rows->firstWhere('bucket', 'matched');
+    expect($matched->source_channel_id)->toBe($sourceZee->id)
+        ->and($matched->matched_target_channel_id)->toBe($targetZee->id)
+        ->and($matched->include)->toBeTrue();
+
+    $component->call('apply');
 
     Bus::assertDispatched(CopyAttributesToPlaylist::class, function (CopyAttributesToPlaylist $job) use ($source, $target, $sourceZee, $targetZee) {
         return $job->migrationMode === true
@@ -89,17 +93,78 @@ it('builds a preview and dispatches the migration job in migration mode', functi
                 'epg_confirmed' => false,
             ]];
     });
+
+    // Plan rows are cleared once applied.
+    expect(ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->count())->toBe(0);
 });
 
-it('does not dispatch when no rows are included', function () {
+it('does not dispatch when every matched row is excluded', function () {
     ['source' => $source, 'target' => $target] = pageFixture($this->user);
+
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->call('buildPreview');
+
+    ProviderMigrationPlanRow::query()
+        ->where('source_playlist_id', $source->id)
+        ->update(['include' => false]);
+
+    $component->call('apply')->assertNotified();
+
+    Bus::assertNotDispatched(CopyAttributesToPlaylist::class);
+});
+
+it('rebuilding the preview replaces the previous rows for the same pair', function () {
+    ['source' => $source, 'target' => $target] = pageFixture($this->user);
+
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->call('buildPreview');
+
+    $firstCount = ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->count();
+
+    $component->call('buildPreview');
+
+    expect(ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->count())->toBe($firstCount);
+});
+
+it('sweeps stale plan rows and any other previews for the user on build', function () {
+    ['source' => $source, 'target' => $target] = pageFixture($this->user);
+
+    // A stale row from an abandoned preview, plus a row for a different source playlist.
+    $stale = ProviderMigrationPlanRow::query()->create([
+        'session_key' => 'stale', 'user_id' => $this->user->id,
+        'source_playlist_id' => 999, 'target_playlist_id' => 998, 'source_channel_id' => 1,
+        'bucket' => 'matched', 'include' => true,
+    ]);
+    ProviderMigrationPlanRow::query()->whereKey($stale->id)->update(['created_at' => now()->subDays(3)]);
+
+    $otherPreview = ProviderMigrationPlanRow::query()->create([
+        'session_key' => 'other', 'user_id' => $this->user->id,
+        'source_playlist_id' => 555, 'target_playlist_id' => 556, 'source_channel_id' => 2,
+        'bucket' => 'matched', 'include' => true,
+    ]);
 
     Livewire::test(MigrateProvider::class, ['record' => $source->id])
         ->set('data.target_playlist_id', $target->id)
-        ->call('buildPreview')
-        ->set('data.mappings.0.include', false)
-        ->call('apply')
-        ->assertNotified();
+        ->call('buildPreview');
 
-    Bus::assertNotDispatched(CopyAttributesToPlaylist::class);
+    expect(ProviderMigrationPlanRow::query()->whereKey($stale->id)->exists())->toBeFalse()
+        ->and(ProviderMigrationPlanRow::query()->whereKey($otherPreview->id)->exists())->toBeFalse()
+        ->and(ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->count())->toBe(1);
+});
+
+it('prunes stale rows on mount', function () {
+    ['source' => $source] = pageFixture($this->user);
+
+    $stale = ProviderMigrationPlanRow::query()->create([
+        'session_key' => 'stale', 'user_id' => $this->user->id,
+        'source_playlist_id' => 1, 'target_playlist_id' => 2, 'source_channel_id' => 1,
+        'bucket' => 'matched', 'include' => true,
+    ]);
+    ProviderMigrationPlanRow::query()->whereKey($stale->id)->update(['created_at' => now()->subHours(5)]);
+
+    Livewire::test(MigrateProvider::class, ['record' => $source->id]);
+
+    expect(ProviderMigrationPlanRow::query()->whereKey($stale->id)->exists())->toBeFalse();
 });
