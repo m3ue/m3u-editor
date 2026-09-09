@@ -44,3 +44,35 @@ JSON;
         @rmdir($tmpLangPath);
     }
 });
+
+test('re-sorts conflict-free lang files alphabetically', function () {
+    $tmpLangPath = sys_get_temp_dir().'/lang-merge-'.uniqid();
+    mkdir($tmpLangPath);
+    $path = $tmpLangPath.'/en.json';
+
+    $originalLangPath = app()->langPath();
+    app()->useLangPath($tmpLangPath);
+
+    // Deliberately out of order, no conflict markers.
+    file_put_contents($path, <<<'JSON'
+    {
+        "Zebra": "Zebra",
+        "10": 10,
+        "Apple": "Apple",
+        "9": 9
+    }
+    JSON);
+
+    try {
+        $this->artisan('lang:merge-conflicts')->assertExitCode(0);
+
+        $raw = file_get_contents($path);
+        // PHP casts numeric-string array keys to int, so 9/10 come back as integers.
+        expect(array_keys(json_decode($raw, true)))->toBe([9, 10, 'Apple', 'Zebra'])
+            ->and($raw)->toEndWith("}\n");
+    } finally {
+        app()->useLangPath($originalLangPath);
+        @unlink($path);
+        @rmdir($tmpLangPath);
+    }
+});

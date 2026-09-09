@@ -27,7 +27,7 @@ class ProviderMigrationPlanRow extends Model
      */
     public function prunable(): Builder
     {
-        return static::where('created_at', '<', now()->subHours(6));
+        return static::query()->where('created_at', '<', now()->subHours(6));
     }
 
     protected $casts = [
