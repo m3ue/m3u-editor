@@ -196,7 +196,7 @@ it('prunes stale rows on mount', function () {
     ['source' => $source] = pageFixture($this->user);
 
     $stale = ProviderMigrationPlanRow::query()->create([
-        'session_key' => 'stale', 'user_id' => $this->user->id,
+        'session_key' => (string) Str::uuid(), 'user_id' => $this->user->id,
         'source_playlist_id' => 1, 'target_playlist_id' => 2, 'source_channel_id' => 1,
         'bucket' => 'matched', 'include' => true,
     ]);
