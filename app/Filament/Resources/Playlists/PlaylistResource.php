@@ -13,6 +13,7 @@ use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResourc
 use App\Filament\Resources\Playlists\Pages\CreatePlaylist;
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Filament\Resources\Playlists\Pages\ListPlaylists;
+use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Filament\Resources\Playlists\Pages\ViewPlaylist;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Filament\Tables\SourceCategoriesTable;
@@ -508,6 +509,7 @@ class PlaylistResource extends Resource implements CopilotResource
             'create' => CreatePlaylist::route('/create'),
             'view' => ViewPlaylist::route('/{record}'),
             'edit' => EditPlaylist::route('/{record}/edit'),
+            'migrate-provider' => MigrateProvider::route('/{record}/migrate-provider'),
         ];
     }
 
@@ -4131,6 +4133,12 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Select the target playlist and channel attributes to copy'))
                     ->modalSubmitActionLabel(__('Copy now'))
                     ->hidden(fn ($record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
+                Action::make('migrate_provider')
+                    ->label(__('Migrate Provider'))
+                    ->icon('heroicon-o-arrows-right-left')
+                    ->color('gray')
+                    ->url(fn (Playlist $record): string => static::getUrl('migrate-provider', ['record' => $record]))
+                    ->hidden(fn (Playlist $record): bool => $record->is_network_playlist || $record->isMediaServerPlaylist()),
                 Action::make('view_sync_logs')
                     ->label(__('View Sync Logs'))
                     ->color('gray')
