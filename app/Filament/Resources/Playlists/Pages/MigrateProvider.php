@@ -527,6 +527,10 @@ class MigrateProvider extends Page implements HasTable
                         'matched_target_stream_id' => null,
                         'bucket' => 'unmatched',
                         'include' => false,
+                        // No target, so any EPG proposal on these rows is moot.
+                        'epg_channel_id' => null,
+                        'epg_status' => 'none',
+                        'epg_confirmed' => false,
                     ]);
 
                 Notification::make()
