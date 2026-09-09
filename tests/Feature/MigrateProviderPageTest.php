@@ -6,9 +6,11 @@ use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\ProviderMigrationPlanRow;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     Bus::fake();
@@ -133,14 +135,14 @@ it('sweeps stale plan rows and any other previews for the user on build', functi
 
     // A stale row from an abandoned preview, plus a row for a different source playlist.
     $stale = ProviderMigrationPlanRow::query()->create([
-        'session_key' => 'stale', 'user_id' => $this->user->id,
+        'session_key' => (string) Str::uuid(), 'user_id' => $this->user->id,
         'source_playlist_id' => 999, 'target_playlist_id' => 998, 'source_channel_id' => 1,
         'bucket' => 'matched', 'include' => true,
     ]);
     ProviderMigrationPlanRow::query()->whereKey($stale->id)->update(['created_at' => now()->subDays(3)]);
 
     $otherPreview = ProviderMigrationPlanRow::query()->create([
-        'session_key' => 'other', 'user_id' => $this->user->id,
+        'session_key' => (string) Str::uuid(), 'user_id' => $this->user->id,
         'source_playlist_id' => 555, 'target_playlist_id' => 556, 'source_channel_id' => 2,
         'bucket' => 'matched', 'include' => true,
     ]);
@@ -152,6 +154,42 @@ it('sweeps stale plan rows and any other previews for the user on build', functi
     expect(ProviderMigrationPlanRow::query()->whereKey($stale->id)->exists())->toBeFalse()
         ->and(ProviderMigrationPlanRow::query()->whereKey($otherPreview->id)->exists())->toBeFalse()
         ->and(ProviderMigrationPlanRow::query()->where('source_playlist_id', $source->id)->count())->toBe(1);
+});
+
+it('releases another row when a manual match points at an already-claimed replacement channel', function () {
+    ['source' => $source, 'target' => $target, 'targetZee' => $targetZee] = pageFixture($this->user);
+
+    // A second source channel with no clean auto-match, so we can move it by hand.
+    $sourceOther = Channel::factory()->create([
+        'playlist_id' => $source->id, 'user_id' => $this->user->id, 'is_vod' => false,
+        'name' => 'Some Other Channel', 'stream_id' => '888', 'enabled' => true,
+    ]);
+
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->call('buildPreview');
+
+    $autoMatched = ProviderMigrationPlanRow::query()
+        ->where('session_key', $component->get('sessionKey'))
+        ->where('bucket', 'matched')
+        ->firstOrFail();
+    expect((int) $autoMatched->matched_target_channel_id)->toBe($targetZee->id);
+
+    $otherRow = ProviderMigrationPlanRow::query()
+        ->where('session_key', $component->get('sessionKey'))
+        ->where('source_channel_id', $sourceOther->id)
+        ->firstOrFail();
+
+    // Point the second row at the channel the first row already claimed.
+    $component->callAction(
+        TestAction::make('changeMatch')->table($otherRow),
+        ['matched_target_channel_id' => $targetZee->id],
+    );
+
+    expect($otherRow->refresh()->matched_target_channel_id)->toBe($targetZee->id)
+        ->and($autoMatched->refresh()->matched_target_channel_id)->toBeNull()
+        ->and($autoMatched->bucket)->toBe('unmatched')
+        ->and($autoMatched->include)->toBeFalse();
 });
 
 it('prunes stale rows on mount', function () {

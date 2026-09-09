@@ -139,7 +139,7 @@ class MigrateProvider extends Page implements HasTable
                             ->default(true),
                         Toggle::make('overwrite')
                             ->label(__('Overwrite existing values'))
-                            ->helperText(__('When off, only empty fields on the replacement channels are filled.'))
+                            ->helperText(__('Keep this on for a lineup migration. When off, only empty fields on the replacement channels are filled, so already-set values like the enabled state, channel number and sort order are left untouched.'))
                             ->default(true),
                         Toggle::make('disable_target_only')
                             ->label(__('Disable channels that are not in this lineup'))
@@ -197,8 +197,11 @@ class MigrateProvider extends Page implements HasTable
             ->emptyStateIcon('heroicon-o-magnifying-glass')
             ->emptyStateHeading(__('No preview available'))
             ->emptyStateDescription(__('No preview is available yet. Choose a replacement playlist and build the preview to see how the lineup will migrate.'))
-            ->defaultSort('source_name')
-            ->defaultSort('include', 'desc')
+            // Included rows first, then alphabetical. A single defaultSort() call only
+            // takes one column, so multi-column ordering has to go through a closure.
+            ->defaultSort(fn (Builder $query): Builder => $query
+                ->orderByDesc('include')
+                ->orderBy('source_name'))
             ->paginated([25, 50, 100])
             ->columns([
                 TextColumn::make('source_name')
@@ -502,11 +505,41 @@ class MigrateProvider extends Page implements HasTable
     private function applyMatchChoice(ProviderMigrationPlanRow $record, mixed $targetId): void
     {
         $channel = $targetId
-            ? Channel::query()
-                ->where('playlist_id', $record->target_playlist_id)
-                ->where('is_vod', false)
-                ->find((int) $targetId)
+            ? $this->scopedTargetChannels()?->clone()->find((int) $targetId)
             : null;
+
+        // A target channel can only receive one source lineup entry (the auto-resolver
+        // enforces this; the manual override has to as well). If another row in this
+        // preview already points here, release it so counts and writes stay one-to-one.
+        if ($channel) {
+            $displaced = ProviderMigrationPlanRow::query()
+                ->where('session_key', $this->sessionKey)
+                ->where('matched_target_channel_id', $channel->id)
+                ->whereKeyNot($record->id)
+                ->get();
+
+            if ($displaced->isNotEmpty()) {
+                ProviderMigrationPlanRow::query()
+                    ->whereKey($displaced->pluck('id'))
+                    ->update([
+                        'matched_target_channel_id' => null,
+                        'matched_target_name' => null,
+                        'matched_target_stream_id' => null,
+                        'bucket' => 'unmatched',
+                        'include' => false,
+                    ]);
+
+                Notification::make()
+                    ->warning()
+                    ->title(__('Match reassigned'))
+                    ->body(trans_choice(
+                        '{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.',
+                        $displaced->count(),
+                        ['name' => $displaced->first()->source_name, 'count' => $displaced->count()],
+                    ))
+                    ->send();
+            }
+        }
 
         $record->update([
             'matched_target_channel_id' => $channel?->id,
@@ -522,14 +555,12 @@ class MigrateProvider extends Page implements HasTable
      */
     private function searchTargetChannels(string $search): array
     {
-        $targetId = $this->data['target_playlist_id'] ?? null;
-        if (! $targetId) {
+        $query = $this->scopedTargetChannels();
+        if (! $query) {
             return [];
         }
 
-        return Channel::query()
-            ->where('playlist_id', $targetId)
-            ->where('is_vod', false)
+        return $query
             ->when($search !== '', fn (Builder $q) => $q->where(fn (Builder $qq) => $qq
                 ->where('name', 'like', "%{$search}%")
                 ->orWhere('name_custom', 'like', "%{$search}%")
@@ -545,7 +576,9 @@ class MigrateProvider extends Page implements HasTable
 
     private function targetChannelLabel(int $channelId): ?string
     {
-        $channel = Channel::query()->find($channelId, ['id', 'name', 'name_custom', 'stream_id', 'stream_id_custom']);
+        $channel = $this->scopedTargetChannels()
+            ?->clone()
+            ->find($channelId, ['id', 'name', 'name_custom', 'stream_id', 'stream_id_custom']);
         if (! $channel) {
             return null;
         }
@@ -556,14 +589,37 @@ class MigrateProvider extends Page implements HasTable
     private function candidateLabels(ProviderMigrationPlanRow $record): string
     {
         $ids = $record->candidate_target_channel_ids ?? [];
-        if (empty($ids)) {
+        $query = $this->scopedTargetChannels();
+        if (empty($ids) || ! $query) {
             return '-';
         }
 
-        return Channel::query()
+        return $query
             ->whereIn('id', $ids)
             ->pluck('name')
             ->implode(', ');
+    }
+
+    /**
+     * A fresh Channel query restricted to the Live channels of the chosen replacement playlist,
+     * but only when that playlist is actually owned by the current user. `target_playlist_id`
+     * lives in client-settable form state, so every read of a target channel goes through here
+     * rather than trusting the id directly.
+     */
+    private function scopedTargetChannels(): ?Builder
+    {
+        $target = Playlist::query()
+            ->where('user_id', auth()->id())
+            ->where('is_network_playlist', false)
+            ->find($this->data['target_playlist_id'] ?? null);
+
+        if (! $target instanceof Playlist) {
+            return null;
+        }
+
+        return Channel::query()
+            ->where('playlist_id', $target->id)
+            ->where('is_vod', false);
     }
 
     private function resolveTarget(): Playlist

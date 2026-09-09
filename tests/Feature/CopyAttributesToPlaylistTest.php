@@ -236,6 +236,43 @@ it('can match channels by name and title when source_id does not match', functio
     expect($targetChannel->logo)->toBe('https://example.com/fallback-logo.png');
 });
 
+it('matches channels whose match values differ only by case or surrounding whitespace', function () {
+    // Regression: the SQL candidate prefilter is now LOWER(TRIM(...))-normalized to agree
+    // with the normalized PHP match key. Before, case/whitespace-divergent rows were
+    // silently excluded from the candidate set on case-sensitive collations (Postgres).
+    $sourcePlaylist = Playlist::factory()->create(['user_id' => $this->user->id]);
+    $sourceChannel = Channel::factory()->create([
+        'playlist_id' => $sourcePlaylist->id,
+        'user_id' => $this->user->id,
+        'source_id' => 'source-channel-id',
+        'name' => '  Discovery HD  ',
+        'logo_internal' => 'https://example.com/discovery.png',
+    ]);
+
+    $targetPlaylist = Playlist::factory()->create(['user_id' => $this->user->id]);
+    $targetChannel = Channel::factory()->create([
+        'playlist_id' => $targetPlaylist->id,
+        'user_id' => $this->user->id,
+        'source_id' => 'different-channel-id',
+        'name' => 'discovery hd',
+        'logo' => null,
+    ]);
+
+    $job = new CopyAttributesToPlaylist(
+        source: $sourcePlaylist,
+        targetId: $targetPlaylist->id,
+        channelAttributes: ['logo'],
+        channelMatchAttributes: ['name'],
+        createIfMissing: false,
+        allAttributes: false,
+        overwrite: false,
+    );
+
+    $job->handle();
+
+    expect($targetChannel->refresh()->logo)->toBe('https://example.com/discovery.png');
+});
+
 it('handles cases where no matching channels are found', function () {
     // Create source playlist
     $sourcePlaylist = Playlist::factory()->create(['user_id' => $this->user->id]);

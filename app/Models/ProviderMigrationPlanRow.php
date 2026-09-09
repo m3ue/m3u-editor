@@ -21,7 +21,9 @@ class ProviderMigrationPlanRow extends Model
     use Prunable;
 
     /**
-     * Aggressively prune abandoned previews. The page also sweeps stale rows on every visit.
+     * Daily backstop for abandoned previews (6h). The page itself sweeps more aggressively,
+     * dropping rows older than 2h on every visit and wiping the user's rows on each rebuild,
+     * so model:prune only ever catches previews from users who never came back.
      */
     public function prunable(): Builder
     {

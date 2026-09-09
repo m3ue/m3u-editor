@@ -5448,7 +5448,6 @@
     "Re-point matched channels at the replacement provider's equivalent EPG channel where one exists, otherwise copy the existing mapping. An expired provider's EPG may no longer publish programme data.": "Re-point matched channels at the replacement provider's equivalent EPG channel where one exists, otherwise copy the existing mapping. An expired provider's EPG may no longer publish programme data.",
     "Replacement channel": "Replacement channel",
     "Replacement playlist": "Replacement playlist",
-    "Review matches": "Review matches",
     "The lineup is being migrated onto \":name\" in the background. You will be notified on completion.": "The lineup is being migrated onto \":name\" in the background. You will be notified on completion.",
     "The working playlist whose channels should receive this lineup.": "The working playlist whose channels should receive this lineup.",
     "Title override": "Title override",
@@ -5478,5 +5477,7 @@
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "No preview available": "No preview available",
     "No preview is available yet. Choose a replacement playlist and build the preview to see how the lineup will migrate.": "No preview is available yet. Choose a replacement playlist and build the preview to see how the lineup will migrate.",
-    "Only the rows marked \"Include\" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider. Custom Playlist membership, per-custom-playlist channel numbers and tag-based groups are not part of this migration.": "Only the rows marked \"Include\" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider. Custom Playlist membership, per-custom-playlist channel numbers and tag-based groups are not part of this migration."
+    "Only the rows marked \"Include\" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider. Custom Playlist membership, per-custom-playlist channel numbers and tag-based groups are not part of this migration.": "Only the rows marked \"Include\" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider. Custom Playlist membership, per-custom-playlist channel numbers and tag-based groups are not part of this migration.",
+    "Match reassigned": "Match reassigned",
+    "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset."
 }
