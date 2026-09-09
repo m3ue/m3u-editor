@@ -348,6 +348,15 @@ class CopyAttributesToPlaylist implements ShouldQueue
     }
 
     /**
+     * The only channel columns that may be used to match rows between playlists. Any attribute
+     * outside this allowlist is ignored, so no caller-supplied value ever reaches raw SQL.
+     */
+    private const MATCHABLE_COLUMNS = [
+        'name', 'title', 'url', 'stream_id', 'stream_id_custom',
+        'station_id', 'logo_internal', 'source_id', 'channel',
+    ];
+
+    /**
      * Apply the widening prefilter for a match-condition set. String columns are wrapped in
      * LOWER(TRIM(...)) so the SQL prefilter agrees with the normalized PHP match key on
      * case-sensitive collations (Postgres); the integer channel-number column is compared raw.
@@ -358,7 +367,9 @@ class CopyAttributesToPlaylist implements ShouldQueue
     private function applyMatchConditions($query, array $matchConditions): void
     {
         foreach ($this->channelMatchAttributes as $attribute) {
-            if (empty($matchConditions[$attribute])) {
+            // Whitelist guard: the column identifier below is interpolated into raw SQL, so it
+            // must be one of a fixed set of known-safe column names, never an arbitrary string.
+            if (! in_array($attribute, self::MATCHABLE_COLUMNS, true) || empty($matchConditions[$attribute])) {
                 continue;
             }
 

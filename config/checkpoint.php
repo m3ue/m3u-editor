@@ -228,6 +228,12 @@ return [
         '1cf9f415fe0d',
 
         // ── SQL Injection — validated before interpolation ───────────────────
+        // CopyAttributesToPlaylist::applyMatchConditions — $attribute is
+        // interpolated into DB::raw only after an in_array() check against the
+        // fixed self::MATCHABLE_COLUMNS allowlist; it can never be an arbitrary
+        // string. The match values themselves are passed as bound whereIn params.
+        '214e51e4e2c9',
+
         // SimilaritySearchService: $relevanceSql is assembled only from fixed
         // database-driver templates; search terms use escaped ? bindings.
         'b5bc019c1883',
@@ -477,6 +483,12 @@ return [
 
         '885eae8be59c', // Bouquet
         'a1a5cad70005', // BouquetPlaylistAlias
+
+        // ProviderMigrationPlanRow — ephemeral scratch rows for the "Migrate
+        // Provider" preview, written only from fixed internal arrays in
+        // MigrateProvider/ProviderMigrationPlanner (never from request input).
+        // Same Model::unguard() convention as every model above.
+        '102808485cb2', // ProviderMigrationPlanRow
     ],
 
     /*

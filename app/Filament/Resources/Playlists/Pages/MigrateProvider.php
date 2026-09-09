@@ -428,7 +428,6 @@ class MigrateProvider extends Page implements HasTable
             ->delete();
     }
 
-
     public function apply(): void
     {
         $target = $this->resolveTarget();
