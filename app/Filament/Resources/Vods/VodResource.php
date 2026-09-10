@@ -187,7 +187,7 @@ class VodResource extends Resource implements CopilotResource
             ->toolbarActions(self::getTableBulkActions());
     }
 
-    public static function getTableColumns($showGroup = true, $showPlaylist = true): array
+    public static function getTableColumns($showGroup = true, $showPlaylist = true, $minimal = false): array
     {
         return [
             ImageColumn::make('logo')
@@ -242,7 +242,8 @@ class VodResource extends Resource implements CopilotResource
                 ->counts('failovers')
                 ->badge()
                 ->toggleable()
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             IconColumn::make('has_metadata')
                 ->label(__('Metadata'))
                 ->icon(fn ($record): string => $record->has_metadata ? 'heroicon-o-check-circle' : 'heroicon-o-minus')

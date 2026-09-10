@@ -148,11 +148,7 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
                     ->label(__('Move'))
                     ->alignCenter()
                     ->view('filament.easy-editor.channel-drag-handle'),
-                // VodResource::getTableColumns() has no $minimal param (yet), so only
-                // pass it on the live/ChannelResource path.
-                ...($this->isVod()
-                    ? $resource::getTableColumns(showGroup: false, showPlaylist: false)
-                    : $resource::getTableColumns(showGroup: false, showPlaylist: false, minimal: true)),
+                ...$resource::getTableColumns(showGroup: false, showPlaylist: false, minimal: true),
             ])
             ->filters($resource::getTableFilters(showPlaylist: false))
             ->recordActions([$editGroup, $edit], position: RecordActionsPosition::BeforeCells)
