@@ -20,7 +20,7 @@ class ManageSmtpSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'smtp';
 
-    protected static ?int $navigationSort = 7;
+    protected static ?int $navigationSort = 8;
 
     public static function getNavigationLabel(): string
     {

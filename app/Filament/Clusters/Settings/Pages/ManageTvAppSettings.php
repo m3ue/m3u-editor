@@ -35,7 +35,7 @@ class ManageTvAppSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'tv-app';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 4;
 
     public static function getNavigationLabel(): string
     {

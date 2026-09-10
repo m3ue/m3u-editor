@@ -20,7 +20,7 @@ class ManageBackupSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'backups';
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 7;
 
     public static function getNavigationLabel(): string
     {

@@ -28,7 +28,7 @@ class ManageAlertSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'alerts';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?int $navigationSort = 12;
 
     public static function getNavigationLabel(): string
     {

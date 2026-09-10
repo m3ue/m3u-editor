@@ -7,10 +7,12 @@ use App\Filament\Clusters\Settings\Pages\ManageBackupSettings;
 use App\Filament\Clusters\Settings\Pages\ManageCopilotSettings;
 use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
+use App\Filament\Clusters\Settings\Pages\ManageNavigationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageProxySettings;
 use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Clusters\Settings\Pages\ManageSyncSettings;
 use App\Filament\Clusters\Settings\Pages\ManageTvAppSettings;
+use App\Filament\Clusters\Settings\SettingsCluster;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Filament\Schemas\Components\Tabs;
@@ -19,6 +21,7 @@ use Livewire\Livewire;
 
 $allPages = [
     ManageGeneralSettings::class,
+    ManageNavigationSettings::class,
     ManageProxySettings::class,
     ManageTvAppSettings::class,
     ManageSyncSettings::class,
@@ -36,6 +39,17 @@ beforeEach(function () {
 });
 
 it('renders every settings sub-page', function (string $page) {
+    Livewire::test($page)->assertOk();
+})->with($allPages);
+
+it('renders every settings sub-page in a non-English locale', function (string $page) {
+    // Regression: a bare, dot-less __() label (e.g. __('Navigation')) collides with a
+    // same-named lang/{locale}/{group}.php translation *group* file when no exact JSON
+    // translation exists for that locale, returning an array instead of a string and
+    // crashing the page. English is unaffected because en.json carries an identity
+    // entry for every string; other locales are not guaranteed to.
+    app()->setLocale('fr');
+
     Livewire::test($page)->assertOk();
 })->with($allPages);
 
@@ -85,6 +99,13 @@ it('resolves the custom date format from the virtual fields on the general page'
             'date_format_preset' => '__custom__',
             'date_format_custom' => 'd/m/Y',
         ]);
+});
+
+it('registers the Navigation page in the Settings cluster sub-navigation', function () {
+    // SettingsCluster overrides getClusteredComponents() with an explicit list rather than
+    // relying on auto-discovery, so every new settings sub-page must be added here or it
+    // is unreachable via the Settings sidebar/sub-nav despite still being a valid route.
+    expect(SettingsCluster::getClusteredComponents())->toContain(ManageNavigationSettings::class);
 });
 
 it('hides the proxy page when the proxy integration is disabled', function () {

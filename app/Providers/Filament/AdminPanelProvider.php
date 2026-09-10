@@ -4,49 +4,10 @@ namespace App\Providers\Filament;
 
 use App\Filament\Auth\EditProfile;
 use App\Filament\Auth\Login;
-use App\Filament\Clusters\Devices\DevicesCluster;
-use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
-use App\Filament\Clusters\Settings\SettingsCluster;
 use App\Filament\CopilotTools\EpgMappingStateTool;
+use App\Filament\Navigation\AdminNavigationMenuBuilder;
 use App\Filament\Pages\Backups;
-use App\Filament\Pages\BrowseShows;
-use App\Filament\Pages\CreatePlugin;
 use App\Filament\Pages\CustomDashboard;
-use App\Filament\Pages\LogViewer;
-use App\Filament\Pages\M3uProxyStreamMonitor;
-use App\Filament\Pages\PluginsDashboard;
-use App\Filament\Pages\ReleaseLogs;
-use App\Filament\Pages\RequestContent;
-use App\Filament\Resources\AedProfiles\AedProfileResource;
-use App\Filament\Resources\Assets\AssetResource;
-use App\Filament\Resources\Categories\CategoryResource;
-use App\Filament\Resources\Channels\ChannelResource;
-use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
-use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
-use App\Filament\Resources\DvrRecordingRules\DvrRecordingRuleResource;
-use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
-use App\Filament\Resources\EpgChannels\EpgChannelResource;
-use App\Filament\Resources\EpgMaps\EpgMapResource;
-use App\Filament\Resources\Epgs\EpgResource;
-use App\Filament\Resources\Groups\GroupResource;
-use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
-use App\Filament\Resources\MergedEpgs\MergedEpgResource;
-use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
-use App\Filament\Resources\Networks\NetworkResource;
-use App\Filament\Resources\PersonalAccessTokens\PersonalAccessTokenResource;
-use App\Filament\Resources\PlaylistAuths\PlaylistAuthResource;
-use App\Filament\Resources\Playlists\PlaylistResource;
-use App\Filament\Resources\PlaylistViewers\PlaylistViewerResource;
-use App\Filament\Resources\PluginInstallReviews\PluginInstallReviewResource;
-use App\Filament\Resources\Plugins\PluginResource;
-use App\Filament\Resources\PostProcesses\PostProcessResource;
-use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
-use App\Filament\Resources\Series\SeriesResource;
-use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
-use App\Filament\Resources\StreamProfiles\StreamProfileResource;
-use App\Filament\Resources\Users\UserResource;
-use App\Filament\Resources\VodGroups\VodGroupResource;
-use App\Filament\Resources\Vods\VodResource;
 use App\Filament\Widgets\ActiveStreamsWidget;
 use App\Filament\Widgets\ContentBreakdownChart;
 use App\Filament\Widgets\DvrStorageOverviewWidget;
@@ -82,8 +43,6 @@ use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationBuilder;
-use Filament\Navigation\NavigationGroup;
-use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -183,115 +142,14 @@ class AdminPanelProvider extends PanelProvider
             ->pages([
                 CustomDashboard::class,
             ])
-            // Explicit navigation replaces auto-discovery. When adding a new Resource or Page,
-            // register its getNavigationItems() call in the appropriate group below, or it
-            // will not appear in the sidebar.
-            ->navigation(function (NavigationBuilder $builder) use ($settings): NavigationBuilder {
-                return $builder
-                    ->items([
-                        ...CustomDashboard::getNavigationItems(),
-                    ])
-                    ->groups([
-                        ...($this->isAdmin() ? [
-                            NavigationGroup::make(fn () => __('Administration'))
-                                ->icon('heroicon-s-shield-check')
-                                ->items([
-                                    ...(config('auth.auto_login') ? [] : UserResource::getNavigationItems()),
-                                    ...(($settings['push_relay_enabled'] || $settings['device_pairing_enabled']) ? DevicesCluster::getNavigationItems() : []),
-                                    ...SettingsCluster::getNavigationItems(),
-                                ]),
-                        ] : []),
-                        NavigationGroup::make(fn () => __('Playlist'))
-                            ->icon('heroicon-m-play-pause')
-                            ->items([
-                                ...PlaylistResource::getNavigationItems(),
-                                ...CustomPlaylistResource::getNavigationItems(),
-                                ...MergedPlaylistResource::getNavigationItems(),
-                                ...PlaylistAliasesCluster::getNavigationItems(),
-                                ...PlaylistViewerResource::getNavigationItems(),
-                                ...PlaylistAuthResource::getNavigationItems(),
-                                ...StreamFileSettingResource::getNavigationItems(),
-                                ...ChannelScrubberResource::getNavigationItems(),
-                            ]),
-                        ...(auth()->user()?->canUseDvr() ? [
-                            NavigationGroup::make(fn () => __('DVR'))
-                                ->icon('heroicon-m-video-camera')
-                                ->items([
-                                    ...DvrRecordingResource::getNavigationItems(),
-                                    ...DvrRecordingRuleResource::getNavigationItems(),
-                                    ...BrowseShows::getNavigationItems(),
-                                ]),
-                        ] : []),
-                        NavigationGroup::make(fn () => __('Integrations'))
-                            ->icon('heroicon-m-server-stack')
-                            ->items([
-                                ...MediaServerIntegrationResource::getNavigationItems(),
-                                ...RequestContent::getNavigationItems(),
-                                ...(config('proxy.proxy_integration_enabled', true) ? NetworkResource::getNavigationItems() : []),
-                            ]),
-                        NavigationGroup::make(fn () => __('Live Channels'))
-                            ->icon('heroicon-m-tv')
-                            ->items([
-                                ...GroupResource::getNavigationItems(),
-                                ...ChannelResource::getNavigationItems(),
-                            ]),
-                        NavigationGroup::make(fn () => __('VOD Channels'))
-                            ->icon('heroicon-m-film')
-                            ->items([
-                                ...VodGroupResource::getNavigationItems(),
-                                ...VodResource::getNavigationItems(),
-                            ]),
-                        NavigationGroup::make(fn () => __('Series'))
-                            ->icon('heroicon-m-play')
-                            ->items([
-                                ...CategoryResource::getNavigationItems(),
-                                ...SeriesResource::getNavigationItems(),
-                            ]),
-                        NavigationGroup::make(fn () => __('EPG'))
-                            ->icon('heroicon-m-calendar-days')
-                            ->items([
-                                ...EpgResource::getNavigationItems(),
-                                ...MergedEpgResource::getNavigationItems(),
-                                ...EpgChannelResource::getNavigationItems(),
-                                ...EpgMapResource::getNavigationItems(),
-                                ...AedProfileResource::getNavigationItems(),
-                            ]),
-                        ...(config('proxy.proxy_integration_enabled', true) && auth()->user()?->canUseProxy() ? [
-                            NavigationGroup::make(fn () => __('Proxy'))
-                                ->icon('heroicon-m-arrows-right-left')
-                                ->items([
-                                    ...StreamProfileResource::getNavigationItems(),
-                                    ...M3uProxyStreamMonitor::getNavigationItems(),
-                                ]),
-                        ] : []),
-                        NavigationGroup::make(fn () => __('Plugins'))
-                            ->icon('heroicon-m-puzzle-piece')
-                            ->items([
-                                ...PluginsDashboard::getNavigationItems(),
-                                ...PluginResource::getNavigationItems(),
-                                ...PluginInstallReviewResource::getNavigationItems(),
-                                ...CreatePlugin::getNavigationItems(),
-                            ]),
-                        NavigationGroup::make(fn () => __('Tools'))
-                            ->collapsed()
-                            ->icon('heroicon-m-wrench-screwdriver')
-                            ->items([
-                                ...PersonalAccessTokenResource::getNavigationItems(),
-                                ...AssetResource::getNavigationItems(),
-                                ...PostProcessResource::getNavigationItems(),
-                                ...LogViewer::getNavigationItems(),
-                                ...ReleaseLogs::getNavigationItems(),
-                                ...Backups::getNavigationItems(),
-                                ...QueueMonitorResource::getNavigationItems(),
-                                NavigationItem::make('API Docs')
-                                    ->label(fn () => __('API Docs').' ↗')
-                                    ->url('/docs/api', shouldOpenInNewTab: true)
-                                    ->sort(9)
-                                    ->icon(null)
-                                    ->visible($this->isAdmin(...)),
-                            ]),
-                    ]);
-            })
+            // Navigation content (names/icons/conditions) is defined in
+            // AdminNavigationSchema; final order/visibility per request is
+            // resolved by AdminNavigationMenuBuilder, layering the
+            // admin-configured layout (Settings > Navigation) on top. When
+            // adding a new Resource or Page, register its
+            // getNavigationItems() call in AdminNavigationSchema, or it will
+            // not appear in the sidebar.
+            ->navigation(fn (NavigationBuilder $builder): NavigationBuilder => app(AdminNavigationMenuBuilder::class)->build($builder, $settings))
             ->breadcrumbs($settings['show_breadcrumbs'])
             ->widgets([
                 // Ordering is driven by this array.
