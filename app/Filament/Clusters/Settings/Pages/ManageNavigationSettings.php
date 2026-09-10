@@ -13,6 +13,7 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
@@ -111,18 +112,24 @@ class ManageNavigationSettings extends BaseSettingsPage
      */
     private function rowSchema(bool $nested = false): array
     {
+        // Icon/label and the visibility toggle share one narrow row (a Grid) instead of
+        // stacking, since the only thing an admin actually edits per row is visibility.
         $schema = [
             Hidden::make('key'),
             Hidden::make('label'),
             Hidden::make('icon'),
-            View::make('filament.forms.components.nav-item-label')
-                ->viewData(fn (Get $get): array => [
-                    'icon' => $get('icon'),
-                    'label' => $get('label'),
+            Grid::make(12)
+                ->schema([
+                    View::make('filament.forms.components.nav-item-label')
+                        ->viewData(fn (Get $get): array => [
+                            'icon' => $get('icon'),
+                            'label' => $get('label'),
+                        ])
+                        ->columnSpan(10),
+                    Toggle::make('visible')
+                        ->label(__('Visible'))
+                        ->columnSpan(2),
                 ]),
-            Toggle::make('visible')
-                ->label(__('Visible'))
-                ->inline(false),
         ];
 
         if (! $nested) {
