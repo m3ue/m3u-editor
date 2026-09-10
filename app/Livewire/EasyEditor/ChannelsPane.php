@@ -1,0 +1,149 @@
+<?php
+
+namespace App\Livewire\EasyEditor;
+
+use App\Filament\Resources\Channels\ChannelResource;
+use App\Filament\Resources\Vods\VodResource;
+use App\Models\Channel;
+use App\Models\Group;
+use Filament\Actions\Action;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
+use Filament\Forms\Concerns\InteractsWithForms;
+use Filament\Forms\Contracts\HasForms;
+use Filament\Notifications\Notification;
+use Filament\Tables\Columns\ViewColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Table;
+use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
+use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
+use Livewire\Component;
+
+/**
+ * Right pane of the Easy Editor: the channels for the selected group, scoped to
+ * Live or VOD. Columns, filters, row actions and bulk actions are the exact
+ * ones from ChannelResource / VodResource so edits behave identically to the
+ * full screens. Only ever renders for a single group, keeping the list (and the
+ * drag-sort) to a manageable size.
+ */
+class ChannelsPane extends Component implements HasActions, HasForms, HasTable
+{
+    use InteractsWithActions;
+    use InteractsWithForms;
+    use InteractsWithTable;
+
+    #[Locked]
+    public ?int $playlistId = null;
+
+    /** "live" or "vod". */
+    #[Locked]
+    public string $contentType = 'live';
+
+    #[Locked]
+    public ?int $selectedGroupId = null;
+
+    public function mount(?int $playlistId = null, string $contentType = 'live', ?int $selectedGroupId = null): void
+    {
+        $this->playlistId = $playlistId;
+        $this->contentType = in_array($contentType, ['live', 'vod'], true) ? $contentType : 'live';
+        $this->selectedGroupId = $selectedGroupId;
+    }
+
+    public function render(): View
+    {
+        return view('livewire.easy-editor.channels-pane');
+    }
+
+    #[On('easy-editor-channels-changed')]
+    public function onChannelsChanged(): void
+    {
+        $this->resetTable();
+    }
+
+    protected function isVod(): bool
+    {
+        return $this->contentType === 'vod';
+    }
+
+    /**
+     * @return class-string<ChannelResource|VodResource>
+     */
+    protected function resourceClass(): string
+    {
+        return $this->isVod() ? VodResource::class : ChannelResource::class;
+    }
+
+    protected function baseQuery(): Builder
+    {
+        return Channel::query()
+            ->where('channels.user_id', auth()->id())
+            ->where('is_vod', $this->isVod())
+            ->when(
+                $this->playlistId && $this->selectedGroupId,
+                fn (Builder $query): Builder => $query
+                    ->where('playlist_id', $this->playlistId)
+                    ->where('group_id', $this->selectedGroupId),
+                fn (Builder $query): Builder => $query->whereRaw('1 = 0'),
+            )
+            ->with([
+                'epgChannel' => fn ($q) => $q->select('id', 'epg_id', 'name', 'icon', 'icon_custom')->with('epg'),
+                'aedProfile' => fn ($q) => $q->select('id', 'name'),
+                'playlist' => fn ($q) => $q->select('id', 'name', 'uuid', 'auto_sort', 'enable_proxy', 'user_id')
+                    ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
+                'customPlaylist' => fn ($q) => $q->select('id', 'name', 'uuid', 'enable_proxy', 'user_id')
+                    ->with(['user' => fn ($uq) => $uq->select('id', 'is_admin', 'permissions')]),
+                'streamProfile' => fn ($q) => $q->select('id', 'name'),
+            ])
+            ->withCount(['failovers']);
+    }
+
+    public function table(Table $table): Table
+    {
+        $resource = $this->resourceClass();
+        $groupName = $this->selectedGroupId
+            ? Group::query()->whereKey($this->selectedGroupId)->value('name')
+            : null;
+
+        return $table
+            ->query(fn (): Builder => $this->baseQuery())
+            ->heading($groupName)
+            ->persistFiltersInSession()
+            ->persistSortInSession()
+            ->filtersTriggerAction(fn (Action $action): Action => $action->button()->label(__('Filters')))
+            ->paginated([25, 50, 100])
+            ->defaultPaginationPageOption(25)
+            ->reorderable('sort')
+            ->defaultSort('sort')
+            ->reorderRecordsTriggerAction(fn (Action $action): Action => $action->button()->label(__('Sort')))
+            ->columns([
+                ViewColumn::make('easy_editor_drag')
+                    ->label(__('Move'))
+                    ->alignCenter()
+                    ->view('filament.easy-editor.channel-drag-handle'),
+                ...$resource::getTableColumns(showGroup: false, showPlaylist: false),
+            ])
+            ->filters($resource::getTableFilters(showPlaylist: false))
+            ->recordActions($resource::getTableActions(), position: RecordActionsPosition::BeforeCells)
+            ->toolbarActions($resource::getTableBulkActions())
+            ->headerActions([
+                Action::make('createCustomChannel')
+                    ->label(__('New Channel'))
+                    ->icon('heroicon-o-plus')
+                    ->button()
+                    ->modalHeading(__('New Custom Channel'))
+                    ->modalDescription(__('NOTE: Custom channels need to be associated with a Playlist or Custom Playlist.'))
+                    ->slideOver()
+                    ->schema(fn (): array => $resource::getForm())
+                    ->action(function (array $data) use ($resource): void {
+                        $resource::createCustomChannel(data: $data, model: Channel::class);
+
+                        Notification::make()->success()->title(__('Channel created'))->send();
+                        $this->resetTable();
+                    }),
+            ]);
+    }
+}

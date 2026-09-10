@@ -12,6 +12,7 @@ use App\Filament\Pages\Backups;
 use App\Filament\Pages\BrowseShows;
 use App\Filament\Pages\CreatePlugin;
 use App\Filament\Pages\CustomDashboard;
+use App\Filament\Pages\EasyEditor;
 use App\Filament\Pages\LogViewer;
 use App\Filament\Pages\M3uProxyStreamMonitor;
 use App\Filament\Pages\PluginsDashboard;
@@ -204,6 +205,7 @@ class AdminPanelProvider extends PanelProvider
                         NavigationGroup::make(fn () => __('Playlist'))
                             ->icon('heroicon-m-play-pause')
                             ->items([
+                                // ...EasyEditor::getNavigationItems(),
                                 ...PlaylistResource::getNavigationItems(),
                                 ...CustomPlaylistResource::getNavigationItems(),
                                 ...MergedPlaylistResource::getNavigationItems(),
