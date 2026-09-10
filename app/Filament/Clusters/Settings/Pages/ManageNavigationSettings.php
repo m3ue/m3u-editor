@@ -101,6 +101,7 @@ class ManageNavigationSettings extends BaseSettingsPage
                     ->reorderableWithButtons()
                     ->addable(false)
                     ->deletable(false)
+                    ->collapsible()
                     ->itemLabel(fn (array $state): ?string => $state['label'] ?? null)
                     ->schema($this->rowSchema())
                     ->columnSpanFull(),
@@ -114,6 +115,9 @@ class ManageNavigationSettings extends BaseSettingsPage
     {
         // Icon/label and the visibility toggle share one narrow row (a Grid) instead of
         // stacking, since the only thing an admin actually edits per row is visibility.
+        // The toggle is only made live() at the group level, where it needs to hide the
+        // nested items when the group itself is turned off - toggling a leaf item needs
+        // no reactivity, so it stays a plain (non-live) field there.
         $schema = [
             Hidden::make('key'),
             Hidden::make('label'),
@@ -128,6 +132,7 @@ class ManageNavigationSettings extends BaseSettingsPage
                         ->columnSpan(10),
                     Toggle::make('visible')
                         ->label(__('Visible'))
+                        ->live(! $nested)
                         ->columnSpan(2),
                 ]),
         ];
@@ -139,8 +144,11 @@ class ManageNavigationSettings extends BaseSettingsPage
                 ->reorderableWithButtons()
                 ->addable(false)
                 ->deletable(false)
+                ->collapsible()
                 ->itemLabel(fn (array $state): ?string => $state['label'] ?? null)
                 ->schema($this->rowSchema(nested: true))
+                // A disabled group's items are irrelevant until it's turned back on.
+                ->hidden(fn (Get $get): bool => ! $get('visible'))
                 ->columnSpanFull();
         }
 

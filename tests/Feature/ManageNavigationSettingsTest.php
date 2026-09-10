@@ -44,6 +44,20 @@ it('saves a hidden group and reordered items as a custom layout', function () {
         ->and($settings->admin_nav_layout['items']['playlist']['order'][0])->toBe('custom_playlists');
 });
 
+it('hides a group\'s items in the editor once the group toggle is turned off', function () {
+    $component = Livewire::test(ManageNavigationSettings::class);
+
+    $groups = $component->get('data.groups');
+    $toolsKey = collect($groups)->search(fn (array $group) => $group['key'] === 'tools');
+    $firstToolsItemLabel = collect($groups[$toolsKey]['items'])->first()['label'];
+
+    $component->assertSee($firstToolsItemLabel);
+
+    $component->set("data.groups.{$toolsKey}.visible", false);
+
+    $component->assertDontSee($firstToolsItemLabel);
+});
+
 it('restores the default layout, clearing any stored customization', function () {
     $settings = app(GeneralSettings::class);
     $settings->admin_nav_layout = ['groups' => ['order' => [], 'hidden' => ['tools']], 'items' => []];
