@@ -7,6 +7,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -26,6 +27,11 @@ class EasyEditor extends Page
     protected string $view = 'filament.pages.easy-editor';
 
     protected static ?int $navigationSort = 1;
+
+    public function getSubheading(): string|Htmlable|null
+    {
+        return __('Use the sort buttons on the tables to enable drag-and-drop sorting. Sort groups and channels as needed to define the output order of your playlist.');
+    }
 
     #[Url]
     public ?int $playlistId = null;

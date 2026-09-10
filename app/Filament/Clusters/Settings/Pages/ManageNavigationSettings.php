@@ -12,6 +12,7 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
@@ -44,7 +45,6 @@ class ManageNavigationSettings extends BaseSettingsPage
     protected function getHeaderActions(): array
     {
         return [
-            ...parent::getHeaderActions(),
             Action::make('restore_default')
                 ->label(__('Restore Default'))
                 ->icon('heroicon-o-arrow-uturn-left')
@@ -67,17 +67,16 @@ class ManageNavigationSettings extends BaseSettingsPage
                         ->send();
                 }),
             Action::make('restore_simplified_default')
-                ->label(__('Restore Simplified Default'))
+                ->label(__('Use Simplified Default'))
                 ->icon('heroicon-o-sparkles')
                 ->color('gray')
                 ->requiresConfirmation()
-                ->modalHeading(__('Restore Simplified Default navigation'))
+                ->modalHeading(__('Use Simplified Default navigation'))
                 ->modalDescription(__('This applies the Simplified Default navigation layout for all users.'))
-                ->modalSubmitActionLabel(__('Restore Simplified Default'))
+                ->modalSubmitActionLabel(__('Use Simplified Default'))
                 ->action(function (): void {
                     $settings = app(GeneralSettings::class);
-                    $settings->admin_nav_layout = $settings->admin_nav_simplified_layout
-                        ?: AdminNavigationLayout::canonicalSnapshot($this->resolvePanelSettings($settings->toArray()));
+                    $settings->admin_nav_layout = AdminNavigationLayout::simplifiedDefault($this->resolvePanelSettings($settings->toArray()));
                     $settings->admin_nav_active_preset = 'simplified';
                     $settings->save();
 
@@ -95,6 +94,10 @@ class ManageNavigationSettings extends BaseSettingsPage
     {
         return $schema
             ->components([
+                Callout::make()
+                    ->info()
+                    ->columnSpanFull()
+                    ->description(__('Drag and drop to reorder groups and items. Toggle visibility to hide or show them. You will need to refresh the page to see the changes take effect.')),
                 Repeater::make('groups')
                     ->hiddenLabel()
                     ->reorderable()
@@ -166,7 +169,7 @@ class ManageNavigationSettings extends BaseSettingsPage
 
         $layout = $data['admin_nav_layout'] ?: (
             ($data['admin_nav_active_preset'] ?? null) === 'simplified'
-                ? ($data['admin_nav_simplified_layout'] ?? [])
+                ? AdminNavigationLayout::simplifiedDefault($panelSettings)
                 : []
         );
         $layout ??= [];
@@ -234,6 +237,22 @@ class ManageNavigationSettings extends BaseSettingsPage
         $groups = $data['groups'] ?? [];
         unset($data['groups']);
 
+        $data['admin_nav_layout'] = $this->buildLayout($groups);
+        $data['admin_nav_active_preset'] = 'custom';
+
+        return $data;
+    }
+
+    /**
+     * Collapse the editor's repeater rows back into the stored
+     * order/hidden shape, for both the live layout and the Simplified
+     * Default preset snapshot.
+     *
+     * @param  list<array{key: string, visible: bool, items?: list<array{key: string, visible: bool}>}>  $groups
+     * @return array{groups: array{order: list<string>, hidden: list<string>}, items: array<string, array{order: list<string>, hidden: list<string>}>}
+     */
+    private function buildLayout(array $groups): array
+    {
         $layout = [
             'groups' => [
                 'order' => array_column($groups, 'key'),
@@ -251,10 +270,7 @@ class ManageNavigationSettings extends BaseSettingsPage
             ];
         }
 
-        $data['admin_nav_layout'] = $layout;
-        $data['admin_nav_active_preset'] = 'custom';
-
-        return $data;
+        return $layout;
     }
 
     /**

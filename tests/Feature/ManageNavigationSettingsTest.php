@@ -74,7 +74,7 @@ it('restores the default layout, clearing any stored customization', function ()
         ->and($settings->admin_nav_active_preset)->toBe('default');
 });
 
-it('applies the simplified default layout as a clone of the canonical order', function () {
+it('applies the shipped simplified default layout via the Use Simplified Default action', function () {
     Livewire::test(ManageNavigationSettings::class)
         ->callAction('restore_simplified_default')
         ->assertNotified();
@@ -82,5 +82,5 @@ it('applies the simplified default layout as a clone of the canonical order', fu
     $settings = app(GeneralSettings::class)->refresh();
 
     expect($settings->admin_nav_active_preset)->toBe('simplified')
-        ->and($settings->admin_nav_layout['groups']['order'])->not->toBeEmpty();
+        ->and($settings->admin_nav_layout['groups']['hidden'])->toContain('dvr', 'plugins');
 });

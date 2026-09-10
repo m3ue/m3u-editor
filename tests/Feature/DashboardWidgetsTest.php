@@ -50,7 +50,7 @@ it('exposes quick actions in the dashboard header, gated by role', function () {
     $this->actingAs(User::factory()->create());
 
     Livewire::test(CustomDashboard::class)
-        ->assertActionExists('new_playlist')
+        ->assertActionExists('manage_playlists')
         ->assertActionExists('playlists')
         ->assertActionExists('epgs')
         ->assertActionDoesNotExist('backups')
@@ -60,7 +60,7 @@ it('exposes quick actions in the dashboard header, gated by role', function () {
     $this->actingAs(User::factory()->admin()->create());
 
     Livewire::test(CustomDashboard::class)
-        ->assertActionExists('new_playlist')
+        ->assertActionExists('manage_playlists')
         ->assertActionExists('backups')
         ->assertActionExists('logs')
         ->assertActionExists('settings');

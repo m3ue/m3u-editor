@@ -316,8 +316,8 @@ class GeneralSettings extends Settings
     public ?bool $device_pairing_enabled = true;
 
     // Admin-managed navigation menu (Settings > Navigation) - global, applies to all users.
-    // 'default' | 'simplified' | 'custom'. Informational only: drives which "Restore"
-    // action is highlighted in the UI.
+    // 'default' | 'simplified' | 'custom'. Informational only: records which preset the
+    // live admin_nav_layout last came from.
     public ?string $admin_nav_active_preset = 'default';
 
     /**
@@ -327,12 +327,6 @@ class GeneralSettings extends Settings
      * Shape: ['groups' => ['order' => [...], 'hidden' => [...]], 'items' => ['<group_key>' => ['order' => [...], 'hidden' => [...]]]].
      */
     public ?array $admin_nav_layout = null;
-
-    /**
-     * Stored "Simplified Default" template, same shape as admin_nav_layout.
-     * Null means it has not been customized yet (falls back to a clone of the canonical order).
-     */
-    public ?array $admin_nav_simplified_layout = null;
 
     public static function group(): string
     {

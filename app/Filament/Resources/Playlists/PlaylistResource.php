@@ -413,8 +413,8 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('manager')
                     ->label(__('Manage'))
                     ->color('gray')
-                    ->tooltip(__('Easy editor page to manage groups and channels in one place'))
-                    ->icon('heroicon-m-cog')
+                    ->tooltip(__('Use easy editor to manage groups and channels in one place'))
+                    ->icon('heroicon-m-sparkles')
                     ->url(fn ($record): string => EasyEditor::getUrl(['playlistId' => $record->getKey()]))
                     ->button()->hiddenLabel()->size('sm'),
                 ViewAction::make()

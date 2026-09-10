@@ -13,9 +13,5 @@ return new class extends SettingsMigration
         if (! $this->migrator->exists('general.admin_nav_layout')) {
             $this->migrator->add('general.admin_nav_layout', null);
         }
-
-        if (! $this->migrator->exists('general.admin_nav_simplified_layout')) {
-            $this->migrator->add('general.admin_nav_simplified_layout', null);
-        }
     }
 };

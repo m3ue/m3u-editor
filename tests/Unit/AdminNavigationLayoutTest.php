@@ -43,6 +43,43 @@ it('builds a canonical snapshot matching the schema order with nothing hidden', 
         ->and($snapshot['items']['playlist']['hidden'])->toBe([]);
 });
 
+it('builds the shipped simplified default from the schema, keyed by every group', function () {
+    $simplified = AdminNavigationLayout::simplifiedDefault(defaultPanelSettings());
+    $schema = AdminNavigationSchema::groups(defaultPanelSettings());
+
+    // Group order is always a permutation of the canonical keys, and every group
+    // has an items entry, so the preset never drops a group the schema still defines.
+    expect($simplified['groups']['order'])->toEqualCanonicalizing(array_keys($schema))
+        ->and(array_keys($simplified['items']))->toEqualCanonicalizing(array_keys($schema))
+        ->and($simplified['groups']['hidden'])->each->toBeIn($simplified['groups']['order']);
+});
+
+it('ships a simplified default that hides the curated groups and items', function () {
+    $simplified = AdminNavigationLayout::simplifiedDefault(defaultPanelSettings());
+
+    expect($simplified['groups']['hidden'])->toEqualCanonicalizing(['dvr', 'plugins'])
+        // Integrations sits below EPG in the curated preset, not at its canonical position.
+        ->and(array_search('integrations', $simplified['groups']['order'], true))
+        ->toBeGreaterThan(array_search('epg', $simplified['groups']['order'], true))
+        ->and($simplified['items']['playlist']['hidden'])->toContain('channel_scrubbers', 'merged_playlists')
+        ->and($simplified['items']['integrations']['hidden'])->toContain('request_content', 'networks')
+        ->and($simplified['items']['epg']['hidden'])->toContain('merged_epgs', 'epg_channels')
+        ->and($simplified['items']['tools']['hidden'])->toContain('api_docs', 'queue_monitor')
+        // Groups/items not named in the curated preset stay visible.
+        ->and($simplified['items']['live_channels']['hidden'])->toBe([])
+        ->and($simplified['items']['playlist']['hidden'])->not->toContain('playlists', 'playlist_auths');
+});
+
+it('falls back to the shipped simplified default when the preset is simplified but no layout is stored', function () {
+    $settings = app(GeneralSettings::class);
+    $settings->admin_nav_active_preset = 'simplified';
+    $settings->admin_nav_layout = null;
+    $settings->save();
+
+    expect(AdminNavigationLayout::resolveActive())
+        ->toBe(AdminNavigationLayout::simplifiedDefault(defaultPanelSettings()));
+});
+
 it('renders the canonical default order for an admin when nothing is stored', function () {
     $this->actingAs(User::factory()->admin()->create());
 
