@@ -131,6 +131,16 @@ it('moves a channel into another group via the drag drop handler', function () {
         ->and($this->channelA->fresh()->group)->toBe($this->groupB->name);
 });
 
+it('starts the channels table on page 1 even with a stale page param in the url', function () {
+    Livewire::withQueryParams(['easyEditorChannelsPage' => 7])
+        ->test(ChannelsPane::class, [
+            'playlistId' => $this->playlist->id,
+            'contentType' => 'live',
+            'selectedGroupId' => $this->groupA->id,
+        ])
+        ->assertSet('paginators.easyEditorChannelsPage', 1);
+});
+
 it('keeps the two pane tables from sharing query-string keys', function () {
     $groups = Livewire::test(GroupsPane::class, ['playlistId' => $this->playlist->id, 'contentType' => 'live']);
     $channels = Livewire::test(ChannelsPane::class, [

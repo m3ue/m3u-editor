@@ -36,6 +36,9 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
     use InteractsWithForms;
     use InteractsWithTable;
 
+    /** Table query-string identifier; the paginator page name is this + "Page". */
+    private const QUERY_STRING_IDENTIFIER = 'easyEditorChannels';
+
     #[Locked]
     public ?int $playlistId = null;
 
@@ -51,6 +54,12 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
         $this->playlistId = $playlistId;
         $this->contentType = in_array($contentType, ['live', 'vod'], true) ? $contentType : 'live';
         $this->selectedGroupId = $selectedGroupId;
+
+        // The parent keys this component by group id, so a group switch remounts it.
+        // Force page 1 here: Laravel's paginator resolver still reads a stale
+        // ?easyEditorChannelsPage=N from the URL even with URL sync disabled, which
+        // would otherwise land the new group's list on a page that doesn't exist.
+        $this->paginators[self::QUERY_STRING_IDENTIFIER.'Page'] = 1;
     }
 
     public function render(): View
@@ -126,7 +135,7 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
             ->query(fn (): Builder => $this->baseQuery())
             // Distinct identifier so this table's page/search/sort/filter query-string
             // keys don't collide with the groups pane's table on the same page.
-            ->queryStringIdentifier('easyEditorChannels')
+            ->queryStringIdentifier(self::QUERY_STRING_IDENTIFIER)
             ->heading($groupName)
             ->filtersTriggerAction(fn (Action $action): Action => $action->button()->label(__('Filters')))
             ->paginated([25, 50, 100])
@@ -139,7 +148,11 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
                     ->label(__('Move'))
                     ->alignCenter()
                     ->view('filament.easy-editor.channel-drag-handle'),
-                ...$resource::getTableColumns(showGroup: false, showPlaylist: false, minimal: true),
+                // VodResource::getTableColumns() has no $minimal param (yet), so only
+                // pass it on the live/ChannelResource path.
+                ...($this->isVod()
+                    ? $resource::getTableColumns(showGroup: false, showPlaylist: false)
+                    : $resource::getTableColumns(showGroup: false, showPlaylist: false, minimal: true)),
             ])
             ->filters($resource::getTableFilters(showPlaylist: false))
             ->recordActions([$editGroup, $edit], position: RecordActionsPosition::BeforeCells)

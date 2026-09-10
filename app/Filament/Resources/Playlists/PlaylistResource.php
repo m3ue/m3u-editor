@@ -9,6 +9,7 @@ use App\Filament\Actions\CronHelperAction;
 use App\Filament\Actions\ModalActionGroup;
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Pages\EasyEditor;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Playlists\Pages\CreatePlaylist;
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
@@ -409,6 +410,13 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalHeading(fn ($record) => 'Actions for '.$record->name)
                     ->schema(self::getPlaylistActionSchema())->button()->hiddenLabel()->size('sm'),
                 EditAction::make()->button()->hiddenLabel()->size('sm'),
+                Action::make('manager')
+                    ->label(__('Manage'))
+                    ->color('gray')
+                    ->tooltip(__('Easy editor page to manage groups and channels in one place'))
+                    ->icon('heroicon-m-cog')
+                    ->url(fn ($record): string => EasyEditor::getUrl(['playlistId' => $record->getKey()]))
+                    ->button()->hiddenLabel()->size('sm'),
                 ViewAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)

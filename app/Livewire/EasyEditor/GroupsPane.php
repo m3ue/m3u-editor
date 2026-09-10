@@ -46,6 +46,9 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
     use InteractsWithForms;
     use InteractsWithTable;
 
+    /** Table query-string identifier; the paginator page name is this + "Page". */
+    private const QUERY_STRING_IDENTIFIER = 'easyEditorGroups';
+
     #[Locked]
     public ?int $playlistId = null;
 
@@ -60,6 +63,11 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
         $this->playlistId = $playlistId;
         $this->contentType = in_array($contentType, ['live', 'vod'], true) ? $contentType : 'live';
         $this->selectedGroupId = $selectedGroupId;
+
+        // The parent keys this component by playlist + content type, so either
+        // switch remounts it - force page 1 so a stale ?easyEditorGroupsPage=N in
+        // the URL can't land the new list on a page that doesn't exist.
+        $this->paginators[self::QUERY_STRING_IDENTIFIER.'Page'] = 1;
     }
 
     public function render(): View
@@ -113,7 +121,7 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
             ->query(fn (): Builder => $this->baseQuery())
             // Distinct identifier so this table's page/search/sort/filter query-string
             // keys don't collide with the channels pane's table on the same page.
-            ->queryStringIdentifier('easyEditorGroups')
+            ->queryStringIdentifier(self::QUERY_STRING_IDENTIFIER)
             ->reorderable('sort_order')
             ->defaultSort('sort_order', 'asc')
             ->paginated([25, 50, 100])
