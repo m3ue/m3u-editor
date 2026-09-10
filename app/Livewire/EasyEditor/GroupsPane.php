@@ -5,6 +5,7 @@ namespace App\Livewire\EasyEditor;
 use App\Facades\SortFacade;
 use App\Filament\Resources\Groups\GroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
+use App\Livewire\EasyEditor\Concerns\ReordersVisiblePage;
 use App\Models\Channel;
 use App\Models\Group;
 use Filament\Actions\Action;
@@ -44,7 +45,9 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
 {
     use InteractsWithActions;
     use InteractsWithForms;
-    use InteractsWithTable;
+    use InteractsWithTable, ReordersVisiblePage {
+        ReordersVisiblePage::reorderTable insteadof InteractsWithTable;
+    }
 
     /** Table query-string identifier; the paginator page name is this + "Page". */
     private const QUERY_STRING_IDENTIFIER = 'easyEditorGroups';
@@ -123,6 +126,7 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
             // keys don't collide with the channels pane's table on the same page.
             ->queryStringIdentifier(self::QUERY_STRING_IDENTIFIER)
             ->reorderable('sort_order')
+            ->paginatedWhileReordering()
             ->defaultSort('sort_order', 'asc')
             ->paginated([25, 50, 100])
             ->defaultPaginationPageOption(25)

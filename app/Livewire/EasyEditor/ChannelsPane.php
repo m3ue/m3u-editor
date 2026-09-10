@@ -4,6 +4,7 @@ namespace App\Livewire\EasyEditor;
 
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\Vods\VodResource;
+use App\Livewire\EasyEditor\Concerns\ReordersVisiblePage;
 use App\Models\Channel;
 use App\Models\Group;
 use Filament\Actions\Action;
@@ -34,7 +35,9 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
 {
     use InteractsWithActions;
     use InteractsWithForms;
-    use InteractsWithTable;
+    use InteractsWithTable, ReordersVisiblePage {
+        ReordersVisiblePage::reorderTable insteadof InteractsWithTable;
+    }
 
     /** Table query-string identifier; the paginator page name is this + "Page". */
     private const QUERY_STRING_IDENTIFIER = 'easyEditorChannels';
@@ -141,6 +144,10 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
             ->paginated([25, 50, 100])
             ->defaultPaginationPageOption(25)
             ->reorderable('sort')
+            // Keep the list paginated during drag-reorder; a group can hold
+            // thousands of channels and rendering them all at once hangs the tab.
+            // ReordersVisiblePage rewrites only the visible page's sort slots.
+            ->paginatedWhileReordering()
             ->defaultSort('sort')
             ->reorderRecordsTriggerAction(fn (Action $action): Action => $action->button()->label(__('Sort')))
             ->columns([
