@@ -19,6 +19,7 @@ use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
 use App\Services\GenreGroupReclassifyService;
+use App\Services\GroupChannelStateService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Services\TmdbService;
@@ -483,11 +484,8 @@ class VodGroupResource extends Resource implements CopilotResource
 
                     Action::make('enable')
                         ->label(__('Enable group channels'))
-                        ->action(function ($record): void {
-                            $record->channels()->update([
-                                'enabled' => true,
-                            ]);
-                        })->after(function () {
+                        ->action(fn (Group $record) => app(GroupChannelStateService::class)->enable($record))
+                        ->after(function () {
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels enabled'))
@@ -502,11 +500,8 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->modalSubmitActionLabel(__('Yes, enable now')),
                     Action::make('disable')
                         ->label(__('Disable group channels'))
-                        ->action(function ($record): void {
-                            $record->channels()->update([
-                                'enabled' => false,
-                            ]);
-                        })->after(function () {
+                        ->action(fn (Group $record) => app(GroupChannelStateService::class)->disable($record))
+                        ->after(function () {
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels disabled'))

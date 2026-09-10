@@ -141,10 +141,13 @@ it('starts the channels table on page 1 even with a stale page param in the url'
         ->assertSet('paginators.easyEditorChannelsPage', 1);
 });
 
-it('reorders only the given rows and reuses their existing sort slots', function () {
+it('reorders only the dragged page slice, leaving the rest of the group in place', function () {
+    $group = Group::factory()->for($this->user)->for($this->playlist)
+        ->create(['name' => 'Reorder Group', 'type' => 'live']);
+
     $channels = collect([10, 20, 30, 40, 50])->map(fn (int $sort) => Channel::factory()
         ->for($this->user)->for($this->playlist)
-        ->create(['group_id' => $this->groupA->id, 'is_vod' => false, 'sort' => $sort]));
+        ->create(['group_id' => $group->id, 'is_vod' => false, 'sort' => $sort]));
 
     // Reverse the middle three only (as one paginated page would); the outer two stay put.
     [$a, $b, $c, $d, $e] = $channels->all();
@@ -152,14 +155,41 @@ it('reorders only the given rows and reuses their existing sort slots', function
     Livewire::test(ChannelsPane::class, [
         'playlistId' => $this->playlist->id,
         'contentType' => 'live',
-        'selectedGroupId' => $this->groupA->id,
+        'selectedGroupId' => $group->id,
     ])->call('reorderTable', [$d->id, $c->id, $b->id]);
 
-    expect((float) $a->fresh()->sort)->toBe(10.0)
-        ->and((float) $d->fresh()->sort)->toBe(20.0)
-        ->and((float) $c->fresh()->sort)->toBe(30.0)
-        ->and((float) $b->fresh()->sort)->toBe(40.0)
-        ->and((float) $e->fresh()->sort)->toBe(50.0);
+    // a and e keep their (first/last) global positions; b, c, d land in the
+    // dragged order in between - renumbered to a clean 1..5 sequence.
+    expect((float) $a->fresh()->sort)->toBe(1.0)
+        ->and((float) $d->fresh()->sort)->toBe(2.0)
+        ->and((float) $c->fresh()->sort)->toBe(3.0)
+        ->and((float) $b->fresh()->sort)->toBe(4.0)
+        ->and((float) $e->fresh()->sort)->toBe(5.0);
+});
+
+it('reorders correctly even when every row shares the same sort value', function () {
+    // The state of a playlist imported with auto-sort off: every channel gets
+    // sort = 0, so there's nothing to "preserve" - a fresh sequence is required
+    // or the drag is a silent no-op.
+    $group = Group::factory()->for($this->user)->for($this->playlist)
+        ->create(['name' => 'Unsorted Group', 'type' => 'live']);
+
+    $channels = collect(range(1, 4))->map(fn () => Channel::factory()
+        ->for($this->user)->for($this->playlist)
+        ->create(['group_id' => $group->id, 'is_vod' => false, 'sort' => 0]));
+
+    [$one, $two, $three, $four] = $channels->all();
+
+    Livewire::test(ChannelsPane::class, [
+        'playlistId' => $this->playlist->id,
+        'contentType' => 'live',
+        'selectedGroupId' => $group->id,
+    ])->call('reorderTable', [$four->id, $three->id, $two->id, $one->id]);
+
+    expect((float) $four->fresh()->sort)->toBe(1.0)
+        ->and((float) $three->fresh()->sort)->toBe(2.0)
+        ->and((float) $two->fresh()->sort)->toBe(3.0)
+        ->and((float) $one->fresh()->sort)->toBe(4.0);
 });
 
 it('will not reorder channels outside the current user via a tampered key', function () {

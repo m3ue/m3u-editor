@@ -8,6 +8,7 @@ use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Livewire\EasyEditor\Concerns\ReordersVisiblePage;
 use App\Models\Channel;
 use App\Models\Group;
+use App\Services\GroupChannelStateService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\Concerns\InteractsWithActions;
@@ -181,7 +182,9 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
                         ->color('success')
                         ->requiresConfirmation()
                         ->action(function (Group $record): void {
-                            $record->channels()->where('is_vod', $this->isVod())->update(['enabled' => true]);
+                            // Matches GroupResource/VodGroupResource: also renumbers
+                            // and triggers a Plex/HDHR resync for live groups.
+                            app(GroupChannelStateService::class)->enable($record);
                             $this->afterGroupChannelsChanged(__('Channels enabled'));
                         }),
                     Action::make('disableChannels')
@@ -190,7 +193,7 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
                         ->color('warning')
                         ->requiresConfirmation()
                         ->action(function (Group $record): void {
-                            $record->channels()->where('is_vod', $this->isVod())->update(['enabled' => false]);
+                            app(GroupChannelStateService::class)->disable($record);
                             $this->afterGroupChannelsChanged(__('Channels disabled'));
                         }),
                     Action::make('sortAlpha')
@@ -223,8 +226,13 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
                     DeleteAction::make()
                         ->visible(fn (Group $record): bool => (bool) $record->custom)
                         ->using(fn (Group $record) => $record->forceDelete())
-                        ->after(function (): void {
-                            $this->selectGroup(null);
+                        ->after(function (Group $record): void {
+                            // Only clear the selection if the deleted group was the one
+                            // being viewed - deleting an unrelated group shouldn't close
+                            // the channels pane out from under the user.
+                            if ($record->id === $this->selectedGroupId) {
+                                $this->selectGroup(null);
+                            }
                         }),
                 ])->label(__('Actions'))->icon('heroicon-m-ellipsis-vertical')
                     ->button()

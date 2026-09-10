@@ -16,6 +16,7 @@ use App\Models\Group;
 use App\Models\StreamProfile;
 use App\Services\DateFormatService;
 use App\Services\FindReplaceService;
+use App\Services\GroupChannelStateService;
 use App\Services\MergedGroupService;
 use App\Services\PlaylistService;
 use App\Traits\HasUserFiltering;
@@ -383,20 +384,8 @@ class GroupResource extends Resource implements CopilotResource
 
                     Action::make('enable')
                         ->label(__('Enable group channels'))
-                        ->action(function (Group $record): void {
-                            $record->channels()->update([
-                                'enabled' => true,
-                            ]);
-
-                            $maxChannel = Channel::query()
-                                ->where('playlist_id', $record->playlist_id)
-                                ->where('group_id', '!=', $record->id)
-                                ->where('enabled', true)
-                                ->max('channel') ?? 0;
-
-                            SortFacade::bulkRecountGroupChannels($record, $maxChannel + 1);
-                        })->after(function () {
-                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_enable');
+                        ->action(fn (Group $record) => app(GroupChannelStateService::class)->enable($record))
+                        ->after(function () {
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels enabled'))
@@ -411,12 +400,8 @@ class GroupResource extends Resource implements CopilotResource
                         ->modalSubmitActionLabel(__('Yes, enable now')),
                     Action::make('disable')
                         ->label(__('Disable group channels'))
-                        ->action(function ($record): void {
-                            $record->channels()->update([
-                                'enabled' => false,
-                            ]);
-                        })->after(function () {
-                            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_disable');
+                        ->action(fn (Group $record) => app(GroupChannelStateService::class)->disable($record))
+                        ->after(function () {
                             Notification::make()
                                 ->success()
                                 ->title(__('Group channels disabled'))

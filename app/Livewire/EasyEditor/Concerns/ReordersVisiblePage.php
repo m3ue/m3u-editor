@@ -5,23 +5,35 @@ namespace App\Livewire\EasyEditor\Concerns;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Drag-reorder that only rewrites the rows currently on screen.
+ * Drag-reorder that renders only one page at a time but still produces a
+ * correct, clean global order.
  *
  * Filament's stock reorder loads *every* matching row when you enter reorder
- * mode (see HasRecords::getTableRecords) and renumbers the whole set 1..N. For a
- * group with a thousand-plus channels that renders thousands of interactive
- * cells at once and hangs / OOMs the browser tab.
+ * mode (see HasRecords::getTableRecords) and renumbers the whole set 1..N. For
+ * a group with a thousand-plus channels that renders thousands of interactive
+ * cells at once and hangs / OOMs the browser tab. Pairing `->reorderable()`
+ * with `->paginatedWhileReordering()` keeps only the current page in the DOM,
+ * but stock `reorderTable()` would then renumber just that page to 1..N,
+ * colliding with every other page's sort values.
  *
- * Paired with `->paginatedWhileReordering()`, this override keeps reordering to
- * the visible page: it reuses the sort values those rows already hold as fixed
- * "slots" and reassigns them in the new visual order, so a drag on page 5 never
- * disturbs the ordering of pages 1-4. Cross-page moves are done with the inline
- * sort-number column or the "Sort A-Z" action instead.
+ * This override instead:
+ *  1. Reads the full group's current key order (by the reorder column, so it
+ *     matches whatever's already on screen across all pages).
+ *  2. Splices the dragged page's keys back into their original slot
+ *     positions, in their new visual order.
+ *  3. Writes a clean 1..N sequence over the *whole* group in a single
+ *     `UPDATE ... CASE` statement (built with Filament's own, driver-escaped
+ *     CASE-expression helper - see makeTableReorderColumnExpression()).
+ *
+ * Step 3 also fixes rows that all share the same sort value (e.g. every
+ * channel imported with a playlist's auto-sort off, which leaves `sort = 0`
+ * on all of them - see ProcessM3uImport). Permuting identical values is a
+ * no-op that silently reverts on refresh; assigning a fresh sequence never is.
  */
 trait ReordersVisiblePage
 {
     /**
-     * @param  array<int|string>  $order  Record keys in their new visual order.
+     * @param  array<int|string>  $order  Record keys in their new visual order (one page's worth).
      */
     public function reorderTable(array $order, int|string|null $draggedRecordKey = null): void
     {
@@ -30,35 +42,55 @@ trait ReordersVisiblePage
         }
 
         $orderColumn = (string) str($this->getTable()->getReorderColumn())->afterLast('.');
-        $keys = array_values($order);
+        $dragged = array_values($order);
 
-        if ($keys === []) {
+        if ($dragged === []) {
             return;
         }
 
         $this->getTable()->callBeforeReordering($order);
 
-        DB::transaction(function () use ($keys, $orderColumn): void {
-            // Sort values the dragged rows currently occupy, ascending. Scoped
-            // through the table's own query so tampered keys outside this
-            // user / playlist / group can't be touched.
-            $slots = (clone $this->getTable()->getQuery())
-                ->whereKey($keys)
+        DB::transaction(function () use ($dragged, $orderColumn): void {
+            $model = app($this->getTable()->getModel());
+            $keyName = $model->getKeyName();
+
+            // Every key in the group (not just this page), in its current order.
+            $allKeys = (clone $this->getTable()->getQuery())
                 ->reorder()
                 ->orderBy($orderColumn)
-                ->pluck($orderColumn)
-                ->map(fn ($value): float => (float) $value)
-                ->values();
+                ->orderBy($keyName)
+                ->pluck($keyName)
+                ->all();
 
-            while ($slots->count() < count($keys)) {
-                $slots->push($slots->isNotEmpty() ? $slots->last() + 1 : (float) ($slots->count() + 1));
+            // Replace the dragged keys' original positions with their new
+            // relative order; everything else keeps its position.
+            $draggedPositions = array_flip($dragged);
+            $cursor = 0;
+            foreach ($allKeys as $index => $key) {
+                if (isset($draggedPositions[$key])) {
+                    $allKeys[$index] = $dragged[$cursor++];
+                }
             }
 
-            foreach ($keys as $index => $recordKey) {
-                (clone $this->getTable()->getQuery())
-                    ->whereKey($recordKey)
-                    ->update([$orderColumn => $slots->get($index, $index + 1)]);
+            if ($allKeys === []) {
+                return;
             }
+
+            $connection = $model->getConnection();
+
+            // Reuse Filament's own CASE-expression builder (CanReorderRecords,
+            // pulled in via InteractsWithTable) rather than hand-rolling raw SQL:
+            // it already wraps the column and escapes each key through the
+            // connection driver.
+            (clone $this->getTable()->getQuery())
+                ->whereIn($keyName, $allKeys)
+                ->update([
+                    $orderColumn => $this->makeTableReorderColumnExpression(
+                        $allKeys,
+                        $connection->getQueryGrammar()->wrap($keyName),
+                        $connection,
+                    ),
+                ]);
         });
 
         $this->getTable()->callAfterReordering($order);
