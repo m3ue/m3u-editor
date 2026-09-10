@@ -18,7 +18,12 @@ use App\Models\Group;
  */
 class GroupChannelStateService
 {
-    public function enable(Group $group): void
+    /**
+     * @param  bool  $dispatchSync  Set false when calling this in a loop (e.g. a
+     *                              bulk action over several groups) so the caller can dispatch a single
+     *                              SyncPlexDvrJob after the loop instead of one per group.
+     */
+    public function enable(Group $group, bool $dispatchSync = true): void
     {
         $group->channels()->update(['enabled' => true]);
 
@@ -34,10 +39,15 @@ class GroupChannelStateService
 
         SortFacade::bulkRecountGroupChannels($group, $maxChannel + 1);
 
-        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_enable');
+        if ($dispatchSync) {
+            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_enable');
+        }
     }
 
-    public function disable(Group $group): void
+    /**
+     * @param  bool  $dispatchSync  See {@see self::enable()}.
+     */
+    public function disable(Group $group, bool $dispatchSync = true): void
     {
         $group->channels()->update(['enabled' => false]);
 
@@ -45,6 +55,8 @@ class GroupChannelStateService
             return;
         }
 
-        SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_disable');
+        if ($dispatchSync) {
+            SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_disable');
+        }
     }
 }

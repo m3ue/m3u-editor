@@ -29,6 +29,15 @@ use Illuminate\Support\Facades\DB;
  * channel imported with a playlist's auto-sort off, which leaves `sort = 0`
  * on all of them - see ProcessM3uImport). Permuting identical values is a
  * no-op that silently reverts on refresh; assigning a fresh sequence never is.
+ *
+ * Steps 1 and 3 touch every row in the group, not just the visible page, so
+ * a drag on a multi-thousand-channel group issues one query plucking every
+ * key and one UPDATE with a same-sized CASE expression. This is intentional:
+ * it's ID-only (no model hydration, so PHP memory stays flat regardless of
+ * group size) and a single statement is still far cheaper than the N
+ * round-trips a chunked-write alternative would cost, for group sizes this
+ * app actually sees. Revisit only if a driver's statement-size limit becomes
+ * a real constraint - not before.
  */
 trait ReordersVisiblePage
 {

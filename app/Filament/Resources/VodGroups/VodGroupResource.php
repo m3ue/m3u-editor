@@ -633,9 +633,7 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->label(__('Enable Group Channels'))
                         ->action(function (Collection $records): void {
                             foreach ($records as $record) {
-                                $record->channels()->update([
-                                    'enabled' => true,
-                                ]);
+                                app(GroupChannelStateService::class)->enable($record, dispatchSync: false);
                             }
                         })->after(function () {
                             Notification::make()
@@ -654,9 +652,7 @@ class VodGroupResource extends Resource implements CopilotResource
                         ->label(__('Disable Group Channels'))
                         ->action(function (Collection $records): void {
                             foreach ($records as $record) {
-                                $record->channels()->update([
-                                    'enabled' => false,
-                                ]);
+                                app(GroupChannelStateService::class)->disable($record, dispatchSync: false);
                             }
                         })->after(function () {
                             Notification::make()
