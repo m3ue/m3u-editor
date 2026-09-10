@@ -6263,6 +6263,7 @@
     "Use Simplified Default navigation": "Use Simplified Default navigation",
     "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.": "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.",
     "Use an existing Emby library": "Use an existing Emby library",
+    "Use easy editor to manage groups and channels in one place": "Use easy editor to manage groups and channels in one place",
     "Use m3u editor proxy to access this channel.": "Use m3u editor proxy to access this channel.",
     "Use network default": "Use network default",
     "Use playlist default": "Use playlist default",
