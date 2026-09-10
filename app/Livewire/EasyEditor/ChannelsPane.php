@@ -64,6 +64,17 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
         $this->resetTable();
     }
 
+    /**
+     * Keep this table's pagination out of the page URL. Two embedded tables on
+     * one page would otherwise both bind to the same `page` param and collide,
+     * and a stale `?page=2` would survive a playlist / content-type switch and
+     * land the fresh table on an empty page.
+     */
+    public function queryStringHandlesPagination(): array
+    {
+        return [];
+    }
+
     protected function isVod(): bool
     {
         return $this->contentType === 'vod';
@@ -108,11 +119,15 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
             ? Group::query()->whereKey($this->selectedGroupId)->value('name')
             : null;
 
+        // We only want the first two items
+        [$editGroup, $edit] = $resource::getTableActions();
+
         return $table
             ->query(fn (): Builder => $this->baseQuery())
+            // Distinct identifier so this table's page/search/sort/filter query-string
+            // keys don't collide with the groups pane's table on the same page.
+            ->queryStringIdentifier('easyEditorChannels')
             ->heading($groupName)
-            ->persistFiltersInSession()
-            ->persistSortInSession()
             ->filtersTriggerAction(fn (Action $action): Action => $action->button()->label(__('Filters')))
             ->paginated([25, 50, 100])
             ->defaultPaginationPageOption(25)
@@ -124,10 +139,10 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
                     ->label(__('Move'))
                     ->alignCenter()
                     ->view('filament.easy-editor.channel-drag-handle'),
-                ...$resource::getTableColumns(showGroup: false, showPlaylist: false),
+                ...$resource::getTableColumns(showGroup: false, showPlaylist: false, minimal: true),
             ])
             ->filters($resource::getTableFilters(showPlaylist: false))
-            ->recordActions($resource::getTableActions(), position: RecordActionsPosition::BeforeCells)
+            ->recordActions([$editGroup, $edit], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions($resource::getTableBulkActions())
             ->headerActions([
                 Action::make('createCustomChannel')

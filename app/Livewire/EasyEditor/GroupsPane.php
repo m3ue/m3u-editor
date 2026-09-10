@@ -73,6 +73,16 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
         $this->selectedGroupId = $groupId;
     }
 
+    /**
+     * Keep this table's pagination out of the page URL - see the matching note
+     * on ChannelsPane. The two embedded tables must not share a `page` param,
+     * and stale pagination must not survive a playlist / content-type switch.
+     */
+    public function queryStringHandlesPagination(): array
+    {
+        return [];
+    }
+
     protected function isVod(): bool
     {
         return $this->contentType === 'vod';
@@ -101,6 +111,9 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
     {
         return $table
             ->query(fn (): Builder => $this->baseQuery())
+            // Distinct identifier so this table's page/search/sort/filter query-string
+            // keys don't collide with the channels pane's table on the same page.
+            ->queryStringIdentifier('easyEditorGroups')
             ->reorderable('sort_order')
             ->defaultSort('sort_order', 'asc')
             ->paginated([25, 50, 100])
@@ -194,23 +207,6 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
                         ->action(function (Group $record, array $data): void {
                             SortFacade::bulkSortGroupChannels($record, $data['direction'] ?? 'ASC', $data['column'] ?? 'title');
                             $this->afterGroupChannelsChanged(__('Channels sorted'));
-                        }),
-                    Action::make('duplicate')
-                        ->label(__('Duplicate group'))
-                        ->icon('heroicon-o-document-duplicate')
-                        ->requiresConfirmation()
-                        ->modalDescription(__('Creates an empty custom group with the same name. Channels are not copied.'))
-                        ->action(function (Group $record): void {
-                            $copy = $record->replicate(['name_internal', 'import_batch_no', 'source_group_id']);
-                            $copy->name = trim(($record->name ?? $record->name_internal).' '.__('(copy)'));
-                            $copy->custom = true;
-                            $copy->is_merged = false;
-                            $copy->parent_id = null;
-                            $copy->sort_order = (int) $this->baseQuery()->max('sort_order') + 1;
-                            $copy->save();
-
-                            Notification::make()->success()->title(__('Group duplicated'))->send();
-                            $this->dispatch('$refresh');
                         }),
                     DeleteAction::make()
                         ->visible(fn (Group $record): bool => (bool) $record->custom)

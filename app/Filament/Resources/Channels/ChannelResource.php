@@ -180,7 +180,7 @@ class ChannelResource extends Resource implements CopilotResource
             ->toolbarActions(self::getTableBulkActions());
     }
 
-    public static function getTableColumns($showGroup = true, $showPlaylist = true): array
+    public static function getTableColumns($showGroup = true, $showPlaylist = true, $minimal = false): array
     {
         return [
             ImageColumn::make('logo')
@@ -238,7 +238,8 @@ class ChannelResource extends Resource implements CopilotResource
                 ->color(fn (string $state): string => self::resolveScrubberStatusColor($state))
                 ->tooltip(fn ($record): string => self::resolveScrubberStatusTooltip($record))
                 ->toggleable()
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             TextColumn::make('last_scrubbed_at')
                 ->label(__('Last Scrubbed'))
                 ->formatStateUsing(fn ($state) => app(DateFormatService::class)->format($state))
@@ -246,13 +247,15 @@ class ChannelResource extends Resource implements CopilotResource
                     ? __('Scrubbed').' '.$record->last_scrubbed_at->diffForHumans()
                     : __('Never scrubbed'))
                 ->toggleable()
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             TextColumn::make('failovers_count')
                 ->label(__('Failovers'))
                 ->counts('failovers')
                 ->badge()
                 ->toggleable()
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             TextInputColumn::make('stream_id_custom')
                 ->label(__('ID'))
                 ->rules(['min:0', 'max:255'])
@@ -328,7 +331,8 @@ class ChannelResource extends Resource implements CopilotResource
                             return $query->orWhere(DB::raw('LOWER(group)'), 'LIKE', "%{$search}%");
                     }
                 })
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             ToggleColumn::make('probe_enabled')
                 ->label(__('Probe Enabled'))
                 ->toggleable()
@@ -358,7 +362,8 @@ class ChannelResource extends Resource implements CopilotResource
                     });
                 })
                 ->limit(40)
-                ->sortable(),
+                ->sortable()
+                ->hidden($minimal),
             TextColumn::make('epgChannel.epg.name')
                 ->label(__('EPG Source'))
                 ->toggleable()

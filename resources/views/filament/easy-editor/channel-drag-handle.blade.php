@@ -4,6 +4,7 @@
     icon="heroicon-m-arrows-right-left"
     color="gray"
     size="sm"
+    :tooltip="__('Drag onto a group on the left to move this channel')"
     :label="__('Drag onto a group on the left to move this channel')"
     class="ml-2 cursor-grab active:cursor-grabbing"
     draggable="true"

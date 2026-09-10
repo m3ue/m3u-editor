@@ -131,6 +131,21 @@ it('moves a channel into another group via the drag drop handler', function () {
         ->and($this->channelA->fresh()->group)->toBe($this->groupB->name);
 });
 
+it('keeps the two pane tables from sharing query-string keys', function () {
+    $groups = Livewire::test(GroupsPane::class, ['playlistId' => $this->playlist->id, 'contentType' => 'live']);
+    $channels = Livewire::test(ChannelsPane::class, [
+        'playlistId' => $this->playlist->id,
+        'contentType' => 'live',
+        'selectedGroupId' => $this->groupA->id,
+    ]);
+
+    // Pagination is deliberately not bound to the URL for either embedded table.
+    expect($groups->instance()->queryStringHandlesPagination())->toBe([])
+        ->and($channels->instance()->queryStringHandlesPagination())->toBe([])
+        ->and($groups->instance()->getTable()->getQueryStringIdentifier())
+        ->not->toBe($channels->instance()->getTable()->getQueryStringIdentifier());
+});
+
 it('will not move a channel across playlists via the drag drop handler', function () {
     $otherPlaylist = Playlist::factory()->for($this->user)->create();
     $otherGroup = Group::factory()->for($this->user)->for($otherPlaylist)

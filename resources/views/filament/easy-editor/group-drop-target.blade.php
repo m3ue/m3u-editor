@@ -5,6 +5,7 @@
     color="gray"
     size="sm"
     class="ml-2"
+    :tooltip="__('Drop a channel here to move it into this group')"
     :label="__('Drop a channel here to move it into this group')"
     x-data="{ over: false }"
     x-on:dragover.prevent="over = true"
