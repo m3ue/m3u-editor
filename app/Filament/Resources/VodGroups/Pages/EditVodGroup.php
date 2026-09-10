@@ -9,6 +9,7 @@ use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Group;
 use App\Services\GenreGroupReclassifyService;
+use App\Services\GroupChannelStateService;
 use App\Services\PlaylistService;
 use App\Services\TmdbService;
 use Filament\Actions\Action;
@@ -251,10 +252,8 @@ class EditVodGroup extends EditRecord
 
                 Action::make('enable')
                     ->label(__('Enable group channels'))
-                    ->action(function ($record): void {
-                        $record->channels()->update([
-                            'enabled' => true,
-                        ]);
+                    ->action(function (Group $record): void {
+                        app(GroupChannelStateService::class)->enable($record);
                     })->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
                         Notification::make()
@@ -271,10 +270,8 @@ class EditVodGroup extends EditRecord
                     ->modalSubmitActionLabel(__('Yes, enable now')),
                 Action::make('disable')
                     ->label(__('Disable group channels'))
-                    ->action(function ($record): void {
-                        $record->channels()->update([
-                            'enabled' => false,
-                        ]);
+                    ->action(function (Group $record): void {
+                        app(GroupChannelStateService::class)->disable($record);
                     })->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
                         Notification::make()

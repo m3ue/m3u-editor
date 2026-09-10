@@ -1,5 +1,11 @@
 @php($groupId = (int) ($getRecord()?->getKey() ?? 0))
 
+{{--
+    Drop target for the cross-pane channel move (see channel-drag-handle.blade.php).
+    Filament has no cross-table drag primitive, so this is a stock
+    <x-filament::icon-button> with native HTML5 dragover/drop events wired on by
+    hand; the drop calls $wire.moveChannelToGroup() on the Livewire component.
+--}}
 <x-filament::icon-button
     icon="heroicon-m-arrow-down-on-square"
     color="gray"

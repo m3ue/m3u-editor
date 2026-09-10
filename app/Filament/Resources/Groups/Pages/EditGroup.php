@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Groups\Pages;
 use App\Facades\SortFacade;
 use App\Filament\Resources\Groups\GroupResource;
 use App\Models\Group;
+use App\Services\GroupChannelStateService;
 use App\Services\PlaylistService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -149,10 +150,8 @@ class EditGroup extends EditRecord
 
                 Action::make('enable')
                     ->label(__('Enable group channels'))
-                    ->action(function ($record): void {
-                        $record->channels()->update([
-                            'enabled' => true,
-                        ]);
+                    ->action(function (Group $record): void {
+                        app(GroupChannelStateService::class)->enable($record);
                     })->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
                         Notification::make()
@@ -169,10 +168,8 @@ class EditGroup extends EditRecord
                     ->modalSubmitActionLabel(__('Yes, enable now')),
                 Action::make('disable')
                     ->label(__('Disable group channels'))
-                    ->action(function ($record): void {
-                        $record->channels()->update([
-                            'enabled' => false,
-                        ]);
+                    ->action(function (Group $record): void {
+                        app(GroupChannelStateService::class)->disable($record);
                     })->after(function ($livewire) {
                         $livewire->dispatch('refreshRelation');
                         Notification::make()
