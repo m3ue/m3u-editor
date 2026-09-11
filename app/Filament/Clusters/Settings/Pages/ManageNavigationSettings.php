@@ -29,12 +29,12 @@ class ManageNavigationSettings extends BaseSettingsPage
 
     public static function getNavigationLabel(): string
     {
-        return __('Navigation Menu');
+        return __('Navigation');
     }
 
     public function getTitle(): string
     {
-        return __('Navigation Menu');
+        return __('Navigation');
     }
 
     public function getSubheading(): ?string

@@ -18,6 +18,7 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
+use App\Models\DvrSetting;
 use App\Models\DynamicGroup;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Epg;
@@ -3876,22 +3877,73 @@ class XtreamApiController extends Controller
      * the effective playlist's DvrSetting, and (for guest credentials) the
      * PlaylistAuth's own dvr_enabled flag. Both feature advertisement and every
      * direct DVR action must agree with this result.
+     *
+     * For a CustomPlaylist/MergedPlaylist wrapper, capability is granted if
+     * EITHER the wrapper's own DvrSetting is enabled OR any source Playlist
+     * behind it has DVR enabled — mirrors resolveDvrSettingIds() so a wrapper
+     * whose channels come from a DVR-enabled source isn't gated out before its
+     * recordings are even looked up.
      */
     private function dvrCapabilityGranted(
         Playlist|CustomPlaylist|MergedPlaylist|null $dvrPlaylist,
         string $authMethod,
         ?PlaylistAuth $playlistAuth
     ): bool {
-        return DvrCapabilityGate::granted(
-            $dvrPlaylist?->dvrSetting,
-            $playlistAuth,
-            $authMethod === 'playlist_auth'
+        if (! $dvrPlaylist) {
+            return false;
+        }
+
+        $settingIds = $this->resolveDvrSettingIds($dvrPlaylist);
+
+        if ($settingIds === []) {
+            return false;
+        }
+
+        return DvrSetting::whereIn('id', $settingIds)->get()->contains(
+            fn (DvrSetting $setting) => DvrCapabilityGate::granted($setting, $playlistAuth, $authMethod === 'playlist_auth')
         );
     }
 
     private function resolveDvrPlaylist($playlist): Playlist|CustomPlaylist|MergedPlaylist|null
     {
         return $this->resolveEffectivePlaylist($playlist);
+    }
+
+    /**
+     * Resolve every DVR setting id a playlist's recordings could be filed under: its own
+     * dvrSetting (if configured directly on it), plus the dvrSettings of the source
+     * Playlists behind it when it's a CustomPlaylist or MergedPlaylist wrapper. Used by the
+     * DVR list/get/cancel/delete endpoints so a recording remains visible and manageable no
+     * matter which of those it was scheduled against.
+     *
+     * @return array<int, int>
+     */
+    private function resolveDvrSettingIds($playlist): array
+    {
+        if ($playlist instanceof Playlist) {
+            return $playlist->dvrSetting ? [$playlist->dvrSetting->id] : [];
+        }
+
+        $sourcePlaylistIds = $playlist instanceof MergedPlaylist
+            ? DB::table('merged_playlist_playlist')
+                ->where('merged_playlist_id', $playlist->id)
+                ->pluck('playlist_id')
+            : $playlist->channels()
+                ->whereNotNull('channels.playlist_id')
+                ->pluck('channels.playlist_id')
+                ->unique();
+
+        $settingIds = DvrSetting::whereIn('playlist_id', $sourcePlaylistIds)
+            ->pluck('id')
+            ->toArray();
+
+        // Include the wrapper's own setting too, in case a recording was ever
+        // scheduled against it directly.
+        if ($playlist->dvrSetting) {
+            $settingIds[] = $playlist->dvrSetting->id;
+        }
+
+        return array_values(array_unique($settingIds));
     }
 
     /**
@@ -3980,9 +4032,9 @@ class XtreamApiController extends Controller
      */
     private function getDvrRecordings(Request $request, $playlist, string $username, string $password, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json([]);
         }
 
@@ -3990,7 +4042,7 @@ class XtreamApiController extends Controller
         $limit = min((int) $request->input('limit', 50), 200);
         $offset = (int) $request->input('offset', 0);
 
-        $query = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+        $query = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with(['channel', 'dvrSetting', 'recordingRule'])
             ->orderByDesc('scheduled_start');
@@ -4018,13 +4070,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
         }
 
-        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+        $recording = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('uuid', $uuid)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with(['channel', 'dvrSetting', 'recordingRule'])
@@ -4669,13 +4721,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
         }
 
-        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+        $recording = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('uuid', $uuid)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->whereIn('status', [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording])
@@ -4714,13 +4766,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'recording_id parameter is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
         }
 
-        $recording = DvrRecording::where('dvr_setting_id', $dvrSetting->id)
+        $recording = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('uuid', $uuid)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->whereIn('status', [
