@@ -218,12 +218,8 @@ class PlaylistGenerateController extends Controller
                             $extension = $channel->container_extension ?? 'mkv';
                         } elseif ($channelProxyEnabled) {
                             // The proxy may transcode the stream, so advertise the configured
-                            // output format instead of the raw provider extension - mirrors the
-                            // allowed_output_formats resolution in XtreamApiController::__invoke().
-                            $proxyOutput = $channelSourcePlaylist->xtream_config['output']
-                                ?? $playlist->xtream_config['output']
-                                ?? 'ts';
-                            $extension = $proxyOutput === 'hls' ? 'm3u8' : $proxyOutput;
+                            // output format instead of the raw provider extension.
+                            $extension = self::resolveProxyOutputFormat($channelSourcePlaylist, $playlist);
                         }
                         $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
                     } elseif ($channelMfRewriteEnabled) {
@@ -623,12 +619,8 @@ class PlaylistGenerateController extends Controller
                         $extension = $channel->container_extension ?? 'mkv';
                     } elseif ($channelProxyEnabled) {
                         // The proxy may transcode the stream, so advertise the configured
-                        // output format instead of the raw provider extension - mirrors the
-                        // allowed_output_formats resolution in XtreamApiController::__invoke().
-                        $proxyOutput = $channelSourcePlaylist->xtream_config['output']
-                            ?? $playlist->xtream_config['output']
-                            ?? 'ts';
-                        $extension = $proxyOutput === 'hls' ? 'm3u8' : $proxyOutput;
+                        // output format instead of the raw provider extension.
+                        $extension = self::resolveProxyOutputFormat($channelSourcePlaylist, $playlist);
                     }
                     $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
                 } elseif ($channelMfRewriteEnabled) {
@@ -748,7 +740,7 @@ class PlaylistGenerateController extends Controller
         $sourcePlaylistId = $channel->playlist_id;
         if ($sourcePlaylistId !== null) {
             if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
-                $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
+                $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'profiles_enabled', 'xtream_config']);
             }
             $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
         } else {
@@ -759,6 +751,29 @@ class PlaylistGenerateController extends Controller
             && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
 
         return [$channelSourcePlaylist, $channelProxyEnabled, ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls];
+    }
+
+    /**
+     * Resolve the proxy's configured output format extension for a live channel,
+     * preferring the channel's own source playlist's xtream_config and falling back
+     * to the requested playlist's. A PlaylistAlias's own xtream_config is a
+     * normalized list of provider account configs (not a single keyed config), so
+     * its actual output setting must be read from the real playlist it wraps via
+     * getEffectivePlaylist() instead - mirrors the allowed_output_formats
+     * resolution in XtreamApiController::__invoke().
+     */
+    private static function resolveProxyOutputFormat(?Playlist $channelSourcePlaylist, $playlist): string
+    {
+        $proxyOutput = $channelSourcePlaylist?->xtream_config['output'] ?? null;
+
+        if ($proxyOutput === null) {
+            $contextXtreamConfig = $playlist instanceof PlaylistAlias
+                ? ($playlist->getEffectivePlaylist()?->xtream_config ?? null)
+                : ($playlist->xtream_config ?? null);
+            $proxyOutput = $contextXtreamConfig['output'] ?? 'ts';
+        }
+
+        return $proxyOutput === 'hls' ? 'm3u8' : $proxyOutput;
     }
 
     /**
