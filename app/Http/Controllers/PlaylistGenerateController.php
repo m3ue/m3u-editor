@@ -129,27 +129,13 @@ class PlaylistGenerateController extends Controller
                 // playlist (the common case) only resolves it once rather than per row.
                 $sourcePlaylistCache = [];
                 foreach ($cursor as $channel) {
-                    // Resolve the channel's own source playlist (may differ from the
-                    // requested $playlist for merged/custom playlists/aliases) so we can
-                    // check its proxy/output settings without an N+1 query per channel.
-                    $sourcePlaylistId = $channel->playlist_id;
-                    if ($sourcePlaylistId !== null) {
-                        if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
-                            $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
-                        }
-                        $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
-                    } else {
-                        $channelSourcePlaylist = null;
-                    }
-
-                    // A channel can force the proxy path even when the playlist-level toggle
-                    // is off: its own per-channel override, or its source playlist pooling
-                    // provider profiles (profile selection/pool distribution only happens on
-                    // the proxy path). Mirrors the `needsProxy` check in
-                    // XtreamStreamController::handleLive()/handleVod().
-                    $channelProxyEnabled = $playlist->user->canUseProxy()
-                        && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
-                    $channelMfRewriteEnabled = ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls;
+                    [$channelSourcePlaylist, $channelProxyEnabled, $channelMfRewriteEnabled] = self::resolveChannelProxyContext(
+                        $playlist,
+                        $channel,
+                        $proxyEnabled,
+                        $mediaFlowRewriteStreamUrls,
+                        $sourcePlaylistCache
+                    );
                     // Get the title and name
                     $title = $channel->title_custom ?? $channel->title;
                     $name = $channel->name_custom ?? $channel->name;
@@ -591,27 +577,13 @@ class PlaylistGenerateController extends Controller
             // playlist (the common case) only resolves it once rather than per row.
             $sourcePlaylistCache = [];
             foreach ($cursor as $channel) {
-                // Resolve the channel's own source playlist (may differ from the
-                // requested $playlist for merged/custom playlists/aliases) so we can
-                // check its proxy/output settings without an N+1 query per channel.
-                $sourcePlaylistId = $channel->playlist_id;
-                if ($sourcePlaylistId !== null) {
-                    if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
-                        $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
-                    }
-                    $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
-                } else {
-                    $channelSourcePlaylist = null;
-                }
-
-                // A channel can force the proxy path even when the playlist-level toggle
-                // is off: its own per-channel override, or its source playlist pooling
-                // provider profiles (profile selection/pool distribution only happens on
-                // the proxy path). Mirrors the `needsProxy` check in
-                // XtreamStreamController::handleLive()/handleVod().
-                $channelProxyEnabled = $playlist->user->canUseProxy()
-                    && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
-                $channelMfRewriteEnabled = ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls;
+                [$channelSourcePlaylist, $channelProxyEnabled, $channelMfRewriteEnabled] = self::resolveChannelProxyContext(
+                    $playlist,
+                    $channel,
+                    $proxyEnabled,
+                    $mediaFlowRewriteStreamUrls,
+                    $sourcePlaylistCache
+                );
 
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
 
@@ -749,6 +721,44 @@ class PlaylistGenerateController extends Controller
             'LineupURL' => $baseUrl.$authPath.'/lineup.json',
             'TunerCount' => $tunerCount,
         ];
+    }
+
+    /**
+     * Resolve a channel's proxy context: its own source playlist (memoized in
+     * $sourcePlaylistCache by playlist_id, so a batch of channels sharing the same
+     * source playlist only resolves it once instead of once per row), whether the
+     * proxy is effectively enabled for it, and whether MediaFlow's raw-URL rewrite
+     * applies.
+     *
+     * A channel can force the proxy path even when the playlist-level toggle is
+     * off: its own per-channel override, or its source playlist pooling provider
+     * profiles (profile selection/pool distribution only happens on the proxy
+     * path). Mirrors the `needsProxy` check in
+     * XtreamStreamController::handleLive()/handleVod().
+     *
+     * @return array{0: ?Playlist, 1: bool, 2: bool}
+     */
+    private static function resolveChannelProxyContext(
+        $playlist,
+        Channel $channel,
+        bool $proxyEnabled,
+        bool $mediaFlowRewriteStreamUrls,
+        array &$sourcePlaylistCache
+    ): array {
+        $sourcePlaylistId = $channel->playlist_id;
+        if ($sourcePlaylistId !== null) {
+            if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
+                $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
+            }
+            $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
+        } else {
+            $channelSourcePlaylist = null;
+        }
+
+        $channelProxyEnabled = $playlist->user->canUseProxy()
+            && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
+
+        return [$channelSourcePlaylist, $channelProxyEnabled, ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls];
     }
 
     /**
