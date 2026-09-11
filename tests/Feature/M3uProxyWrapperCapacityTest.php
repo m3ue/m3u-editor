@@ -24,8 +24,10 @@ use App\Enums\DvrRecordingStatus;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
+use App\Models\Episode;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
@@ -187,4 +189,67 @@ test('an active DVR recording counts toward capacity and is never evicted — a 
 
     expect($deletedStreamId)->toBe('live-a')
         ->and($url)->toBeString()->not->toBeEmpty();
+});
+
+test('the source playlist cap is enforced through an unlimited merged wrapper for episode streaming', function () {
+    $source = Playlist::factory()->for($this->user)->create([
+        'enable_proxy' => true,
+        'available_streams' => 1,
+    ]);
+    $merged = MergedPlaylist::factory()->for($this->user)->create(['available_streams' => 0]);
+    $merged->playlists()->attach($source->id);
+
+    $series = Series::factory()->for($this->user)->for($source)->create();
+    $episodeA = Episode::factory()->for($this->user)->for($source)->for($series)->create(['url' => 'http://example.com/a.mkv']);
+    $episodeB = Episode::factory()->for($this->user)->for($source)->for($series)->create(['url' => 'http://example.com/b.mkv']);
+
+    // Episode A is already streaming through the wrapper — tagged with
+    // source_playlist_uuid = the source playlist's uuid, not playlist_uuid.
+    Http::fake([
+        '*/streams/by-metadata*' => function ($request) use ($source, $episodeA) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            if (($query['field'] ?? null) === 'source_playlist_uuid' && ($query['value'] ?? null) === $source->uuid) {
+                return Http::response([
+                    'matching_streams' => [['stream_id' => 'live-a', 'metadata' => ['type' => 'episode', 'episode_id' => (string) $episodeA->id]]],
+                    'total_matching' => 1,
+                ]);
+            }
+
+            return Http::response(['matching_streams' => [], 'total_matching' => 0]);
+        },
+    ]);
+
+    expect(fn () => app(M3uProxyService::class)->getEpisodeUrl($merged, $episodeB))
+        ->toThrow(HttpException::class);
+});
+
+test('the wrapper playlist cap is enforced for episode streaming when its source playlist is unlimited', function () {
+    $source = Playlist::factory()->for($this->user)->create([
+        'enable_proxy' => true,
+        'available_streams' => 0,
+    ]);
+    $merged = MergedPlaylist::factory()->for($this->user)->create(['available_streams' => 1]);
+    $merged->playlists()->attach($source->id);
+
+    $series = Series::factory()->for($this->user)->for($source)->create();
+    $episodeA = Episode::factory()->for($this->user)->for($source)->for($series)->create(['url' => 'http://example.com/a.mkv']);
+    $episodeB = Episode::factory()->for($this->user)->for($source)->for($series)->create(['url' => 'http://example.com/b.mkv']);
+
+    // Episode A is already streaming directly through the wrapper.
+    Http::fake([
+        '*/streams/by-metadata*' => function ($request) use ($merged, $episodeA) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            if (($query['field'] ?? null) === 'playlist_uuid' && ($query['value'] ?? null) === $merged->uuid) {
+                return Http::response([
+                    'matching_streams' => [['stream_id' => 'live-a', 'metadata' => ['type' => 'episode', 'episode_id' => (string) $episodeA->id]]],
+                    'total_matching' => 1,
+                ]);
+            }
+
+            return Http::response(['matching_streams' => [], 'total_matching' => 0]);
+        },
+    ]);
+
+    expect(fn () => app(M3uProxyService::class)->getEpisodeUrl($merged, $episodeB))
+        ->toThrow(HttpException::class);
 });

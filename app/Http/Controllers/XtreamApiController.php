@@ -3948,6 +3948,37 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * Resolve the single DvrSetting a new recording/rule should be written against,
+     * when accessed through a CustomPlaylist/MergedPlaylist wrapper. Mirrors
+     * resolveDvrSettingIds()'s read-side resolution, but a write needs exactly one
+     * target: prefers the given channel's own source Playlist's DvrSetting (so
+     * scheduling a specific channel through a wrapper always lands on the right
+     * source, even when the wrapper spans multiple DVR-enabled sources), then falls
+     * back to the wrapper's own DvrSetting, then the first DVR-enabled source
+     * resolved via resolveDvrSettingIds() (covers the "any channel" series-rule case).
+     */
+    private function resolveDvrSettingForWrite($playlist, ?int $channelId = null): ?DvrSetting
+    {
+        if ($channelId) {
+            $channel = $playlist->channels()->where('channels.id', $channelId)->first();
+            if ($channel?->playlist_id) {
+                $setting = DvrSetting::where('playlist_id', $channel->playlist_id)->first();
+                if ($setting) {
+                    return $setting;
+                }
+            }
+        }
+
+        if ($playlist->dvrSetting) {
+            return $playlist->dvrSetting;
+        }
+
+        $settingIds = $this->resolveDvrSettingIds($playlist);
+
+        return $settingIds === [] ? null : DvrSetting::find($settingIds[0]);
+    }
+
+    /**
      * Get short EPG for an attached network on custom/merged playlists.
      * Stream ID format: network-{id}
      */
@@ -4117,9 +4148,9 @@ class XtreamApiController extends Controller
             ]);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json([
                 'used_bytes' => 0,
                 'quota_bytes' => null,
@@ -4129,16 +4160,17 @@ class XtreamApiController extends Controller
             ]);
         }
 
-        $usedBytes = $dvrSetting->storage_used_bytes;
-        $quotaBytes = $dvrSetting->global_disk_quota_gb > 0
-            ? $dvrSetting->global_disk_quota_gb * 1024 ** 3
-            : null;
+        $dvrSettings = DvrSetting::whereIn('id', $dvrSettingIds)->get();
+
+        $usedBytes = (int) $dvrSettings->sum('storage_used_bytes');
+        $quotaBytes = $dvrSettings->sum(fn (DvrSetting $s) => $s->global_disk_quota_gb > 0 ? $s->global_disk_quota_gb * 1024 ** 3 : 0) ?: null;
+        $recordingCount = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)->count();
 
         return response()->json([
             'used_bytes' => $usedBytes,
             'quota_bytes' => $quotaBytes,
             'percent_used' => $quotaBytes ? min(100, round($usedBytes / $quotaBytes * 100, 1)) : null,
-            'recording_count' => $dvrSetting->recordings()->count(),
+            'recording_count' => $recordingCount,
             'scope' => 'account',
         ]);
     }
@@ -4148,13 +4180,13 @@ class XtreamApiController extends Controller
      */
     private function listDvrSeriesRules(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
     {
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json([]);
         }
 
-        $rules = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+        $rules = DvrRecordingRule::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('type', DvrRuleType::Series)
             ->where('enabled', true)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
@@ -4177,13 +4209,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'rule_id parameter is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
         }
 
-        $rule = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+        $rule = DvrRecordingRule::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('id', $ruleId)
             ->where('type', DvrRuleType::Series)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
@@ -4213,20 +4245,20 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'q parameter is required (minimum 2 characters)'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting?->enabled) {
+        if ($dvrSettingIds === [] || ! DvrSetting::whereIn('id', $dvrSettingIds)->where('enabled', true)->exists()) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
         }
 
-        // Pre-fetch the set of existing Series rules for this DVR setting (scoped by
+        // Pre-fetch the set of existing Series rules for these DVR settings (scoped by
         // playlist_auth when applicable) keyed by their auto-derived normalized_title,
         // so each result can advertise `has_series_rule` + `series_rule_id` without
         // a per-group query. Uses the same SeriesKey::normalize normalization as the
         // grouping below — which matches DvrRecordingRule::saving's column population —
         // so a normalized-title lookup here is consistent with what a future rule
         // created from this result would store.
-        $seriesRuleTitles = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+        $seriesRuleTitles = DvrRecordingRule::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('type', DvrRuleType::Series)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->pluck('id', 'normalized_title');
@@ -4441,7 +4473,8 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'channel_id, title, start_time, and end_time are required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting?->enabled ? $playlist->dvrSetting : null;
+        $dvrSetting = $this->resolveDvrSettingForWrite($playlist, $channelId);
+        $dvrSetting = $dvrSetting?->enabled ? $dvrSetting : null;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
@@ -4523,7 +4556,8 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'title is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting?->enabled ? $playlist->dvrSetting : null;
+        $dvrSetting = $this->resolveDvrSettingForWrite($playlist, $channelId);
+        $dvrSetting = $dvrSetting?->enabled ? $dvrSetting : null;
 
         if (! $dvrSetting) {
             return response()->json(['error' => 'DVR is not enabled for this playlist'], 422);
@@ -4631,13 +4665,13 @@ class XtreamApiController extends Controller
             return response()->json(['error' => 'rule_id parameter is required'], 400);
         }
 
-        $dvrSetting = $playlist->dvrSetting;
+        $dvrSettingIds = $this->resolveDvrSettingIds($playlist);
 
-        if (! $dvrSetting) {
+        if ($dvrSettingIds === []) {
             return response()->json(['error' => 'DVR not configured for this playlist'], 404);
         }
 
-        $rule = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+        $rule = DvrRecordingRule::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('id', $ruleId)
             ->where('type', DvrRuleType::Series)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))

@@ -361,14 +361,19 @@ test('getEpisodeUrl uses first available episode failover when primary playlist 
         'sort' => 1,
     ]);
 
-    Http::fake(function ($request) use ($playlistA) {
+    Http::fake(function ($request) use ($playlistA, $master) {
         if (str_contains($request->url(), '/streams/by-metadata')) {
+            $field = $request['field'] ?? null;
             $value = $request['value'] ?? null;
+            $isAtCapacity = $field === 'playlist_uuid' && $value === $playlistA->uuid;
 
             return Http::response([
-                'matching_streams' => [],
-                'total_matching' => $value === $playlistA->uuid ? 1 : 0,
-                'total_clients' => $value === $playlistA->uuid ? 1 : 0,
+                'matching_streams' => $isAtCapacity ? [[
+                    'stream_id' => 'existing-episode-stream',
+                    'metadata' => ['type' => 'episode', 'episode_id' => (string) $master->id],
+                ]] : [],
+                'total_matching' => $isAtCapacity ? 1 : 0,
+                'total_clients' => $isAtCapacity ? 1 : 0,
             ]);
         }
 
