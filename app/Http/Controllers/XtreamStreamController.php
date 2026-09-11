@@ -283,12 +283,15 @@ class XtreamStreamController extends Controller
             // must be taken even if enable_proxy is off on both the channel and the
             // (possibly merged/custom) playlist being streamed through - profile
             // selection and pool distribution only happen on the proxy path.
-            $needsProxy = $channel->enable_proxy
-                || $playlist->enable_proxy
-                || $request->input('proxy') === 'true'
-                || ($channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled);
+            $needsProxy = Channel::needsProxy(
+                channelEnableProxy: (bool) $channel->enable_proxy,
+                playlistEnableProxy: (bool) $playlist->enable_proxy,
+                requestProxyFlag: $request->input('proxy') === 'true',
+                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled,
+                userCanUseProxy: $playlist->user->canUseProxy(),
+            );
 
-            if ($needsProxy && $playlist->user->canUseProxy()) {
+            if ($needsProxy) {
                 // Timeshift handled in proxy controller (if needed)
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
@@ -343,12 +346,15 @@ class XtreamStreamController extends Controller
         if ($channel instanceof Channel) {
             // See handleLive(): pooled-provider playlists must use the proxy path so
             // profile selection and pool distribution are applied.
-            $needsProxy = $channel->enable_proxy
-                || $playlist->enable_proxy
-                || $request->input('proxy') === 'true'
-                || ($channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled);
+            $needsProxy = Channel::needsProxy(
+                channelEnableProxy: (bool) $channel->enable_proxy,
+                playlistEnableProxy: (bool) $playlist->enable_proxy,
+                requestProxyFlag: $request->input('proxy') === 'true',
+                sourcePlaylistProfilesEnabled: $channel->playlist instanceof Playlist && $channel->playlist->profiles_enabled,
+                userCanUseProxy: $playlist->user->canUseProxy(),
+            );
 
-            if ($needsProxy && $playlist->user->canUseProxy()) {
+            if ($needsProxy) {
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
                 if ($playlistAuth instanceof PlaylistAuth) {

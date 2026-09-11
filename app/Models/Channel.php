@@ -137,6 +137,31 @@ class Channel extends Model
         return (bool) ($playlist?->enable_proxy ?? false);
     }
 
+    /**
+     * Shared proxy-eligibility rule used by both live streaming (XtreamStreamController)
+     * and static output generation (PlaylistGenerateController::generate*), so the two
+     * stay in sync instead of maintaining separate copies of the same rule.
+     *
+     * A channel is proxied when the user's plan allows it and any of: the channel itself
+     * force-enables the proxy, the playlist being streamed/output through has it enabled,
+     * the request explicitly asked for it, or the channel's own source playlist pools
+     * provider profiles (profile selection/pool distribution only happens on the proxy path).
+     */
+    public static function needsProxy(
+        bool $channelEnableProxy,
+        bool $playlistEnableProxy,
+        bool $requestProxyFlag,
+        bool $sourcePlaylistProfilesEnabled,
+        bool $userCanUseProxy
+    ): bool {
+        return $userCanUseProxy && (
+            $channelEnableProxy
+            || $playlistEnableProxy
+            || $requestProxyFlag
+            || $sourcePlaylistProfilesEnabled
+        );
+    }
+
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);

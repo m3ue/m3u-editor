@@ -228,6 +228,15 @@ class PlaylistGenerateController extends Controller
                     }
                     $url = rtrim($url, '.');
 
+                    // The catchup-source URL always points at our own timeshift endpoint when the
+                    // proxy is enabled, regardless of whether the main URL above used the internal
+                    // Xtream format, so its extension must independently reflect the proxy's
+                    // configured output format rather than reusing $extension (which is only
+                    // proxy-aware inside the $useInternalXtreamFormat branch).
+                    $catchupExtension = ($channelProxyEnabled && ! $channel->is_vod)
+                        ? self::resolveProxyOutputFormat($channelSourcePlaylist, $playlist)
+                        : $extension;
+
                     // Make sure TVG ID only contains characters and numbers
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
@@ -246,7 +255,7 @@ class PlaylistGenerateController extends Controller
                         // This also ensures catchup works for Xtream-imported channels that have
                         // tv_archive=1 but no catchup_source URL template stored.
                         if (($channelProxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
-                            $catchupExt = $extension ?: 'ts';
+                            $catchupExt = $catchupExtension ?: 'ts';
                             $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
                             $extInf .= " catchup-source=\"{$catchupSource}\"";
                         } elseif ($channel->catchup_source) {
@@ -725,8 +734,8 @@ class PlaylistGenerateController extends Controller
      * A channel can force the proxy path even when the playlist-level toggle is
      * off: its own per-channel override, or its source playlist pooling provider
      * profiles (profile selection/pool distribution only happens on the proxy
-     * path). Mirrors the `needsProxy` check in
-     * XtreamStreamController::handleLive()/handleVod().
+     * path). Uses the same `Channel::needsProxy()` rule as
+     * XtreamStreamController::handleLive()/handleVod() so the two can't drift apart.
      *
      * @return array{0: ?Playlist, 1: bool, 2: bool}
      */
@@ -747,8 +756,13 @@ class PlaylistGenerateController extends Controller
             $channelSourcePlaylist = null;
         }
 
-        $channelProxyEnabled = $playlist->user->canUseProxy()
-            && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
+        $channelProxyEnabled = Channel::needsProxy(
+            channelEnableProxy: (bool) $channel->enable_proxy,
+            playlistEnableProxy: $proxyEnabled,
+            requestProxyFlag: false,
+            sourcePlaylistProfilesEnabled: $channelSourcePlaylist->profiles_enabled ?? false,
+            userCanUseProxy: $playlist->user->canUseProxy(),
+        );
 
         return [$channelSourcePlaylist, $channelProxyEnabled, ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls];
     }
