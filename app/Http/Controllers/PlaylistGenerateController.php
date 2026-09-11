@@ -98,8 +98,10 @@ class PlaylistGenerateController extends Controller
         // Get the base URL
         $baseUrl = ProxyFacade::getBaseUrl();
 
-        // Pre-compute MediaFlow stream URL rewrite flag (checked once, used per channel)
-        $mfRewriteEnabled = ! $proxyEnabled && PlaylistFacade::mediaFlowProxyEnabled()
+        // Pre-compute the global MediaFlow settings (checked once); whether it actually
+        // applies is decided per-channel below, since the proxy can be forced on for a
+        // single channel (or its source playlist) even when the playlist-level toggle is off.
+        $mediaFlowRewriteStreamUrls = PlaylistFacade::mediaFlowProxyEnabled()
             && (PlaylistFacade::getMediaFlowSettings()['mediaflow_proxy_rewrite_stream_urls'] ?? false);
 
         // Build the channel query
@@ -108,7 +110,7 @@ class PlaylistGenerateController extends Controller
 
         // Get all active channels
         return response()->stream(
-            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $usedAuth, $mfRewriteEnabled) {
+            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $usedAuth, $mediaFlowRewriteStreamUrls) {
                 // Set the auth details
                 if ($usedAuth) {
                     $username = urlencode($usedAuth->username);
@@ -123,7 +125,31 @@ class PlaylistGenerateController extends Controller
                 echo "#EXTM3U x-tvg-url=\"$epgUrl\" \n";
                 $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
                 $idChannelBy = $playlist->id_channel_by;
+                // Memoized by playlist_id so a batch of channels sharing the same source
+                // playlist (the common case) only resolves it once rather than per row.
+                $sourcePlaylistCache = [];
                 foreach ($cursor as $channel) {
+                    // Resolve the channel's own source playlist (may differ from the
+                    // requested $playlist for merged/custom playlists/aliases) so we can
+                    // check its proxy/output settings without an N+1 query per channel.
+                    $sourcePlaylistId = $channel->playlist_id;
+                    if ($sourcePlaylistId !== null) {
+                        if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
+                            $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
+                        }
+                        $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
+                    } else {
+                        $channelSourcePlaylist = null;
+                    }
+
+                    // A channel can force the proxy path even when the playlist-level toggle
+                    // is off: its own per-channel override, or its source playlist pooling
+                    // provider profiles (profile selection/pool distribution only happens on
+                    // the proxy path). Mirrors the `needsProxy` check in
+                    // XtreamStreamController::handleLive()/handleVod().
+                    $channelProxyEnabled = $playlist->user->canUseProxy()
+                        && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
+                    $channelMfRewriteEnabled = ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls;
                     // Get the title and name
                     $title = $channel->title_custom ?? $channel->title;
                     $name = $channel->name_custom ?? $channel->name;
@@ -185,9 +211,8 @@ class PlaylistGenerateController extends Controller
                     $filename = parse_url($url, PHP_URL_PATH);
                     $extension = pathinfo($filename, PATHINFO_EXTENSION);
                     if (empty($extension)) {
-                        $sourcePlaylist = $channel->getEffectivePlaylist();
-                        if ($sourcePlaylist?->xtream) {
-                            $extension = $sourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
+                        if ($channelSourcePlaylist?->xtream) {
+                            $extension = $channelSourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
                         }
                     }
 
@@ -205,9 +230,17 @@ class PlaylistGenerateController extends Controller
                         if ($channel->is_vod) {
                             $urlPath = 'movie';
                             $extension = $channel->container_extension ?? 'mkv';
+                        } elseif ($channelProxyEnabled) {
+                            // The proxy may transcode the stream, so advertise the configured
+                            // output format instead of the raw provider extension - mirrors the
+                            // allowed_output_formats resolution in XtreamApiController::__invoke().
+                            $proxyOutput = $channelSourcePlaylist->xtream_config['output']
+                                ?? $playlist->xtream_config['output']
+                                ?? 'ts';
+                            $extension = $proxyOutput === 'hls' ? 'm3u8' : $proxyOutput;
                         }
                         $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
-                    } elseif ($mfRewriteEnabled) {
+                    } elseif ($channelMfRewriteEnabled) {
                         // Raw URL mode: wrap the provider URL through MediaFlow Proxy
                         $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
                     }
@@ -230,7 +263,7 @@ class PlaylistGenerateController extends Controller
                         // m3u-editor rather than going directly to the provider.
                         // This also ensures catchup works for Xtream-imported channels that have
                         // tv_archive=1 but no catchup_source URL template stored.
-                        if (($proxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
+                        if (($channelProxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
                             $catchupExt = $extension ?: 'ts';
                             $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
                             $extInf .= " catchup-source=\"{$catchupSource}\"";
@@ -317,7 +350,7 @@ class PlaylistGenerateController extends Controller
                             if (! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format) || $proxyEnabled) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
-                            } elseif ($mfRewriteEnabled) {
+                            } elseif (! $proxyEnabled && $mediaFlowRewriteStreamUrls) {
                                 // Raw URL mode: wrap the provider URL through MediaFlow Proxy
                                 $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
                             }
@@ -541,18 +574,45 @@ class PlaylistGenerateController extends Controller
             $proxyEnabled = $playlist->enable_proxy;
         }
 
-        // Pre-compute MediaFlow stream URL rewrite flag (checked once, used per channel)
-        $mfRewriteEnabled = ! $proxyEnabled && PlaylistFacade::mediaFlowProxyEnabled()
+        // Pre-compute the global MediaFlow settings (checked once); whether it actually
+        // applies is decided per-channel below, since the proxy can be forced on for a
+        // single channel (or its source playlist) even when the playlist-level toggle is off.
+        $mediaFlowRewriteStreamUrls = PlaylistFacade::mediaFlowProxyEnabled()
             && (PlaylistFacade::getMediaFlowSettings()['mediaflow_proxy_rewrite_stream_urls'] ?? false);
 
         // Pre-compute the base URL for stream URL generation (used if proxy enabled or internal Xtream format used)
         $baseUrl = ProxyFacade::getBaseUrl();
         $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
 
-        return response()->stream(function () use ($cursor, $baseUrl, $username, $password, $playlist, $idChannelBy, $mfRewriteEnabled, $isCustomContext, $useInternalXtreamFormat, &$channelNumber) {
+        return response()->stream(function () use ($cursor, $baseUrl, $username, $password, $playlist, $idChannelBy, $proxyEnabled, $mediaFlowRewriteStreamUrls, $isCustomContext, $useInternalXtreamFormat, &$channelNumber) {
             $first = true;
             echo '[';
+            // Memoized by playlist_id so a batch of channels sharing the same source
+            // playlist (the common case) only resolves it once rather than per row.
+            $sourcePlaylistCache = [];
             foreach ($cursor as $channel) {
+                // Resolve the channel's own source playlist (may differ from the
+                // requested $playlist for merged/custom playlists/aliases) so we can
+                // check its proxy/output settings without an N+1 query per channel.
+                $sourcePlaylistId = $channel->playlist_id;
+                if ($sourcePlaylistId !== null) {
+                    if (! array_key_exists($sourcePlaylistId, $sourcePlaylistCache)) {
+                        $sourcePlaylistCache[$sourcePlaylistId] = Playlist::find($sourcePlaylistId, ['id', 'xtream', 'enable_proxy', 'profiles_enabled', 'xtream_config']);
+                    }
+                    $channelSourcePlaylist = $sourcePlaylistCache[$sourcePlaylistId];
+                } else {
+                    $channelSourcePlaylist = null;
+                }
+
+                // A channel can force the proxy path even when the playlist-level toggle
+                // is off: its own per-channel override, or its source playlist pooling
+                // provider profiles (profile selection/pool distribution only happens on
+                // the proxy path). Mirrors the `needsProxy` check in
+                // XtreamStreamController::handleLive()/handleVod().
+                $channelProxyEnabled = $playlist->user->canUseProxy()
+                    && ($proxyEnabled || $channel->enable_proxy || ($channelSourcePlaylist->profiles_enabled ?? false));
+                $channelMfRewriteEnabled = ! $channelProxyEnabled && $mediaFlowRewriteStreamUrls;
+
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
 
                 $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
@@ -576,9 +636,8 @@ class PlaylistGenerateController extends Controller
                 $filename = parse_url($url, PHP_URL_PATH);
                 $extension = pathinfo($filename, PATHINFO_EXTENSION);
                 if (empty($extension)) {
-                    $sourcePlaylist = $channel->getEffectivePlaylist();
-                    if ($sourcePlaylist?->xtream) {
-                        $extension = $sourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
+                    if ($channelSourcePlaylist?->xtream) {
+                        $extension = $channelSourcePlaylist->xtream_config['output'] ?? 'ts'; // Default to 'ts' if not set
                     }
                 }
 
@@ -590,9 +649,17 @@ class PlaylistGenerateController extends Controller
                     if ($channel->is_vod) {
                         $urlPath = 'movie';
                         $extension = $channel->container_extension ?? 'mkv';
+                    } elseif ($channelProxyEnabled) {
+                        // The proxy may transcode the stream, so advertise the configured
+                        // output format instead of the raw provider extension - mirrors the
+                        // allowed_output_formats resolution in XtreamApiController::__invoke().
+                        $proxyOutput = $channelSourcePlaylist->xtream_config['output']
+                            ?? $playlist->xtream_config['output']
+                            ?? 'ts';
+                        $extension = $proxyOutput === 'hls' ? 'm3u8' : $proxyOutput;
                     }
                     $url = $baseUrl."/{$urlPath}/{$username}/{$password}/".$channel->id.'.'.$extension;
-                } elseif ($mfRewriteEnabled) {
+                } elseif ($channelMfRewriteEnabled) {
                     // Raw URL mode: wrap the provider URL through MediaFlow Proxy
                     $url = PlaylistFacade::buildMediaFlowStreamUrl($url);
                 }
