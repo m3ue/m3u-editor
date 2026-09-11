@@ -3930,8 +3930,9 @@ class XtreamApiController extends Controller
                 ->pluck('playlist_id')
             : $playlist->channels()
                 ->whereNotNull('channels.playlist_id')
-                ->pluck('channels.playlist_id')
-                ->unique();
+                ->groupBy('channels.playlist_id')
+                ->distinct()
+                ->pluck('channels.playlist_id');
 
         $settingIds = DvrSetting::whereIn('playlist_id', $sourcePlaylistIds)
             ->pluck('id')
