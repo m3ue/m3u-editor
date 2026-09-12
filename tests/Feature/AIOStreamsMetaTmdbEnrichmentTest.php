@@ -166,6 +166,48 @@ it('resolves an imdb id to tmdb and adds shaped season metadata for a series', f
     expect($meta['seasons'][1])->not->toHaveKey('overview');
 });
 
+it('shapes TMDB recommendations into related items on a movie meta', function () {
+    $movie = fakeTmdbMovie();
+    $movie['recommendations'] = [
+        'results' => [
+            ['id' => 680, 'title' => 'Pulp Fiction', 'poster_path' => '/pulp.jpg'],
+            ['id' => 155, 'title' => 'The Dark Knight', 'poster_path' => null],
+        ],
+    ];
+
+    Http::fake([
+        'aiostreams.test/abc/meta/movie/tmdb:603.json*' => Http::response([
+            'meta' => ['id' => 'tmdb:603', 'type' => 'movie', 'name' => 'The Matrix'],
+        ], 200),
+        'api.themoviedb.org/3/movie/603*' => Http::response($movie, 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tmdb:603')['meta'];
+
+    expect($meta['related'])->toHaveCount(2);
+    expect($meta['related'][0])->toMatchArray([
+        'id' => 'tmdb:680',
+        'type' => 'movie',
+        'name' => 'Pulp Fiction',
+        'poster' => 'https://image.tmdb.org/t/p/w342/pulp.jpg',
+    ]);
+    // No poster - key dropped rather than emitted null.
+    expect($meta['related'][1])->not->toHaveKey('poster');
+});
+
+it('omits related when TMDB returns no recommendations', function () {
+    Http::fake([
+        'aiostreams.test/abc/meta/movie/tmdb:603.json*' => Http::response([
+            'meta' => ['id' => 'tmdb:603', 'type' => 'movie', 'name' => 'The Matrix'],
+        ], 200),
+        'api.themoviedb.org/3/movie/603*' => Http::response(fakeTmdbMovie(), 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('movie', 'tmdb:603')['meta'];
+
+    expect($meta)->not->toHaveKey('related');
+});
+
 it('does not enrich or call TMDB when the integration toggle is off', function () {
     $this->integration->update(['aiostreams_tmdb_enrich' => false]);
 

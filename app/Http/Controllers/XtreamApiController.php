@@ -1392,6 +1392,17 @@ class XtreamApiController extends Controller
                 $seriesInfo['clearlogo'] = $clearLogo;
             }
 
+            // "More like this" - persisted on series->metadata['related_tmdb'] during TMDB
+            // enrichment, resolved here against the playlist's own VOD/series library.
+            // Absent on non-TMDB-enriched rows or when nothing in the library matches,
+            // so those responses stay byte-identical to today.
+            if (! empty($seriesItem->metadata['related_tmdb'])) {
+                $related = $this->resolveRelatedLibraryItems($seriesItem->metadata['related_tmdb'], $playlist, 'series', $seriesItem->id);
+                if (! empty($related)) {
+                    $seriesInfo['related'] = $related;
+                }
+            }
+
             $seasons = [];
             $episodesBySeason = [];
             if ($seriesItem->seasons && $seriesItem->seasons->isNotEmpty()) {
@@ -1919,6 +1930,17 @@ class XtreamApiController extends Controller
             // those responses stay byte-identical.
             if (! empty($clearLogo)) {
                 $defaultInfo['clearlogo'] = $clearLogo;
+            }
+
+            // "More like this" - persisted on channel->info['related_tmdb'] during TMDB
+            // enrichment, resolved here against the playlist's own VOD/series library.
+            // Absent on non-TMDB-enriched rows or when nothing in the library matches,
+            // so those responses stay byte-identical to today.
+            if (! empty($info['related_tmdb'])) {
+                $related = $this->resolveRelatedLibraryItems($info['related_tmdb'], $playlist, 'movie', $channel->id);
+                if (! empty($related)) {
+                    $defaultInfo['related'] = $related;
+                }
             }
 
             // Build movie_data section - use channel's movie_data field if available, otherwise build from channel data
@@ -3853,6 +3875,92 @@ class XtreamApiController extends Controller
     private function canAdvertiseDvrFeature($playlist, string $authMethod, ?PlaylistAuth $playlistAuth): bool
     {
         return $this->dvrCapabilityGranted($this->resolveDvrPlaylist($playlist), $authMethod, $playlistAuth);
+    }
+
+    /**
+     * Resolve TMDB "more like this" candidates - persisted at enrichment time
+     * on `info['related_tmdb']` / `series.metadata['related_tmdb']` by
+     * FetchTmdbIds / AppliesTmdbSelection - down to the subset that actually
+     * exists in this playlist's own VOD/series library, matched by `tmdb_id`.
+     * Recommendations for titles outside the library are dropped rather than
+     * shown, so every related card the client renders is guaranteed
+     * playable; this also means the row updates automatically as the library
+     * grows, without ever needing to re-run TMDB enrichment.
+     *
+     * @param  array<int, array{tmdb_id?: int, media_type?: string}>  $relatedTmdb
+     * @param  Playlist|PlaylistAlias  $playlist
+     * @return array<int, array{type: string, id: int, name: string, cover: ?string, tmdb_id: int}>
+     */
+    private function resolveRelatedLibraryItems(array $relatedTmdb, $playlist, string $excludeType, int $excludeId): array
+    {
+        $movieTmdbIds = [];
+        $seriesTmdbIds = [];
+
+        foreach ($relatedTmdb as $candidate) {
+            $tmdbId = (int) ($candidate['tmdb_id'] ?? 0);
+            if (! $tmdbId) {
+                continue;
+            }
+
+            if (($candidate['media_type'] ?? null) === 'tv') {
+                $seriesTmdbIds[$tmdbId] = true;
+            } else {
+                $movieTmdbIds[$tmdbId] = true;
+            }
+        }
+
+        $channelsByTmdbId = collect();
+        if (! empty($movieTmdbIds)) {
+            $channelsByTmdbId = PlaylistGenerateController::getChannelQuery($playlist, isVod: true)
+                ->whereIn('channels.tmdb_id', array_keys($movieTmdbIds))
+                ->get(['id', 'tmdb_id', 'title_custom', 'title', 'name', 'logo', 'logo_internal'])
+                ->keyBy('tmdb_id');
+        }
+
+        $seriesByTmdbId = collect();
+        if (! empty($seriesTmdbIds)) {
+            $seriesByTmdbId = $playlist->series()
+                ->where('enabled', true)
+                ->whereIn('series.tmdb_id', array_keys($seriesTmdbIds))
+                ->get(['id', 'tmdb_id', 'name', 'cover'])
+                ->keyBy('tmdb_id');
+        }
+
+        $related = [];
+
+        foreach ($relatedTmdb as $candidate) {
+            if (count($related) >= 12) {
+                break;
+            }
+
+            $tmdbId = (int) ($candidate['tmdb_id'] ?? 0);
+            if (! $tmdbId) {
+                continue;
+            }
+
+            $isSeries = ($candidate['media_type'] ?? null) === 'tv';
+            $type = $isSeries ? 'series' : 'movie';
+
+            $match = $isSeries ? $seriesByTmdbId->get($tmdbId) : $channelsByTmdbId->get($tmdbId);
+            if (! $match || ($type === $excludeType && (int) $match->id === $excludeId)) {
+                continue;
+            }
+
+            $cover = $isSeries ? $match->cover : ($match->logo ?: $match->logo_internal);
+            if ($playlist->enable_logo_proxy && $cover) {
+                $cover = $this->proxyImageUrl($cover, self::posterProxyWidth());
+            }
+
+            $related[] = [
+                'type' => $type,
+                'id' => (int) $match->id,
+                'name' => $isSeries ? $match->name : ($match->title_custom ?? $match->title ?? $match->name),
+                'cover' => $cover,
+                'tmdb_id' => $tmdbId,
+            ];
+        }
+
+        return $related;
     }
 
     /**

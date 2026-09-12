@@ -716,6 +716,12 @@ class FetchTmdbIds implements ShouldQueue
                     $info['cast_list'] = $details['cast_list'];
                 }
 
+                // Populate "more like this" candidates (Xtream get_vod_info resolves
+                // these against the playlist's own library at request time).
+                if (! empty($details['recommendations'])) {
+                    $info['related_tmdb'] = $details['recommendations'];
+                }
+
                 // Populate director if available
                 if (! empty($details['director'])) {
                     $info['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
@@ -1059,6 +1065,13 @@ class FetchTmdbIds implements ShouldQueue
                 // client rendering (Xtream get_series_info reads it straight from here).
                 if (! empty($details['cast_list'])) {
                     $metadata['cast_list'] = $details['cast_list'];
+                    $updateData['metadata'] = $metadata;
+                }
+
+                // Populate "more like this" candidates (Xtream get_series_info resolves
+                // these against the playlist's own library at request time).
+                if (! empty($details['recommendations'])) {
+                    $metadata['related_tmdb'] = $details['recommendations'];
                     $updateData['metadata'] = $metadata;
                 }
 

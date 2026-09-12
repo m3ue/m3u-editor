@@ -193,6 +193,10 @@ trait AppliesTmdbSelection
                 $info['cast_list'] = $details['cast_list'];
             }
 
+            if (! empty($details['recommendations'])) {
+                $info['related_tmdb'] = $details['recommendations'];
+            }
+
             if (! empty($details['director'])) {
                 $info['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
             }
@@ -355,6 +359,10 @@ trait AppliesTmdbSelection
 
             if (! empty($details['cast_list'])) {
                 $seriesMetadata['cast_list'] = $details['cast_list'];
+            }
+
+            if (! empty($details['recommendations'])) {
+                $seriesMetadata['related_tmdb'] = $details['recommendations'];
             }
 
             if (! empty($details['director'])) {

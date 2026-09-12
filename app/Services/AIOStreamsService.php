@@ -480,6 +480,10 @@ class AIOStreamsService implements MediaServer
             }
         }
 
+        if (! empty($details['recommendations']) && empty($meta['related'])) {
+            $meta['related'] = $this->shapeTmdbRecommendations($details['recommendations']);
+        }
+
         $data['meta'] = $meta;
 
         return $data;
@@ -517,6 +521,30 @@ class AIOStreamsService implements MediaServer
         }
 
         return $out;
+    }
+
+    /**
+     * Reshape TmdbService::getMovieDetails()/getTvSeriesDetails() `recommendations`
+     * into Stremio-style related items. Uses the `tmdb:{id}` id form the
+     * catalog browse already understands (see extractMovieDbIds()) so tapping
+     * a related card re-enters this same getMeta()/enrichMetaWithTmdb() path -
+     * no extra TMDB lookup needed to resolve an imdb id first.
+     *
+     * @param  array<int, array{tmdb_id: int, title: string, poster_url: ?string, media_type: string}>  $recommendations
+     * @return array<int, array{id: string, type: string, name: string, poster: ?string}>
+     */
+    protected function shapeTmdbRecommendations(array $recommendations): array
+    {
+        return collect($recommendations)
+            ->filter(fn ($rec) => ! empty($rec['tmdb_id']))
+            ->map(fn ($rec) => array_filter([
+                'id' => 'tmdb:'.$rec['tmdb_id'],
+                'type' => ($rec['media_type'] ?? null) === 'tv' ? 'series' : 'movie',
+                'name' => $rec['title'] ?? '',
+                'poster' => $rec['poster_url'] ?? null,
+            ], fn ($value) => $value !== null && $value !== ''))
+            ->values()
+            ->all();
     }
 
     /**

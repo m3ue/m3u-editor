@@ -892,7 +892,7 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos,images',
+                    'append_to_response' => 'external_ids,credits,videos,images,recommendations',
                     'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
@@ -992,6 +992,7 @@ class TmdbService
                 'cast_list' => $castList,
                 'director' => $director,
                 'youtube_trailer' => $youtubeTrailer,
+                'recommendations' => $this->reshapeRecommendations($data['recommendations']['results'] ?? [], 'tv'),
             ];
         } catch (\Exception $e) {
             Log::error('TMDB get TV series details error', [
@@ -1020,7 +1021,7 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos,images',
+                    'append_to_response' => 'external_ids,credits,videos,images,recommendations',
                     'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
@@ -1109,6 +1110,7 @@ class TmdbService
                 'cast_list' => $castList,
                 'director' => $directors,
                 'youtube_trailer' => $youtubeTrailer,
+                'recommendations' => $this->reshapeRecommendations($data['recommendations']['results'] ?? [], 'movie'),
             ];
         } catch (\Exception $e) {
             Log::error('TMDB get movie details error', [
@@ -1179,6 +1181,32 @@ class TmdbService
                 'photo' => ! empty($p['profile_path'])
                     ? 'https://image.tmdb.org/t/p/w185'.$p['profile_path']
                     : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Reshape a TMDB `recommendations.results` page into the minimal shape
+     * needed to later match a recommendation against the user's own library
+     * (by `tmdb_id`) or, for AIOStreams, to link straight to a `tmdb:{id}`
+     * meta lookup. Capped at 12 - this is a "more like this" row, not a feed.
+     *
+     * @param  array<int, array<string, mixed>>  $results
+     * @return array<int, array{tmdb_id: int, title: string, poster_url: ?string, media_type: string}>
+     */
+    private function reshapeRecommendations(array $results, string $mediaType): array
+    {
+        return collect($results)
+            ->filter(fn ($r) => ! empty($r['id']))
+            ->take(12)
+            ->map(fn ($r) => [
+                'tmdb_id' => (int) $r['id'],
+                'title' => $r['title'] ?? $r['name'] ?? '',
+                'poster_url' => ! empty($r['poster_path'])
+                    ? 'https://image.tmdb.org/t/p/w342'.$r['poster_path']
+                    : null,
+                'media_type' => $mediaType,
             ])
             ->values()
             ->all();
