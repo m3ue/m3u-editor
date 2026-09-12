@@ -155,6 +155,47 @@ it('builds a vod tmdb auto-merge job when the playlist merge key is tmdb id', fu
         ->and($job->mergeKey)->toBe('tmdb_id');
 });
 
+it('builds a resolution-first weighted config for a vod tmdb auto-merge job when resolution priority is enabled', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => [
+            'merge_key' => 'tmdb_id',
+            'vod_resolution_priority_enabled' => true,
+        ],
+    ]);
+
+    $job = SyncListener::getMergeJob($this->playlist->refresh());
+
+    expect($job->weightedConfig['priority_attributes'][0] ?? null)->toBe('resolution');
+});
+
+it('plumbs vod_verify_filename_via_probe through weightedConfig for vod tmdb auto-merge jobs', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => [
+            'merge_key' => 'tmdb_id',
+            'vod_verify_filename_via_probe' => true,
+        ],
+    ]);
+
+    $job = SyncListener::getMergeJob($this->playlist->refresh());
+
+    expect($job->weightedConfig['vod_verify_filename_via_probe'] ?? null)->toBeTrue();
+});
+
+it('defaults vod_verify_filename_via_probe to false when unset in auto_merge_config', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => [
+            'merge_key' => 'tmdb_id',
+        ],
+    ]);
+
+    $job = SyncListener::getMergeJob($this->playlist->refresh());
+
+    expect($job->weightedConfig['vod_verify_filename_via_probe'] ?? null)->toBeFalse();
+});
+
 it('chains merge job before scrubber when both are enabled', function () {
     $this->playlist->update(['auto_merge_channels_enabled' => true]);
 

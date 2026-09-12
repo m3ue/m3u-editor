@@ -375,3 +375,17 @@ This adds:
 - Use queue workers with appropriate memory limits
 - Enable optimizations (disable force re-merge)
 - Monitor database performance during processing
+
+## VOD Resolution Priority
+
+When a playlist merges VOD by TMDB ID (`merge_key = tmdb_id`), the same movie can appear at multiple resolutions (e.g. a 4K release and a 720p release from different providers). Resolution Priority promotes the higher-resolution duplicate to master so the best-quality stream wins, mirroring the existing channel-merge behavior. Resolution is derived first from probed `stream_stats`, then (optionally) parsed from the channel title, name, or URL — so no live ffprobe is required during the merge pass.
+
+Four fields control the behavior, in the **Auto-Merge Processing** section of the playlist form (visible only when the VOD merge key is set to `tmdb_id`), and in the manual **Merge Same ID** dialog for VOD:
+
+- **`vod_resolution_priority_enabled`** (default `true`) — "Promote higher-resolution duplicate when same TMDB ID found". When enabled, `resolution` leads the weighted priority order (`resolution → playlist priority → group priority → codec → keyword match`).
+- **`vod_use_filename_resolution`** (default `true`) — "Parse resolution from title/URL when ffprobe data is missing". When disabled, only probed `stream_stats` resolution is used, so channels without probe data fall back to playlist priority.
+- **`vod_min_resolution_promote`** (default `720`) — "Discard filename-derived resolution below this height". Channels whose filename-parsed resolution is below this threshold are treated as having no resolution signal; probed resolution always passes through.
+- **`vod_verify_filename_via_probe`** (default `false`) — "Verify filename-derived resolution via ffprobe after merge". Opt-in: when enabled, channels whose resolution was derived from filename/title/URL (not probed) are queued for ffprobe after the merge completes, so the next merge uses the probed value instead of the parsed one.
+
+_![VOD Resolution Priority settings](screenshots/vod-resolution-priority.png)_
+

@@ -66,7 +66,7 @@ class AioStreamsQualityParser
         ];
     }
 
-    protected function parseResolution(string $haystack): ?int
+    public function parseResolution(string $haystack): ?int
     {
         if (preg_match('/\b(2160p|4k|uhd)\b/i', $haystack)) {
             return 2160;
