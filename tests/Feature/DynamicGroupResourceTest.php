@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CachedContentFileStatus;
 use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
 use App\Filament\Resources\Categories\CategoryResource;
@@ -7,8 +8,12 @@ use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Filament\Resources\DynamicGroups\Pages\ViewDynamicGroup;
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
+use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
+use App\Jobs\DownloadCachedContentFile;
+use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\DynamicGroupItemSnapshot;
@@ -16,6 +21,8 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\SyncRun;
 use App\Models\User;
+use App\Services\TmdbService;
+use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
@@ -33,6 +40,15 @@ beforeEach(function () {
     // Fake the bus so we don't need a live Redis during unit tests.
     Bus::fake();
 
+    // The two sibling listing resources (VodDynamicGroupResource and
+    // SeriesDynamicGroupResource) gate their nav visibility on BOTH the
+    // feature flag AND TmdbService::isConfigured(). Mock TMDB configured
+    // here so those sibling resources — not this view-only parent — would
+    // advertise themselves in the sidebar if a test queried them.
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    app()->instance(TmdbService::class, $tmdb);
+
     $this->user = User::factory()->create();
     $this->actingAs($this->user);
     $this->playlist = Playlist::factory()->for($this->user)->create();
@@ -44,13 +60,15 @@ beforeEach(function () {
     Cache::put("p:{$this->playlist->id}:xtream_status", [], 60);
 });
 
-it('registers only the view page (no index) and stays out of nav', function () {
-    // The standalone index was removed because its auto-generated breadcrumb
-    // off the per-playlist widgets landed users on a list page they never
-    // asked to be on. The view page is reachable via the widget row's
-    // view action (or a click anywhere on the row), with a breadcrumb that
-    // chains through the type-appropriate VodGroupResource/CategoryResource
-    // index instead of the (now-missing) index or the owning playlist.
+it('registers only the view page and stays out of nav (per-type listings live on sibling resources)', function () {
+    // The sidebar-refactor split: the per-playlist widgets were retired
+    // in favor of TWO sibling Filament resources backed by the same
+    // DynamicGroup model — VodDynamicGroupResource surfaces under the
+    // VOD Channels nav group, SeriesDynamicGroupResource under the Series
+    // nav group. This parent DynamicGroupResource stays as the canonical
+    // "view one DynamicGroup row" destination (reachable from either
+    // sibling listing's view action) but no longer surfaces in the
+    // sidebar and no longer hosts an index page.
     $pages = DynamicGroupResource::getPages();
 
     expect(DynamicGroupResource::canCreate())->toBeFalse()
@@ -279,6 +297,49 @@ it('lists the real synced dynamic_group_items members on the Movies relation man
         ->assertCanNotSeeTableRecords([$notAttached]);
 });
 
+it('the Movies relation manager shows a blue Cached check per row when a completed CachedContentFile exists for that channel', function () {
+    // Per-movie 'is THIS movie cached?' indicator lives on the
+    // ChannelsRelationManager (the movie grid in ViewDynamicGroup),
+    // not on the VOD Dynamic Groups listing. Blue check = completed
+    // CachedContentFile at this channel's tmdb_id + group's rule
+    // quality.
+    $this->playlist->update([
+        'dynamic_groups_config' => [
+            ['name' => 'Trending Now', 'cache_enabled' => true],
+        ],
+    ]);
+
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+
+    $cached = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'is_vod' => true, 'title' => 'Cached Movie', 'tmdb_id' => 550,
+    ]);
+    $uncached = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'is_vod' => true, 'title' => 'Not Cached Movie', 'tmdb_id' => 551,
+    ]);
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $cached->id],
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $uncached->id],
+    ]);
+
+    CachedContentFile::factory()->completed()->create([
+        'content_type' => 'movie', 'tmdb_id' => '550', 'quality' => null,
+    ]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $group,
+        'pageClass' => ViewDynamicGroup::class,
+    ])
+        ->assertOk()
+        ->loadTable()
+        ->assertTableColumnStateSet('is_cached', CachedContentFileStatus::Completed, $cached)
+        ->assertTableColumnStateSet('is_cached', null, $uncached);
+});
+
 it('lists the real synced dynamic_group_items members on the Series relation manager table', function () {
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id,
@@ -313,13 +374,15 @@ it('chains the View page breadcrumb through VodGroupResource for vod-type groups
         ->instance()
         ->getBreadcrumbs();
 
-    $expectedUrl = VodGroupResource::getUrl('index').'?tab='.$this->playlist->id;
-
-    expect($breadcrumbs)->toHaveKey($expectedUrl)
-        ->and($breadcrumbs[$expectedUrl])->toBe('Groups')
+    // The root segment points at the per-type Dynamic Groups
+    // index (VodDynamicGroupResource for vod), not the older
+    // VOD Groups / Categories pages.
+    expect($breadcrumbs)->toHaveKey(VodDynamicGroupResource::getUrl('index'))
+        ->and($breadcrumbs[VodDynamicGroupResource::getUrl('index')])->toBe('Dynamic Groups')
         ->and($breadcrumbs)->toContain('Dynamic')
         ->and($breadcrumbs)->toContain('Trending Now')
-        ->and($breadcrumbs)->not->toContain('Dynamic Groups');
+        ->and($breadcrumbs)->not->toHaveKey(VodGroupResource::getUrl('index'))
+        ->and($breadcrumbs)->not->toHaveKey(CategoryResource::getUrl('index'));
 });
 
 it('chains the View page breadcrumb through CategoryResource for series-type groups, pre-selecting the owning playlist tab', function () {
@@ -334,15 +397,18 @@ it('chains the View page breadcrumb through CategoryResource for series-type gro
         ->instance()
         ->getBreadcrumbs();
 
-    $expectedUrl = CategoryResource::getUrl('index').'?tab='.$this->playlist->id;
-
-    expect($breadcrumbs)->toHaveKey($expectedUrl)
-        ->and($breadcrumbs[$expectedUrl])->toBe('Categories')
+    // The root segment points at the per-type Dynamic Groups
+    // index (SeriesDynamicGroupResource for series). Label is
+    // "Dynamic Groups" — same as the vod-side.
+    expect($breadcrumbs)->toHaveKey(SeriesDynamicGroupResource::getUrl('index'))
+        ->and($breadcrumbs[SeriesDynamicGroupResource::getUrl('index')])->toBe('Dynamic Groups')
         ->and($breadcrumbs)->toContain('Dynamic')
-        ->and($breadcrumbs)->toContain('Trending Series');
+        ->and($breadcrumbs)->toContain('Trending Series')
+        ->and($breadcrumbs)->not->toHaveKey(VodGroupResource::getUrl('index'))
+        ->and($breadcrumbs)->not->toHaveKey(CategoryResource::getUrl('index'));
 });
 
-it('the View page\'s back action points at Groups for vod-type and Categories for series-type', function () {
+it('the View page\'s back action points at the per-type Dynamic Groups index for both types', function () {
     $vodGroup = DynamicGroup::create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
@@ -354,17 +420,20 @@ it('the View page\'s back action points at Groups for vod-type and Categories fo
         'type' => 'series', 'source' => 'trending', 'name' => 'Series Group',
     ]);
 
+    // The back button label is the same for both types — the user
+    // goes back to the Dynamic Groups list (whichever per-type
+    // page they came from). The URL is per-type.
     Livewire::test(ViewDynamicGroup::class, ['record' => $vodGroup->id])
         ->assertOk()
-        ->assertSee('Back to Groups')
-        ->assertDontSee('Back to Categories')
-        ->assertActionHasUrl('back_to_index', VodGroupResource::getUrl('index').'?tab='.$this->playlist->id);
+        ->assertSee('Back to Dynamic Groups')
+        ->assertDontSee('Back to Groups')
+        ->assertDontSee('Back to Categories');
 
     Livewire::test(ViewDynamicGroup::class, ['record' => $seriesGroup->id])
         ->assertOk()
-        ->assertSee('Back to Categories')
+        ->assertSee('Back to Dynamic Groups')
         ->assertDontSee('Back to Groups')
-        ->assertActionHasUrl('back_to_index', CategoryResource::getUrl('index').'?tab='.$this->playlist->id);
+        ->assertDontSee('Back to Categories');
 });
 
 it('deletes the DynamicGroup and cascades its dynamic_group_items when the View page delete action runs', function () {
@@ -408,4 +477,68 @@ it('titles the View page "View Dynamic Group" for vod-type and "View Dynamic Cat
         ->toBe('View Dynamic Group');
     expect(Livewire::test(ViewDynamicGroup::class, ['record' => $seriesGroup->id])->instance()->getTitle())
         ->toBe('View Dynamic Category');
+});
+
+it('ViewDynamicGroup exposes a Cache Now header action that dispatches DownloadCachedContentFile jobs', function () {
+    // The action lives on the /dynamic-groups/{id} view page (Cloud +
+    // arrow-down icon, info/blue) so operators can kick off a cache build
+    // for one specific group without going through the cron. Bulk
+    // selection on the DynamicGroupsWidget is the multi-group equivalent;
+    // this is the single-group surface.
+    Bus::fake();
+
+    // Prime Spatie Settings before mutating — see the project test pattern
+    // documented at DynamicGroupCacheActivityWidgetTest:22.
+    app(GeneralSettings::class)->refresh();
+    app(GeneralSettings::class)->enable_dynamic_group_cache = true;
+    app(GeneralSettings::class)->save();
+    app(GeneralSettings::class)->refresh();
+
+    $this->playlist->update(['dynamic_groups_config' => [
+        ['name' => 'Trending', 'cache_enabled' => true],
+    ]]);
+
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending',
+    ]);
+    $channels = collect(['600', '601', '602'])->map(
+        fn (string $tmdbId) => Channel::factory()->for($this->playlist)->create(['tmdb_id' => $tmdbId])
+    );
+    $group->channels()->attach($channels->pluck('id')->all());
+
+    $tester = Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk();
+
+    // callAction drives both the existence check (assertActionVisible) and
+    // the closure invocation. If the action isn't wired into the page's
+    // header actions, this throws — no separate assertPageActionExists
+    // needed (the v5 test API doesn't expose it for view pages).
+    $tester->callAction('cache_now');
+
+    // 3 channels → 3 DownloadCachedContentFile dispatches.
+    Bus::assertDispatchedTimes(DownloadCachedContentFile::class, 3);
+});
+
+it('ViewDynamicGroup cache_now fires a warning notification when dynamic-group caching is disabled', function () {
+    // Defensive UX: master toggle off → no silent dispatch, the action
+    // shows a Filament notification with the "how to enable" hint.
+    Bus::fake();
+
+    app(GeneralSettings::class)->refresh();
+    app(GeneralSettings::class)->enable_dynamic_group_cache = false;
+    app(GeneralSettings::class)->save();
+    app(GeneralSettings::class)->refresh();
+
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending',
+    ]);
+
+    $tester = Livewire::test(ViewDynamicGroup::class, ['record' => $group->id])
+        ->assertOk()
+        ->callAction('cache_now');
+
+    Bus::assertNotDispatched(DownloadCachedContentFile::class);
+    $tester->assertNotified('Dynamic Group Caching is disabled');
 });

@@ -25,8 +25,11 @@ use Illuminate\Support\Collection;
 /**
  * Read-only Filament resource for a DynamicGroup row. Rule config lives on
  * the Playlist form's Dynamic Groups (TMDB) repeater, not here. Only the
- * `view` route is registered — the `index` page is intentionally absent,
- * see Pages\ViewDynamicGroup for the breadcrumb rationale.
+ * `view` route is registered — the per-type listing surfaces live on
+ * `VodDynamicGroupResource` and `SeriesDynamicGroupResource` (each
+ * scoped to one type in their own `getEloquentQuery()`). The breadcrumb
+ * chain through `VodGroupResource`/`CategoryResource` is preserved here,
+ * see `Pages\ViewDynamicGroup` for the rationale.
  */
 class DynamicGroupResource extends Resource
 {
@@ -39,15 +42,23 @@ class DynamicGroupResource extends Resource
 
     /**
      * Always hide from Filament's nav and global search — drill-in is only
-     * reachable from the per-playlist widgets, never as a top-level entry.
-     * Access is intentionally permissive so the view route resolves, just
-     * not advertised.
+     * reachable from the per-type listing pages, never as a top-level
+     * entry. Access is intentionally permissive so the view route
+     * resolves, just not advertised.
      */
     public static function canAccess(): bool
     {
         return true;
     }
 
+    /**
+     * Hidden from the sidebar — the two per-type listing surfaces are
+     * registered as separate Filament resources (VodDynamicGroupResource
+     * in the VOD Channels group, SeriesDynamicGroupResource in the Series
+     * group). This resource stays only as the canonical "view one
+     * DynamicGroup row" destination reachable from either listing's
+     * row action.
+     */
     public static function shouldRegisterNavigation(): bool
     {
         return false;
@@ -369,23 +380,6 @@ class DynamicGroupResource extends Resource
     }
 
     /**
-     * The resource has no `index` page (see class docblock). This exists as
-     * a defensive fallback for any generic Filament internals that still
-     * call `getUrl('index')` / `getIndexUrl()` on this resource directly
-     * (e.g. global search's "view all results" link) — without it those
-     * would throw a `LogicException`. It is NOT what drives the page's own
-     * breadcrumb/back-navigation chain anymore: `Pages\ViewDynamicGroup`
-     * overrides `getBreadcrumbs()` and its header actions directly, routing
-     * through `VodGroupResource`/`CategoryResource` by type instead.
-     *
-     * @param  array<mixed>  $parameters
-     */
-    public static function getIndexUrl(array $parameters = [], bool $isAbsolute = true, ?string $panel = null, ?Model $tenant = null, bool $shouldGuessMissingParameters = false): string
-    {
-        return PlaylistResource::getUrl('index', $parameters, $isAbsolute, $panel, $tenant, $shouldGuessMissingParameters);
-    }
-
-    /**
      * Both managers are registered even though only one tab will render
      * per record (gating is done in `canViewForRecord` on each manager).
      * Filament iterates `getRelations()` and picks the tabs that pass the
@@ -402,6 +396,11 @@ class DynamicGroupResource extends Resource
 
     public static function getPages(): array
     {
+        // View-only resource: the per-type listing surfaces live on the
+        // dedicated VodDynamicGroupResource and SeriesDynamicGroupResource
+        // (each scoped to one type in getEloquentQuery()). The view route
+        // stays here as a single shared detail page reached from either
+        // listing's row action.
         return [
             'view' => Pages\ViewDynamicGroup::route('/{record}'),
         ];

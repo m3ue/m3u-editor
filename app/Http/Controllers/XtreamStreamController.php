@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Api\M3uProxyApiController;
+use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
@@ -11,8 +12,10 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\DynamicGroupCacheDispatchService;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
+use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -344,6 +347,44 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
         [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
         if ($channel instanceof Channel) {
+            // Dynamic Group Cache (Phase 3): when the playlist has proxy
+            // enabled, serve a Completed cache hit before falling through
+            // to the proxy/direct path. Proxy-on gating mirrors Phase 2's
+            // dispatcher so we never silently redirect a user away from
+            // the direct path they asked for. The lazy trigger
+            // fires-and-forgets a download for cache misses (so the next
+            // play benefits) while this play still flows through the
+            // normal proxy/direct branches below.
+            if ($playlist->enable_proxy && $channel->tmdb_id !== null) {
+                $tmdbId = (string) $channel->tmdb_id;
+                $dispatchService = app(DynamicGroupCacheDispatchService::class);
+                $cached = $dispatchService->findCompletedCache('movie', $tmdbId, null, null, null);
+
+                if ($cached) {
+                    return Redirect::to(route('dynamic-group-cache.stream', [
+                        'username' => $username,
+                        'password' => $password,
+                        'uuid' => $cached->uuid,
+                        'format' => $format,
+                    ]));
+                }
+
+                $settings = app(GeneralSettings::class);
+                if ($settings->enable_dynamic_group_cache && $settings->dynamic_group_cache_lazy_load) {
+                    $found = $dispatchService->findCacheableRuleForChannel($channel);
+                    if ($found !== null) {
+                        $fingerprint = CachedContentFile::fingerprintFor([
+                            'content_type' => 'movie',
+                            'tmdb_id' => $tmdbId,
+                            'quality' => $dispatchService->resolveQuality($found['rule']),
+                        ]);
+                        if (! $dispatchService->shouldSkip($fingerprint)) {
+                            $dispatchService->dispatchForChannel($playlist, $found['group'], $channel, $found['rule']);
+                        }
+                    }
+                }
+            }
+
             // See handleLive(): pooled-provider playlists must use the proxy path so
             // profile selection and pool distribution are applied.
             $needsProxy = Channel::needsProxy(
@@ -390,6 +431,49 @@ class XtreamStreamController extends Controller
         $format = $format ?? 'mp4'; // Default to 'mp4' if no format provided
         [$playlist, $episode, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
         if ($episode instanceof Episode) {
+            // Dynamic Group Cache (Phase 3) — mirrors handleVod's cache
+            // check + lazy trigger pattern for Episodes. Uses the *series'*
+            // tmdb_id (matches Phase 2's dispatcher) so a fingerprint
+            // computed here matches what's already cached for the same
+            // content.
+            if ($playlist->enable_proxy) {
+                $series = $episode->series;
+                if ($series && $series->tmdb_id !== null) {
+                    $tmdbId = (string) $series->tmdb_id;
+                    $seasonNumber = $episode->season;
+                    $episodeNumber = $episode->episode_number;
+
+                    $dispatchService = app(DynamicGroupCacheDispatchService::class);
+                    $cached = $dispatchService->findCompletedCache('episode', $tmdbId, null, $seasonNumber, $episodeNumber);
+
+                    if ($cached) {
+                        return Redirect::to(route('dynamic-group-cache.stream', [
+                            'username' => $username,
+                            'password' => $password,
+                            'uuid' => $cached->uuid,
+                            'format' => $format,
+                        ]));
+                    }
+
+                    $settings = app(GeneralSettings::class);
+                    if ($settings->enable_dynamic_group_cache && $settings->dynamic_group_cache_lazy_load) {
+                        $found = $dispatchService->findCacheableRuleForEpisode($episode);
+                        if ($found !== null) {
+                            $fingerprint = CachedContentFile::fingerprintFor([
+                                'content_type' => 'episode',
+                                'tmdb_id' => $tmdbId,
+                                'season_number' => $seasonNumber,
+                                'episode_number' => $episodeNumber,
+                                'quality' => $dispatchService->resolveQuality($found['rule']),
+                            ]);
+                            if (! $dispatchService->shouldSkip($fingerprint)) {
+                                $dispatchService->dispatchForEpisode($playlist, $found['group'], $episode, $found['rule']);
+                            }
+                        }
+                    }
+                }
+            }
+
             if (($playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
                 // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);

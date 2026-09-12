@@ -271,6 +271,24 @@ return [
             'timeout' => 60 * 5,
             'nice' => 5,
         ],
+
+        // Cache downloads run here exclusively, isolated from other queues so a
+        // burst of multi-GB movie files can't starve the general or DVR queues.
+        // Jobs are rare-but-large — generous timeout, low per-process concurrency.
+        'dynamic-group-cache-queue' => [
+            'connection' => 'redis',
+            'queue' => ['dynamic-group-cache'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            // SQLite guard matches the dvr-queue pattern
+            'maxProcesses' => $horizonIntEnv('HORIZON_DYNAMIC_GROUP_CACHE_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 2),
+            'maxTime' => $horizonIntEnv('HORIZON_DYNAMIC_GROUP_CACHE_MAX_TIME', 7200),
+            'maxJobs' => $horizonIntEnv('HORIZON_DYNAMIC_GROUP_CACHE_MAX_JOBS', 50),
+            'memory' => $horizonIntEnv('HORIZON_DYNAMIC_GROUP_CACHE_MEMORY', 512), // MB — file handles can be GB
+            'tries' => 1, // Overridden by the job's own $tries/retryUntil() (DownloadCachedContentFile.php) — this value is unused
+            'timeout' => (int) config('dvr.playlist_download_timeout', 3600),
+            'nice' => 5,
+        ],
     ],
 
     'environments' => [

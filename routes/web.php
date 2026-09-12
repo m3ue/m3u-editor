@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\BackupDownloadController;
+use App\Http\Controllers\CachedContentStreamController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\DvrRecordingDownloadController;
 use App\Http\Controllers\DvrStreamController;
@@ -466,3 +467,21 @@ Route::get('/aiostreams-media/{integration}/live/{item}/stream', [
 // NOTE: The DVR file streaming routes (dvr.recording.*) were relocated earlier in
 // this file, ahead of the /{uuid}/hdhr/... catch-all, so the HDHR pattern no
 // longer swallows /dvr/... URLs. See the "DVR file streaming routes" block above.
+
+/*
+ * Dynamic Group Cache — file streaming endpoint. Served from the global
+ * `cached_content_files` table when the playback path (Phase 3's
+ * XtreamStreamController cache check) redirects a play through it.
+ *
+ * Auth mirrors the Xtream and DVR stream routes: PlaylistAuth credentials
+ * or playlist UUID + owner name. The controller additionally verifies the
+ * requested file is referenced by a DynamicGroup belonging to the
+ * authenticated playlist (the table has no user_id column, so this is the
+ * only "ownership" check available).
+ *
+ * The {format?} segment is optional — same convention as the DVR stream
+ * route. Real callers (the playback-path redirect in XtreamStreamController)
+ * always pass format explicitly.
+ */
+Route::get('/cached-content/{username}/{password}/{uuid}.{format?}', [CachedContentStreamController::class, 'stream'])
+    ->name('dynamic-group-cache.stream');
