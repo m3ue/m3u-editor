@@ -492,3 +492,126 @@ it('rotates a scrubber dead master to a live failover and restores it when live 
         'channel_failover_id' => $secondaryFailover->id,
     ]);
 });
+
+it('keeps merging unrelated titles when the similarity guard is off', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+
+    // Same stream_id, wildly different channels. This is the pre-existing
+    // behaviour and must not change unless the guard is explicitly turned on.
+    foreach (['UK: BBC 3 / CBBC HD', 'UK: FOOD NETWORK +1'] as $index => $title) {
+        Channel::factory()->create([
+            'stream_id' => 'TS',
+            'title' => $title,
+            'url' => "http://provider.test/stream/{$index}.ts",
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+    }
+
+    $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+    runMergeChannels($user, $playlists, $playlist->id);
+
+    $this->assertDatabaseCount('channel_failovers', 1);
+});
+
+it('does not create a failover when the titles describe different channels', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+
+    // A mis-parsed stream id ("TS" is the container extension, not an id) is
+    // enough to group unrelated channels. The guard should refuse the pairing.
+    foreach (['UK: BBC 3 / CBBC HD', 'UK: FOOD NETWORK +1'] as $index => $title) {
+        Channel::factory()->create([
+            'stream_id' => 'TS',
+            'title' => $title,
+            'url' => "http://provider.test/stream/{$index}.ts",
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+    }
+
+    $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+    runMergeChannels($user, $playlists, $playlist->id, minTitleSimilarity: 0.4);
+
+    $this->assertDatabaseCount('channel_failovers', 0);
+});
+
+it('still merges the same channel across quality variants when the guard is on', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+
+    // Source prefixes and quality suffixes differ, the channel does not.
+    // Comparing the raw titles would score these as unrelated.
+    foreach (['DE| SYFY HEVC', 'JOYN| SYFY FHD ᴿᴬᵂ'] as $index => $title) {
+        Channel::factory()->create([
+            'stream_id' => 'syfy.de',
+            'title' => $title,
+            'url' => "http://provider.test/stream/syfy-{$index}.ts",
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+    }
+
+    $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+    runMergeChannels($user, $playlists, $playlist->id, minTitleSimilarity: 0.4);
+
+    $this->assertDatabaseCount('channel_failovers', 1);
+});
+
+it('still merges an event feed against its base channel when the guard is on', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+
+    // Providers append the fixture to the title of the channel carrying it.
+    foreach (['BE| DAZN 7 - OH Leuven - Standard', 'BE - DAZN 7'] as $index => $title) {
+        Channel::factory()->create([
+            'stream_id' => 'dazn7.be',
+            'title' => $title,
+            'url' => "http://provider.test/stream/dazn-{$index}.ts",
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+    }
+
+    $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+    runMergeChannels($user, $playlists, $playlist->id, minTitleSimilarity: 0.4);
+
+    $this->assertDatabaseCount('channel_failovers', 1);
+});
+
+it('still merges an abbreviated title against its expanded form when the guard is on', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+
+    // "E!" reduces to a single character; scoring it would call these unrelated.
+    foreach (['FR| E! FHD', 'FR - E! ENTERTAINMENT HD'] as $index => $title) {
+        Channel::factory()->create([
+            'stream_id' => 'e.fr',
+            'title' => $title,
+            'url' => "http://provider.test/stream/e-{$index}.ts",
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'group_id' => null,
+            'enabled' => true,
+        ]);
+    }
+
+    $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+    runMergeChannels($user, $playlists, $playlist->id, minTitleSimilarity: 0.4);
+
+    $this->assertDatabaseCount('channel_failovers', 1);
+});
