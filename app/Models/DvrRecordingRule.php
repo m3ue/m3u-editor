@@ -9,6 +9,7 @@ use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
 use App\Services\DvrSchedulerService;
 use App\Support\SeriesKey;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -35,9 +36,24 @@ class DvrRecordingRule extends Model
             'keep_last' => 'integer',
             'enabled' => 'boolean',
             'enable_comskip' => 'boolean',
+            'sports_dedup_days' => 'integer',
             'manual_start' => UtcDateTime::class,
             'manual_end' => UtcDateTime::class,
         ];
+    }
+
+    /**
+     * Dedup window for this rule's sports airings (no season/episode data).
+     * Rule override wins; falls back to the DVR setting's default (2 days).
+     * 0 = record every same-title airing.
+     */
+    public function sportsDedupDays(): int
+    {
+        if ($this->sports_dedup_days !== null) {
+            return max(0, (int) $this->sports_dedup_days);
+        }
+
+        return $this->dvrSetting?->sportsDedupDays() ?? 2;
     }
 
     /**
@@ -144,11 +160,35 @@ class DvrRecordingRule extends Model
      */
     public function alreadyHaveEpisode(string $seriesKey, ?int $season, ?int $episode): bool
     {
+        return $this->getEpisodeRecordingStatus($seriesKey, $season, $episode) !== null;
+    }
+
+    /**
+     * Get the status of an existing recording for the given series_key + season + episode.
+     * Returns the status string ('scheduled', 'completed', 'purged', etc.) or null if no recording exists.
+     *
+     * Purged is deliberately included: retention deletes the recording file but
+     * keeps the database row as the record that the episode has already been
+     * recorded, so a rule set to avoid repeat episodes must not schedule the
+     * same season + episode again after cleanup.
+     */
+    public function getEpisodeRecordingStatus(string $seriesKey, ?int $season, ?int $episode): ?string
+    {
         if ($season === null || $episode === null) {
-            return false;
+            $recording = DvrRecording::where('series_key', $seriesKey)
+                ->whereIn('status', [
+                    DvrRecordingStatus::Scheduled,
+                    DvrRecordingStatus::Recording,
+                    DvrRecordingStatus::PostProcessing,
+                    DvrRecordingStatus::Completed,
+                    DvrRecordingStatus::Purged,
+                ])
+                ->first();
+
+            return $recording?->status?->value;
         }
 
-        return DvrRecording::where('series_key', $seriesKey)
+        $recording = DvrRecording::where('series_key', $seriesKey)
             ->where('season', $season)
             ->where('episode', $episode)
             ->whereIn('status', [
@@ -158,7 +198,78 @@ class DvrRecordingRule extends Model
                 DvrRecordingStatus::Completed,
                 DvrRecordingStatus::Purged,
             ])
-            ->exists();
+            ->first();
+
+        return $recording?->status?->value;
+    }
+
+    /**
+     * Sports identity (no season/episode): same series_key within a dedup
+     * WINDOW (see DvrSetting::sportsDedupDays) of an existing recording = a
+     * replay of the same game (skipped — even after retention purged the file,
+     * the row is kept). Beyond the window it is a NEW event (a re-match later
+     * in the season) and must record. A same-day replay is always a duplicate.
+     */
+    public function getEpisodeRecordingStatusOnDate(string $seriesKey, \DateTimeInterface $date, int $windowDays): ?string
+    {
+        $from = (new CarbonImmutable($date))->subDays($windowDays);
+
+        $recording = DvrRecording::where('series_key', $seriesKey)
+            ->whereBetween('scheduled_start', [$from, $date])
+            ->whereIn('status', [
+                DvrRecordingStatus::Scheduled,
+                DvrRecordingStatus::Recording,
+                DvrRecordingStatus::PostProcessing,
+                DvrRecordingStatus::Completed,
+                DvrRecordingStatus::Purged,
+            ])
+            ->orderByDesc('scheduled_start')
+            ->first();
+
+        return $recording?->status?->value;
+    }
+
+    /**
+     * Sports identity duplicate check — see getEpisodeRecordingStatusOnDate().
+     */
+    public function alreadyHaveEpisodeOnDate(string $seriesKey, \DateTimeInterface $date, int $windowDays): bool
+    {
+        return $this->getEpisodeRecordingStatusOnDate($seriesKey, $date, $windowDays) !== null;
+    }
+
+    /**
+     * In-window duplicate check against dry-run scheduled keys (sports keys
+     * are seriesKey|DATE): true when a same-title airing within [windowStart,
+     * date] was already scheduled in this dry run.
+     *
+     * @param  list<string>  $scheduledKeys
+     */
+    public function sportsAlreadyScheduled(string $seriesKey, \DateTimeInterface $date, int $windowDays, array $scheduledKeys): bool
+    {
+        if ($windowDays === 0) {
+            return in_array($seriesKey.'|'.$date->format('Y-m-d'), $scheduledKeys, true);
+        }
+
+        $windowStart = $date->format('Y-m-d');
+        $prefix = $seriesKey.'|';
+        foreach ($scheduledKeys as $key) {
+            if (! str_starts_with($key, $prefix)) {
+                continue;
+            }
+
+            $scheduledDate = substr($key, strlen($prefix));
+            $scheduledTimestamp = strtotime($scheduledDate);
+            $dateTimestamp = strtotime($date->format('Y-m-d'));
+
+            if ($scheduledTimestamp !== false
+                && $dateTimestamp !== false
+                && $scheduledTimestamp >= $dateTimestamp - $windowDays * 86400
+                && $scheduledTimestamp <= $dateTimestamp) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

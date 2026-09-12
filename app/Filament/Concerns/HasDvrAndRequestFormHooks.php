@@ -42,6 +42,7 @@ trait HasDvrAndRequestFormHooks
             $data['dvr_include_disabled_channels'] = $dvr->include_disabled_channels;
             $data['dvr_default_series_mode'] = $dvr->default_series_mode?->value ?? DvrSeriesMode::UniqueSe->value;
             $data['dvr_default_series_keep_last'] = $dvr->default_series_keep_last;
+            $data['dvr_sports_dedup_days'] = $dvr->sports_dedup_days;
         } else {
             $data['dvr_enabled'] = false;
             $data['dvr_output_format'] = 'ts';
@@ -104,6 +105,7 @@ trait HasDvrAndRequestFormHooks
                     'include_disabled_channels' => $data['dvr_include_disabled_channels'] ?? false,
                     'default_series_mode' => $data['dvr_default_series_mode'] ?? DvrSeriesMode::UniqueSe->value,
                     'default_series_keep_last' => ($data['dvr_default_series_keep_last'] > 0) ? $data['dvr_default_series_keep_last'] : null,
+                    'sports_dedup_days' => isset($data['dvr_sports_dedup_days']) && $data['dvr_sports_dedup_days'] > 0 ? (int) $data['dvr_sports_dedup_days'] : null,
                 ]
             );
         }

@@ -26,6 +26,21 @@
                                     </span>
                                 @endif
 
+                                {{-- Will-record badge --}}
+                                @if (isset($airing['will_record']))
+                                    @if ($airing['will_record'])
+                                        <span class="inline-flex flex-shrink-0 items-center rounded bg-red-500/90 px-1.5 py-0.5 text-xs font-medium text-white">{{ __('Will Record') }}</span>
+                                    @else
+                                        @if ($airing['skip_reason'] === 'already_scheduled')
+                                            <span class="inline-flex flex-shrink-0 items-center rounded bg-gray-400/90 px-1.5 py-0.5 text-xs font-medium text-white">{{ __('Skipped - Already Scheduled') }}</span>
+                                        @elseif ($airing['skip_reason'] === 'already_recorded')
+                                            <span class="inline-flex flex-shrink-0 items-center rounded bg-gray-400/90 px-1.5 py-0.5 text-xs font-medium text-white">{{ __('Skipped - Already Recorded') }}</span>
+                                        @else
+                                            <span class="inline-flex flex-shrink-0 items-center rounded bg-gray-400/90 px-1.5 py-0.5 text-xs font-medium text-white">{{ __('Skipped') }}</span>
+                                        @endif
+                                    @endif
+                                @endif
+
                                 {{-- Flags --}}
                                 @if ($airing['is_new'])
                                     <span class="inline-flex flex-shrink-0 items-center rounded bg-emerald-500/90 px-1.5 py-0.5 text-xs font-medium text-white">{{ __('New') }}</span>
