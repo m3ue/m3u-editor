@@ -56,12 +56,14 @@ it('offers only valid sort columns for each target', function (string $target, a
             'stream_id' => 'ID (or override if set)',
             'channel' => 'Channel No.',
             'release_date' => 'Release Date',
+            'rating' => 'Rating',
         ],
     ],
     'series categories' => [
         'series_categories',
         [
             'release_date' => 'Release Date',
+            'rating' => 'Rating',
         ],
     ],
 ]);

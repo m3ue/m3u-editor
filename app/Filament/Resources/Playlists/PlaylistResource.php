@@ -2933,15 +2933,22 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ];
 
                                     return match ($get('target')) {
-                                        'series_categories' => ['release_date' => 'Release Date'],
-                                        'vod_groups' => [...$alphaOptions, 'release_date' => 'Release Date'],
+                                        'series_categories' => [
+                                            'release_date' => 'Release Date',
+                                            'rating' => __('Rating'),
+                                        ],
+                                        'vod_groups' => [
+                                            ...$alphaOptions,
+                                            'release_date' => 'Release Date',
+                                            'rating' => __('Rating'),
+                                        ],
                                         default => $alphaOptions,
                                     };
                                 })
                                 ->live()
                                 ->default('title')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', ($state ?? '') === 'release_date' ? 'DESC' : 'ASC'))
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', in_array(($state ?? ''), ['release_date', 'rating'], true) ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))

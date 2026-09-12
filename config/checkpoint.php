@@ -268,6 +268,20 @@ return [
         '361a8a8465de',
         '53e3187b2a5f',
         'a215f7e698e0',
+        // SortService rating methods (bulkSort{GroupChannels,CategorySeries,PlaylistVod,PlaylistSeries}ByRating):
+        // identical guarantees to the release-date methods above. $isNullExpr and
+        // $valueExpr are compile-time SQL literals chosen by the PDO driver name
+        // (never user input), $direction is ternary-validated to 'ASC'|'DESC',
+        // group/category/playlist ids are passed as bound ? placeholders, and the
+        // fallback branch's $casesSql/$idsSql are built only from integer primary
+        // keys already in the DB.
+        'aadd792f3848',
+        '2d52b5b8a9a9',
+        '1ba676f58a61',
+        '5a37cebd0f2a',
+        'f08c259abaee',
+        'ddec03a89221',
+        '30d9243d3129',
 
         // SortService natural-sort rewrite (issue #1369): same guarantees as the
         // original SortService entries above, just on new lines/hashes.
