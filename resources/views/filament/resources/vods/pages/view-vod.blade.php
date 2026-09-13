@@ -323,8 +323,20 @@
         </div>
     @endif
 
-    {{-- Cast --}}
-    @include('filament.partials.cast-section', ['cast' => $castList])
+    {{-- Cast (clickable: each tile navigates to the actor's filmography page,
+         scoped to this playlist so it only shows items available locally) --}}
+    @include('filament.partials.cast-section', [
+        'cast' => $castList,
+        'filmographyPage' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+            ? \App\Filament\Pages\ActorFilmography::class
+            : \App\Filament\GuestPanel\Pages\GuestActorFilmography::class,
+        'playlistId' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+            ? ($record->playlist_id ?? null)
+            : null,
+        'playlistUuid' => \Filament\Facades\Filament::getCurrentPanel()->getId() !== 'admin'
+            ? ($record->playlist?->uuid ?? null)
+            : null,
+    ])
 
     {{-- Technical Details --}}
     <div class="mb-6">
