@@ -231,8 +231,21 @@
         </div>
     @endif
 
-    {{-- Cast --}}
-    @include('filament.partials.cast-section', ['cast' => $castList, 'collapsed' => true])
+    {{-- Cast (clickable: each tile navigates to the actor's filmography page,
+         scoped to this playlist so it only shows items available locally) --}}
+    @include('filament.partials.cast-section', [
+        'cast' => $castList,
+        'collapsed' => true,
+        'filmographyPage' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+            ? \App\Filament\Pages\ActorFilmography::class
+            : \App\Filament\GuestPanel\Pages\GuestActorFilmography::class,
+        'playlistId' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+            ? ($record->playlist_id ?? null)
+            : null,
+        'playlistUuid' => \Filament\Facades\Filament::getCurrentPanel()->getId() !== 'admin'
+            ? ($record->playlist?->uuid ?? null)
+            : null,
+    ])
 
     {{-- Probed Stream Info (aggregated across episodes) --}}
     @include('filament.partials.probed-stream-info-series', ['record' => $record])

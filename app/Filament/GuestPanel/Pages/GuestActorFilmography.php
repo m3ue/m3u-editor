@@ -3,7 +3,10 @@
 namespace App\Filament\GuestPanel\Pages;
 
 use App\Facades\PlaylistFacade;
+use App\Filament\Concerns\FiltersFilmographyByPlaylist;
 use App\Filament\GuestPanel\Pages\Concerns\HasGuestAuth;
+use App\Filament\GuestPanel\Resources\Series\SeriesResource as GuestSeriesResource;
+use App\Filament\GuestPanel\Resources\Vods\VodResource as GuestVodResource;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -14,6 +17,7 @@ use Illuminate\Contracts\Support\Htmlable;
 
 class GuestActorFilmography extends Page
 {
+    use FiltersFilmographyByPlaylist;
     use HasGuestAuth;
 
     protected string $view = 'filament.guest-panel.pages.actor-filmography';
@@ -30,6 +34,9 @@ class GuestActorFilmography extends Page
 
     /** @var array<int> Guest-enabled Arr integration IDs for the playlist owner. */
     public array $guestIntegrationIds = [];
+
+    /** Cached playlist_id resolved from $this->playlistUuid at mount() time. 0 = no scope. */
+    protected ?int $resolvedFilmographyPlaylistId = null;
 
     public function getTitle(): string|Htmlable
     {
@@ -65,6 +72,19 @@ class GuestActorFilmography extends Page
         $this->personId = (int) (request()->query('personId', $this->personId));
         $this->name = (string) (request()->query('name', $this->name));
 
+        // The HasGuestAuth trait normally fills $playlistUuid from the route,
+        // but our mount() overrides the trait's, so populate it here too.
+        if (empty($this->playlistUuid)) {
+            $this->playlistUuid = static::getCurrentUuid();
+        }
+
+        // Resolve uuid → playlist_id once for the trait to read. HasGuestAuth
+        // already validated the guest authenticated against this playlist, so
+        // no further ownership check is required at the trait boundary.
+        $this->resolvedFilmographyPlaylistId = ! empty($this->playlistUuid)
+            ? $this->resolvePlaylistIdFromUuid($this->playlistUuid) ?? 0
+            : 0;
+
         $service = app(TmdbService::class);
 
         if ($this->personId <= 0 && $this->name !== '') {
@@ -77,6 +97,7 @@ class GuestActorFilmography extends Page
 
         $this->person = $service->getPersonDetails($this->personId);
         $this->filmography = $service->getPersonCombinedCredits($this->personId);
+        $this->filmography = $this->filterFilmographyToPlaylist($this->filmography);
 
         $this->guestIntegrationIds = $this->resolveGuestIntegrationIds();
     }
@@ -87,6 +108,14 @@ class GuestActorFilmography extends Page
             return;
         }
 
+        $url = $this->resolveLocalItemUrl($tmdbId, $mediaType);
+        if ($url) {
+            $this->redirect($url);
+
+            return;
+        }
+        // No local match (or no playlist scope) — fall through to existing ArrSearch
+        // dispatch so the item is still reachable via the ArrIntegration request flow.
         $title = null;
         foreach ($this->filmography as $item) {
             if ((int) ($item['tmdb_id'] ?? 0) === $tmdbId) {
@@ -96,6 +125,38 @@ class GuestActorFilmography extends Page
         }
 
         $this->dispatch('request-from-discover', tmdbId: $tmdbId, mediaType: $mediaType, title: $title);
+    }
+
+    /**
+     * Trait accessor: returns the cached playlist_id resolved from $this->playlistUuid,
+     * or 0 if no scope is set. HasGuestAuth has already validated the guest authenticated
+     * against this playlist, so no extra ownership check is needed here.
+     */
+    protected function filmographyPlaylistId(): int
+    {
+        return $this->resolvedFilmographyPlaylistId ?? 0;
+    }
+
+    protected function filmographySeriesResource(): string
+    {
+        return GuestSeriesResource::class;
+    }
+
+    protected function filmographyVodResource(): string
+    {
+        return GuestVodResource::class;
+    }
+
+    private function resolvePlaylistIdFromUuid(string $uuid): ?int
+    {
+        $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
+        if (! $playlist) {
+            return null;
+        }
+
+        $playlistId = $playlist instanceof PlaylistAlias ? $playlist->playlist_id : $playlist->id;
+
+        return $playlistId ? (int) $playlistId : null;
     }
 
     /**
