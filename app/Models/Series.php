@@ -6,7 +6,6 @@ use App\Enums\PlaylistSourceType;
 use App\Exceptions\XtreamRateLimitedException;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
-use App\Services\TmdbService;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
@@ -61,29 +60,6 @@ class Series extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    /**
-     * Resolved TMDB cast for this series.
-     *
-     * Returns the TMDB credits shape used by ActorFilmography navigation:
-     * `[{ id, actor, character, photo }, ...]`. Empty when the series has no
-     * tmdb_id, when TMDB isn't configured, or when the API returns nothing.
-     * Cached by TmdbService::getTvCast (60 min).
-     *
-     * Used by the series detail view's cast avatar grid and exposed as the
-     * canonical entry point for the m3u-tv app's cast navigation.
-     *
-     * @return array<int, array{id: int, actor: string, character: string, photo: ?string}>
-     */
-    public function castMembers(): array
-    {
-        $tmdbId = (int) ($this->tmdb_id ?? 0);
-        if ($tmdbId <= 0) {
-            return [];
-        }
-
-        return app(TmdbService::class)->getTvCast($tmdbId);
     }
 
     public function playlist(): BelongsTo

@@ -1,7 +1,7 @@
 {{--
     Rich cast row (TMDB / media-server `cast_list`), shared by the VOD and
     Series view pages. Expects $cast as an array of
-    ['id' => int, 'name' => string, 'character' => ?string, 'photo' => ?string].
+    ['name' => string, 'character' => ?string, 'photo' => ?string, 'id' => ?int].
     Renders nothing when there is no rich cast.
 
     When $filmographyPage is passed, each tile is wrapped in an <a> that
@@ -33,7 +33,6 @@
                         $actorName = (string) $member['name'];
                         $character = (string) ($member['character'] ?? '');
                         $photo = $member['photo'] ?? null;
-
                         $tileInner = '
                             <div class="fi-avatar fi-circular fi-size-lg flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">'
                             .($photo

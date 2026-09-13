@@ -325,35 +325,18 @@
 
     {{-- Cast (clickable: each tile navigates to the actor's filmography page,
          scoped to this playlist so it only shows items available locally) --}}
-    @php
-        $filmographyPageClass = \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+    @include('filament.partials.cast-section', [
+        'cast' => $castList,
+        'filmographyPage' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
             ? \App\Filament\Pages\ActorFilmography::class
-            : \App\Filament\GuestPanel\Pages\GuestActorFilmography::class;
-        $isGuestPanelForCast = \Filament\Facades\Filament::getCurrentPanel()->getId() !== 'admin';
-    @endphp
-    @if (! empty($castMembers))
-        <x-filament::section :collapsible="true" compact :collapsed="true" heading="{{ __('Cast') }}">
-            <x-slot name="afterHeader">
-                <x-filament::badge color="gray">{{ count($castMembers) }}</x-filament::badge>
-            </x-slot>
-
-            @include('filament.partials.cast-avatar-grid', [
-                'castMembers' => $castMembers,
-                'filmographyPage' => $filmographyPageClass,
-                'playlistId' => $isGuestPanelForCast ? null : ($record->playlist_id ?? null),
-                'playlistUuid' => $isGuestPanelForCast ? ($record->playlist?->uuid ?? null) : null,
-            ])
-        </x-filament::section>
-    @elseif (! empty($castList))
-        {{-- Fall back to upstream's static cast-section (TMDB-enriched data)
-             if no live-cast data was returned by $record->castMembers(). --}}
-        @include('filament.partials.cast-section', [
-            'cast' => $castList,
-            'filmographyPage' => $filmographyPageClass,
-            'playlistId' => $isGuestPanelForCast ? null : ($record->playlist_id ?? null),
-            'playlistUuid' => $isGuestPanelForCast ? ($record->playlist?->uuid ?? null) : null,
-        ])
-    @endif
+            : \App\Filament\GuestPanel\Pages\GuestActorFilmography::class,
+        'playlistId' => \Filament\Facades\Filament::getCurrentPanel()->getId() === 'admin'
+            ? ($record->playlist_id ?? null)
+            : null,
+        'playlistUuid' => \Filament\Facades\Filament::getCurrentPanel()->getId() !== 'admin'
+            ? ($record->playlist?->uuid ?? null)
+            : null,
+    ])
 
     {{-- Technical Details --}}
     <div class="mb-6">

@@ -45,20 +45,6 @@ class ViewSeries extends ViewRecord
         return implode(' • ', $parts) ?: null;
     }
 
-    /**
-     * Pass TMDB-resolved cast members down to the view so each member can be
-     * rendered as an avatar linking to GuestActorFilmography. Empty when the
-     * series has no tmdb_id or when TMDB isn't configured.
-     *
-     * @return array<string, mixed>
-     */
-    protected function getViewData(): array
-    {
-        return [
-            'castMembers' => $this->record->castMembers(),
-        ];
-    }
-
     protected function getHeaderActions(): array
     {
         return [

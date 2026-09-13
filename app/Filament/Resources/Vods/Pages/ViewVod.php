@@ -56,20 +56,6 @@ class ViewVod extends ViewRecord
     }
 
     /**
-     * Pass TMDB-resolved cast members down to the view so each member can be
-     * rendered as an avatar linking to ActorFilmography. Empty when the VOD
-     * channel has no tmdb_id or when TMDB isn't configured.
-     *
-     * @return array<string, mixed>
-     */
-    protected function getViewData(): array
-    {
-        return [
-            'castMembers' => $this->record->castMembers(),
-        ];
-    }
-
-    /**
      * Open the floating player for this VOD. Called from the detail view's
      * Play button - the payload is built server-side rather than inlined into
      * a `wire:click="$dispatch(...)"` expression, whose naive parser breaks on
