@@ -11,6 +11,7 @@ use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Observers\ChannelObserver;
 use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
+use App\Services\TmdbService;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -87,6 +88,33 @@ class Channel extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Resolved TMDB cast for VOD channels (movies).
+     *
+     * Returns the TMDB credits shape used by ActorFilmography navigation:
+     * `[{ id, actor, character, photo }, ...]`. Empty for non-VOD channels,
+     * when tmdb_id is missing, when TMDB isn't configured, or when the API
+     * returns nothing. Cached by TmdbService::getMovieCast (60 min).
+     *
+     * Used by the VOD detail view's cast avatar grid and exposed as the
+     * canonical entry point for the m3u-tv app's cast navigation.
+     *
+     * @return array<int, array{id: int, actor: string, character: string, photo: ?string}>
+     */
+    public function castMembers(): array
+    {
+        if (! $this->is_vod) {
+            return [];
+        }
+
+        $tmdbId = (int) ($this->tmdb_id ?? 0);
+        if ($tmdbId <= 0) {
+            return [];
+        }
+
+        return app(TmdbService::class)->getMovieCast($tmdbId);
     }
 
     public function aioIntegration(): BelongsTo

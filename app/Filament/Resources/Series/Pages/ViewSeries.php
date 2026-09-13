@@ -4,7 +4,6 @@ namespace App\Filament\Resources\Series\Pages;
 
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
 use App\Filament\Resources\Series\SeriesResource;
-use App\Support\TmdbRating;
 use App\Traits\AppliesTmdbSelection;
 use Filament\Actions;
 use Filament\Resources\Pages\ViewRecord;
@@ -40,11 +39,25 @@ class ViewSeries extends ViewRecord
             $parts[] = $this->record->genre;
         }
 
-        if ($this->record->rating && ! TmdbRating::isVoteCountBelowThreshold($this->record->metadata['vote_count'] ?? null)) {
+        if ($this->record->rating) {
             $parts[] = '★ '.$this->record->rating;
         }
 
         return implode(' • ', $parts) ?: null;
+    }
+
+    /**
+     * Pass TMDB-resolved cast members down to the view so each member can be
+     * rendered as an avatar linking to ActorFilmography. Empty when the series
+     * has no tmdb_id or when TMDB isn't configured.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getViewData(): array
+    {
+        return [
+            'castMembers' => $this->record->castMembers(),
+        ];
     }
 
     protected function getHeaderActions(): array
