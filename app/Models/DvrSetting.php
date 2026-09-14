@@ -39,6 +39,7 @@ class DvrSetting extends Model
             'default_series_keep_last' => 'integer',
             'include_disabled_channels' => 'boolean',
             'transcode_recordings' => 'boolean',
+            'sports_dedup_days' => 'integer',
         ];
     }
 
@@ -81,6 +82,19 @@ class DvrSetting extends Model
     public function resolveEndLateSeconds(?int $ruleOverride): int
     {
         return $ruleOverride ?? $this->default_end_late_seconds;
+    }
+
+    /**
+     * Dedup window for sports airings without season/episode data: a
+     * same-title airing within this many days of an existing recording is a
+     * replay of the same game (skipped); beyond the window it is a new event
+     * (recorded). Null/unset falls back to 2 days.
+     */
+    public function sportsDedupDays(): int
+    {
+        $days = (int) ($this->sports_dedup_days ?? 2);
+
+        return max(0, $days);
     }
 
     /**

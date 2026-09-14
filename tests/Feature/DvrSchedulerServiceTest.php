@@ -860,6 +860,204 @@ it('unique_se mode still records a different episode (different season/episode n
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(2);
 });
 
+it('unique_se mode does not re-record a purged episode after retention cleanup', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => 'My Show',
+            'series_mode' => DvrSeriesMode::UniqueSe,
+        ]);
+
+    // Retention deleted the file but deliberately kept the row as the record
+    // that the episode has already been recorded — the duplicate check must
+    // still see it, otherwise the same S/E gets scheduled again after cleanup.
+    DvrRecording::factory()
+        ->purged()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'My Show',
+            'season' => 1,
+            'episode' => 5,
+            'series_key' => "setting:{$this->setting->id}|title:my show",
+        ]);
+
+    $rerun = EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => 1,
+        'episode' => 5,
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
+        ->where('programme_start', $rerun->start_time)
+        ->count())->toBe(0);
+
+    // The preview's skip-reason lookup sees the purged row too.
+    expect($rule->getEpisodeRecordingStatus(
+        "setting:{$this->setting->id}|title:my show",
+        1,
+        5,
+    ))->toBe(DvrRecordingStatus::Purged->value);
+});
+
+it('unique_se sports rule records a re-match on a different date despite an earlier purged game', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => 'My Show',
+            'series_mode' => DvrSeriesMode::UniqueSe,
+        ]);
+
+    // Prior game (same title, NO season/episode) purged by retention a week ago
+    DvrRecording::factory()
+        ->purged()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'My Show',
+            'season' => null,
+            'episode' => null,
+            'series_key' => "setting:{$this->setting->id}|title:my show",
+        ]);
+
+    // Re-match TODAY — a new event, must record
+    $game = EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => null,
+        'episode' => null,
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
+        ->where('programme_start', $game->start_time)
+        ->count())->toBe(1);
+});
+
+it('unique_se sports rule dedups a same-day replay of the same game', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => 'My Show',
+            'series_mode' => DvrSeriesMode::UniqueSe,
+        ]);
+
+    // Two airings of the same game on the same day (afternoon + evening replay)
+    $game1 = EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => null,
+        'episode' => null,
+    ]);
+    EpgProgramme::factory()->upcoming(6)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => null,
+        'episode' => null,
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
+        ->where('programme_start', $game1->start_time)
+        ->count())->toBe(1);
+});
+
+it('unique_se sports rule skips a next-day replay inside the dedup window', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => 'My Show',
+            'series_mode' => DvrSeriesMode::UniqueSe,
+        ]);
+
+    // Yesterday's game (completed) — the default dedup window (2 days) treats
+    // today's same-title airing as a replay, not a new event.
+    $yesterday = now()->subDay();
+    DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'My Show',
+            'season' => null,
+            'episode' => null,
+            'series_key' => "setting:{$this->setting->id}|title:my show",
+            'scheduled_start' => $yesterday,
+            'actual_start' => $yesterday,
+            'actual_end' => $yesterday->copy()->addHour(),
+        ]);
+
+    $replay = EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => null,
+        'episode' => null,
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
+        ->where('programme_start', $replay->start_time)
+        ->count())->toBe(0);
+});
+
+it('unique_se sports rule records a re-match outside the dedup window', function () {
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create([
+            'series_title' => 'My Show',
+            'series_mode' => DvrSeriesMode::UniqueSe,
+        ]);
+
+    // A game from a month ago (purged by retention) — outside the 2-day
+    // window, so a same-title airing today is a NEW event.
+    $oldGame = now()->subMonth();
+    DvrRecording::factory()
+        ->purged()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'My Show',
+            'season' => null,
+            'episode' => null,
+            'series_key' => "setting:{$this->setting->id}|title:my show",
+            'scheduled_start' => $oldGame,
+        ]);
+
+    $newGame = EpgProgramme::factory()->upcoming(5)->create([
+        'title' => 'My Show',
+        'epg_channel_id' => 'test.channel',
+        'season' => null,
+        'episode' => null,
+    ]);
+
+    $this->service->matchAndSchedule(30);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
+        ->where('programme_start', $newGame->start_time)
+        ->count())->toBe(1);
+});
+
 it('all mode records every programme regardless of prior S/E recordings', function () {
     $rule = DvrRecordingRule::factory()
         ->series()
