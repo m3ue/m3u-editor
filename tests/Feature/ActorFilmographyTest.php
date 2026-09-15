@@ -1,12 +1,16 @@
 <?php
 
 use App\Filament\Pages\ActorFilmography;
+use App\Models\Channel;
+use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
+use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
@@ -154,4 +158,102 @@ it('looks up the person by name when personId is missing', function () {
         ->and($page->person)->toBeArray()
         ->and($page->person['name'])->toBe('Test Actor')
         ->and($page->filmography)->toHaveCount(2);
+});
+
+it('filters filmography to series+vod in the originating playlist', function () {
+    Cache::flush();
+    Http::preventStrayRequests();
+    Http::fake([
+        'api.themoviedb.org/3/person/*' => Http::sequence()
+            ->push(['name' => 'Test Actor', 'profile_path' => '/abc.jpg', 'biography' => 'Bio.'], 200)
+            ->push([
+                'cast' => [
+                    ['id' => 1399, 'media_type' => 'tv', 'name' => 'GoT', 'character' => 'X', 'first_air_date' => '2011-04-17', 'poster_path' => '/got.jpg'],
+                    ['id' => 999, 'media_type' => 'tv', 'name' => 'Not in playlist', 'character' => 'X', 'first_air_date' => '2010-01-01', 'poster_path' => '/x.jpg'],
+                    ['id' => 550, 'media_type' => 'movie', 'title' => 'Fight Club', 'character' => 'Y', 'release_date' => '1999-10-15', 'poster_path' => '/fc.jpg'],
+                    ['id' => 7777, 'media_type' => 'movie', 'title' => 'Not in playlist either', 'character' => 'Y', 'release_date' => '2000-01-01', 'poster_path' => '/y.jpg'],
+                ],
+            ], 200),
+    ]);
+
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    // Playlist contains: GoT (series, tmdb 1399) + Fight Club (vod, tmdb 550).
+    $playlist = Playlist::factory()->for($user)->create();
+    Series::factory()->for($user)->for($playlist, 'playlist')->create(['tmdb_id' => 1399]);
+    Channel::factory()->for($user)->for($playlist, 'playlist')->create(['is_vod' => true, 'tmdb_id' => 550]);
+
+    $page = new ActorFilmography;
+    $page->personId = 123;
+    $page->playlistId = $playlist->id;
+    $page->mount();
+
+    expect($page->filmography)->toHaveCount(2)
+        ->and(collect($page->filmography)->pluck('tmdb_id')->all())->toEqualCanonicalizing([1399, 550]);
+});
+
+it('does not filter when playlistId is zero', function () {
+    Cache::flush();
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $page = new ActorFilmography;
+    $page->personId = 123;
+    $page->playlistId = 0;
+    $page->mount();
+
+    expect($page->filmography)->toHaveCount(2);
+});
+
+it('does not filter when playlistId belongs to another user (non-admin)', function () {
+    // Security: any authenticated user could otherwise pass another user's
+    // playlistId via query string. The trait's filmographyPlaylistId() impl
+    // should return 0 in that case and the filter is skipped (safe fallback
+    // to global TMDB).
+    Cache::flush();
+    Http::preventStrayRequests();
+
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $this->actingAs($intruder);
+
+    $foreignPlaylist = Playlist::factory()->for($owner)->create();
+    Series::factory()->for($owner)->for($foreignPlaylist, 'playlist')->create(['tmdb_id' => 1399]);
+    Channel::factory()->for($owner)->for($foreignPlaylist, 'playlist')->create(['is_vod' => true, 'tmdb_id' => 550]);
+
+    $page = new ActorFilmography;
+    $page->personId = 123;
+    $page->playlistId = $foreignPlaylist->id;
+    $page->mount();
+
+    // Foreign playlist is rejected → filmography returned unfiltered (2 from the default mock).
+    expect($page->filmography)->toHaveCount(2);
+});
+
+it('redirects to local Series when openFilmographyItem is called inside a playlist-scoped page', function () {
+    Cache::flush();
+    Http::preventStrayRequests();
+    Http::fake([
+        'api.themoviedb.org/3/person/*' => Http::sequence()
+            ->push(['name' => 'Test Actor', 'profile_path' => null, 'biography' => null], 200)
+            ->push([
+                'cast' => [
+                    ['id' => 1399, 'media_type' => 'tv', 'name' => 'GoT', 'character' => 'X', 'first_air_date' => '2011-04-17', 'poster_path' => null],
+                ],
+            ], 200),
+    ]);
+
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $playlist = Playlist::factory()->for($user)->create();
+    $series = Series::factory()->for($user)->for($playlist, 'playlist')->create(['tmdb_id' => 1399]);
+
+    Livewire::test(ActorFilmography::class, [
+        'personId' => 123,
+        'playlistId' => $playlist->id,
+    ])
+        ->call('openFilmographyItem', 1399, 'tv')
+        ->assertRedirectContains((string) $series->id);
 });
