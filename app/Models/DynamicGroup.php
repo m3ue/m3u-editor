@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 
 /**
@@ -78,6 +79,14 @@ class DynamicGroup extends Model
     }
 
     /**
+     * Cached content files referenced by this dynamic group.
+     */
+    public function cachedContentFiles(): BelongsToMany
+    {
+        return $this->belongsToMany(CachedContentFile::class, 'cached_content_file_dynamic_groups');
+    }
+
+    /**
      * Query for the playlist items a rule's TMDB id set matches — VOD
      * channels when $type is 'vod', otherwise series. Shared by the
      * SyncDynamicGroups membership writer and the playlist form's per-rule
@@ -134,5 +143,15 @@ class DynamicGroup extends Model
     {
         return collect($config ?? [])
             ->contains(fn (array $rule): bool => (bool) ($rule['enabled'] ?? false));
+    }
+
+    /**
+     * Gate the CreateDynamicGroup header action. Defaults to true (any
+     * authenticated user with a Playlist can create) — tighten if a policy
+     * is later added.
+     */
+    public static function canCreate(): bool
+    {
+        return auth()->check();
     }
 }

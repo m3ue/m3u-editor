@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\SyncRunPhase;
+use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\DynamicGroupItemSnapshot;
@@ -11,6 +12,7 @@ use App\Models\Series;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -108,53 +110,13 @@ class SyncDynamicGroups implements ShouldQueue
                 $name = trim((string) ($rule['name'] ?? ''));
                 $params = (array) ($rule['tmdb_params'] ?? []);
 
-                if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
-                    continue;
-                }
-
-                $tmdbIds = $this->collectTmdbIds($tmdb, $type, $source, $params);
                 $triple = $type.':'.$source.':'.$name;
-                $existingForTriple = DynamicGroup::where('playlist_id', $playlist->id)
-                    ->where('type', $type)
-                    ->where('source', $source)
-                    ->where('name', $name)
-                    ->first();
 
-                if ($tmdbIds === []) {
-                    // TMDB returned no ids for this rule. TmdbService returns
-                    // [] on any error (timeout, non-2xx, rate-limit — see its
-                    // catch blocks), so this is also the transient-failure
-                    // path. If we already have a DynamicGroup row for this
-                    // triple, treat the run as a no-op for it: keep the row
-                    // and its membership intact so the Xtream category id
-                    // (offset + id) stays stable. Only skip the create when
-                    // there's no row yet.
-                    if ($existingForTriple !== null) {
-                        $validKeys[] = $triple;
-                    }
+                $group = $this->materializeRule($playlist, $type, $source, $name, $params, $index, $tmdb);
 
-                    continue;
+                if ($group !== null) {
+                    $validKeys[] = $triple;
                 }
-
-                $group = DynamicGroup::updateOrCreate(
-                    [
-                        'playlist_id' => $playlist->id,
-                        'type' => $type,
-                        'source' => $source,
-                        'name' => $name,
-                    ],
-                    [
-                        'user_id' => $playlist->user_id,
-                        'tmdb_params' => $params,
-                        'sort_order' => $index,
-                        'enabled' => true,
-                        'last_synced_at' => now(),
-                    ],
-                );
-
-                $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
-
-                $validKeys[] = $triple;
             }
         }
 
@@ -177,8 +139,167 @@ class SyncDynamicGroups implements ShouldQueue
             ->all();
 
         if ($staleIds !== []) {
+            // PR #1500 Bug 3: a rule with cache_retention_mode=never_expire
+            // should pin its cached files for the lifetime of the file, not
+            // for the lifetime of the rule. If the user disables (or, less
+            // commonly, replaces) the rule, the DynamicGroup row gets
+            // hard-deleted, the pivot FKs cascade-delete, and the file
+            // appears orphaned to the next retention pass — which then
+            // hard-deletes the file. Stamp never_expire=true on every
+            // referenced CachedContentFile before the delete fires so the
+            // file is preserved by the retention short-circuit.
+            //
+            // We look up the rule from the FULL playlist config (not the
+            // `enabled`-filtered $rules above) so a still-present-but-
+            // disabled rule is matched. Rules the user has fully removed
+            // (true rename / replacement) fall through unmarked — the
+            // retention policy travels with the rule in that case, but a
+            // fully-removed rule is a deliberate "this content shouldn't be
+            // pinned forever anymore" signal and a strict-interpretation
+            // hard-delete is acceptable.
+            $this->pinNeverExpireFilesForStaleGroups($playlist, $existing, $staleIds);
             DynamicGroup::whereIn('id', $staleIds)->delete();
         }
+    }
+
+    /**
+     * For each stale DynamicGroup whose matching rule (in the playlist's
+     * current `dynamic_groups_config`, even if disabled) has
+     * `cache_retention_mode=never_expire`, stamp `never_expire=true` on
+     * every CachedContentFile it currently references via the pivot.
+     *
+     * Runs BEFORE the DynamicGroup::whereIn()->delete() so the pivot
+     * rows still exist for the file lookup — the cascade is the
+     * destructive step we're guarding against.
+     */
+    private function pinNeverExpireFilesForStaleGroups(
+        Playlist $playlist,
+        Collection $existing,
+        array $staleIds,
+    ): void {
+        $config = $playlist->dynamic_groups_config;
+        if (! is_array($config) || $config === []) {
+            return;
+        }
+
+        $staleByTriple = $existing
+            ->filter(fn (DynamicGroup $dg): bool => in_array((int) $dg->id, $staleIds, true))
+            ->keyBy(fn (DynamicGroup $dg): string => $dg->type.':'.$dg->source.':'.$dg->name);
+
+        foreach ($staleByTriple as $triple => $dg) {
+            // Find the matching rule — the rule may be present in the
+            // current config but disabled (the common case for "user turned
+            // the rule off"). It can also be absent (the user deleted the
+            // rule entirely) — for that case we can't recover the
+            // retention mode, so we leave the file unmarked and let
+            // retention delete it as before.
+            $mode = null;
+            foreach ($config as $rule) {
+                if (! is_array($rule)) {
+                    continue;
+                }
+                if (($rule['type'] ?? null) === $dg->type
+                    && ($rule['source'] ?? null) === $dg->source
+                    && trim((string) ($rule['name'] ?? '')) === $dg->name
+                ) {
+                    $mode = $rule['cache_retention_mode'] ?? 'match_group_lifetime';
+                    break;
+                }
+            }
+
+            if ($mode !== 'never_expire') {
+                continue;
+            }
+
+            $fileIds = DB::table('cached_content_file_dynamic_groups')
+                ->where('dynamic_group_id', $dg->id)
+                ->pluck('cached_content_file_id');
+
+            if ($fileIds->isEmpty()) {
+                continue;
+            }
+
+            // Marked rows are NOT updated when the user re-enables the rule
+            // in a future sync — that's an explicit "I want this to expire
+            // normally now" gesture. (Re-enabling syncs the same files in
+            // via the normal pivot path; retention sees them as live and
+            // keeps them, never_expire stays true as a harmless flag.)
+            CachedContentFile::query()
+                ->whereIn('id', $fileIds->all())
+                ->update(['never_expire' => true]);
+        }
+    }
+
+    /**
+     * Materialize one Dynamic Group rule into a DynamicGroup row + its
+     * membership. Public so the CreateDynamicGroup header action on the
+     * VOD / Series Dynamic Groups listing pages can call it synchronously
+     * after appending a rule to a playlist's `dynamic_groups_config`.
+     *
+     * Returns:
+     *  - null when the rule is invalid (no usable type/source/name), or when
+     *    TMDB returned no ids AND no pre-existing DynamicGroup row for this
+     *    (playlist, type, source, name) tuple. The latter matches the
+     *    existing batch-job behavior: a rule with empty TMDB results is a
+     *    no-op for new rules (the next sync will retry once TMDB is healthy)
+     *    but is also a no-op for existing rules (keeps the Xtream category id
+     *    stable).
+     *  - the DynamicGroup row otherwise. `last_synced_at` is set, sort_order
+     *    is recorded, and membership is rewritten from the current TMDB
+     *    snapshot. `enabled` is forced true because the caller already
+     *    filtered disabled rules upstream.
+     */
+    public function materializeRule(
+        Playlist $playlist,
+        string $type,
+        string $source,
+        string $name,
+        array $params,
+        int $sortOrder,
+        TmdbService $tmdb,
+    ): ?DynamicGroup {
+        if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
+            return null;
+        }
+
+        $tmdbIds = $this->collectTmdbIds($tmdb, $type, $source, $params);
+        $existingForTriple = DynamicGroup::where('playlist_id', $playlist->id)
+            ->where('type', $type)
+            ->where('source', $source)
+            ->where('name', $name)
+            ->first();
+
+        if ($tmdbIds === []) {
+            // TMDB returned no ids for this rule. TmdbService returns
+            // [] on any error (timeout, non-2xx, rate-limit — see its
+            // catch blocks), so this is also the transient-failure
+            // path. If we already have a DynamicGroup row for this
+            // triple, treat the run as a no-op for it: keep the row
+            // and its membership intact so the Xtream category id
+            // (offset + id) stays stable. Only skip the create when
+            // there's no row yet.
+            return $existingForTriple;
+        }
+
+        $group = DynamicGroup::updateOrCreate(
+            [
+                'playlist_id' => $playlist->id,
+                'type' => $type,
+                'source' => $source,
+                'name' => $name,
+            ],
+            [
+                'user_id' => $playlist->user_id,
+                'tmdb_params' => $params,
+                'sort_order' => $sortOrder,
+                'enabled' => true,
+                'last_synced_at' => now(),
+            ],
+        );
+
+        $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
+
+        return $group;
     }
 
     /**

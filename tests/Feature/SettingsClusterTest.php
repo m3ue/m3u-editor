@@ -135,7 +135,8 @@ function activeSettingsTab(string $pageClass, string $tab): int
 it('opens the Integrations page on the tab named in ?tab=', function () {
     expect(activeSettingsTab(ManageIntegrationSettings::class, 'tmdb'))->toBe(1)
         ->and(activeSettingsTab(ManageIntegrationSettings::class, 'aiostreams'))->toBe(2)
-        ->and(activeSettingsTab(ManageIntegrationSettings::class, 'mediaflow'))->toBe(3);
+        ->and(activeSettingsTab(ManageIntegrationSettings::class, 'dynamic-group-cache'))->toBe(3)
+        ->and(activeSettingsTab(ManageIntegrationSettings::class, 'mediaflow'))->toBe(4);
 });
 
 it('opens the Alerts page on the tab named in ?tab=', function () {

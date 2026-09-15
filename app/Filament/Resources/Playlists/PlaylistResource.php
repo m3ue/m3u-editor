@@ -17,6 +17,8 @@ use App\Filament\Resources\Playlists\Pages\ListPlaylists;
 use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Filament\Resources\Playlists\Pages\ViewPlaylist;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
+use App\Filament\Tables\DynamicGroupCacheableChannelsTable;
+use App\Filament\Tables\DynamicGroupCacheableSeriesTable;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
 use App\Jobs\CopyAttributesToPlaylist;
@@ -33,6 +35,7 @@ use App\Livewire\PlaylistM3uUrl;
 use App\Livewire\XtreamApiInfo;
 use App\Livewire\XtreamDnsStatus;
 use App\Models\Category;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\DynamicGroup;
 use App\Models\Group;
@@ -40,6 +43,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\PlaylistProfile;
+use App\Models\Series;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
 use App\Models\StreamProfile;
@@ -49,6 +53,7 @@ use App\Rules\UrlIsAllowed;
 use App\Rules\UrlSafeCredential;
 use App\Rules\ValidRegexPattern;
 use App\Services\DateFormatService;
+use App\Services\DynamicGroupCacheDispatchService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\ProfileService;
@@ -781,6 +786,301 @@ class PlaylistResource extends Resource implements CopilotResource
                 Livewire::make(EpgViewer::class)
                     ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * The inner-schema items for a single Dynamic Group rule, shared between
+     * the Playlist form's `dynamic_groups_config` Repeater and the new
+     * CreateDynamicGroup action on the VOD / Series Dynamic Groups listing
+     * pages. Returned as an array of Filament schema components so both
+     * surfaces (Repeater::schema([...]) and CreateAction::schema([...]))
+     * can consume it directly.
+     *
+     * The `type` field is NOT included here — the Repeater lets the user
+     * pick vod/series per item, and the CreateAction sets it implicitly
+     * from the listing page's type. Both call sites inject `type` from a
+     * higher scope.
+     */
+    public static function getDynamicGroupRuleSchema(): array
+    {
+        return [
+            Toggle::make('enabled')
+                ->label(__('Enabled'))
+                ->default(true)
+                ->inline(false)
+                ->columnSpan(1),
+            Select::make('type')
+                ->label(__('Content Type'))
+                ->options([
+                    'vod' => __('VOD (Movies)'),
+                    'series' => __('Series'),
+                ])
+                ->live()
+                ->required()
+                ->afterStateUpdated(function (Set $set): void {
+                    // Reset source-dependent fields so the user
+                    // cannot keep a provider/genre/network that
+                    // is no longer relevant after switching
+                    // between vod and series.
+                    $set('source', null);
+                    $set('tmdb_params', []);
+                })
+                ->columnSpan(2),
+            Select::make('source')
+                ->label(__('Source'))
+                ->options(function (Get $get): array {
+                    $type = $get('type');
+
+                    if ($type === 'series') {
+                        return [
+                            'trending' => __('Trending'),
+                            'popular' => __('Popular'),
+                            'top_genre' => __('Top Genre'),
+                            'tmdb_network' => __('By TV Network'),
+                            'provider' => __('By Streaming Service'),
+                        ];
+                    }
+
+                    return [
+                        'trending' => __('Trending'),
+                        'popular' => __('Popular'),
+                        'now_playing' => __('In Theatres'),
+                        'upcoming' => __('Coming Soon'),
+                        'top_genre' => __('Top Genre'),
+                        'provider' => __('By Streaming Service'),
+                    ];
+                })
+                ->live()
+                ->required()
+                ->columnSpan(3),
+            Select::make('tmdb_params.genre_id')
+                ->label(__('Genre'))
+                ->options(function (Get $get): array {
+                    $tmdb = app(TmdbService::class);
+                    if (! $tmdb->isConfigured()) {
+                        return [];
+                    }
+                    $genres = $get('type') === 'series'
+                        ? $tmdb->getTvGenres()
+                        : $tmdb->getMovieGenres();
+
+                    return array_column($genres, 'name', 'id');
+                })
+                ->required()
+                ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
+                ->columnSpan(5),
+            Select::make('tmdb_params.network_id')
+                ->label(__('TV Network'))
+                ->options(TmdbService::TV_NETWORKS)
+                ->required()
+                ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
+                ->columnSpan(5),
+            Select::make('tmdb_params.provider_id')
+                ->label(__('Streaming Service'))
+                ->options(function (Get $get): array {
+                    $tmdb = app(TmdbService::class);
+                    if (! $tmdb->isConfigured()) {
+                        return [];
+                    }
+                    $region = $get('tmdb_params.region') ?: 'US';
+                    $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
+                    $providers = $tmdb->getWatchProviders($mediaType, $region);
+
+                    return array_column($providers, 'name', 'id');
+                })
+                ->required()
+                ->live()
+                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                ->columnSpan(4),
+            TextInput::make('tmdb_params.region')
+                ->label(__('Region'))
+                ->placeholder('US')
+                ->maxLength(2)
+                ->live()
+                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                ->columnSpan(1),
+            Select::make('tmdb_params.time_window')
+                ->label(__('Time Window'))
+                ->options([
+                    'day' => __('Today'),
+                    'week' => __('This Week'),
+                ])
+                ->default('week')
+                ->visible(fn (Get $get): bool => $get('source') === 'trending')
+                ->columnSpan(5),
+            Select::make('tmdb_params.pages')
+                ->label(__('Pages to Fetch'))
+                ->hintIcon(
+                    'heroicon-m-question-mark-circle',
+                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
+                )
+                ->options([
+                    1 => '1 (~20 items)',
+                    2 => '2 (~40 items)',
+                    3 => '3 (~60 items, default)',
+                    4 => '4 (~80 items)',
+                    5 => '5 (~100 items, max)',
+                ])
+                ->default(3)
+                ->native(false)
+                ->columnSpan(3),
+            TextInput::make('name')
+                ->label(__('Category Name'))
+                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
+                ->required()
+                ->columnSpan(3),
+            Toggle::make('cache_enabled')
+                ->label(__('Enable Caching'))
+                ->live()
+                ->inline(false)
+                ->columnSpan(3)
+                ->helperText(function (Get $get): string {
+                    // NOTE: $get('../../enable_proxy') is the standard Filament v3+
+                    // path from inside a non-relationship Repeater item to a
+                    // parent-form field. This repo has no confirmed in-repo
+                    // precedent (Phase 1 grep returned zero matches) — Phase 2
+                    // browser verification required. If this resolves to null,
+                    // the helper text below will incorrectly say "Requires Proxy"
+                    // even when proxy is on. Fallback: wire enable_proxy via a
+                    // mutateFormDataBeforeFill hook on the EditPlaylist page to
+                    // make it reliably readable, or replace this closure with a
+                    // static helper text "Caching requires the playlist's Stream
+                    // Proxy to be enabled."
+                    return ! $get('../../enable_proxy')
+                        ? __('Requires \'Enable Stream Proxy\' on this playlist.')
+                        : __('Cache matching content so multiple playlists/Dynamic Groups don\'t each hit the provider.');
+                }),
+            ComponentsGroup::make()
+                ->columnSpanFull()
+                ->columns(12)
+                ->hidden(fn (Get $get): bool => ! $get('cache_enabled'))
+                ->schema([
+                    Select::make('cache_content_selection')
+                        ->label(__('Content to Cache'))
+                        ->options([
+                            'all' => __('All Content'),
+                            'recent' => __('Recent (within X days)'),
+                            'select' => __('Select Content'),
+                        ])
+                        ->default('all')
+                        ->live()
+                        ->required()
+                        ->columnSpan(3),
+                    TextInput::make('cache_content_days')
+                        ->label(__('Days Back'))
+                        ->type('number')
+                        ->minValue(1)
+                        ->default(30)
+                        ->helperText(__('Only cache content released within this many days from today.'))
+                        ->columnSpan(3)
+                        ->hidden(fn (Get $get): bool => (string) $get('cache_content_selection') !== 'recent'),
+                    Select::make('cache_retention_mode')
+                        ->label(__('Retention Mode'))
+                        ->options([
+                            'match_group_lifetime' => __('Match Group Lifetime'),
+                            'lifetime_plus_days' => __('Group Lifetime + Extra Days'),
+                            'never_expire' => __('Never Expire'),
+                        ])
+                        ->default('match_group_lifetime')
+                        ->live()
+                        ->required()
+                        ->columnSpan(3),
+                    TextInput::make('cache_retention_extra_days')
+                        ->label(__('Extra Days After Group Removal'))
+                        ->type('number')
+                        ->minValue(0)
+                        ->default(0)
+                        ->helperText(__('Days to keep cached files after the Dynamic Group is removed from the playlist config.'))
+                        ->columnSpan(3)
+                        ->hidden(fn (Get $get): bool => (string) $get('cache_retention_mode') !== 'lifetime_plus_days'),
+                    ModalTableSelect::make('cache_selected_content_ids')
+                        ->label(__('Selected Content'))
+                        ->helperText(__('Pick which already-matched members of this Dynamic Group to cache. Sync the playlist first — the picker is scoped to the group\'s materialized membership.'))
+                        ->columnSpan(12)
+                        ->multiple()
+                        ->visible(fn (Get $get): bool => (string) $get('cache_content_selection') === 'select')
+                        ->tableConfiguration(
+                            fn (Get $get): string => $get('type') === 'series'
+                                ? DynamicGroupCacheableSeriesTable::class
+                                : DynamicGroupCacheableChannelsTable::class,
+                        )
+                        ->tableArguments(function ($record, Get $get): array {
+                            // Inside the Repeater, the parent-form Playlist ID
+                            // is reachable via the standard Filament v3+ sibling path.
+                            // Falls back to `$record?->id` for direct-form contexts.
+                            $playlistId = $get('../../id') ?: ($record?->id ?? null);
+                            $group = null;
+                            if ($playlistId) {
+                                $group = app(DynamicGroupCacheDispatchService::class)
+                                    ->resolveGroupForRule((int) $playlistId, ['name' => $get('name')]);
+                            }
+
+                            return [
+                                'playlist_id' => $playlistId,
+                                'dynamic_group_id' => $group?->id,
+                            ];
+                        })
+                        ->selectAction(
+                            fn (Action $action) => $action
+                                ->label(__('Select content'))
+                                ->modalHeading(__('Select Dynamic Group members to cache'))
+                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                ->button(),
+                        )
+                        ->hintAction(
+                            Action::make('clear_selected_content')
+                                ->label(__('Clear all'))
+                                ->icon('heroicon-o-x-mark')
+                                ->color('danger')
+                                ->action(function (Set $set): void {
+                                    $set('cache_selected_content_ids', []);
+                                })
+                                ->requiresConfirmation()
+                                ->modalHeading(__('Clear selection'))
+                                ->modalDescription(__('Are you sure you want to clear all selected content for this rule?'))
+                                ->modalSubmitActionLabel(__('Clear'))
+                        )
+                        ->getOptionLabelFromRecordUsing(
+                            fn ($record) => $record->title ?? $record->name
+                        )
+                        ->getOptionLabelsUsing(function (array $values): array {
+                            // Values are mixed VOD/Series IDs depending on the rule's
+                            // `type` — fall back to Series if Channel didn't claim them.
+                            $values = array_values(array_filter($values, fn ($value) => is_numeric($value)));
+                            if (empty($values)) {
+                                return [];
+                            }
+
+                            $channelLabels = Channel::whereIn('id', $values)
+                                ->pluck('title', 'id')
+                                ->all();
+                            $remaining = array_diff($values, array_keys($channelLabels));
+                            $seriesLabels = ! empty($remaining)
+                                ? Series::whereIn('id', $remaining)
+                                    ->pluck('name', 'id')
+                                    ->all()
+                                : [];
+
+                            return $channelLabels + $seriesLabels;
+                        }),
+                    TextInput::make('cache_location_override')
+                        ->label(__('Cache Location Override'))
+                        ->placeholder(__('Leave blank to use the global cache location'))
+                        ->helperText(__('Absolute path on disk. Per-group override; new downloads land here, but already-cached files are NOT moved.'))
+                        ->columnSpan(6),
+                    TextInput::make('cache_prefer_quality_keyword')
+                        ->label(__('Preferred Quality Keyword'))
+                        ->placeholder(__('e.g. 4K'))
+                        ->helperText(__('Tie-break preference when multiple qualities match the same content. Free-text tag — e.g. "4K", "1080p".'))
+                        ->columnSpan(3),
+                    Toggle::make('cache_avoid_duplicate_content')
+                        ->label(__('Avoid Duplicate Content Across Dynamic Groups'))
+                        ->default(true)
+                        ->inline(false)
+                        ->helperText(__('Reuse the same cached file across multiple groups when content identity matches, instead of downloading once per group.'))
+                        ->columnSpan(3),
+                ]),
+        ];
     }
 
     public static function getFormSections($creating = false, $includeAuth = false): array
@@ -1950,133 +2250,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     Repeater::make('dynamic_groups_config')
                         ->label(__('Dynamic Groups Configuration'))
                         ->columnSpanFull()
-                        ->schema([
-                            Toggle::make('enabled')
-                                ->label(__('Enabled'))
-                                ->default(true)
-                                ->inline(false)
-                                ->columnSpan(1),
-                            Select::make('type')
-                                ->label(__('Content Type'))
-                                ->options([
-                                    'vod' => __('VOD (Movies)'),
-                                    'series' => __('Series'),
-                                ])
-                                ->live()
-                                ->required()
-                                ->afterStateUpdated(function (Set $set): void {
-                                    // Reset source-dependent fields so the user
-                                    // cannot keep a provider/genre/network that
-                                    // is no longer relevant after switching
-                                    // between vod and series.
-                                    $set('source', null);
-                                    $set('tmdb_params', []);
-                                })
-                                ->columnSpan(2),
-                            Select::make('source')
-                                ->label(__('Source'))
-                                ->options(function (Get $get): array {
-                                    $type = $get('type');
-
-                                    if ($type === 'series') {
-                                        return [
-                                            'trending' => __('Trending'),
-                                            'popular' => __('Popular'),
-                                            'top_genre' => __('Top Genre'),
-                                            'tmdb_network' => __('By TV Network'),
-                                            'provider' => __('By Streaming Service'),
-                                        ];
-                                    }
-
-                                    return [
-                                        'trending' => __('Trending'),
-                                        'popular' => __('Popular'),
-                                        'now_playing' => __('In Theatres'),
-                                        'upcoming' => __('Coming Soon'),
-                                        'top_genre' => __('Top Genre'),
-                                        'provider' => __('By Streaming Service'),
-                                    ];
-                                })
-                                ->live()
-                                ->required()
-                                ->columnSpan(3),
-                            Select::make('tmdb_params.genre_id')
-                                ->label(__('Genre'))
-                                ->options(function (Get $get): array {
-                                    $tmdb = app(TmdbService::class);
-                                    if (! $tmdb->isConfigured()) {
-                                        return [];
-                                    }
-                                    $genres = $get('type') === 'series'
-                                        ? $tmdb->getTvGenres()
-                                        : $tmdb->getMovieGenres();
-
-                                    return array_column($genres, 'name', 'id');
-                                })
-                                ->required()
-                                ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.network_id')
-                                ->label(__('TV Network'))
-                                ->options(TmdbService::TV_NETWORKS)
-                                ->required()
-                                ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.provider_id')
-                                ->label(__('Streaming Service'))
-                                ->options(function (Get $get): array {
-                                    $tmdb = app(TmdbService::class);
-                                    if (! $tmdb->isConfigured()) {
-                                        return [];
-                                    }
-                                    $region = $get('tmdb_params.region') ?: 'US';
-                                    $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
-                                    $providers = $tmdb->getWatchProviders($mediaType, $region);
-
-                                    return array_column($providers, 'name', 'id');
-                                })
-                                ->required()
-                                ->live()
-                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                ->columnSpan(4),
-                            TextInput::make('tmdb_params.region')
-                                ->label(__('Region'))
-                                ->placeholder('US')
-                                ->maxLength(2)
-                                ->live()
-                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                ->columnSpan(1),
-                            Select::make('tmdb_params.time_window')
-                                ->label(__('Time Window'))
-                                ->options([
-                                    'day' => __('Today'),
-                                    'week' => __('This Week'),
-                                ])
-                                ->default('week')
-                                ->visible(fn (Get $get): bool => $get('source') === 'trending')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.pages')
-                                ->label(__('Pages to Fetch'))
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
-                                )
-                                ->options([
-                                    1 => '1 (~20 items)',
-                                    2 => '2 (~40 items)',
-                                    3 => '3 (~60 items, default)',
-                                    4 => '4 (~80 items)',
-                                    5 => '5 (~100 items, max)',
-                                ])
-                                ->default(3)
-                                ->native(false)
-                                ->columnSpan(3),
-                            TextInput::make('name')
-                                ->label(__('Category Name'))
-                                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
-                                ->required()
-                                ->columnSpan(3),
-                        ])
+                        ->schema(self::getDynamicGroupRuleSchema())
                         ->columns(12)
                         ->reorderable()
                         ->reorderableWithButtons()

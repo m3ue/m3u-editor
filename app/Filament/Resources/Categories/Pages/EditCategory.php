@@ -160,6 +160,7 @@ class EditCategory extends EditRecord
                     ->modalIcon('heroicon-o-document-arrow-down')
                     ->modalDescription(__('Sync category series .strm files now? This will generate .strm files for the enabled series at the path set for the series.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
+
                 Action::make('enable')
                     ->label(__('Enable category series'))
                     ->action(function ($record): void {
