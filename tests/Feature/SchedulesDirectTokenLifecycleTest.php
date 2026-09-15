@@ -8,11 +8,17 @@ use App\Models\Epg;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Bus::fake();
+    Http::preventStrayRequests();
+});
 
 function sdEpg(array $overrides = []): Epg
 {
@@ -343,4 +349,34 @@ it('clears the stale cooldown from sibling EPGs after a later successful login',
 
     expect($recovering->fresh()->sd_login_cooldown_until)->toBeNull();
     expect($sibling->fresh()->sd_login_cooldown_until)->toBeNull();
+});
+
+it('retries a retryable programs subchunk failure once', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/programs' => Http::sequence()
+            ->push(['code' => 6001, 'message' => 'Temporary failure'], 503)
+            ->push([], 200),
+    ]);
+
+    $responseFile = tempnam(sys_get_temp_dir(), 'sd-test-');
+    $method = new ReflectionMethod(SchedulesDirectService::class, 'fetchProgramBatch');
+    $response = $method->invoke(new SchedulesDirectService, 'token', [['programID' => 'SH0000000001']], $responseFile);
+
+    expect($response->status())->toBe(200);
+    expect(Http::recorded())->toHaveCount(2);
+    unlink($responseFile);
+});
+
+it('does not retry a permanent programs subchunk failure', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/programs' => Http::response(['code' => 6000, 'message' => 'Permanent failure'], 400),
+    ]);
+
+    $responseFile = tempnam(sys_get_temp_dir(), 'sd-test-');
+    $method = new ReflectionMethod(SchedulesDirectService::class, 'fetchProgramBatch');
+    $response = $method->invoke(new SchedulesDirectService, 'token', [['programID' => 'SH0000000001']], $responseFile);
+
+    expect($response->status())->toBe(400);
+    expect(Http::recorded())->toHaveCount(1);
+    unlink($responseFile);
 });

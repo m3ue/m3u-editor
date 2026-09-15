@@ -67,7 +67,7 @@ class CustomPlaylistController extends Controller
                 'is_vod' => (bool) $channel->is_vod,
                 'group' => $channel->tags->first()?->getAttributeValue('name'),
                 'channel_number' => $channel->pivot->channel_number,
-                'sort' => $channel->pivot->sort,
+                'sort' => $channel->pivot->sort === null ? null : (float) $channel->pivot->sort,
             ])->values(),
             'meta' => [
                 'current_page' => $channels->currentPage(),

@@ -891,16 +891,35 @@ class EpgResource extends Resource implements CopilotResource
             ->color('warning')
             ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
             ->modalHeading(__('Manage SchedulesDirect Lineups'))
-            ->modalDescription(__('View and remove lineups from your SchedulesDirect account.'))
-            ->modalSubmitActionLabel(__('Remove Selected Lineup'))
+            ->modalDescription(__('Add or remove lineups from your SchedulesDirect account.'))
+            ->modalSubmitActionLabel(__('Apply Lineup Change'))
             ->schema(function (Epg $record): array {
                 try {
                     $service = app(SchedulesDirectService::class);
                     $lineups = $service->getAccountLineupsAsOptions($record);
                     $count = count($lineups);
                     $max = $service->getAccountMaxLineups($record->sd_token);
+                    $available = [];
+                    try {
+                        foreach ($service->getHeadends($record->sd_token, $record->sd_country, $record->sd_postal_code) as $headend) {
+                            foreach ($headend['lineups'] ?? [] as $lineup) {
+                                if (! isset($lineups[$lineup['lineup']])) {
+                                    $available[$lineup['lineup']] = "{$lineup['name']} - {$lineup['lineup']} ({$headend['transport']})";
+                                }
+                            }
+                        }
+                    } catch (Exception) {
+                        $available = [];
+                    }
 
                     return [
+                        Select::make('lineup_to_add')
+                            ->label(__('Lineup to Add'))
+                            ->options($available)
+                            ->disabled($count >= $max || empty($available))
+                            ->helperText(empty($available)
+                                ? __('Could not fetch available lineups. Adding a lineup is disabled.')
+                                : __("{$count} of {$max} slots used")),
                         Select::make('lineup_to_remove')
                             ->label(__('Lineup to Remove'))
                             ->options($lineups)
@@ -918,23 +937,30 @@ class EpgResource extends Resource implements CopilotResource
                 }
             })
             ->action(function (array $data, Epg $record): void {
-                $lineupId = $data['lineup_to_remove'] ?? null;
+                $lineupId = $data['lineup_to_add'] ?? null;
+                $isAdd = filled($lineupId);
+                $lineupId ??= $data['lineup_to_remove'] ?? null;
                 if (! $lineupId) {
                     return;
                 }
 
                 try {
-                    app(SchedulesDirectService::class)->removeLineupFromEpg($record, $lineupId);
+                    if ($isAdd) {
+                        app(SchedulesDirectService::class)->addLineupToEpg($record, $lineupId);
+                    } else {
+                        app(SchedulesDirectService::class)->removeLineupFromEpg($record, $lineupId);
+                    }
 
+                    $verb = $isAdd ? 'added to' : 'removed from';
                     Notification::make()
                         ->success()
-                        ->title(__('Lineup removed'))
-                        ->body(__("Lineup {$lineupId} has been removed from your SchedulesDirect account."))
+                        ->title($isAdd ? __('Lineup added') : __('Lineup removed'))
+                        ->body(__("Lineup {$lineupId} has been {$verb} your SchedulesDirect account."))
                         ->send();
                 } catch (Exception $e) {
                     Notification::make()
                         ->danger()
-                        ->title(__('Failed to remove lineup'))
+                        ->title($isAdd ? __('Failed to add lineup') : __('Failed to remove lineup'))
                         ->body($e->getMessage())
                         ->send();
                 }
