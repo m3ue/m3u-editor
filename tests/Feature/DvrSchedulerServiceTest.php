@@ -871,7 +871,7 @@ it('unique_se mode does not re-record a purged episode after retention cleanup',
         ]);
 
     // Retention deleted the file but deliberately kept the row as the record
-    // that the episode has already been recorded — the duplicate check must
+    // that the episode has already been recorded - the duplicate check must
     // still see it, otherwise the same S/E gets scheduled again after cleanup.
     DvrRecording::factory()
         ->purged()
@@ -929,7 +929,7 @@ it('unique_se sports rule records a re-match on a different date despite an earl
             'series_key' => "setting:{$this->setting->id}|title:my show",
         ]);
 
-    // Re-match TODAY — a new event, must record
+    // Re-match TODAY - a new event, must record
     $game = EpgProgramme::factory()->upcoming(5)->create([
         'title' => 'My Show',
         'epg_channel_id' => 'test.channel',
@@ -939,8 +939,11 @@ it('unique_se sports rule records a re-match on a different date despite an earl
 
     $this->service->matchAndSchedule(30);
 
+    // programme_start is stored via App\Casts\UtcDateTime, which always
+    // normalizes to an explicit-offset UTC string - a bare Carbon comparison
+    // value wouldn't textually match, so format it the same way.
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
-        ->where('programme_start', $game->start_time)
+        ->where('programme_start', UtcDateTime::forQuery($game->start_time))
         ->count())->toBe(1);
 });
 
@@ -971,8 +974,11 @@ it('unique_se sports rule dedups a same-day replay of the same game', function (
     $this->service->matchAndSchedule(30);
 
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+    // programme_start is stored via App\Casts\UtcDateTime, which always
+    // normalizes to an explicit-offset UTC string - a bare Carbon comparison
+    // value wouldn't textually match, so format it the same way.
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
-        ->where('programme_start', $game1->start_time)
+        ->where('programme_start', UtcDateTime::forQuery($game1->start_time))
         ->count())->toBe(1);
 });
 
@@ -986,7 +992,7 @@ it('unique_se sports rule skips a next-day replay inside the dedup window', func
             'series_mode' => DvrSeriesMode::UniqueSe,
         ]);
 
-    // Yesterday's game (completed) — the default dedup window (2 days) treats
+    // Yesterday's game (completed) - the default dedup window (2 days) treats
     // today's same-title airing as a replay, not a new event.
     $yesterday = now()->subDay();
     DvrRecording::factory()
@@ -1028,7 +1034,7 @@ it('unique_se sports rule records a re-match outside the dedup window', function
             'series_mode' => DvrSeriesMode::UniqueSe,
         ]);
 
-    // A game from a month ago (purged by retention) — outside the 2-day
+    // A game from a month ago (purged by retention) - outside the 2-day
     // window, so a same-title airing today is a NEW event.
     $oldGame = now()->subMonth();
     DvrRecording::factory()
@@ -1053,8 +1059,11 @@ it('unique_se sports rule records a re-match outside the dedup window', function
 
     $this->service->matchAndSchedule(30);
 
+    // programme_start is stored via App\Casts\UtcDateTime, which always
+    // normalizes to an explicit-offset UTC string - a bare Carbon comparison
+    // value wouldn't textually match, so format it the same way.
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)
-        ->where('programme_start', $newGame->start_time)
+        ->where('programme_start', UtcDateTime::forQuery($newGame->start_time))
         ->count())->toBe(1);
 });
 

@@ -70,7 +70,7 @@ it('re-renders the airings preview from the edited form values on an existing ru
     // Mounting shows the SAVED rule's airings; editing the title (onBlur)
     // must re-render the preview from the form's current values without
     // persisting anything. The preview's view DATA is asserted directly from
-    // the page's form schema against the current form state — deterministic
+    // the page's form schema against the current form state - deterministic
     // in the test harness, unlike full HTML re-render snapshots.
     $assertPreview = function (Testable $page, array $expectedSubtitles, array $absentSubtitles): void {
         $flatten = function ($components) use (&$flatten): array {

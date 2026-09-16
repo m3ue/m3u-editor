@@ -206,7 +206,7 @@ class DvrRecordingRule extends Model
     /**
      * Sports identity (no season/episode): same series_key within a dedup
      * WINDOW (see DvrSetting::sportsDedupDays) of an existing recording = a
-     * replay of the same game (skipped — even after retention purged the file,
+     * replay of the same game (skipped - even after retention purged the file,
      * the row is kept). Beyond the window it is a NEW event (a re-match later
      * in the season) and must record. A same-day replay is always a duplicate.
      */
@@ -230,7 +230,7 @@ class DvrRecordingRule extends Model
     }
 
     /**
-     * Sports identity duplicate check — see getEpisodeRecordingStatusOnDate().
+     * Sports identity duplicate check - see getEpisodeRecordingStatusOnDate().
      */
     public function alreadyHaveEpisodeOnDate(string $seriesKey, \DateTimeInterface $date, int $windowDays): bool
     {
@@ -246,18 +246,19 @@ class DvrRecordingRule extends Model
      */
     public function sportsAlreadyScheduled(string $seriesKey, \DateTimeInterface $date, int $windowDays, array $scheduledKeys): bool
     {
+        // Sports dedup keys are built as "seriesKey|DATE|" (the trailing pipe
+        // is the unused season/episode segment) - strip it before comparing.
         if ($windowDays === 0) {
-            return in_array($seriesKey.'|'.$date->format('Y-m-d'), $scheduledKeys, true);
+            return in_array($seriesKey.'|'.$date->format('Y-m-d').'|', $scheduledKeys, true);
         }
 
-        $windowStart = $date->format('Y-m-d');
         $prefix = $seriesKey.'|';
         foreach ($scheduledKeys as $key) {
             if (! str_starts_with($key, $prefix)) {
                 continue;
             }
 
-            $scheduledDate = substr($key, strlen($prefix));
+            $scheduledDate = rtrim(substr($key, strlen($prefix)), '|');
             $scheduledTimestamp = strtotime($scheduledDate);
             $dateTimestamp = strtotime($date->format('Y-m-d'));
 

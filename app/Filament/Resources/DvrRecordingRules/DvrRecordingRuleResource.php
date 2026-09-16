@@ -125,14 +125,15 @@ class DvrRecordingRuleResource extends Resource
                             return [];
                         }
 
-                        // Deduplicate by title — the IPTV provider may have
-                        // multiple streams/quality variants for the same channel.
-                        // Channels without a title fall back to their name so
-                        // the option label is never null.
+                        // Deduplicate by the label the option will actually show
+                        // (title, or name when title is blank) - the IPTV provider
+                        // may have multiple streams/quality variants for the same
+                        // channel, but channels without a title must not collapse
+                        // into a single "untitled" option.
                         return Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
                             ->orderBy('title')
                             ->get()
-                            ->unique('title')
+                            ->unique(fn (Channel $channel): string => $channel->title ?: $channel->name)
                             ->mapWithKeys(fn (Channel $channel): array => [
                                 $channel->id => $channel->title ?: $channel->name,
                             ])
@@ -218,7 +219,7 @@ class DvrRecordingRuleResource extends Resource
     /**
      * Build a temporary DvrRecordingRule from form values to preview
      * matched airings. Works for both new rules (no record yet) and
-     * existing rules being edited — the preview always reflects the form's
+     * existing rules being edited - the preview always reflects the form's
      * CURRENT (possibly unsaved) values, so onBlur changes to the title,
      * channel or record-episodes mode re-render the airings immediately.
      */
@@ -230,7 +231,7 @@ class DvrRecordingRuleResource extends Resource
         }
 
         // On the initial mount the form state may not be filled yet, so fall back
-        // to the record's values — the preview must render for existing rules
+        // to the record's values - the preview must render for existing rules
         // before any onBlur edit.
         $seriesTitle = trim((string) ($get('series_title') ?? $record?->series_title ?? ''));
         if ($seriesTitle === '') {
@@ -242,17 +243,14 @@ class DvrRecordingRuleResource extends Resource
             return [];
         }
 
-        $formMatchMode = is_string($get('match_mode'))
-            ? DvrMatchMode::tryFrom($get('match_mode'))
-            : $get('match_mode');
-
         $tempRule = new DvrRecordingRule([
-            // Existing records supply the base (fields outside the form —
+            // Existing records supply the base (fields outside the form -
             // tmdb_id, enable_comskip, keep_last, ...) so edited rules preview
-            // with their full context.
+            // with their full context. There is no match_mode field on this
+            // form, so it always comes from the record (or the model default).
             ...($record?->getAttributes() ?? []),
             'series_title' => $seriesTitle,
-            'match_mode' => $formMatchMode ?? $record?->match_mode ?? DvrMatchMode::Contains,
+            'match_mode' => $record?->match_mode ?? DvrMatchMode::Contains,
             'series_mode' => is_string($get('series_mode'))
                 ? (DvrSeriesMode::tryFrom($get('series_mode')) ?? $record?->series_mode)
                 : ($get('series_mode') ?? $record?->series_mode ?? DvrSeriesMode::All),

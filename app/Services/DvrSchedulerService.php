@@ -259,10 +259,10 @@ class DvrSchedulerService
             // Dedup strategy depends on series_mode:
             // - All: record every matching airing (no dedup)
             // - UniqueSe/NewFlag with season/episode: dedup by rule series_key
-            //   + S/E (scripted episodes — Purged rows still block, see
+            //   + S/E (scripted episodes - Purged rows still block, see
             //   alreadyHaveEpisode)
             // - UniqueSe/NewFlag without S/E (sports): identity is the
-            //   programme title + airing DATE — a re-match on a different date
+            //   programme title + airing DATE - a re-match on a different date
             //   is a new event and records even if an earlier game was
             //   recorded or purged; a same-day replay is the same game.
             $hasSeasonEpisode = $programme->season !== null && $programme->episode !== null;

@@ -110,7 +110,7 @@ trait HasDvrMatchedAirings
                     : SeriesKey::for($rule->dvrSetting->id, $p->title);
                 // Mirror the scheduler's dedup identity: S/E programmes key on
                 // season|episode; sports (no S/E) key on the airing date
-                // within the setting's dedup window — a same-title airing is
+                // within the setting's dedup window - a same-title airing is
                 // a replay of a recent game (skipped) but a re-match beyond
                 // the window is a new event (recorded).
                 $windowDays = $rule->sportsDedupDays();

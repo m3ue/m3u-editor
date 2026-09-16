@@ -105,7 +105,7 @@ trait HasDvrAndRequestFormHooks
                     'include_disabled_channels' => $data['dvr_include_disabled_channels'] ?? false,
                     'default_series_mode' => $data['dvr_default_series_mode'] ?? DvrSeriesMode::UniqueSe->value,
                     'default_series_keep_last' => ($data['dvr_default_series_keep_last'] > 0) ? $data['dvr_default_series_keep_last'] : null,
-                    'sports_dedup_days' => isset($data['dvr_sports_dedup_days']) && $data['dvr_sports_dedup_days'] > 0 ? (int) $data['dvr_sports_dedup_days'] : null,
+                    'sports_dedup_days' => isset($data['dvr_sports_dedup_days']) && $data['dvr_sports_dedup_days'] !== '' && $data['dvr_sports_dedup_days'] !== null && (int) $data['dvr_sports_dedup_days'] >= 0 ? (int) $data['dvr_sports_dedup_days'] : null,
                 ]
             );
         }
