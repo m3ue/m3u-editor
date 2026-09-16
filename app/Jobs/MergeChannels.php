@@ -8,6 +8,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\ChannelMergeKeyService;
+use App\Services\VodResolutionExtractor;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -15,6 +16,9 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class MergeChannels implements ShouldQueue
 {
@@ -28,6 +32,19 @@ class MergeChannels implements ShouldQueue
         'group_priority',
         'catchup_support',
         'resolution',
+        'codec',
+        'keyword_match',
+    ];
+
+    /**
+     * VOD default priority order: resolution leads (probed or filename-derived),
+     * followed by playlist/group priority, codec and keyword match. Catch-up
+     * support does not apply to VOD and is intentionally omitted.
+     */
+    public const VOD_DEFAULT_PRIORITY_ORDER = [
+        'resolution',
+        'playlist_priority',
+        'group_priority',
         'codec',
         'keyword_match',
     ];
@@ -62,6 +79,16 @@ class MergeChannels implements ShouldQueue
      * @var array<int, true>
      */
     protected array $existingFailoverMasterIds = [];
+
+    /**
+     * Transient VOD resolution cache keyed by channel id. Each entry records the
+     * resolved vertical resolution (2160/1440/1080/720/576/480) and its source
+     * ('probed' from stored stream_stats, or 'title'/'name'/'url' from filename
+     * parsing). In-memory only; never persisted to the database.
+     *
+     * @var array<int, array{resolution: int, source: string}>
+     */
+    protected array $vodResolutionCache = [];
 
     /**
      * Create a new job instance.
@@ -185,7 +212,54 @@ class MergeChannels implements ShouldQueue
         $processed += $regexResults['processed'];
         $deactivatedCount += $regexResults['deactivated'];
 
+        $this->dispatchVodResolutionProbeVerification();
+
         $this->sendCompletionNotification($processed, $deactivatedCount);
+    }
+
+    /**
+     * When VOD filename-resolution verification is opted in, queue an ffprobe for
+     * every channel whose resolution was derived from title/name/url (not probed)
+     * during this merge pass. Probing runs async; the next merge reads the probed
+     * value. Never blocks or fails the merge itself.
+     */
+    protected function dispatchVodResolutionProbeVerification(): void
+    {
+        if (! (bool) ($this->weightedConfig['vod_verify_filename_via_probe'] ?? false)) {
+            return;
+        }
+
+        // Note: this is independent of the playlist-level auto_probe_vod_streams toggle.
+        // The user has explicitly opted in to filename-resolution verification, so we
+        // dispatch the probe regardless of the bulk probe setting.
+        $playlist = Playlist::find($this->playlistId);
+        if (! $playlist) {
+            return;
+        }
+
+        $channelIds = [];
+        foreach ($this->vodResolutionCache as $channelId => $resolved) {
+            if (($resolved['source'] ?? 'probed') === 'probed') {
+                continue;
+            }
+
+            $channelIds[] = $channelId;
+        }
+
+        if ($channelIds === []) {
+            return;
+        }
+
+        try {
+            Bus::dispatch(new ProbeStreamsChunk(
+                channelIds: $channelIds,
+                probeTimeout: $playlist->probe_timeout ?? 15,
+            ));
+
+            Log::info('MergeChannels: Queued VOD resolution verification probe for '.count($channelIds).' channel(s).');
+        } catch (Throwable $e) {
+            Log::warning("MergeChannels: Failed to queue VOD resolution verification probe - {$e->getMessage()}");
+        }
     }
 
     /**
@@ -480,6 +554,13 @@ class MergeChannels implements ShouldQueue
      */
     protected function selectMasterChannel(Collection $group, array $playlistPriority): ?Channel
     {
+        // Hydrate resolutions for the FULL unfiltered group so any later failover
+        // candidate excluded from master selection (disabled-group / scrubber-dead)
+        // still has a cache entry and ranks correctly when it becomes a failover.
+        if ($this->vodResolutionPriorityEnabled()) {
+            $this->hydrateVodResolutions($group);
+        }
+
         // Filter out channels from disabled groups if enabled.
         // When the user opted in to exclude_disabled_groups, we must NOT fall back
         // to the unfiltered group: that would silently pick (and later re-enable)
@@ -629,6 +710,10 @@ class MergeChannels implements ShouldQueue
             }
         }
 
+        // hydrateVodResolutions is invoked by selectMasterChannel() on the full
+        // (unfiltered) group, so failover candidates excluded from master selection
+        // still get a cache entry. Do not re-hydrate here.
+
         $scoredChannels = $group->map(function ($channel) use ($playlistPriority) {
             return [
                 'channel' => $channel,
@@ -652,6 +737,41 @@ class MergeChannels implements ShouldQueue
 
         // Return first top scorer (sorted by sort order for consistency)
         return $topChannels->sortBy('sort')->first();
+    }
+
+    /**
+     * Whether VOD resolution-priority scoring is active for this merge.
+     */
+    protected function vodResolutionPriorityEnabled(): bool
+    {
+        return $this->contentType === 'vod'
+            && (bool) ($this->weightedConfig['vod_resolution_priority_enabled'] ?? false);
+    }
+
+    /**
+     * Hydrate the transient VOD resolution cache for each candidate channel.
+     *
+     * Reads already-stored stream_stats (probed) or, when enabled, parses the
+     * title/name/url. Filename-derived resolutions below the configured promote
+     * threshold are discarded as too unreliable to override scoring with.
+     */
+    protected function hydrateVodResolutions(Collection $group): void
+    {
+        $useFilename = (bool) ($this->weightedConfig['vod_use_filename_resolution'] ?? true);
+        $minPromote = (int) ($this->weightedConfig['vod_min_resolution_promote'] ?? 720);
+
+        foreach ($group as $channel) {
+            $resolved = VodResolutionExtractor::extract($channel);
+            if ($resolved === null) {
+                continue;
+            }
+
+            if ($resolved['source'] !== 'probed' && (! $useFilename || $resolved['resolution'] < $minPromote)) {
+                continue;
+            }
+
+            $this->vodResolutionCache[(int) $channel->id] = $resolved;
+        }
     }
 
     /**
@@ -761,10 +881,27 @@ class MergeChannels implements ShouldQueue
      */
     protected function getResolutionScore(Channel $channel): int
     {
+        if ($this->vodResolutionPriorityEnabled()) {
+            $vertical = $this->vodResolutionCache[(int) $channel->id]['resolution'] ?? null;
+
+            return $vertical !== null && $vertical > 0
+                ? $this->verticalResolutionScore($vertical)
+                : 0;
+        }
+
         $resolution = $this->getResolution($channel);
 
         // Normalize: 4K (3840x2160 = 8294400) = 100, 1080p = ~25, 720p = ~11
         return min(100, (int) ($resolution / 82944));
+    }
+
+    /**
+     * Map a vertical resolution (2160/1080/720/480...) onto the same 0-100 scale
+     * used by the pixel-count normalization above.
+     */
+    protected function verticalResolutionScore(int $vertical): int
+    {
+        return min(100, (int) round($vertical / 21.6));
     }
 
     /**

@@ -2476,6 +2476,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ])
                                 ->default('stream_id')
                                 ->required()
+                                ->live()
                                 ->helperText(__('Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.')),
                             Toggle::make('auto_merge_config.check_resolution')
                                 ->label(__('Prioritize by resolution'))
@@ -2684,6 +2685,38 @@ class PlaylistResource extends Resource implements CopilotResource
                                         $component->state($formatted);
                                     }
                                 }),
+                        ]),
+
+                    Fieldset::make(__('VOD Resolution Priority'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled') || $get('auto_merge_config.merge_key') !== 'tmdb_id')
+                        ->schema([
+                            Toggle::make('auto_merge_config.vod_resolution_priority_enabled')
+                                ->label(__('Promote higher-resolution duplicate when same TMDB ID found'))
+                                ->inline(false)
+                                ->default(true)
+                                ->helperText(__('When enabled, the higher-resolution duplicate becomes the master when the same TMDB ID appears at multiple resolutions.')),
+                            Toggle::make('auto_merge_config.vod_use_filename_resolution')
+                                ->label(__('Parse resolution from title/URL when ffprobe data is missing'))
+                                ->inline(false)
+                                ->default(true)
+                                ->helperText(__('Derive resolution from the title, name, or URL when the stream has not been probed with ffprobe.')),
+                            Select::make('auto_merge_config.vod_min_resolution_promote')
+                                ->label(__('Discard filename-derived resolution below this height'))
+                                ->options([
+                                    480 => '480p',
+                                    720 => '720p',
+                                    1080 => '1080p',
+                                    2160 => '2160p',
+                                ])
+                                ->default(720)
+                                ->helperText(__('Channels whose filename-parsed resolution is below this threshold are treated as having no resolution signal. Probed resolution always passes through.')),
+                            Toggle::make('auto_merge_config.vod_verify_filename_via_probe')
+                                ->label(__('Verify filename-derived resolution via ffprobe after merge'))
+                                ->inline(false)
+                                ->default(false)
+                                ->helperText(__('When enabled, channels whose resolution was derived from filename/title/URL (not probed) are queued for ffprobe after the merge completes. Next merge uses the probed value.')),
                         ]),
                 ]),
             Section::make(__('Find & Replace Rules'))
