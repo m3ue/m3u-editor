@@ -136,6 +136,12 @@ return [
             'key' => env('OPENROUTER_API_KEY'),
         ],
 
+        'unsloth_studio' => [
+            'driver' => 'openai',
+            'key' => env('UNSLOTH_STUDIO_API_KEY'),
+            'url' => env('UNSLOTH_STUDIO_URL', CopilotProvider::UNSLOTH_URL),
+        ],
+
         'voyageai' => [
             'driver' => 'voyageai',
             'key' => env('VOYAGEAI_API_KEY'),

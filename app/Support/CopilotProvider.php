@@ -6,6 +6,8 @@ final class CopilotProvider
 {
     public const OPENCODE_URL = 'https://opencode.ai/zen/v1';
 
+    public const UNSLOTH_URL = 'http://localhost:8888/v1';
+
     private const DEFAULT_OPENAI_URL = 'https://api.openai.com/v1';
 
     /**
@@ -26,6 +28,7 @@ final class CopilotProvider
             'minimax' => 'MiniMax',
             'openrouter' => 'OpenRouter',
             'ollama' => 'Ollama (Local)',
+            'unsloth_studio' => 'Unsloth Studio (Local)',
         ];
     }
 
@@ -42,6 +45,7 @@ final class CopilotProvider
             'minimax' => 'MiniMax-M2.7',
             'openrouter' => 'openai/gpt-5.4',
             'ollama' => 'llama3',
+            'unsloth_studio' => 'default',
             default => 'gpt-5.4-mini',
         };
     }
@@ -50,6 +54,7 @@ final class CopilotProvider
     {
         return match ($provider) {
             'ollama' => 'http://localhost:11434',
+            'unsloth_studio' => self::UNSLOTH_URL,
             'minimax' => 'https://api.minimax.io/v1',
             'opencode_zen', 'opencode_go' => self::OPENCODE_URL,
             default => self::DEFAULT_OPENAI_URL,
@@ -58,6 +63,6 @@ final class CopilotProvider
 
     public static function supportsCustomUrl(?string $provider): bool
     {
-        return in_array($provider, ['openai', 'opencode_zen', 'opencode_go', 'ollama', 'minimax'], true);
+        return in_array($provider, ['openai', 'opencode_zen', 'opencode_go', 'ollama', 'minimax', 'unsloth_studio'], true);
     }
 }
