@@ -52,7 +52,6 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\Log;
 
 class EpgResource extends Resource implements CopilotResource
 {
@@ -298,7 +297,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->modalDescription(__('Reset EPG status so it can be processed again. Only perform this action if you are having problems with the EPG syncing.'))
                         ->modalSubmitActionLabel(__('Yes, reset now')),
                     self::getManageSdLineupsAction(),
-                    self::getSdDeleteAction(),
+                    DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()->slideOver()
                     ->button()->hiddenLabel()->size('sm'),
@@ -475,9 +474,10 @@ class EpgResource extends Resource implements CopilotResource
                     Grid::make()
                         ->columns(2)
                         ->schema([
-                            Select::make('sd_lineup_id')
-                                ->label(__('Lineup'))
-                                ->helperText(__('Select your SchedulesDirect lineup'))
+                            Select::make('sd_lineup_ids')
+                                ->label(__('Selected Lineups'))
+                                ->helperText(__('Select the SchedulesDirect lineups to use for this EPG. Add account lineups from Manage SD Lineups first.'))
+                                ->multiple()
                                 ->searchable()
                                 ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
                                     $country = $get('sd_country');
@@ -493,34 +493,12 @@ class EpgResource extends Resource implements CopilotResource
                                         // Authenticate to get fresh token
                                         $authData = $service->authenticate($username, $password);
 
-                                        // // Get account lineups first
-                                        // $accountLineups = [];
-                                        // try {
-                                        //     $userLineups = $service->getUserLineups($authData['token']);
-                                        //     $accountLineups = $userLineups['lineups'] ?? [];
-                                        // } catch (\Exception $e) {
-                                        //     // If we can't get account lineups, fall back to headend search
-                                        // }
-
                                         $options = [];
 
-                                        // // First, add account lineups that match the search
-                                        // foreach ($accountLineups as $lineup) {
-                                        //     if (stripos($lineup['name'], $search) !== false) {
-                                        //         $options[$lineup['lineup']] = "{$lineup['name']}";
-                                        //     }
-                                        // }
-
-                                        // Then add available lineups from headends
-                                        $headends = $service->getHeadends($authData['token'], $country, $postalCode);
-                                        foreach ($headends as $headend) {
-                                            foreach ($headend['lineups'] as $lineup) {
-                                                if (stripos($lineup['name'], $search) !== false) {
-                                                    // Don't duplicate if already in account
-                                                    if (! isset($options[$lineup['lineup']])) {
-                                                        $options[$lineup['lineup']] = "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
-                                                    }
-                                                }
+                                        $userLineups = $service->getUserLineups($authData['token']);
+                                        foreach ($userLineups['lineups'] ?? [] as $lineup) {
+                                            if (stripos($lineup['name'] ?? $lineup['lineup'], $search) !== false) {
+                                                $options[$lineup['lineup']] = "{$lineup['name']} — {$lineup['lineup']} ({$lineup['transport']})";
                                             }
                                         }
 
@@ -543,13 +521,10 @@ class EpgResource extends Resource implements CopilotResource
                                         // Authenticate to get fresh token
                                         $authData = $service->authenticate($username, $password);
 
-                                        // Check available lineups
-                                        $headends = $service->getHeadends($authData['token'], $country, $postalCode);
-                                        foreach ($headends as $headend) {
-                                            foreach ($headend['lineups'] as $lineup) {
-                                                if ($lineup['lineup'] === $value) {
-                                                    return "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
-                                                }
+                                        $userLineups = $service->getUserLineups($authData['token']);
+                                        foreach ($userLineups['lineups'] ?? [] as $lineup) {
+                                            if (($lineup['lineup'] ?? null) === $value) {
+                                                return "{$lineup['name']} — {$lineup['lineup']} ({$lineup['transport']})";
                                             }
                                         }
 
@@ -891,21 +866,46 @@ class EpgResource extends Resource implements CopilotResource
             ->color('warning')
             ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
             ->modalHeading(__('Manage SchedulesDirect Lineups'))
-            ->modalDescription(__('View and remove lineups from your SchedulesDirect account.'))
-            ->modalSubmitActionLabel(__('Remove Selected Lineup'))
+            ->modalDescription(__('Add or remove lineups from your SchedulesDirect account.'))
+            ->modalSubmitActionLabel(__('Apply Lineup Change'))
             ->schema(function (Epg $record): array {
                 try {
                     $service = app(SchedulesDirectService::class);
                     $lineups = $service->getAccountLineupsAsOptions($record);
                     $count = count($lineups);
                     $max = $service->getAccountMaxLineups($record->sd_token);
+                    $slotsUsed = __(':used of :max slots used', ['used' => $count, 'max' => $max]);
+                    $available = [];
+                    try {
+                        foreach ($service->getHeadends($record->sd_token, $record->sd_country, $record->sd_postal_code) as $headend) {
+                            foreach ($headend['lineups'] ?? [] as $lineup) {
+                                if (! isset($lineups[$lineup['lineup']])) {
+                                    $available[$lineup['lineup']] = "{$lineup['name']} - {$lineup['lineup']} ({$headend['transport']})";
+                                }
+                            }
+                        }
+                    } catch (Exception) {
+                        $available = [];
+                    }
 
                     return [
+                        Select::make('selected_lineup_ids')
+                            ->label(__('Selected for this EPG'))
+                            ->options($lineups)
+                            ->multiple()
+                            ->default($record->configuredSchedulesDirectLineupIds())
+                            ->helperText(__('These lineups are included in this EPG import. Account lineups remain available until you remove them.')),
+                        Select::make('lineup_to_add')
+                            ->label(__('Lineup to Add'))
+                            ->options($available)
+                            ->disabled($count >= $max || empty($available))
+                            ->helperText(empty($available)
+                                ? __('Could not fetch available lineups. Adding a lineup is disabled.')
+                                : $slotsUsed),
                         Select::make('lineup_to_remove')
                             ->label(__('Lineup to Remove'))
                             ->options($lineups)
-                            ->required()
-                            ->hint(__("{$count} of {$max} slots used"))
+                            ->hint($slotsUsed)
                             ->helperText(__('Select the lineup you want to remove from your SchedulesDirect account.')),
                     ];
                 } catch (Exception $e) {
@@ -918,56 +918,41 @@ class EpgResource extends Resource implements CopilotResource
                 }
             })
             ->action(function (array $data, Epg $record): void {
-                $lineupId = $data['lineup_to_remove'] ?? null;
-                if (! $lineupId) {
-                    return;
-                }
-
                 try {
-                    app(SchedulesDirectService::class)->removeLineupFromEpg($record, $lineupId);
+                    $service = app(SchedulesDirectService::class);
+                    $selectedLineupIds = $data['selected_lineup_ids'] ?? $record->configuredSchedulesDirectLineupIds();
+                    $lineupToAdd = $data['lineup_to_add'] ?? null;
+                    $lineupToRemove = $data['lineup_to_remove'] ?? null;
+
+                    if (filled($lineupToAdd)) {
+                        $service->addLineupToEpg($record, $lineupToAdd);
+                        $selectedLineupIds[] = $lineupToAdd;
+                    }
+
+                    if (filled($lineupToRemove)) {
+                        $selectedLineupIds = array_values(array_filter(
+                            $selectedLineupIds,
+                            fn (string $lineupId): bool => $lineupId !== $lineupToRemove,
+                        ));
+                    }
+
+                    $service->saveEpgLineupSelection($record, $selectedLineupIds);
+
+                    if (filled($lineupToRemove)) {
+                        $service->removeLineupFromEpg($record->fresh(), $lineupToRemove);
+                    }
 
                     Notification::make()
                         ->success()
-                        ->title(__('Lineup removed'))
-                        ->body(__("Lineup {$lineupId} has been removed from your SchedulesDirect account."))
+                        ->title(__('SchedulesDirect lineups updated'))
+                        ->body(__('The account and EPG lineup selections have been updated.'))
                         ->send();
                 } catch (Exception $e) {
                     Notification::make()
                         ->danger()
-                        ->title(__('Failed to remove lineup'))
+                        ->title(__('Failed to update lineups'))
                         ->body($e->getMessage())
                         ->send();
-                }
-            });
-    }
-
-    /**
-     * Shared DeleteAction that, for SD EPGs, offers to also remove the lineup from SD.
-     * Filament injects the current $record via type-hint in all three contexts.
-     */
-    public static function getSdDeleteAction(): DeleteAction
-    {
-        return DeleteAction::make()
-            ->modalDescription(fn (Epg $record) => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup()
-                ? __('Delete this EPG? You can optionally also remove the associated lineup from your SchedulesDirect account to free up a lineup slot.')
-                : null)
-            ->schema(fn (Epg $record): array => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup() ? [
-                Toggle::make('delete_sd_lineup')
-                    ->label(__('Also delete lineup from SchedulesDirect account'))
-                    ->helperText(__('Removing unused lineups from your SchedulesDirect account frees up slots for new ones.'))
-                    ->default(true),
-            ] : [])
-            ->before(function (array $data, Epg $record): void {
-                if ($record->isSchedulesDirect() && ($data['delete_sd_lineup'] ?? false) && $record->hasSchedulesDirectLineup()) {
-                    try {
-                        app(SchedulesDirectService::class)->removeConfiguredLineup($record);
-                    } catch (Exception $e) {
-                        Log::warning('Failed to remove SchedulesDirect lineup on EPG delete', [
-                            'epg_id' => $record->id,
-                            'lineup_id' => $record->sd_lineup_id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
                 }
             });
     }

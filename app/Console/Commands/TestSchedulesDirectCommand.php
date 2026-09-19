@@ -172,8 +172,9 @@ class TestSchedulesDirectCommand extends Command
         // Check if we have an EPG with configured stations
         if ($epgId = $this->option('epg')) {
             $epg = Epg::find($epgId);
-            if ($epg && ! empty($epg->sd_station_ids) && ! empty($epg->sd_lineup_id)) {
-                $this->line("Using EPG's configured lineup: {$epg->sd_lineup_id}");
+            $lineupId = $epg?->configuredSchedulesDirectLineupIds()[0] ?? null;
+            if ($epg && ! empty($epg->sd_station_ids) && $lineupId) {
+                $this->line("Using EPG's configured lineup: {$lineupId}");
                 $sampleProgramIds = $this->getProgramIdsFromEpgStations($token, $epg);
             }
         }
@@ -538,7 +539,7 @@ class TestSchedulesDirectCommand extends Command
             $stationIds = array_slice($epg->sd_station_ids, 0, 3);
             $this->line('Using '.count($stationIds).' stations from EPG configuration');
 
-            return $this->fetchProgramIds($token, $stationIds, $epg->sd_lineup_id);
+            return $this->fetchProgramIds($token, $stationIds, $epg->configuredSchedulesDirectLineupIds()[0] ?? '');
         } catch (\Exception $e) {
             $this->error('Error getting program IDs from EPG stations: '.$e->getMessage());
 

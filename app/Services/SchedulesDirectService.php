@@ -36,6 +36,10 @@ class SchedulesDirectService
      */
     private const DEBUG_NOT_ENABLED_CODE = 2055;
 
+    private const PROGRAMS_PERMANENT_FAILURE_CODE = 6000;
+
+    private const PROGRAMS_RETRYABLE_FAILURE_CODE = 6001;
+
     private const LINEUP_ALREADY_IN_ACCOUNT_CODE = 2101;
 
     private const MAX_LINEUPS_CODE = 2102;
@@ -183,7 +187,7 @@ class SchedulesDirectService
     /**
      * Generator to process schedules in memory-efficient chunks
      */
-    private function processScheduleChunks(string $token, array $stationIds, array $dates): Generator
+    private function processScheduleChunks(string $token, array $stationIds, array $dates, array &$scheduleChunkFailures): Generator
     {
         foreach ($this->getStationChunks($stationIds, self::STATIONS_PER_CHUNK) as $chunkIndex => $stationChunk) {
             $chunkNumber = $chunkIndex + 1;
@@ -217,7 +221,14 @@ class SchedulesDirectService
                     }
                 } catch (Exception $e) {
                     if ($retry === self::MAX_RETRIES - 1) {
-                        Log::error("Max retries exceeded for chunk {$chunkNumber}, skipping");
+                        $scheduleChunkFailures[] = [
+                            'chunk' => $chunkNumber,
+                            'code' => $e->getCode(),
+                            'message' => $e->getMessage(),
+                        ];
+                        Log::error("Max retries exceeded for schedule chunk {$chunkNumber}", [
+                            'error' => $e->getMessage(),
+                        ]);
                     }
                 }
             }
@@ -600,7 +611,7 @@ class SchedulesDirectService
     public function addLineup(string $token, string $lineupId): array
     {
         try {
-            $response = $this->makeRequest('PUT', "/lineups/{$lineupId}", [], $token);
+            $response = $this->makeRequest('PUT', '/lineups/'.rawurlencode($lineupId), [], $token);
 
             return $response->json();
         } catch (Exception $e) {
@@ -629,7 +640,7 @@ class SchedulesDirectService
     public function removeLineup(string $token, string $lineupId): array
     {
         try {
-            $response = $this->makeRequest('DELETE', "/lineups/{$lineupId}", [], $token);
+            $response = $this->makeRequest('DELETE', '/lineups/'.rawurlencode($lineupId), [], $token);
 
             return $response->json();
         } catch (Exception $e) {
@@ -672,6 +683,20 @@ class SchedulesDirectService
      */
     public function removeLineupFromEpg(Epg $epg, string $lineupId): void
     {
+        if (in_array($lineupId, $epg->configuredSchedulesDirectLineupIds(), true)) {
+            throw new Exception(__('Remove this lineup from the EPG selection before removing it from the SchedulesDirect account.'));
+        }
+
+        $lineupUsedByAnotherEpg = Epg::query()
+            ->schedulesDirectAccount((string) $epg->sd_username, $epg->user_id)
+            ->whereKeyNot($epg->getKey())
+            ->get()
+            ->contains(fn (Epg $otherEpg): bool => in_array($lineupId, $otherEpg->configuredSchedulesDirectLineupIds(), true));
+
+        if ($lineupUsedByAnotherEpg) {
+            throw new Exception(__('Remove this lineup from every EPG using this SchedulesDirect account before removing it from the account.'));
+        }
+
         if (! $epg->hasValidSchedulesDirectToken()) {
             $this->authenticateFromEpg($epg);
             $epg->refresh();
@@ -681,16 +706,91 @@ class SchedulesDirectService
     }
 
     /**
-     * Remove the lineup that is currently configured on the EPG from the SD account.
-     * No-op if no lineup is configured.
+     * Add a lineup after checking the account limit and verify the subscription
+     * through the documented lineups read-back endpoint.
      */
-    public function removeConfiguredLineup(Epg $epg): void
+    public function addLineupToEpg(Epg $epg, string $lineupId): array
     {
-        if (! $epg->hasSchedulesDirectLineup()) {
-            return;
+        if (! $epg->hasValidSchedulesDirectToken()) {
+            $this->authenticateFromEpg($epg);
+            $epg->refresh();
         }
 
-        $this->removeLineupFromEpg($epg, $epg->sd_lineup_id);
+        $token = $epg->sd_token;
+        $status = $this->getStatus($token);
+        $maxLineups = (int) ($status['account']['maxLineups'] ?? 4);
+        $lineups = $this->getAccountLineups($token)['lineups'] ?? [];
+        $alreadySubscribed = collect($lineups)->contains(fn (array $lineup): bool => ($lineup['lineup'] ?? null) === $lineupId);
+
+        if ($alreadySubscribed) {
+            throw new Exception("Lineup {$lineupId} is already subscribed to this SchedulesDirect account.");
+        }
+
+        if (! $alreadySubscribed && count($lineups) >= $maxLineups) {
+            throw new Exception('SchedulesDirect account lineup limit reached.', self::MAX_LINEUPS_CODE);
+        }
+
+        $this->addLineup($token, $lineupId);
+        $readBack = $this->getAccountLineups($token);
+        if (! collect($readBack['lineups'] ?? [])->contains(fn (array $lineup): bool => ($lineup['lineup'] ?? null) === $lineupId)) {
+            throw new Exception("SchedulesDirect did not confirm lineup {$lineupId} after adding it.");
+        }
+
+        return $readBack;
+    }
+
+    /**
+     * Persist an EPG's selected lineups only after confirming that each selection
+     * belongs to the provider account and fits its current selection limit.
+     *
+     * @param  array<int, string>  $lineupIds
+     */
+    public function saveEpgLineupSelection(Epg $epg, array $lineupIds): void
+    {
+        if (! $epg->hasValidSchedulesDirectToken()) {
+            $this->authenticateFromEpg($epg);
+            $epg->refresh();
+        }
+
+        $lineupIds = $this->validateEpgLineupSelection($epg->sd_token, $lineupIds);
+
+        $epg->sd_lineup_ids = $lineupIds;
+        $epg->synchronizeSchedulesDirectLineupIds();
+        $epg->save();
+    }
+
+    /**
+     * Normalize an EPG selection and verify that it is entirely subscribed on
+     * the provider account before it is persisted.
+     *
+     * @param  array<int, mixed>  $lineupIds
+     * @return array<int, string>
+     */
+    public function validateEpgLineupSelection(string $token, array $lineupIds): array
+    {
+        $lineupIds = collect($lineupIds)
+            ->filter(fn (mixed $lineupId): bool => is_string($lineupId) && filled(trim($lineupId)))
+            ->map(fn (string $lineupId): string => trim($lineupId))
+            ->unique()
+            ->values()
+            ->all();
+        $maxLineups = $this->getAccountMaxLineups($token);
+
+        if (count($lineupIds) > $maxLineups) {
+            throw new Exception(__('Select at most :max SchedulesDirect lineups for this EPG.', ['max' => $maxLineups]));
+        }
+
+        $accountLineupIds = collect($this->getAccountLineups($token)['lineups'] ?? [])
+            ->pluck('lineup')
+            ->filter()
+            ->all();
+        $missingLineups = array_values(array_diff($lineupIds, $accountLineupIds));
+
+        if ($missingLineups !== []) {
+            throw new Exception(__('Select only lineups already added to this SchedulesDirect account.'));
+        }
+
+        return $lineupIds;
     }
 
     /**
@@ -698,7 +798,7 @@ class SchedulesDirectService
      */
     public function getLineup(string $token, string $lineupId): array
     {
-        $response = $this->makeRequest('GET', "/lineups/{$lineupId}", [], $token);
+        $response = $this->makeRequest('GET', '/lineups/'.rawurlencode($lineupId), [], $token);
 
         return $response->json();
     }
@@ -1145,27 +1245,38 @@ class SchedulesDirectService
                 'sd_progress' => 0,
             ]);
 
-            // Check if lineup is already in account; add it if not
-            try {
-                $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
-            } catch (Exception $e) {
-                // 4003/4004 = lineup not found/not subscribed
-                if ($e->getCode() === self::LINEUP_NOT_IN_ACCOUNT_CODE
-                    || str_contains($e->getMessage(), 'not in account')
-                    || str_contains($e->getMessage(), 'not subscribed')
-                ) {
-                    Log::debug("Adding lineup {$epg->sd_lineup_id} to SchedulesDirect account", ['epg_id' => $epg->id]);
-                    $this->addLineup($epg->sd_token, $epg->sd_lineup_id);
-                    $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
-                } else {
-                    throw $e;
+            // Resolve every explicitly selected lineup before replacing any local
+            // XMLTV output. A failed lineup leaves the prior document intact.
+            $lineupData = [
+                'map' => [],
+                'stations' => [],
+            ];
+            $stationIds = [];
+            $knownStationIds = [];
+
+            foreach ($epg->configuredSchedulesDirectLineupIds() as $lineupId) {
+                $selectedLineup = $this->getLineup($epg->sd_token, $lineupId);
+                $stationsById = collect($selectedLineup['stations'] ?? [])
+                    ->keyBy('stationID');
+
+                foreach ($selectedLineup['map'] ?? [] as $mapping) {
+                    $stationId = $mapping['stationID'] ?? null;
+                    if (! $stationId || isset($knownStationIds[$stationId])) {
+                        continue;
+                    }
+
+                    $knownStationIds[$stationId] = true;
+                    $stationIds[] = $stationId;
+                    $lineupData['map'][] = $mapping;
+
+                    if ($station = $stationsById->get($stationId)) {
+                        $lineupData['stations'][] = $station;
+                    }
                 }
             }
 
-            // Refresh station IDs from the current lineup on every sync so stations
-            // Schedules Direct removes/remaps server-side don't linger and get
-            // requested after they're no longer valid (causes SD to block the app).
-            $stationIds = array_column($lineupData['map'], 'stationID');
+            // Refresh station IDs from every selected lineup on each sync so stations
+            // removed/remapped by Schedules Direct never remain in later requests.
             $epg->update(['sd_station_ids' => $stationIds]);
 
             // Use limited stations for faster processing
@@ -1236,21 +1347,19 @@ class SchedulesDirectService
         // Prepare file path
         $filePath = Storage::disk('local')->path($epg->file_path);
 
-        // Remove old file if exists
-        if (Storage::disk('local')->exists($epg->file_path)) {
-            Storage::disk('local')->delete($epg->file_path);
-        }
-
         // Ensure directory exists
         if (! Storage::disk('local')->exists($epg->folder_path)) {
             Storage::disk('local')->makeDirectory($epg->folder_path);
         }
 
-        // Open file for writing
-        $file = fopen($filePath, 'w');
+        // Build the replacement beside the current file. The existing document
+        // remains available until the complete replacement is closed successfully.
+        $temporaryPath = tempnam(dirname($filePath), basename($filePath).'.');
+        $file = $temporaryPath === false ? false : fopen($temporaryPath, 'w');
         if (! $file) {
             throw new Exception("Cannot open file for writing: {$filePath}");
         }
+        $completed = false;
         try {
             // Extract station artwork from lineup data (logos are included in lineup response)
             Log::debug('Extracting station artwork from lineup data');
@@ -1264,6 +1373,10 @@ class SchedulesDirectService
 
             // Write XML footer
             fwrite($file, "</tv>\n");
+            if (! fflush($file)) {
+                throw new Exception("Cannot flush XMLTV file: {$temporaryPath}");
+            }
+            $completed = true;
         } catch (Exception $e) {
             Log::error('Failed to stream process to XMLTV', [
                 'epg_id' => $epg->id,
@@ -1275,6 +1388,14 @@ class SchedulesDirectService
         } finally {
             fclose($file);
             $epg->update(['sd_progress' => 100]);
+            if ($completed) {
+                if (! rename($temporaryPath, $filePath)) {
+                    @unlink($temporaryPath);
+                    throw new Exception("Cannot replace XMLTV file: {$filePath}");
+                }
+            } elseif (file_exists($temporaryPath)) {
+                @unlink($temporaryPath);
+            }
         }
 
         return $filePath;
@@ -1358,7 +1479,9 @@ class SchedulesDirectService
         // and sd_progress updates stay bounded regardless of sd_days_to_import.
         $progressStep = 0;
         $totalProgramsWritten = 0;
-        foreach ($this->processScheduleChunks($epg->sd_token, $stationIds, $dates) as $scheduleChunk) {
+        $programBatchFailures = [];
+        $scheduleChunkFailures = [];
+        foreach ($this->processScheduleChunks($epg->sd_token, $stationIds, $dates, $scheduleChunkFailures) as $scheduleChunk) {
             $subChunkSize = max(1, (int) ceil(count($scheduleChunk) / self::PROGRESS_STEPS_PER_BATCH));
             foreach (array_chunk($scheduleChunk, $subChunkSize) as $scheduleSubChunk) {
                 $progressStep++;
@@ -1403,7 +1526,7 @@ class SchedulesDirectService
                     try {
                         // Stream process programs directly without creating lookup arrays
                         $chunkProgramsWritten = 0;
-                        $this->streamProcessProgramsDirectly($tempProgramIdFile, $epg->sd_token, $progressStep, $scheduleSubChunk, $file, $chunkProgramsWritten, $artworkCache, $epg);
+                        $this->streamProcessProgramsDirectly($tempProgramIdFile, $epg->sd_token, $progressStep, $scheduleSubChunk, $file, $chunkProgramsWritten, $artworkCache, $epg, $programBatchFailures);
                         $totalProgramsWritten += $chunkProgramsWritten;
                         Log::debug('Sub-chunk completed', [
                             'step' => $progressStep,
@@ -1415,8 +1538,11 @@ class SchedulesDirectService
                             'step' => $progressStep,
                             'error' => $e->getMessage(),
                         ]);
-
-                        continue;
+                        $programBatchFailures[] = [
+                            'step' => $progressStep,
+                            'code' => $e->getCode(),
+                            'message' => $e->getMessage(),
+                        ];
                     } finally {
                         // Clean up temporary file
                         if (isset($tempProgramIdFile) && file_exists($tempProgramIdFile)) {
@@ -1440,6 +1566,20 @@ class SchedulesDirectService
 
             unset($scheduleChunk);
         }
+        $batchFailures = array_merge($scheduleChunkFailures, $programBatchFailures);
+        if ($batchFailures !== []) {
+            $epg->update(['sd_errors' => array_merge($epg->sd_errors ?? [], $batchFailures)]);
+            if ($scheduleChunkFailures !== []) {
+                throw new Exception(sprintf(
+                    'SchedulesDirect schedule import completed only partially; %d schedule batch(es) failed.',
+                    count($scheduleChunkFailures)
+                ));
+            }
+            throw new Exception(sprintf(
+                'SchedulesDirect program import completed only partially; %d program batch(es) failed.',
+                count($programBatchFailures)
+            ));
+        }
         Log::debug('EPG processing completed', [
             'total_programs_written' => $totalProgramsWritten,
             'steps_processed' => $progressStep,
@@ -1449,7 +1589,7 @@ class SchedulesDirectService
     /**
      * Stream process programs directly without creating lookup arrays - pure streaming approach
      */
-    private function streamProcessProgramsDirectly(string $programIdFile, string $token, int $chunkIndex, array $scheduleChunk, $file, int &$programsWritten, array $artworkCache = [], ?Epg $epg = null): void
+    private function streamProcessProgramsDirectly(string $programIdFile, string $token, int $chunkIndex, array $scheduleChunk, $file, int &$programsWritten, array $artworkCache = [], ?Epg $epg = null, array &$programBatchFailures = []): void
     {
         $handle = fopen($programIdFile, 'r');
         if (! $handle) {
@@ -1467,7 +1607,12 @@ class SchedulesDirectService
 
                     // When we reach batch size, process the programs immediately
                     if (count($batch) >= self::PROGRAMS_BATCH_SIZE) {
-                        $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
+                        try {
+                            $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
+                        } catch (Exception $e) {
+                            Log::error('Error processing program batch', ['chunk' => $chunkIndex, 'batch' => $batchIndex, 'error' => $e->getMessage()]);
+                            $programBatchFailures[] = ['step' => $chunkIndex, 'batch' => $batchIndex, 'code' => $e->getCode(), 'message' => $e->getMessage()];
+                        }
                         $batch = []; // Clear the batch
                         $batchIndex++;
 
@@ -1479,7 +1624,12 @@ class SchedulesDirectService
 
             // Process remaining programs in the last batch
             if (! empty($batch)) {
-                $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
+                try {
+                    $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
+                } catch (Exception $e) {
+                    Log::error('Error processing program batch', ['chunk' => $chunkIndex, 'batch' => $batchIndex, 'error' => $e->getMessage()]);
+                    $programBatchFailures[] = ['step' => $chunkIndex, 'batch' => $batchIndex, 'code' => $e->getCode(), 'message' => $e->getMessage()];
+                }
             }
             Log::debug('Completed streaming direct program processing', [
                 'chunk' => $chunkIndex,
@@ -1517,8 +1667,11 @@ class SchedulesDirectService
             // Merge with existing artwork cache
             $fullArtworkCache = array_merge($artworkCache, ['programs' => $programArtworkCache]);
 
-            // Stream the API response directly to a file
-            $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
+            // Stream the API response directly to a file. 6001 is a documented
+            // soft failure, so retry the complete batch once; 6000 must remain
+            // visible to the caller instead of producing an apparently valid
+            // but program-less import.
+            $response = $this->fetchProgramBatch($token, $programBatch, $tempResponseFile);
 
             // Check for error code 2055 in the response file (API returns error as JSON even on failure)
             if (! $response->successful() && file_exists($tempResponseFile)) {
@@ -1529,7 +1682,7 @@ class SchedulesDirectService
 
                     // Retry the request without the debug header
                     Log::debug('Retrying program batch request without debug header');
-                    $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
+                    $response = $this->fetchProgramBatch($token, $programBatch, $tempResponseFile);
                 }
             }
 
@@ -1573,24 +1726,44 @@ class SchedulesDirectService
                     'programs_written_in_batch' => $programsWritten,
                 ]);
             } else {
-                Log::error('Failed to fetch program batch', [
-                    'chunk' => $chunkIndex,
-                    'batch' => $batchIndex + 1,
-                    'status' => $response->status(),
-                ]);
+                throw $this->programBatchException($tempResponseFile, $response->status());
             }
-        } catch (Exception $e) {
-            Log::error('Error processing program batch directly', [
-                'chunk' => $chunkIndex,
-                'batch' => $batchIndex + 1,
-                'error' => $e->getMessage(),
-            ]);
         } finally {
             // Clean up temporary response file
             if (file_exists($tempResponseFile)) {
                 unlink($tempResponseFile);
             }
         }
+    }
+
+    private function fetchProgramBatch(string $token, array $programBatch, string $responseFile): Response
+    {
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($responseFile)
+                ->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
+
+            if ($response->successful()) {
+                return $response;
+            }
+
+            $data = json_decode((string) file_get_contents($responseFile), true);
+            if (($data['code'] ?? null) !== self::PROGRAMS_RETRYABLE_FAILURE_CODE || $attempt === 2) {
+                return $response;
+            }
+
+            Log::warning('Retrying transient SchedulesDirect programs failure', ['attempt' => $attempt]);
+        }
+
+        return $response;
+    }
+
+    private function programBatchException(string $responseFile, int $status): Exception
+    {
+        $data = json_decode((string) file_get_contents($responseFile), true);
+        $code = (int) ($data['code'] ?? $status);
+        $message = (string) ($data['message'] ?? 'SchedulesDirect programs request failed.');
+
+        return new Exception("SchedulesDirect programs error {$code}: {$message}", $code);
     }
 
     /**
@@ -1736,7 +1909,9 @@ class SchedulesDirectService
             } elseif ($method === 'POST') {
                 $response = $request->post($url, $data);
             } elseif ($method === 'PUT') {
-                $response = $request->put($url, $data);
+                $response = $data === []
+                    ? $request->send('PUT', $url, ['body' => ''])
+                    : $request->put($url, $data);
             } else {
                 $response = $request->send($method, $url, ['json' => $data]);
             }
@@ -1788,7 +1963,9 @@ class SchedulesDirectService
             } elseif ($method === 'POST') {
                 $response = $request->post($url, $data);
             } elseif ($method === 'PUT') {
-                $response = $request->put($url, $data);
+                $response = $data === []
+                    ? $request->send('PUT', $url, ['body' => ''])
+                    : $request->put($url, $data);
             } else {
                 $response = $request->send($method, $url, ['json' => $data]);
             }
