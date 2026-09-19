@@ -181,6 +181,11 @@ return [
             'label' => 'EPG Processor',
             'description' => 'Process or enrich EPG data',
         ],
+        'epg_cache_enrichment' => [
+            'interface' => EpgProcessorPluginInterface::class,
+            'label' => 'EPG Cache Enrichment',
+            'description' => 'Conditionally enrich host-owned cached EPG programmes',
+        ],
         'stream_analysis' => [
             'interface' => StreamAnalysisPluginInterface::class,
             'label' => 'Stream Analysis',
