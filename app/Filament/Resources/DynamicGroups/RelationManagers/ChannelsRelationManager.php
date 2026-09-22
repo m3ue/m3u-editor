@@ -59,6 +59,7 @@ class ChannelsRelationManager extends RelationManager
         // read-only membership view.
         return VodResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('title')
+            ->defaultSort('channels.created_at', 'desc')
             ->recordActions([])
             ->toolbarActions([]);
     }

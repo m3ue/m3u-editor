@@ -207,7 +207,7 @@ it('collectDynamicGroupResults() defaults to 3 pages when pages param is absent 
     Http::assertSentCount(3); // default is 3 (unchanged from pre-fix behavior, but now actually loops)
 });
 
-it('collectDynamicGroupResults() caps pages at MAX_DYNAMIC_GROUP_PAGES = 5', function () {
+it('collectDynamicGroupResults() caps pages at MAX_DYNAMIC_GROUP_PAGES = 10', function () {
     Http::fake([
         'api.themoviedb.org/3/trending/movie/week*' => Http::sequence()
             ->push(trendingPageResponse([701]), 200)
@@ -215,15 +215,20 @@ it('collectDynamicGroupResults() caps pages at MAX_DYNAMIC_GROUP_PAGES = 5', fun
             ->push(trendingPageResponse([703]), 200)
             ->push(trendingPageResponse([704]), 200)
             ->push(trendingPageResponse([705]), 200)
-            // If the cap is broken, the 6th push would fire.
-            ->push(trendingPageResponse([706]), 200),
+            ->push(trendingPageResponse([706]), 200)
+            ->push(trendingPageResponse([707]), 200)
+            ->push(trendingPageResponse([708]), 200)
+            ->push(trendingPageResponse([709]), 200)
+            ->push(trendingPageResponse([710]), 200)
+            // If the cap is broken, the 11th push would fire.
+            ->push(trendingPageResponse([711]), 200),
     ]);
 
     $service = app(TmdbService::class);
     $results = $service->collectDynamicGroupResults('vod', 'trending', ['pages' => 99]); // way over cap
 
-    expect($results)->toHaveCount(5);
-    Http::assertSentCount(5);
+    expect($results)->toHaveCount(10);
+    Http::assertSentCount(10);
 });
 
 it('collectDynamicGroupResults() trending respects time_window param (day vs week)', function () {

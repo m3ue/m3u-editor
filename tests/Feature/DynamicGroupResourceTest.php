@@ -447,3 +447,77 @@ it('titles the View page "View Dynamic Group" for vod-type and "View Dynamic Cat
     expect(Livewire::test(ViewDynamicGroup::class, ['record' => $seriesGroup->id])->instance()->getTitle())
         ->toBe('View Dynamic Group');
 });
+
+it('defaults the Movies relation manager sort to channels.created_at desc', function () {
+    // Three enabled VOD members attached to one dynamic group, with
+    // deliberately spread created_at values. The default sort must put
+    // the newest at the top regardless of how the underlying channels
+    // would otherwise be ordered by VodResource::setupTable.
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+
+    $oldest = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'is_vod' => true, 'enabled' => true, 'title' => 'Oldest Movie',
+        'created_at' => now()->subDays(3),
+    ]);
+    $middle = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'is_vod' => true, 'enabled' => true, 'title' => 'Middle Movie',
+        'created_at' => now()->subDays(2),
+    ]);
+    $newest = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'is_vod' => true, 'enabled' => true, 'title' => 'Newest Movie',
+        'created_at' => now()->subDay(),
+    ]);
+
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $oldest->id],
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $middle->id],
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $newest->id],
+    ]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $group,
+        'pageClass' => ViewDynamicGroup::class,
+    ])
+        ->assertOk()
+        ->loadTable()
+        ->assertCanSeeTableRecords([$newest, $middle, $oldest], inOrder: true);
+});
+
+it('defaults the Series relation manager sort to series.created_at desc', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Trending Series',
+    ]);
+
+    $oldest = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true, 'name' => 'Oldest Show',
+        'created_at' => now()->subDays(3),
+    ]);
+    $middle = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true, 'name' => 'Middle Show',
+        'created_at' => now()->subDays(2),
+    ]);
+    $newest = Series::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true, 'name' => 'Newest Show',
+        'created_at' => now()->subDay(),
+    ]);
+
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $oldest->id],
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $middle->id],
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $newest->id],
+    ]);
+
+    Livewire::test(SeriesRelationManager::class, [
+        'ownerRecord' => $group,
+        'pageClass' => ViewDynamicGroup::class,
+    ])
+        ->assertOk()
+        ->loadTable()
+        ->assertCanSeeTableRecords([$newest, $middle, $oldest], inOrder: true);
+});

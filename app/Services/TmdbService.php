@@ -51,7 +51,7 @@ class TmdbService
      * collection. Each page is cached individually so this is mostly a
      * safety bound on TMDB API calls, not on member rows.
      */
-    public const MAX_DYNAMIC_GROUP_PAGES = 5;
+    public const MAX_DYNAMIC_GROUP_PAGES = 10;
 
     protected ?string $apiKey;
 

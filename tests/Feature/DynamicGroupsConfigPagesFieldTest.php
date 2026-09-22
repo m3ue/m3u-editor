@@ -92,5 +92,5 @@ it('EditPlaylist page class is still instantiable after the schema change', func
     // This smoke check just confirms the page class still exists and loads
     // after the PlaylistResource schema change.
     expect(class_exists(EditPlaylist::class))->toBeTrue()
-        ->and(TmdbService::MAX_DYNAMIC_GROUP_PAGES)->toBe(5);
+        ->and(TmdbService::MAX_DYNAMIC_GROUP_PAGES)->toBe(10);
 });

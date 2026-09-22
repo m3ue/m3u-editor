@@ -3601,7 +3601,12 @@ class PlaylistResource extends Resource implements CopilotResource
                     2 => '2 (~40 items)',
                     3 => '3 (~60 items, default)',
                     4 => '4 (~80 items)',
-                    5 => '5 (~100 items, max)',
+                    5 => '5 (~100 items)',
+                    6 => '6 (~120 items)',
+                    7 => '7 (~140 items)',
+                    8 => '8 (~160 items)',
+                    9 => '9 (~180 items)',
+                    10 => '10 (~200 items, max)',
                 ])
                 ->default(3)
                 ->native(false)
