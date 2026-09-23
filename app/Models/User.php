@@ -240,6 +240,15 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasPermission('use_proxy');
     }
 
+    public function canUseProviderAuthPassthrough(): bool
+    {
+        if (! config('proxy.proxy_integration_enabled', true)) {
+            return false;
+        }
+
+        return $this->hasPermission('use_provider_auth_passthrough');
+    }
+
     /**
      * Check if user can use integrations.
      */
@@ -313,6 +322,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     {
         return [
             'use_proxy' => 'Use Proxy',
+            'use_provider_auth_passthrough' => 'Use Provider Authentication Passthrough',
             'use_integrations' => 'Use Integrations',
             'use_tools' => 'Use Tools',
             'use_stream_file_sync' => 'Use Stream File Sync',

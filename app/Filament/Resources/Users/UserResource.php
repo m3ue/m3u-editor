@@ -92,6 +92,7 @@ class UserResource extends Resource implements CopilotResource
                             ->descriptions(function () {
                                 $descriptions = [
                                     'use_proxy' => 'Allow this user to access proxy features and stream via the m3u-proxy server',
+                                    'use_provider_auth_passthrough' => 'Allow this user to configure Provider Authentication Passthrough on playlists',
                                     'use_integrations' => 'Allow this user to access media server integrations and related features',
                                     'use_tools' => 'Allow this user to access tools like API Tokens and Post Processing',
                                     'use_stream_file_sync' => 'Allow this user to access stream file sync features',

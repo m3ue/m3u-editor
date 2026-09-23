@@ -514,6 +514,7 @@ class PlaylistService
         $playlist = null;
         $authMethod = 'none';
         $playlistAuthId = null;
+        $providerPassthrough = null;
 
         // Method 1: Try to authenticate using PlaylistAuth credentials
         $playlistAuth = PlaylistAuth::where('username', $username)
@@ -553,6 +554,8 @@ class PlaylistService
                         'alias_auth',
                         $username,
                         $password,
+                        null,
+                        null,
                     ];
                 }
             }
@@ -624,12 +627,25 @@ class PlaylistService
             }
         }
 
+        if (! $playlist) {
+            $providerPassthrough = app(ProviderAuthPassthroughService::class)->authenticate(
+                (string) $username,
+                (string) $password
+            );
+
+            if ($providerPassthrough) {
+                $playlist = $providerPassthrough['playlist'];
+                $authMethod = 'provider_passthrough';
+            }
+        }
+
         return [
             $playlist,
             $authMethod,
             $username,
             $password,
             $playlistAuthId,
+            $providerPassthrough,
         ];
     }
 
@@ -822,13 +838,12 @@ class PlaylistService
 
             // Helpful debug for verification
             Log::debug(sprintf(
-                '[TIMESHIFT-M3U] utc=%d lutc=%d tz=%s start=%s offset(min)=%d final_url=%s',
+                '[TIMESHIFT-M3U] utc=%d lutc=%d tz=%s start=%s offset(min)=%d',
                 $utc,
                 $lutc,
                 $providerTz,
                 $stamp,
-                $offset,
-                $streamUrl
+                $offset
             ));
         } elseif ($xtreamTimeshiftPresent) {
             // Convert Xtream API date format to timeshift URL format
@@ -853,11 +868,10 @@ class PlaylistService
 
             // Helpful debug for verification
             Log::debug(sprintf(
-                '[TIMESHIFT-XTREAM] duration=%d date=%s converted_stamp=%s final_url=%s',
+                '[TIMESHIFT-XTREAM] duration=%d date=%s converted_stamp=%s',
                 $duration,
                 $date,
-                $stamp,
-                $streamUrl
+                $stamp
             ));
         }
 

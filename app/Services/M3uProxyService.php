@@ -2684,7 +2684,9 @@ class M3uProxyService
                 throw new Exception('Stream ID not found in API response');
             }
 
-            throw new Exception('Failed to create stream: '.$response->body());
+            throw new Exception(
+                'Failed to create stream: HTTP '.$response->status()
+            );
         } catch (Exception $e) {
             Log::error('Error creating/updating stream on m3u-proxy', [
                 'channel_id' => $metadata['channel_id'] ?? $metadata['id'] ?? null,
@@ -2714,10 +2716,21 @@ class M3uProxyService
         ?string $userAgent = null,
         string $format = 'raw',
         array $metadata = [],
+        ?string $username = null,
     ): string {
-        $streamId = $this->createStream($url, false, $userAgent, $headers, $metadata);
+        $streamId = $this->createStream(
+            $url,
+            false,
+            $userAgent,
+            $headers,
+            $metadata
+        );
 
-        return $this->buildProxyUrl($streamId, $format);
+        return $this->buildProxyUrl(
+            $streamId,
+            $format,
+            $username
+        );
     }
 
     /**

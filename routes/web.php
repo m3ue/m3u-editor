@@ -384,7 +384,7 @@ Route::middleware(['throttle:5,1'])->prefix('epg')->group(function () {
 
 // Main Xtream API endpoint at /player_api.php and /get.php
 Route::match(['get', 'post'], '/player_api.php', [XtreamApiController::class, 'handle'])->name('xtream.api.player');
-Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'handle'])->name('xtream.api.get');
+Route::match(['get', 'post'], '/get.php', [XtreamApiController::class, 'get'])->name('xtream.api.get');
 Route::get('/xmltv.php', [XtreamApiController::class, 'epg'])->name('xtream.api.epg');
 
 // Dispatcharr-compatible proxy stream endpoint (used by emby-xtream plugin)

@@ -11,8 +11,10 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\M3uProxyService;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
+use App\Services\ProviderAuthPassthroughService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -73,8 +75,8 @@ class XtreamStreamController extends Controller
         $streamModel = null;
         $playlist = null;
         $resolvedPlaylistAuth = null;
+        $passthrough = null;
 
-        // Method 1: Try to authenticate using PlaylistAuth credentials
         $playlistAuth = PlaylistAuth::where('username', $username)
             ->where('password', $password)
             ->where('enabled', true)
@@ -86,72 +88,102 @@ class XtreamStreamController extends Controller
 
         if ($playlistAuth) {
             $playlist = $playlistAuth->getAssignedModel();
+
             if ($playlist) {
-                // Load necessary relationships for the playlist
                 $playlist->load(['user']);
                 $resolvedPlaylistAuth = $playlistAuth;
             }
         }
 
-        // Method 2: Fall back to original authentication (username = playlist owner, password = playlist UUID)
         if (! $playlist) {
-            // Try to find playlist by UUID (password parameter)
             try {
-                $playlist = Playlist::with(['user'])->where('uuid', $password)->firstOrFail();
+                $playlist = Playlist::with(['user'])
+                    ->where('uuid', $password)
+                    ->firstOrFail();
 
-                // Verify username matches playlist owner's name
                 if ($playlist->user->name !== $username) {
                     $playlist = null;
                 }
             } catch (ModelNotFoundException $e) {
-                try {
-                    $playlist = MergedPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
-
-                    // Verify username matches playlist owner's name
-                    if ($playlist->user->name !== $username) {
-                        $playlist = null;
-                    }
-                } catch (ModelNotFoundException $e) {
-                    try {
-                        $playlist = CustomPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
-
-                        // Verify username matches playlist owner's name
-                        if ($playlist->user->name !== $username) {
-                            $playlist = null;
-                        }
-                    } catch (ModelNotFoundException $e) {
-                        try {
-                            $playlist = PlaylistAlias::with(['user'])
-                                ->where('uuid', $password)
-                                ->orWhere(fn ($query) => $query->where([
-                                    ['username', $username],
-                                    ['password', $password],
-                                ]))->firstOrFail();
-
-                            // If username and password do not match directly, then username must match playlist owner's name
-                            if (! ($playlist->username === $username && $playlist->password === $password)) {
-                                // Verify username matches playlist owner's name
-                                if ($playlist->user->name !== $username) {
-                                    $playlist = null;
-                                }
-                            }
-                        } catch (ModelNotFoundException $e) {
-                            return [null, null, null];
-                        }
-                    }
-                }
+                $playlist = null;
             }
         }
 
-        // If no authentication method worked, return null
         if (! $playlist) {
-            return [null, null, null];
+            try {
+                $playlist = MergedPlaylist::with(['user'])
+                    ->where('uuid', $password)
+                    ->firstOrFail();
+
+                if ($playlist->user->name !== $username) {
+                    $playlist = null;
+                }
+            } catch (ModelNotFoundException $e) {
+                $playlist = null;
+            }
         }
 
-        // Get the stream model
-        $streamModel = $this->getValidatedStreamFromPlaylist($playlist, $streamId, $streamType);
+        if (! $playlist) {
+            try {
+                $playlist = CustomPlaylist::with(['user'])
+                    ->where('uuid', $password)
+                    ->firstOrFail();
 
-        return [$playlist, $streamModel, $resolvedPlaylistAuth];
+                if ($playlist->user->name !== $username) {
+                    $playlist = null;
+                }
+            } catch (ModelNotFoundException $e) {
+                $playlist = null;
+            }
+        }
+
+        if (! $playlist) {
+            try {
+                $playlist = PlaylistAlias::with(['user'])
+                    ->where('uuid', $password)
+                    ->orWhere(fn ($query) => $query->where([
+                        ['username', $username],
+                        ['password', $password],
+                    ]))
+                    ->firstOrFail();
+
+                if (! ($playlist->username === $username && $playlist->password === $password)) {
+                    if ($playlist->user->name !== $username) {
+                        $playlist = null;
+                    }
+                }
+            } catch (ModelNotFoundException $e) {
+                $playlist = null;
+            }
+        }
+
+        if (! $playlist) {
+            $passthrough = app(ProviderAuthPassthroughService::class)->authenticate(
+                $username,
+                $password
+            );
+
+            if ($passthrough) {
+                $playlist = $passthrough['playlist'];
+            }
+        }
+
+        if (! $playlist) {
+            return [null, null, null, null];
+        }
+
+        $streamModel = $this->getValidatedStreamFromPlaylist(
+            $playlist,
+            $streamId,
+            $streamType
+        );
+
+        return [
+            $playlist,
+            $streamModel,
+            $resolvedPlaylistAuth,
+            $passthrough,
+        ];
     }
 
     /**
@@ -271,7 +303,12 @@ class XtreamStreamController extends Controller
         }
 
         $format = $format ?? 'ts'; // Default to 'ts' if no format provided
-        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'live');
+        [$playlist, $channel, $playlistAuth, $passthrough] = $this->findAuthenticatedPlaylistAndStreamModel(
+            $username,
+            $password,
+            $streamId,
+            'live'
+        );
 
         // Handle network playlists - stream_id is actually a network ID
         if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
@@ -279,6 +316,61 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
+            if ($passthrough && $playlist instanceof Playlist) {
+                $passthroughService = app(ProviderAuthPassthroughService::class);
+
+                $streamUrl = $passthroughService->buildLiveUrl(
+                    $playlist,
+                    $channel,
+                    $username,
+                    $password,
+                    $passthrough['provider_url'] ?? null
+                );
+
+                if (! $streamUrl) {
+                    return response()->json([
+                        'error' => 'Unable to build provider stream URL',
+                    ], 502);
+                }
+
+                if (! $playlist->provider_auth_passthrough_live) {
+                    return Redirect::to($streamUrl);
+                }
+
+                if (! $playlist->user->canUseProviderAuthPassthrough()) {
+                    return response()->json([
+                        'error' => 'Provider Authentication Passthrough is not available',
+                    ], 503);
+                }
+
+                try {
+                    $proxyFormat = strtolower(
+                        trim((string) ($playlist->xtream_config['output'] ?? 'ts'))
+                    );
+
+                    $proxyUrl = app(M3uProxyService::class)->createDirectStreamUrl(
+                        url: $streamUrl,
+                        headers: $playlist->custom_headers ?? [],
+                        userAgent: $playlist->user_agent ?: null,
+                        format: $proxyFormat,
+                        metadata: [
+                            'id' => (string) $channel->id,
+                            'channel_id' => (string) $channel->id,
+                            'type' => 'channel',
+                            'playlist_uuid' => $playlist->uuid,
+                            'source_playlist_uuid' => $playlist->uuid,
+                            'auth_method' => 'provider_passthrough',
+                        ],
+                        username: $username,
+                    );
+
+                    return Redirect::to($proxyUrl);
+                } catch (\Throwable) {
+                    return response()->json([
+                        'error' => 'Unable to create proxy stream',
+                    ], 502);
+                }
+            }
             // When the channel's source playlist pools provider profiles, the proxy path
             // must be taken even if enable_proxy is off on both the channel and the
             // (possibly merged/custom) playlist being streamed through - profile
@@ -336,16 +428,72 @@ class XtreamStreamController extends Controller
      */
     public function handleVod(Request $request, string $username, string $password, string $streamId, ?string $format = null)
     {
-        // Validate that streamId is numeric to prevent database errors
         if (! is_numeric($streamId)) {
             return response()->json(['error' => 'Invalid stream ID'], 400);
         }
 
-        $format = $format ?? 'ts'; // Default to 'ts' if no format provided
-        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'vod');
+        $format = $format ?? 'ts';
+
+        [$playlist, $channel, $playlistAuth, $passthrough] = $this->findAuthenticatedPlaylistAndStreamModel(
+            $username,
+            $password,
+            $streamId,
+            'vod'
+        );
+
         if ($channel instanceof Channel) {
-            // See handleLive(): pooled-provider playlists must use the proxy path so
-            // profile selection and pool distribution are applied.
+            if ($passthrough && $playlist instanceof Playlist) {
+                $passthroughService = app(ProviderAuthPassthroughService::class);
+
+                $streamUrl = $passthroughService->buildVodUrl(
+                    $playlist,
+                    $channel,
+                    $username,
+                    $password,
+                    $passthrough['provider_url'] ?? null
+                );
+
+                if (! $streamUrl) {
+                    return response()->json([
+                        'error' => 'Unable to build provider stream URL',
+                    ], 502);
+                }
+
+                if (! $playlist->provider_auth_passthrough_vod) {
+                    return Redirect::to($streamUrl);
+                }
+
+                if (! $playlist->user->canUseProviderAuthPassthrough()) {
+                    return response()->json([
+                        'error' => 'Proxy is not available for this playlist',
+                    ], 503);
+                }
+
+                try {
+                    $proxyUrl = app(M3uProxyService::class)->createDirectStreamUrl(
+                        url: $streamUrl,
+                        headers: $playlist->custom_headers ?? [],
+                        userAgent: $playlist->user_agent ?: null,
+                        format: 'raw',
+                        metadata: [
+                            'id' => (string) $channel->id,
+                            'channel_id' => (string) $channel->id,
+                            'type' => 'vod',
+                            'playlist_uuid' => $playlist->uuid,
+                            'source_playlist_uuid' => $playlist->uuid,
+                            'auth_method' => 'provider_passthrough',
+                        ],
+                        username: $username,
+                    );
+
+                    return Redirect::to($proxyUrl);
+                } catch (\Throwable) {
+                    return response()->json([
+                        'error' => 'Unable to create proxy stream',
+                    ], 502);
+                }
+            }
+
             $needsProxy = Channel::needsProxy(
                 channelEnableProxy: (bool) $channel->enable_proxy,
                 playlistEnableProxy: (bool) $playlist->enable_proxy,
@@ -355,26 +503,44 @@ class XtreamStreamController extends Controller
             );
 
             if ($needsProxy) {
-                // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
                 $request->merge(['username' => $username]);
+
                 if ($playlistAuth instanceof PlaylistAuth) {
                     $request->merge(['playlist_auth_id' => $playlistAuth->id]);
                 }
-                $this->applyClientStreamProfile($request, $playlist, $playlistAuth);
 
-                // player=true signals an in-app player request — apply in-app transcoding profile
-                $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
+                $this->applyClientStreamProfile(
+                    $request,
+                    $playlist,
+                    $playlistAuth
+                );
 
-                return app()->call([app(M3uProxyApiController::class), $method], [
-                    'id' => $streamId,
-                    'uuid' => $playlist->uuid,
-                ]);
-            } else {
-                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getChannelUrl($channel, $playlist)));
+                $method = $request->input('player') === 'true'
+                    ? 'channelPlayer'
+                    : 'channel';
+
+                return app()->call(
+                    [app(M3uProxyApiController::class), $method],
+                    [
+                        'id' => $streamId,
+                        'uuid' => $playlist->uuid,
+                    ]
+                );
             }
+
+            return Redirect::to(
+                $this->applyMediaFlowProxy(
+                    PlaylistUrlService::getChannelUrl(
+                        $channel,
+                        $playlist
+                    )
+                )
+            );
         }
 
-        return response()->json(['error' => 'Unauthorized or stream not found'], 403);
+        return response()->json([
+            'error' => 'Unauthorized or stream not found',
+        ], 403);
     }
 
     /**
@@ -382,35 +548,114 @@ class XtreamStreamController extends Controller
      */
     public function handleSeries(Request $request, string $username, string $password, string|int $streamId, ?string $format = null)
     {
-        // Validate that streamId is numeric to prevent database errors
         if (! is_numeric($streamId)) {
             return response()->json(['error' => 'Invalid stream ID'], 400);
         }
 
-        $format = $format ?? 'mp4'; // Default to 'mp4' if no format provided
-        [$playlist, $episode, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'episode');
+        $format = $format ?? 'mp4';
+
+        [$playlist, $episode, $playlistAuth, $passthrough] = $this->findAuthenticatedPlaylistAndStreamModel(
+            $username,
+            $password,
+            $streamId,
+            'episode'
+        );
+
         if ($episode instanceof Episode) {
-            if (($playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
-                // Add username and PlaylistAuth ID to request for proxy traceability and per-auth enforcement
+            if ($passthrough && $playlist instanceof Playlist) {
+                $passthroughService = app(ProviderAuthPassthroughService::class);
+
+                $streamUrl = $passthroughService->buildSeriesUrl(
+                    $playlist,
+                    $episode,
+                    $username,
+                    $password,
+                    $passthrough['provider_url'] ?? null
+                );
+
+                if (! $streamUrl) {
+                    return response()->json([
+                        'error' => 'Unable to build provider stream URL',
+                    ], 502);
+                }
+
+                if (! $playlist->provider_auth_passthrough_series) {
+                    return Redirect::to($streamUrl);
+                }
+
+                if (! $playlist->user->canUseProviderAuthPassthrough()) {
+                    return response()->json([
+                        'error' => 'Proxy is not available for this playlist',
+                    ], 503);
+                }
+
+                try {
+                    $proxyUrl = app(M3uProxyService::class)->createDirectStreamUrl(
+                        url: $streamUrl,
+                        headers: $playlist->custom_headers ?? [],
+                        userAgent: $playlist->user_agent ?: null,
+                        format: 'raw',
+                        metadata: [
+                            'id' => (string) $episode->id,
+                            'episode_id' => (string) $episode->id,
+                            'type' => 'episode',
+                            'playlist_uuid' => $playlist->uuid,
+                            'source_playlist_uuid' => $playlist->uuid,
+                            'auth_method' => 'provider_passthrough',
+                        ],
+                        username: $username,
+                    );
+
+                    return Redirect::to($proxyUrl);
+                } catch (\Throwable) {
+                    return response()->json([
+                        'error' => 'Unable to create proxy stream',
+                    ], 502);
+                }
+            }
+
+            if (
+                ($playlist->enable_proxy || $request->input('proxy') === 'true')
+                && $playlist->user->canUseProxy()
+            ) {
                 $request->merge(['username' => $username]);
+
                 if ($playlistAuth instanceof PlaylistAuth) {
                     $request->merge(['playlist_auth_id' => $playlistAuth->id]);
                 }
-                $this->applyClientStreamProfile($request, $playlist, $playlistAuth);
 
-                // player=true signals an in-app player request — apply in-app transcoding profile
-                $method = $request->input('player') === 'true' ? 'episodePlayer' : 'episode';
+                $this->applyClientStreamProfile(
+                    $request,
+                    $playlist,
+                    $playlistAuth
+                );
 
-                return app()->call([app(M3uProxyApiController::class), $method], [
-                    'id' => $streamId,
-                    'uuid' => $playlist->uuid,
-                ]);
-            } else {
-                return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getEpisodeUrl($episode, $playlist)));
+                $method = $request->input('player') === 'true'
+                    ? 'episodePlayer'
+                    : 'episode';
+
+                return app()->call(
+                    [app(M3uProxyApiController::class), $method],
+                    [
+                        'id' => $streamId,
+                        'uuid' => $playlist->uuid,
+                    ]
+                );
             }
+
+            return Redirect::to(
+                $this->applyMediaFlowProxy(
+                    PlaylistUrlService::getEpisodeUrl(
+                        $episode,
+                        $playlist
+                    )
+                )
+            );
         }
 
-        return response()->json(['error' => 'Unauthorized or stream not found'], 403);
+        return response()->json([
+            'error' => 'Unauthorized or stream not found',
+        ], 403);
     }
 
     /**
@@ -442,23 +687,27 @@ class XtreamStreamController extends Controller
      */
     public function handleTimeshift(Request $request, string $username, string $password, int $duration, string $date, string|int $streamId, ?string $format = null)
     {
-        // Validate that streamId is numeric to prevent database errors
         if (! is_numeric($streamId)) {
             return response()->json(['error' => 'Invalid stream ID'], 400);
         }
 
-        $format = $format ?? 'ts'; // Default to 'ts' if no format provided
+        $format = $format ?? 'ts';
 
-        // Timeshift is only available for live channels
-        [$playlist, $channel, $playlistAuth] = $this->findAuthenticatedPlaylistAndStreamModel($username, $password, $streamId, 'timeshift');
+        [$playlist, $channel, $playlistAuth, $passthrough] = $this->findAuthenticatedPlaylistAndStreamModel(
+            $username,
+            $password,
+            $streamId,
+            'timeshift'
+        );
 
         if (! ($channel instanceof Channel)) {
-            return response()->json(['error' => 'Unauthorized or stream not found'], 403);
+            return response()->json([
+                'error' => 'Unauthorized or stream not found',
+            ], 403);
         }
 
-        // If the primary channel doesn't support catchup, defer to the first failover that does.
-        // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
         $timeshiftChannel = $channel;
+
         if (! $channel->catchup || $channel->catchup == 0) {
             $failoverWithCatchup = $channel->failoverChannels()
                 ->whereNotNull('catchup')
@@ -471,37 +720,111 @@ class XtreamStreamController extends Controller
             }
         }
 
-        // Convert Unix timestamp to Xtream format if the player sends a numeric date string
-        if (ctype_digit($date)) {
-            $date = Carbon::createFromTimestamp((int) $date)->format('Y-m-d:H-i-s');
+        if ($passthrough && $playlist instanceof Playlist) {
+            $passthroughService = app(ProviderAuthPassthroughService::class);
+
+            $streamUrl = $passthroughService->buildTimeshiftUrl(
+                $playlist,
+                $timeshiftChannel,
+                $username,
+                $password,
+                $duration,
+                $date,
+                $passthrough['provider_url'] ?? null
+            );
+
+            if (! $streamUrl) {
+                return response()->json([
+                    'error' => 'Unable to build provider timeshift URL',
+                ], 502);
+            }
+
+            if (! $playlist->provider_auth_passthrough_live) {
+                return Redirect::to($streamUrl);
+            }
+
+            if (! $playlist->user->canUseProviderAuthPassthrough()) {
+                return response()->json([
+                    'error' => 'Proxy is not available for this playlist',
+                ], 503);
+            }
+
+            try {
+                $proxyUrl = app(M3uProxyService::class)->createDirectStreamUrl(
+                    url: $streamUrl,
+                    headers: $playlist->custom_headers ?? [],
+                    userAgent: $playlist->user_agent ?: null,
+                    format: 'raw',
+                    metadata: [
+                        'id' => (string) $timeshiftChannel->id,
+                        'channel_id' => (string) $timeshiftChannel->id,
+                        'type' => 'timeshift',
+                        'playlist_uuid' => $playlist->uuid,
+                        'source_playlist_uuid' => $playlist->uuid,
+                        'auth_method' => 'provider_passthrough',
+                    ],
+                    username: $username,
+                );
+
+                return Redirect::to($proxyUrl);
+            } catch (\Throwable) {
+                return response()->json([
+                    'error' => 'Unable to create proxy stream',
+                ], 502);
+            }
         }
 
-        // Parse the date parameter and add timeshift parameters to the request
-        // Expected downstream format: YYYY-MM-DD:HH-MM-SS
-        // Also add username for proxy traceability
+        if (ctype_digit($date)) {
+            $date = Carbon::createFromTimestamp((int) $date)
+                ->format('Y-m-d:H-i-s');
+        }
+
         $mergeData = [
             'timeshift_duration' => $duration,
             'timeshift_date' => $date,
             'username' => $username,
         ];
+
         if ($playlistAuth instanceof PlaylistAuth) {
             $mergeData['playlist_auth_id'] = $playlistAuth->id;
         }
+
         $request->merge($mergeData);
 
-        if (($playlist->enable_proxy || $request->input('proxy') === 'true') && $playlist->user->canUseProxy()) {
-            $this->applyClientStreamProfile($request, $playlist, $playlistAuth);
+        if (
+            ($playlist->enable_proxy || $request->input('proxy') === 'true')
+            && $playlist->user->canUseProxy()
+        ) {
+            $this->applyClientStreamProfile(
+                $request,
+                $playlist,
+                $playlistAuth
+            );
 
-            return app()->call([app(M3uProxyApiController::class), 'channel'], [
-                'id' => $timeshiftChannel->id,
-                'uuid' => $playlist->uuid,
-            ]);
-        } else {
-            $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
-            $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $timeshiftChannel);
-
-            return Redirect::to($this->applyMediaFlowProxy($streamUrl));
+            return app()->call(
+                [app(M3uProxyApiController::class), 'channel'],
+                [
+                    'id' => $timeshiftChannel->id,
+                    'uuid' => $playlist->uuid,
+                ]
+            );
         }
+
+        $streamUrl = PlaylistUrlService::getChannelUrl(
+            $timeshiftChannel,
+            $playlist
+        );
+
+        $streamUrl = PlaylistService::generateTimeshiftUrl(
+            $request,
+            $streamUrl,
+            $playlist,
+            $timeshiftChannel
+        );
+
+        return Redirect::to(
+            $this->applyMediaFlowProxy($streamUrl)
+        );
     }
 
     /**

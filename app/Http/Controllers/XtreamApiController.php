@@ -94,6 +94,25 @@ class XtreamApiController extends Controller
         'search_epg_shows',
     ];
 
+    private const PROVIDER_PASSTHROUGH_ACTIONS = [
+        '',
+        'panel',
+        'get_user_info',
+        'get_account_info',
+        'get_server_info',
+        'get_live_streams',
+        'get_vod_streams',
+        'get_series',
+        'get_series_info',
+        'get_live_categories',
+        'get_vod_categories',
+        'get_series_categories',
+        'get_vod_info',
+        'get_short_epg',
+        'get_simple_data_table',
+        'm3u_plus',
+    ];
+
     private const FAVORITE_COLUMNS = [
         'content_type', 'stream_id', 'aio_item_id', 'imdb_id', 'tmdb_id',
         'aio_integration_id', 'title', 'thumbnail_url', 'item_type', 'favorited_at',
@@ -107,6 +126,15 @@ class XtreamApiController extends Controller
      * payload growth.
      */
     private const int MAX_RECENT_EPISODES = 40;
+
+    public function get(Request $request)
+    {
+        $request->merge([
+            'action' => 'm3u_plus',
+        ]);
+
+        return $this->handle($request);
+    }
 
     /**
      * Xtream API request handler.
@@ -542,7 +570,14 @@ class XtreamApiController extends Controller
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
-        [$playlist, $authMethod, $username, $password] = $this->authenticate($request);
+        [
+            $playlist,
+            $authMethod,
+            $username,
+            $password,
+            ,
+            $providerPassthrough,
+        ] = $this->authenticate($request);
 
         // If no authentication method worked, return error
         if (! $playlist || $authMethod === 'none') {
@@ -551,6 +586,15 @@ class XtreamApiController extends Controller
             }
 
             return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        if (
+            $authMethod === 'provider_passthrough'
+            && ! in_array($action, self::PROVIDER_PASSTHROUGH_ACTIONS, true)
+        ) {
+            return response()->json([
+                'error' => 'Action not available',
+            ], 403);
         }
 
         $playlistAuth = $authMethod === 'playlist_auth'
@@ -646,15 +690,35 @@ class XtreamApiController extends Controller
                 $activeConnections = M3uProxyService::getPlaylistActiveStreamsCount($playlist);
             }
 
-            $expDate = PlaylistFacade::resolveXtreamExpDate(
-                $playlist,
-                $authMethod,
-                $username,
-                $password
-            );
+            $status = 'Active';
+            $isTrial = '0';
+            $createdAt = $playlist->user
+                ? $playlist->user->created_at->timestamp
+                : $now->timestamp;
 
-            if (empty($expDate) || (int) $expDate === 0) {
-                $expDate = $expires;
+            if (
+                $authMethod === 'provider_passthrough'
+                && is_array($providerPassthrough['user_info'] ?? null)
+            ) {
+                $providerUserInfo = $providerPassthrough['user_info'];
+
+                $expDate = $providerUserInfo['exp_date'] ?? '0';
+                $activeConnections = $providerUserInfo['active_cons'] ?? $activeConnections;
+                $streams = $providerUserInfo['max_connections'] ?? $streams;
+                $status = $providerUserInfo['status'] ?? 'Active';
+                $isTrial = $providerUserInfo['is_trial'] ?? '0';
+                $createdAt = $providerUserInfo['created_at'] ?? $createdAt;
+            } else {
+                $expDate = PlaylistFacade::resolveXtreamExpDate(
+                    $playlist,
+                    $authMethod,
+                    $username,
+                    $password
+                );
+
+                if (empty($expDate) || (int) $expDate === 0) {
+                    $expDate = $expires;
+                }
             }
 
             $settings = app(GeneralSettings::class);
@@ -665,12 +729,12 @@ class XtreamApiController extends Controller
                 'username' => $username,
                 'password' => $password,
                 'message' => (string) $message,
-                'auth' => 1, // Authenticated successfully
-                'status' => 'Active', // No inactive playlists should reach this point
+                'auth' => 1,
+                'status' => (string) $status,
                 'exp_date' => (string) $expDate,
-                'is_trial' => '0', // Trial accounts not supported
+                'is_trial' => (string) $isTrial,
                 'active_cons' => (string) $activeConnections,
-                'created_at' => (string) ($playlist->user ? $playlist->user->created_at->timestamp : $now->timestamp),
+                'created_at' => (string) $createdAt,
                 'max_connections' => (string) $streams,
                 'allowed_output_formats' => $outputFormats,
             ];
@@ -705,7 +769,7 @@ class XtreamApiController extends Controller
 
             // If enhanced output is enabled, include the m3u_editor payload with version and features
             // This is required for the M3U TV app to connect via the Xtream API and resolve the features available for the playlist.
-            if ($enhancedOutputEnabled) {
+            if ($enhancedOutputEnabled && $authMethod !== 'provider_passthrough') {
                 $features = $this->resolveM3uEditorFeatures($playlist, $authMethod, $playlistAuth);
                 $aiostreamsData = $this->resolveAIOStreamsData($playlist, $features);
 
@@ -1288,15 +1352,22 @@ class XtreamApiController extends Controller
             // passthrough to the provider rather than served from a stale sync-time cache -
             // force refresh and skip the TMDB dispatch, which is unrelated to episode freshness
             // and shouldn't be re-triggered on every client request.
-            if (! $isMediaServerSeries && ! $isDvrSeries) {
+            if (
+                $authMethod !== 'provider_passthrough'
+                && ! $isMediaServerSeries
+                && ! $isDvrSeries
+            ) {
                 $results = $seriesItem->fetchMetadata(
                     refresh: ! $playlist->auto_fetch_series_metadata,
                     sync: false,
                     dispatchTmdb: (bool) $playlist->auto_fetch_series_metadata,
                 );
+
                 if ($results !== null && $results !== false) {
-                    // Provider returned new data — reload the model with fresh relations
-                    $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
+                    $seriesItem = $seriesItem->fresh([
+                        'seasons.episodes',
+                        'category',
+                    ]) ?? $seriesItem;
                 }
             }
 
@@ -1832,20 +1903,25 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'VOD not found'], 404);
             }
 
-            if (! $channel->last_metadata_fetch) {
-                // No metadata yet - fetch it, and fail the request if that doesn't work.
+            if (
+                $authMethod !== 'provider_passthrough'
+                && ! $channel->last_metadata_fetch
+            ) {
                 $results = $channel->fetchMetadata();
+
                 if ($results === false) {
-                    return response()->json(['error' => 'Failed to fetch VOD metadata'], 500);
+                    return response()->json([
+                        'error' => 'Failed to fetch VOD metadata',
+                    ], 500);
                 }
-            } elseif (! $playlist->auto_fetch_vod_metadata) {
-                // auto_fetch_vod_metadata is disabled, meaning the user has opted out of
-                // eager sync-time fetching in favor of on-demand requests - so this request
-                // should be a live passthrough to the provider rather than served from a
-                // one-time cached fetch. Skip the TMDB dispatch (unrelated to freshness, and
-                // shouldn't be re-triggered on every client request), and don't fail the
-                // request if the live call errors - fall back to the cached data instead.
-                $channel->fetchMetadata(refresh: true, skipTmdb: true);
+            } elseif (
+                $authMethod !== 'provider_passthrough'
+                && ! $playlist->auto_fetch_vod_metadata
+            ) {
+                $channel->fetchMetadata(
+                    refresh: true,
+                    skipTmdb: true
+                );
             }
 
             // On-demand TMDB enrichment: global opt-in (Settings > Integrations > TMDB >

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Playlists\Pages;
 
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Resources\Pages\CreateRecord\Concerns\HasWizard;
@@ -28,7 +29,24 @@ class CreatePlaylist extends CreateRecord
     {
         // Remove auth-related fields from playlist creation data
         // These will be handled after the playlist is created
-        unset($data['auth_option'], $data['existing_auth_id'], $data['auth_name'], $data['auth_username'], $data['auth_password']);
+        unset(
+            $data['auth_option'],
+            $data['existing_auth_id'],
+            $data['auth_name'],
+            $data['auth_username'],
+            $data['auth_password']
+        );
+
+        if (! Auth::user()?->canUseProviderAuthPassthrough()) {
+            unset(
+                $data['provider_auth_passthrough'],
+                $data['provider_auth_passthrough_live'],
+                $data['provider_auth_passthrough_vod'],
+                $data['provider_auth_passthrough_series']
+            );
+        } elseif (! ($data['xtream'] ?? false)) {
+            $data['provider_auth_passthrough'] = false;
+        }
 
         return $data;
     }
@@ -36,6 +54,15 @@ class CreatePlaylist extends CreateRecord
     protected function afterCreate(): void
     {
         $data = $this->form->getState();
+
+        if ($this->record->provider_auth_passthrough) {
+            Playlist::query()
+                ->whereKeyNot($this->record->getKey())
+                ->where('provider_auth_passthrough', true)
+                ->update([
+                    'provider_auth_passthrough' => false,
+                ]);
+        }
 
         // Handle authentication based on the selected option
         if (isset($data['auth_option'])) {

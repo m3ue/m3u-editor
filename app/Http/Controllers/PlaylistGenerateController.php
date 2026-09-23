@@ -12,6 +12,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\PlaylistUrlService;
+use App\Services\ProviderAuthPassthroughService;
 use Illuminate\Http\Request;
 use Illuminate\Support\LazyCollection;
 
@@ -63,25 +64,63 @@ class PlaylistGenerateController extends Controller
         }
 
         $usedAuth = null;
-        if ($auths->isNotEmpty()) {
-            $authenticated = false;
-            foreach ($auths as $auth) {
-                $authUsername = $auth->username;
-                $authPassword = $auth->password;
+        $passthroughAuthenticated = false;
 
+        $providedUsername = (string) $request->get('username', '');
+        $providedPassword = (string) $request->get('password', '');
+
+        if ($auths->isNotEmpty()) {
+            foreach ($auths as $auth) {
                 if (
-                    $request->get('username') === $authUsername &&
-                    $request->get('password') === $authPassword
+                    $providedUsername === $auth->username &&
+                    $providedPassword === $auth->password
                 ) {
-                    $authenticated = true;
                     $usedAuth = $auth;
                     break;
                 }
             }
+        }
 
-            if (! $authenticated) {
-                return response()->json(['Error' => 'Unauthorized'], 401);
+        if (
+            ! $usedAuth &&
+            $playlist instanceof Playlist &&
+            $playlist->provider_auth_passthrough &&
+            $providedUsername !== '' &&
+            $providedPassword !== ''
+        ) {
+            $passthrough = app(ProviderAuthPassthroughService::class)->authenticate(
+                $providedUsername,
+                $providedPassword
+            );
+
+            if (
+                $passthrough &&
+                $passthrough['playlist']->getKey() === $playlist->getKey()
+            ) {
+                $passthroughAuthenticated = true;
             }
+        }
+
+        if (
+            ! $usedAuth &&
+            ! $passthroughAuthenticated &&
+            (
+                $auths->isNotEmpty() ||
+                ($playlist instanceof Playlist && $playlist->provider_auth_passthrough)
+            )
+        ) {
+            return response()->json(['Error' => 'Unauthorized'], 401);
+        }
+
+        if ($usedAuth) {
+            $streamUsername = urlencode($usedAuth->username);
+            $streamPassword = urlencode($usedAuth->password);
+        } elseif ($passthroughAuthenticated) {
+            $streamUsername = urlencode($providedUsername);
+            $streamPassword = urlencode($providedPassword);
+        } else {
+            $streamUsername = urlencode($playlist->user->name);
+            $streamPassword = urlencode($playlist->uuid);
         }
 
         // Check if proxy enabled
@@ -115,18 +154,22 @@ class PlaylistGenerateController extends Controller
 
         // Get all active channels
         return response()->stream(
-            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $usedAuth, $mediaFlowRewriteStreamUrls) {
-                // Set the auth details
-                if ($usedAuth) {
-                    $username = urlencode($usedAuth->username);
-                    $password = urlencode($usedAuth->password);
-                } else {
-                    $username = urlencode($playlist->user->name);
-                    $password = urlencode($playlist->uuid);
-                }
+            function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $streamUsername, $streamPassword, $passthroughAuthenticated, $mediaFlowRewriteStreamUrls) {
+                $username = $streamUsername;
+                $password = $streamPassword;
 
                 // Output the enabled channels
-                $epgUrl = route('epg.generate', ['uuid' => $playlist->uuid]);
+                if ($passthroughAuthenticated) {
+                    $epgUrl = $baseUrl.'/xmltv.php?'.http_build_query([
+                        'username' => rawurldecode($username),
+                        'password' => rawurldecode($password),
+                    ]);
+                } else {
+                    $epgUrl = route('epg.generate', [
+                        'uuid' => $playlist->uuid,
+                    ]);
+                }
+
                 echo "#EXTM3U x-tvg-url=\"$epgUrl\" \n";
                 $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
                 $idChannelBy = $playlist->id_channel_by;
@@ -215,7 +258,11 @@ class PlaylistGenerateController extends Controller
                     // Format the URL in Xtream Codes format if not disabled
                     // This way we can perform additional stream analysis, check for stream limits, etc.
                     // When disabled, will return the raw URL from the channel (or the proxyfied URL if proxy enabled)
-                    $useInternalXtreamFormat = ! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format);
+                    $useInternalXtreamFormat = $passthroughAuthenticated
+                        || ! (
+                            (config('app.disable_m3u_xtream_format') ?? false)
+                            || $playlist->disable_m3u_xtream_format
+                        );
                     if ($useInternalXtreamFormat) {
                         $urlPath = 'live';
                         if ($channel->is_vod) {
@@ -343,7 +390,14 @@ class PlaylistGenerateController extends Controller
                             if ($logoProxyEnabled) {
                                 $icon = LogoProxyController::generateProxyUrl($icon);
                             }
-                            if (! ((config('app.disable_m3u_xtream_format') ?? false) || $playlist->disable_m3u_xtream_format) || $proxyEnabled) {
+                            if (
+                                $passthroughAuthenticated
+                                || ! (
+                                    (config('app.disable_m3u_xtream_format') ?? false)
+                                    || $playlist->disable_m3u_xtream_format
+                                )
+                                || $proxyEnabled
+                            ) {
                                 $containerExtension = $episode->container_extension ?? 'mp4';
                                 $url = $baseUrl."/series/{$username}/{$password}/".$episode->id.".{$containerExtension}";
                             } elseif (! $proxyEnabled && $mediaFlowRewriteStreamUrls) {
