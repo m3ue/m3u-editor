@@ -21,6 +21,17 @@ function makeCredentialSwapAlias(Playlist $playlist, array $config): PlaylistAli
     ]);
 }
 
+function makeMultiEntryCredentialSwapAlias(Playlist $playlist, array $configs): PlaylistAlias
+{
+    return PlaylistAlias::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $playlist->user_id,
+        'name' => 'Test Alias',
+        'uuid' => Str::uuid()->toString(),
+        'xtream_config' => $configs,
+    ]);
+}
+
 function makeM3uPlaylist(): Playlist
 {
     $user = User::factory()->create();
@@ -94,15 +105,52 @@ it('leaves non xtream m3u channel urls untouched', function () {
     );
 });
 
-it('leaves urls untouched when provider is not registered in alias', function () {
-    // Even if a URL looks Xtream-shaped (numeric stream ID in prefix-less form),
-    // it must NOT be rewritten unless its base URL is in the alias's provider list.
-    // This prevents CDN/HLS URLs from being accidentally rewritten.
+it('rewrites xtream shaped urls for single entry aliases even without a provider match', function () {
+    // Single-entry aliases mirror Xtream-playlist behavior: the one URL and
+    // credential set the user entered is what clients receive, whatever provider
+    // URL the streams carry. Note this includes numeric CDN-shaped URLs — with a
+    // single entry the user has said "rewrite this playlist's streams", and
+    // non-numeric CDN URLs are still left untouched by the parser.
     $playlist = makeM3uPlaylist();
     $alias = makeCredentialSwapAlias($playlist, [
-        'url' => 'http://provider.example.com:8080',
+        'url' => 'http://alias.example.com:8080',
         'username' => 'newuser',
         'password' => 'newpass',
+    ]);
+
+    $cases = [
+        'http://unknown-provider.com:9000/user/pass/5678.ts' => 'http://alias.example.com:8080/newuser/newpass/5678.ts',
+        'http://other-provider.com:8080/live/olduser/oldpass/42.ts' => 'http://alias.example.com:8080/live/newuser/newpass/42.ts',
+    ];
+
+    foreach ($cases as $original => $expected) {
+        $channel = Channel::factory()->create([
+            'playlist_id' => $playlist->id,
+            'user_id' => $playlist->user_id,
+            'group_id' => null,
+            'url' => $original,
+        ]);
+
+        $this->assertSame($expected, $alias->transformChannelUrl($channel), "Failed rewriting: {$original}");
+    }
+});
+
+it('leaves urls untouched for multi entry aliases when no entry matches', function () {
+    // Multi-entry aliases (custom/merged) keep strict per-provider matching: a
+    // stream is only rewritten when its provider URL matches one of the entries,
+    // so provider B's streams are never rewritten with provider A's credentials.
+    $playlist = makeM3uPlaylist();
+    $alias = makeMultiEntryCredentialSwapAlias($playlist, [
+        [
+            'url' => 'http://provider-a.example.com:8080',
+            'username' => 'userA',
+            'password' => 'passA',
+        ],
+        [
+            'url' => 'http://provider-b.example.com:8080',
+            'username' => 'userB',
+            'password' => 'passB',
+        ],
     ]);
 
     foreach ([

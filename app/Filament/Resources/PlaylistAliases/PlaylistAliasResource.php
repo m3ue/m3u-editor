@@ -493,7 +493,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->defaultItems(0)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: __('The credential(s) URL will be used to match the provider for credential swap. If a URL in the source playlist matches a credential URL, the credentials will be swapped with the ones defined here.')
+                            tooltip: __('Clients receive the URL and credentials entered here. For Xtream playlists these replace the playlist\'s own credentials. For M3U playlists with a single entry, all Xtream-style stream URLs are rewritten to them. With multiple entries, each set applies only to streams whose provider URL matches that entry\'s URL.')
                         )
                         ->maxItems(fn (Get $get) => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true) ? null : 1)
                         ->minItems(1)
@@ -503,7 +503,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             Forms\Components\TextInput::make('url')
                                 ->label(__('Xtream API URL'))
                                 ->live()
-                                ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
+                                ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/). This is the URL clients will receive.')
                                 ->prefixIcon('heroicon-m-globe-alt')
                                 ->maxLength(4000)
                                 ->url()

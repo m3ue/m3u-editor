@@ -1350,11 +1350,17 @@ class PlaylistAlias extends Model
         }
 
         // The extracted provider URL must match a config the user has explicitly
-        // registered in this alias. This acts as the multi-provider selector and
-        // prevents accidental rewrites of non-Xtream CDN URLs.
+        // registered in this alias. Multi-entry aliases use this as the
+        // per-provider selector; single-entry aliases fall back to the one entry,
+        // mirroring the Xtream branch so the URL the user entered is what clients
+        // receive regardless of the provider URL embedded in the streams.
         $aliasConfig = $this->findXtreamConfigByUrl($parsedConfig['url']);
         if (! $aliasConfig) {
-            return [null, $primaryAliasConfig];
+            if (count($this->xtream_config) > 1) {
+                return [null, $primaryAliasConfig];
+            }
+
+            $aliasConfig = $primaryAliasConfig;
         }
 
         return [$parsedConfig, $aliasConfig];
