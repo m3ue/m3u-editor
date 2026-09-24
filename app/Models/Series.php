@@ -8,6 +8,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\TmdbEnrichment;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
@@ -257,7 +258,7 @@ class Series extends Model
         });
     }
 
-    public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true)
+    public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true, bool $preferTmdb = false)
     {
         // AIOStreams-backed series are resolved via ResolveAioStreamsSeries, not Xtream.
         if ($this->is_custom) {
@@ -319,7 +320,13 @@ class Series extends Model
                 $update = [
                     'last_metadata_fetch' => now(),
                     'last_modified' => $providerLastModified,
-                    'metadata' => $info, // Store raw metadata
+                    // Store raw metadata, keeping TMDB-only enrichment (cast_list/clearlogo/
+                    // related_tmdb) the provider payload never carries.
+                    'metadata' => TmdbEnrichment::preserveOnProviderRefresh(
+                        $this->metadata,
+                        $info,
+                        $preferTmdb ? TmdbEnrichment::PREFERRED_SERIES_METADATA_KEYS : [],
+                    ),
                 ];
                 if ($refresh) {
                     $item = $detail['info'] ?? null;
@@ -338,6 +345,15 @@ class Series extends Model
                             'backdrop_path' => is_string($backdropPath) ? json_decode($backdropPath, true) : $backdropPath,
                             'youtube_trailer' => $item['youtube_trailer'] ?? null,
                         ]);
+
+                        // TMDB-owned columns on an enriched series keep their TMDB value.
+                        if ($preferTmdb && TmdbEnrichment::isEnriched($this->metadata)) {
+                            foreach (TmdbEnrichment::PREFERRED_SERIES_COLUMNS as $column) {
+                                if (! blank($this->{$column})) {
+                                    unset($update[$column]);
+                                }
+                            }
+                        }
                     }
                 }
 

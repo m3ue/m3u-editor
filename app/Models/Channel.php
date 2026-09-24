@@ -13,6 +13,7 @@ use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
@@ -759,7 +760,7 @@ class Channel extends Model
         });
     }
 
-    public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
+    public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false, bool $preferTmdb = false)
     {
         if (! $this->is_vod) {
             return false;
@@ -817,7 +818,14 @@ class Channel extends Model
                 }
                 $update = [
                     'year' => $year,
-                    'info' => $movieData['info'] ?? null,
+                    // Keep TMDB-only enrichment (cast_list/clearlogo/related_tmdb) the
+                    // provider payload never carries, or this refresh would wipe it. With
+                    // $preferTmdb, TMDB-owned fields on an enriched row also win over the provider.
+                    'info' => TmdbEnrichment::preserveOnProviderRefresh(
+                        $this->info,
+                        $movieData['info'] ?? null,
+                        $preferTmdb ? TmdbEnrichment::PREFERRED_VOD_INFO_KEYS : [],
+                    ),
                     'movie_data' => $movieData['movie_data'] ?? null,
                     'last_metadata_fetch' => now(),
                 ];
