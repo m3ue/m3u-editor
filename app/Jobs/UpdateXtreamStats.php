@@ -66,7 +66,7 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
     protected function fetchXtreamData($playlist, $type): array
     {
         try {
-            $config = ($type === 'playlist') ? $playlist->xtream_config : $playlist->getPrimaryXtreamConfig();
+            $config = ($type === 'playlist') ? $playlist->xtream_config : $playlist->getPrimaryCredentialConfig();
             if (! $config) {
                 return [];
             }

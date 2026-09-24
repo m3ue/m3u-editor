@@ -1256,138 +1256,251 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * Transform channel URL to use this alias's provider config.
+     * Transform channel URL using this alias's provider entries.
      *
-     * For M3U-imported playlists that have no stored xtream_config, credentials are
-     * parsed directly from the stream URL. The extracted provider URL must match one
-     * of the alias's configured providers — this is both the selection mechanism for
-     * multi-provider aliases and the guard against rewriting non-Xtream CDN URLs.
+     * Each entry's `url` is the provider URL used to decide which streams the entry
+     * applies to. A matching stream gets the entry's credentials swapped in (when set)
+     * and, when URL replacement is enabled, its provider URL replaced with the entry's
+     * `replace_url`. Streams that match no entry are returned untouched.
      */
     public function transformChannelUrl(Channel $channel): string
     {
         $originalUrl = $channel->url_custom ?: ($channel->url ?? '');
 
-        // We need at least one alias xtream config to do any transformation.
-        $primaryAliasConfig = $this->getPrimaryXtreamConfig();
-        if (! $primaryAliasConfig) {
-            return $originalUrl;
-        }
-
-        $effectivePlaylist = $channel->getEffectivePlaylist();
-        [$sourceConfig, $aliasConfig] = $this->resolveSourceAndAliasConfig(
-            $originalUrl,
-            $effectivePlaylist?->xtream_config,
-            $primaryAliasConfig,
-        );
-
-        if (! $sourceConfig) {
-            return $originalUrl;
-        }
-
-        return $this->transformUrl($originalUrl, $sourceConfig, $aliasConfig);
+        return $this->transformStreamUrl($originalUrl, $channel->getEffectivePlaylist()?->xtream_config);
     }
 
     /**
-     * Transform episode URL to use this alias's provider config.
+     * Transform episode URL using this alias's provider entries.
      *
-     * For M3U-imported playlists that have no stored xtream_config, credentials are
-     * parsed directly from the stream URL. The extracted provider URL must match one
-     * of the alias's configured providers — this is both the selection mechanism for
-     * multi-provider aliases and the guard against rewriting non-Xtream CDN URLs.
+     * See transformChannelUrl() for how entries are matched and applied.
      */
     public function transformEpisodeUrl(Episode $episode): string
     {
-        $originalUrl = $episode->url ?? '';
-
-        // We need at least one alias xtream config to do any transformation.
-        $primaryAliasConfig = $this->getPrimaryXtreamConfig();
-        if (! $primaryAliasConfig) {
-            return $originalUrl;
-        }
-
-        $effectivePlaylist = $episode->getEffectivePlaylist();
-        [$sourceConfig, $aliasConfig] = $this->resolveSourceAndAliasConfig(
-            $originalUrl,
-            $effectivePlaylist?->xtream_config,
-            $primaryAliasConfig,
-        );
-
-        if (! $sourceConfig) {
-            return $originalUrl;
-        }
-
-        return $this->transformUrl($originalUrl, $sourceConfig, $aliasConfig);
+        return $this->transformStreamUrl($episode->url ?? '', $episode->getEffectivePlaylist()?->xtream_config);
     }
 
     /**
-     * Resolve the source config and best-matching alias config for a stream URL.
+     * Apply only this alias's provider URL replacement to an already-resolved stream URL.
      *
-     * For Xtream playlists the stored xtream_config is the source of truth.
-     * For M3U playlists (no stored config) credentials are parsed from the stream URL,
-     * but only if the extracted provider URL is already known to this alias — unknown
-     * URLs are left untouched rather than rewritten with the wrong credentials.
+     * Used by the proxy when a provider profile of the source playlist has already
+     * picked the credentials: the profile's credentials are kept, and the provider URL
+     * is swapped when the matching entry has URL replacement enabled.
      *
      * @param  array<string,mixed>|null  $playlistXtreamConfig
-     * @param  array<string,mixed>  $primaryAliasConfig
-     * @return array{0: array<string,mixed>|null, 1: array<string,mixed>}
      */
-    private function resolveSourceAndAliasConfig(
-        string $streamUrl,
-        ?array $playlistXtreamConfig,
-        array $primaryAliasConfig,
-    ): array {
-        if ($playlistXtreamConfig) {
-            // Xtream playlist: use the stored source config and pick the best alias match.
-            $aliasConfig = $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? '')) ?? $primaryAliasConfig;
-
-            return [$playlistXtreamConfig, $aliasConfig];
+    public function replaceProviderUrl(string $url, ?array $playlistXtreamConfig): string
+    {
+        $match = $this->matchProviderEntry($url, $playlistXtreamConfig);
+        if (! $match) {
+            return $url;
         }
 
-        // M3U playlist: extract credentials from the stream URL itself.
-        $parsedConfig = self::parseXtreamStreamUrl($streamUrl);
-        if (! $parsedConfig) {
-            return [null, $primaryAliasConfig];
-        }
+        [$entry, $sourceConfig] = $match;
 
-        // The extracted provider URL must match a config the user has explicitly
-        // registered in this alias. This acts as the multi-provider selector and
-        // prevents accidental rewrites of non-Xtream CDN URLs.
-        $aliasConfig = $this->findXtreamConfigByUrl($parsedConfig['url']);
-        if (! $aliasConfig) {
-            return [null, $primaryAliasConfig];
-        }
-
-        return [$parsedConfig, $aliasConfig];
+        return $this->swapProviderBaseUrl($url, (string) ($sourceConfig['url'] ?? ''), $entry) ?? $url;
     }
 
     /**
-     * Transform URL from source config to alias config
+     * Whether a provider entry has its own credentials to swap in.
+     *
+     * @param  array<string,mixed>  $entry
      */
-    private function transformUrl(
-        string $originalUrl,
-        array $sourceConfig,
-        array $aliasConfig
-    ): string {
-        // Extract source provider details safely
-        $sourceBaseUrl = rtrim((string) ($sourceConfig['url'] ?? ''), '/');
-        $sourceUsername = (string) ($sourceConfig['username'] ?? '');
-        $sourcePassword = (string) ($sourceConfig['password'] ?? '');
+    public static function entryHasCredentials(array $entry): bool
+    {
+        return filled($entry['username'] ?? null) && filled($entry['password'] ?? null);
+    }
 
-        // Extract alias provider details safely
-        $aliasBaseUrl = rtrim((string) ($aliasConfig['url'] ?? ''), '/');
-        $aliasUsername = (string) ($aliasConfig['username'] ?? '');
-        $aliasPassword = (string) ($aliasConfig['password'] ?? '');
+    /**
+     * Whether a provider entry replaces the provider URL clients receive.
+     *
+     * @param  array<string,mixed>  $entry
+     */
+    public static function entryReplacesUrl(array $entry): bool
+    {
+        return (bool) ($entry['replace_url_enabled'] ?? false) && filled($entry['replace_url'] ?? null);
+    }
 
-        // If any required value is missing, do not attempt to transform
-        if (
-            $sourceBaseUrl === '' ||
-            $sourceUsername === '' ||
-            $sourcePassword === '' ||
-            $aliasBaseUrl === '' ||
-            $aliasUsername === '' ||
-            $aliasPassword === ''
-        ) {
+    /**
+     * The first provider entry that has its own credentials, for calls that talk to the
+     * provider's Xtream API as this alias (stats, connection info).
+     *
+     * @return array<string,mixed>|null
+     */
+    public function getPrimaryCredentialConfig(): ?array
+    {
+        foreach ($this->xtream_config as $entry) {
+            if (self::entryHasCredentials($entry)) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string,mixed>|null  $playlistXtreamConfig
+     */
+    private function transformStreamUrl(string $originalUrl, ?array $playlistXtreamConfig): string
+    {
+        $match = $this->matchProviderEntry($originalUrl, $playlistXtreamConfig);
+        if (! $match) {
             return $originalUrl;
+        }
+
+        [$entry, $sourceConfig] = $match;
+
+        return $this->rewriteStreamUrl($originalUrl, $sourceConfig, $entry);
+    }
+
+    /**
+     * Find the provider entry that applies to a stream URL, along with the source config
+     * describing what the URL currently contains.
+     *
+     * For Xtream playlists the stored xtream_config is the source of truth, and the entry
+     * whose provider URL matches it is used (falling back to the first entry when it has
+     * credentials, as aliases always have). For M3U playlists (no stored config) the entry
+     * is the one whose provider URL the stream URL starts with; credentials are parsed from
+     * the stream URL when it is Xtream-shaped.
+     *
+     * @param  array<string,mixed>|null  $playlistXtreamConfig
+     * @return array{0: array<string,mixed>, 1: array<string,mixed>}|null
+     */
+    private function matchProviderEntry(string $streamUrl, ?array $playlistXtreamConfig): ?array
+    {
+        $primaryEntry = $this->getPrimaryXtreamConfig();
+        if (! $primaryEntry || $streamUrl === '') {
+            return null;
+        }
+
+        if ($playlistXtreamConfig) {
+            $entry = $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? ''));
+
+            // An entry without credentials only swaps the provider URL, so it must match
+            // the source explicitly rather than being applied to any provider.
+            if (! $entry && self::entryHasCredentials($primaryEntry)) {
+                $entry = $primaryEntry;
+            }
+
+            return $entry ? [$entry, $playlistXtreamConfig] : null;
+        }
+
+        $entry = $this->findEntryForStreamUrl($streamUrl);
+        if (! $entry) {
+            return null;
+        }
+
+        $entryUrl = rtrim((string) $entry['url'], '/');
+        $parsedConfig = self::parseXtreamStreamUrl($streamUrl);
+        $sourceConfig = $parsedConfig && strcasecmp(rtrim($parsedConfig['url'], '/'), $entryUrl) === 0
+            ? $parsedConfig
+            : ['url' => substr($streamUrl, 0, strlen($entryUrl))];
+
+        return [$entry, $sourceConfig];
+    }
+
+    /**
+     * Find the entry whose provider URL the stream URL starts with (longest match wins).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function findEntryForStreamUrl(string $streamUrl): ?array
+    {
+        $bestEntry = null;
+        $bestLength = 0;
+
+        foreach ($this->xtream_config as $entry) {
+            $entryUrl = rtrim((string) ($entry['url'] ?? ''), '/');
+            if ($entryUrl !== '' && strlen($entryUrl) > $bestLength && self::urlStartsWithBase($streamUrl, $entryUrl)) {
+                $bestEntry = $entry;
+                $bestLength = strlen($entryUrl);
+            }
+        }
+
+        return $bestEntry;
+    }
+
+    /**
+     * Rewrite a stream URL from its source config to a provider entry.
+     *
+     * @param  array<string,mixed>  $sourceConfig
+     * @param  array<string,mixed>  $entry
+     */
+    private function rewriteStreamUrl(string $originalUrl, array $sourceConfig, array $entry): string
+    {
+        $sourceBaseUrl = rtrim((string) ($sourceConfig['url'] ?? ''), '/');
+
+        if (self::entryHasCredentials($entry)) {
+            $outputBaseUrl = self::entryReplacesUrl($entry)
+                ? rtrim((string) $entry['replace_url'], '/')
+                : rtrim((string) ($entry['url'] ?? ''), '/');
+
+            $rewritten = $this->swapCredentials(
+                $originalUrl,
+                $sourceBaseUrl,
+                (string) ($sourceConfig['username'] ?? ''),
+                (string) ($sourceConfig['password'] ?? ''),
+                $outputBaseUrl,
+                (string) $entry['username'],
+                (string) $entry['password'],
+            );
+
+            if ($rewritten !== null) {
+                return $rewritten;
+            }
+        }
+
+        return $this->swapProviderBaseUrl($originalUrl, $sourceBaseUrl, $entry) ?? $originalUrl;
+    }
+
+    /**
+     * Replace the provider URL at the start of a stream URL with the entry's replacement
+     * URL, keeping the rest of the URL (path, credentials, stream ID) as it is.
+     *
+     * @param  array<string,mixed>  $entry
+     */
+    private function swapProviderBaseUrl(string $url, string $sourceBaseUrl, array $entry): ?string
+    {
+        if (! self::entryReplacesUrl($entry)) {
+            return null;
+        }
+
+        $replaceUrl = rtrim((string) $entry['replace_url'], '/');
+
+        foreach ([rtrim($sourceBaseUrl, '/'), rtrim((string) ($entry['url'] ?? ''), '/')] as $baseUrl) {
+            if ($baseUrl !== '' && self::urlStartsWithBase($url, $baseUrl)) {
+                return $replaceUrl.substr($url, strlen($baseUrl));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether a URL is the base URL or a path beneath it (case-insensitive).
+     */
+    private static function urlStartsWithBase(string $url, string $baseUrl): bool
+    {
+        return strcasecmp($url, $baseUrl) === 0
+            || str_starts_with(strtolower($url), strtolower($baseUrl).'/');
+    }
+
+    /**
+     * Swap the credentials (and base URL) of an Xtream-style stream URL.
+     *
+     * Returns null when the URL does not carry the source credentials.
+     */
+    private function swapCredentials(
+        string $originalUrl,
+        string $sourceBaseUrl,
+        string $sourceUsername,
+        string $sourcePassword,
+        string $outputBaseUrl,
+        string $outputUsername,
+        string $outputPassword,
+    ): ?string {
+        if ($sourceBaseUrl === '' || $sourceUsername === '' || $sourcePassword === '' || $outputBaseUrl === '') {
+            return null;
         }
 
         // Pattern matches:
@@ -1399,10 +1512,7 @@ class PlaylistAlias extends Model
             '/(.+)$#';
 
         if (preg_match($pattern, $originalUrl, $matches)) {
-            $streamType = $matches[1];
-            $streamIdAndExtension = $matches[2];
-
-            return "{$aliasBaseUrl}/{$streamType}/{$aliasUsername}/{$aliasPassword}/{$streamIdAndExtension}";
+            return "{$outputBaseUrl}/{$matches[1]}/{$outputUsername}/{$outputPassword}/{$matches[2]}";
         }
 
         // Prefix-less live form (common in M3U exports):
@@ -1414,10 +1524,10 @@ class PlaylistAlias extends Model
             '/(.+)$#';
 
         if (preg_match($pattern, $originalUrl, $matches)) {
-            return "{$aliasBaseUrl}/{$aliasUsername}/{$aliasPassword}/{$matches[1]}";
+            return "{$outputBaseUrl}/{$outputUsername}/{$outputPassword}/{$matches[1]}";
         }
 
-        return $originalUrl;
+        return null;
     }
 
     /**

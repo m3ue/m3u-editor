@@ -371,7 +371,7 @@ class PlaylistService
     public static function getChannelBaseUrl(Playlist|PlaylistAlias $source, $channelId): string
     {
         $config = $source instanceof PlaylistAlias
-            ? $source->getPrimaryXtreamConfig()
+            ? $source->getPrimaryCredentialConfig()
             : $source->xtream_config;
 
         if (! $config) {
@@ -388,7 +388,7 @@ class PlaylistService
     public static function getSeriesBaseUrl(Playlist|PlaylistAlias $source, $seriesId): string
     {
         $config = $source instanceof PlaylistAlias
-            ? $source->getPrimaryXtreamConfig()
+            ? $source->getPrimaryCredentialConfig()
             : $source->xtream_config;
 
         if (! $config) {

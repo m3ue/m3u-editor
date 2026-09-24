@@ -994,6 +994,23 @@ class M3uProxyService
     }
 
     /**
+     * Re-apply a PlaylistAlias's provider URL replacement to a URL picked by a provider profile.
+     *
+     * When the source playlist has provider profiles, the profile builds the upstream URL
+     * instead of the alias, so the alias's own transform never runs. The profile's
+     * credentials are kept; only the provider URL is swapped, when the alias entry
+     * matching the stream has URL replacement enabled.
+     */
+    private function applyAliasProviderUrl(string $url, $playlist, Channel|Episode $item): string
+    {
+        if (! $playlist instanceof PlaylistAlias || $url === '') {
+            return $url;
+        }
+
+        return $playlist->replaceProviderUrl($url, $item->getEffectivePlaylist()?->xtream_config);
+    }
+
+    /**
      * Check whether a PlaylistAuth user is within their per-auth stream limit.
      *
      * When the limit is reached and stop-oldest is enabled (per-auth setting takes
@@ -1508,6 +1525,10 @@ class M3uProxyService
             // Use the selected profile as context if available
             $urlContext = $selectedProfile ?? $playlist;
             $primaryUrl = PlaylistUrlService::getChannelUrl($channel, $urlContext);
+
+            if ($selectedProfile) {
+                $primaryUrl = $this->applyAliasProviderUrl($primaryUrl, $playlist, $channel);
+            }
         }
         if (empty($primaryUrl)) {
             throw new Exception('Channel primary URL is empty');
@@ -1556,6 +1577,9 @@ class M3uProxyService
                     // Use the selected profile as context if available
                     $urlContext = $selectedProfile ?? $playlist;
                     $url = PlaylistUrlService::getChannelUrl($ch, $urlContext);
+                    if ($selectedProfile) {
+                        $url = $this->applyAliasProviderUrl($url, $playlist, $ch);
+                    }
 
                     return $this->resolveMediaServerUpstreamUrl($url)['url'] ?? $url;
                 })
@@ -1970,7 +1994,7 @@ class M3uProxyService
             ]);
 
             // Transform URL using selected profile
-            $url = $selectedProfile->transformEpisodeUrl($episode);
+            $url = $this->applyAliasProviderUrl($selectedProfile->transformEpisodeUrl($episode), $playlist, $episode);
         }
 
         // Media-server-backed episodes (Plex/Emby/Jellyfin/WebDAV/AIOStreams) store our own
