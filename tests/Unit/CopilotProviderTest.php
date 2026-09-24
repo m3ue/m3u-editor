@@ -26,3 +26,16 @@ it('registers OpenCode aliases in Laravel AI config with endpoint root URLs', fu
         ->and(config('ai.providers.opencode_go.driver'))->toBe('deepseek')
         ->and(config('ai.providers.opencode_go.url'))->toBe(CopilotProvider::OPENCODE_URL);
 });
+
+it('defines the local Unsloth Studio provider with the correct defaults', function (): void {
+    expect(CopilotProvider::options())->toHaveKey('unsloth_studio', 'Unsloth Studio (Local)');
+
+    expect(CopilotProvider::defaultUrl('unsloth_studio'))->toBe(CopilotProvider::UNSLOTH_URL)
+        ->and(CopilotProvider::defaultModel('unsloth_studio'))->toBe('default')
+        ->and(CopilotProvider::supportsCustomUrl('unsloth_studio'))->toBeTrue();
+});
+
+it('registers Unsloth Studio in Laravel AI config as an OpenAI-compatible endpoint', function (): void {
+    expect(config('ai.providers.unsloth_studio.driver'))->toBe('openai')
+        ->and(config('ai.providers.unsloth_studio.url'))->toBe(CopilotProvider::UNSLOTH_URL);
+});
