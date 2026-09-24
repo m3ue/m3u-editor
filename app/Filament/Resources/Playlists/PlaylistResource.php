@@ -578,13 +578,19 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('process_series')
                     ->label(__('Fetch Provider Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'series_progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImportSeries($record, force: true));
+                            ->dispatch(new ProcessM3uImportSeries($record, force: true, overwriteExisting: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -603,13 +609,19 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('process_vod')
                     ->label(__('Fetch Provider VOD Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessVodChannels(playlist: $record));
+                            ->dispatch(new ProcessVodChannels(playlist: $record, force: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -3956,13 +3968,19 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('process_series')
                     ->label(__('Fetch Provider Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'series_progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImportSeries($record, force: true));
+                            ->dispatch(new ProcessM3uImportSeries($record, force: true, overwriteExisting: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -3981,13 +3999,19 @@ class PlaylistResource extends Resource implements CopilotResource
                 Action::make('process_vod')
                     ->label(__('Fetch Provider VOD Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessVodChannels(playlist: $record));
+                            ->dispatch(new ProcessVodChannels(playlist: $record, force: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()

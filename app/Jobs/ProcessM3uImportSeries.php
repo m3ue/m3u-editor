@@ -29,6 +29,7 @@ class ProcessM3uImportSeries implements ShouldQueue
         public ?bool $isNew = false,
         public ?string $batchNo = null,
         public ?int $syncRunId = null,
+        public bool $overwriteExisting = false,
     ) {}
 
     /**
@@ -79,7 +80,7 @@ class ProcessM3uImportSeries implements ShouldQueue
                 notify: true,
                 all_playlists: false,
                 playlist_id: $this->playlist->id,
-                overwrite_existing: false,
+                overwrite_existing: $this->overwriteExisting,
                 user_id: $this->playlist->user_id,
                 sync_stream_files: (bool) $this->playlist->auto_sync_series_stream_files,
                 syncRunId: $this->syncRunId,

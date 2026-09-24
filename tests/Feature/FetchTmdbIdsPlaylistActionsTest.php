@@ -2,6 +2,8 @@
 
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\ProcessM3uImportSeries;
+use App\Jobs\ProcessVodChannels;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Settings\GeneralSettings;
@@ -51,3 +53,21 @@ it('hides the playlist TMDB actions for non-Xtream playlists', function () {
         ->assertActionHidden('fetch_tmdb_vod')
         ->assertActionHidden('fetch_tmdb_series');
 });
+
+it('passes the overwrite toggle through the playlist provider metadata actions', function (bool $overwrite) {
+    $this->playlist->update(['xtream' => true]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->callAction('process_vod', ['overwrite_existing' => $overwrite])
+        ->assertHasNoActionErrors();
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->callAction('process_series', ['overwrite_existing' => $overwrite])
+        ->assertHasNoActionErrors();
+
+    Bus::assertDispatched(ProcessVodChannels::class, fn (ProcessVodChannels $job) => $job->playlist?->is($this->playlist)
+        && $job->force === $overwrite);
+    Bus::assertDispatched(ProcessM3uImportSeries::class, fn (ProcessM3uImportSeries $job) => $job->playlist->is($this->playlist)
+        && $job->force === true
+        && $job->overwriteExisting === $overwrite);
+})->with([true, false]);
