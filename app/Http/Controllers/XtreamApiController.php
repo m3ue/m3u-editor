@@ -1315,7 +1315,7 @@ class XtreamApiController extends Controller
             if (app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch) {
                 $tmdb = app(TmdbService::class);
                 if ($tmdb->isConfigured()) {
-                    app(FetchTmdbIds::class)->processSingleSeries($tmdb, $seriesItem);
+                    app(FetchTmdbIds::class)->processSingleSeries($tmdb, $seriesItem, backfillEnrichment: true);
                 }
             }
 
@@ -1866,7 +1866,7 @@ class XtreamApiController extends Controller
             if (app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch) {
                 $tmdb = app(TmdbService::class);
                 if ($tmdb->isConfigured()) {
-                    app(FetchTmdbIds::class)->processVodChannel($tmdb, $channel);
+                    app(FetchTmdbIds::class)->processVodChannel($tmdb, $channel, backfillEnrichment: true);
                 }
             }
 

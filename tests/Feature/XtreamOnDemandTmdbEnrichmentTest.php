@@ -330,3 +330,98 @@ it('refreshes a media-server series with an id-less cast_list placeholder', func
     $series->refresh();
     expect($series->metadata['cast_list'][0]['id'] ?? null)->toBe(17419);
 });
+
+it('backfills TMDB enrichment for a VOD title whose provider already supplied tmdb_id, plot and cover', function () {
+    mockOnDemandTmdbSettings(autoEnrichOnFetch: true);
+
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'overview' => 'TMDB overview.',
+            'poster_path' => '/matrix.jpg',
+            'credits' => [
+                'cast' => [
+                    ['id' => 6384, 'name' => 'Keanu Reeves', 'character' => 'Neo', 'profile_path' => '/keanu.jpg'],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $group = Group::factory()->for($this->user)->create();
+    $channel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'The Matrix',
+        'year' => 1999,
+        'tmdb_id' => 603,
+        'last_metadata_fetch' => now(),
+        // Provider-synced metadata: looks "complete" but was never TMDB-enriched.
+        'info' => [
+            'tmdb_id' => 603,
+            'plot' => 'Provider plot.',
+            'cover_big' => 'https://provider.test/matrix.jpg',
+            // Multi-genre, so the skip branch's separate genre check stays quiet.
+            'genre' => 'Action, Science Fiction',
+        ],
+    ]);
+
+    $response = $this->getJson(onDemandXtreamUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]));
+
+    $response->assertOk();
+    $response->assertJsonPath('cast_list.0.name', 'Keanu Reeves');
+    // Provider plot is kept - TMDB only fills plot when empty.
+    $response->assertJsonPath('info.plot', 'Provider plot.');
+
+    expect($channel->refresh()->info)->toHaveKey('related_tmdb');
+
+    // Backfilled once: later views are served from what was persisted.
+    $tmdbCalls = 0;
+    Http::fake(function () use (&$tmdbCalls) {
+        $tmdbCalls++;
+
+        return Http::response([], 500);
+    });
+
+    $this->getJson(onDemandXtreamUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]))
+        ->assertOk()
+        ->assertJsonPath('cast_list.0.name', 'Keanu Reeves');
+
+    expect($tmdbCalls)->toBe(0);
+});
+
+it('backfills TMDB enrichment for a series whose provider already supplied tmdb_id, plot and cover', function () {
+    mockOnDemandTmdbSettings(autoEnrichOnFetch: true);
+
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/1396*' => Http::response([
+            'id' => 1396,
+            'name' => 'Breaking Bad',
+            'overview' => 'TMDB overview.',
+            'poster_path' => '/bb.jpg',
+            'credits' => [
+                'cast' => [
+                    ['id' => 17419, 'name' => 'Bryan Cranston', 'character' => 'Walter White', 'profile_path' => '/bc.jpg'],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'name' => 'Breaking Bad',
+        'cover' => 'https://provider.test/bb.jpg',
+        'plot' => 'Provider plot.',
+        'tmdb_id' => 1396,
+        'metadata' => ['tmdb_id' => 1396],
+        'last_modified' => now(),
+    ]);
+
+    $response = $this->getJson(onDemandXtreamUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk();
+    $response->assertJsonPath('info.cast_list.0.name', 'Bryan Cranston');
+
+    expect($series->refresh()->metadata)->toHaveKey('related_tmdb');
+});
