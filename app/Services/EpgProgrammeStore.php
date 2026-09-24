@@ -4,6 +4,9 @@ namespace App\Services;
 
 use Generator;
 use PDO;
+use PDOException;
+use PDOStatement;
+use Throwable;
 
 /**
  * Single-file SQLite store for an EPG's cached programmes.
@@ -19,6 +22,11 @@ use PDO;
  * payload is stored as JSON with keys left at their canonical empty default
  * ({@see EMPTY_PROGRAMME}) stripped. {@see hydrate()} rebuilds the exact array
  * shape callers of {@see EpgCacheService} have always received.
+ *
+ * The store also carries its own `cache_state.cache_revision`, which
+ * {@see applyConditionalUpdates()} bumps in the same commit as an in-place
+ * enrichment batch - so a batch is either visible as a whole or not at all, and
+ * a reader holding an older revision can be told its snapshot is stale.
  */
 class EpgProgrammeStore
 {
@@ -55,15 +63,21 @@ class EpgProgrammeStore
     /** Above this many requested channels, a single date scan + PHP-side filter beats a huge `IN (...)` list. */
     private const MAX_IN_PARAMS = 500;
 
+    /** How long a conditional update waits for SQLite's write lock before failing as busy. */
+    private const DEFAULT_BUSY_TIMEOUT_MS = 10000;
+
+    /** Key of the published cache revision inside {@see CACHE_STATE_TABLE}. */
+    private const REVISION_KEY = 'revision';
+
+    private const CACHE_STATE_TABLE = 'cache_state';
+
     private ?PDO $pdo = null;
 
-    private ?\PDOStatement $insertStatement = null;
+    private ?PDOStatement $insertStatement = null;
 
     private int $pendingRows = 0;
 
-    private string $buildingPath = '';
-
-    private string $finalPath = '';
+    private string $path = '';
 
     /**
      * Strip `channel` / `start` / `stop` (stored as columns) and any key still
@@ -107,34 +121,55 @@ class EpgProgrammeStore
         return $programme;
     }
 
+    /**
+     * Revision of one programme. The enrichment API pins this per row, so the
+     * definition has to live with the stored format rather than in a caller.
+     *
+     * @param  array<string, mixed>  $programme
+     */
+    public static function revisionOf(array $programme): string
+    {
+        return hash('sha256', json_encode($programme, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE));
+    }
+
+    /**
+     * Revision of one raw `rowid, channel_id, start_ts, stop_ts, data` row,
+     * matching {@see revisionOf()} on the hydrated programme.
+     *
+     * @param  array{rowid: int, channel_id: string, start_ts: int, stop_ts: ?int, data: string}  $row
+     */
+    public static function rawRowRevision(array $row): string
+    {
+        return self::revisionOf(self::hydrateRow($row));
+    }
+
     private static function timestampToIso(int $timestamp): string
     {
         return gmdate('Y-m-d\TH:i:s', $timestamp).'.000000Z';
     }
 
     /**
-     * Open a fresh writer. Builds into a `.building` sidecar and only renames it
-     * over the real path in {@see finish()}, so readers never see a partial DB.
+     * Open a fresh writer that builds a complete store at `$sqlitePath`.
+     *
+     * A rebuild passes a staging path and only publishes it once
+     * {@see finish()} succeeded, so a half-written store is never visible under
+     * a canonical file name.
      */
     public function beginWrite(string $sqlitePath): void
     {
-        $this->finalPath = $sqlitePath;
-        // Unique per-run suffix so an overlapping rebuild of the same EPG cannot
-        // write into the sidecar this run is mid-transaction on (journal_mode is
-        // OFF). Whichever run calls finish() last wins the atomic rename.
-        $this->buildingPath = $sqlitePath.'.building-'.getmypid().'-'.bin2hex(random_bytes(4));
+        $this->path = $sqlitePath;
 
         $directory = dirname($sqlitePath);
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
-        if (is_file($this->buildingPath)) {
-            @unlink($this->buildingPath);
+        if (is_file($sqlitePath)) {
+            @unlink($sqlitePath);
         }
 
-        $this->pdo = new PDO('sqlite:'.$this->buildingPath);
+        $this->pdo = new PDO('sqlite:'.$sqlitePath);
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        // The DB is disposable and rebuilt from XML, and this run is the sole
+        // The store is disposable and rebuilt from XML, and this run is the sole
         // writer, so durability pragmas are pure overhead here.
         $this->pdo->exec('PRAGMA journal_mode=OFF');
         $this->pdo->exec('PRAGMA synchronous=OFF');
@@ -148,6 +183,9 @@ class EpgProgrammeStore
             .'stop_ts INTEGER, '
             .'data TEXT NOT NULL)'
         );
+        $this->pdo->exec('CREATE TABLE '.self::CACHE_STATE_TABLE.' (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+        $this->pdo->prepare('INSERT INTO '.self::CACHE_STATE_TABLE.' (key, value) VALUES (?, ?)')
+            ->execute([self::REVISION_KEY, self::freshRevision()]);
 
         $this->insertStatement = $this->pdo->prepare(
             'INSERT INTO programmes (channel_id, date, start_ts, stop_ts, data) VALUES (?, ?, ?, ?, ?)'
@@ -181,10 +219,11 @@ class EpgProgrammeStore
     }
 
     /**
-     * Commit, build the lookup index, close, and atomically swap the built DB
-     * into place. Throws if the swap fails so the caller can flag the cache
-     * generation as failed rather than leaving a stale/missing store behind a
-     * "success" metadata write.
+     * Commit the rows, build the lookup index and close the store.
+     *
+     * Publication is deliberately not part of this: a staging file built by a
+     * rebuild becomes the canonical store only when
+     * {@see EpgCacheStorage::publishRebuild()} renames it into place.
      */
     public function finish(): void
     {
@@ -196,40 +235,63 @@ class EpgProgrammeStore
             $this->pdo->commit();
         }
         $this->pdo->exec('CREATE INDEX programmes_date_channel ON programmes (date, channel_id, start_ts)');
-        $this->insertStatement = null;
-        $this->pdo = null;
-
-        if (! @rename($this->buildingPath, $this->finalPath)) {
-            @unlink($this->buildingPath);
-
-            throw new \RuntimeException("Failed to move EPG programme store into place at {$this->finalPath}");
-        }
+        $this->close();
     }
 
     /**
-     * Abandon a half-written DB (parse failed). Leaves any existing real file
-     * untouched.
+     * Abandon a half-written store: close it and delete the file this writer
+     * created, leaving any other file (the canonical store of an unfinished
+     * rebuild's EPG) untouched.
      */
     public function discard(): void
     {
-        $this->insertStatement = null;
-        $this->pdo = null;
-        if ($this->buildingPath !== '' && is_file($this->buildingPath)) {
-            @unlink($this->buildingPath);
+        $this->close();
+
+        if ($this->path !== '' && is_file($this->path)) {
+            @unlink($this->path);
         }
     }
 
     /**
      * Open an existing store for reading. Caller is responsible for checking the
      * file exists first and for {@see close()}ing when done.
+     *
+     * `$busyTimeoutMs` overrides SQLite's default (60s) busy timeout. Exposure
+     * is for tests, so a contended read can be exercised without waiting the
+     * default out; leaving it null keeps the driver default.
      */
-    public static function openRead(string $sqlitePath): self
+    public static function openRead(string $sqlitePath, ?int $busyTimeoutMs = null): self
     {
         $store = new self;
+        $store->path = $sqlitePath;
         $store->pdo = new PDO('sqlite:'.$sqlitePath);
         $store->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        if ($busyTimeoutMs !== null) {
+            // Explicit int cast: the timeout is concatenated into a PRAGMA
+            // statement, which SQLite cannot parameterize.
+            $store->pdo->exec('PRAGMA busy_timeout='.(int) $busyTimeoutMs);
+        }
 
         return $store;
+    }
+
+    /**
+     * Open this store for conditional in-place updates of the canonical file.
+     *
+     * `$busyTimeoutMs` bounds how long SQLite waits for the write lock, so a
+     * cache that is busy right now surfaces as a retryable
+     * {@see EpgCacheBusyException} instead of stalling the caller.
+     */
+    public function openWrite(string $sqlitePath, int $busyTimeoutMs = self::DEFAULT_BUSY_TIMEOUT_MS): void
+    {
+        $this->path = $sqlitePath;
+        $this->pdo = new PDO('sqlite:'.$sqlitePath);
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // Rollback journal, not WAL: one canonical file, no -wal/-shm sidecars.
+        $this->pdo->exec('PRAGMA journal_mode=DELETE');
+        // Explicit int cast: the timeout is concatenated into a PRAGMA
+        // statement, which SQLite cannot parameterize.
+        $this->pdo->exec('PRAGMA busy_timeout='.(int) $busyTimeoutMs);
     }
 
     public function close(): void
@@ -291,6 +353,225 @@ class EpgProgrammeStore
         while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
             yield [$row['channel_id'], self::hydrateRow($row)];
         }
+    }
+
+    /**
+     * Page through raw rows by rowid, independent of the date/channel index.
+     * Used by the plugin enrichment API, which addresses programmes by opaque
+     * rowid locator rather than by date/channel.
+     *
+     * A read that failed because another writer holds SQLite's lock is not an
+     * empty page: it surfaces as {@see EpgCacheBusyException} so the caller can
+     * report retryable contention - the same distinction
+     * {@see readRowsByIds()} and {@see readCacheRevision()} make.
+     *
+     * @return list<array{rowid: int, channel_id: string, start_ts: int, stop_ts: ?int, data: string}>
+     *
+     * @throws EpgCacheBusyException when another connection holds the lock
+     */
+    public function readPage(int $afterRowid, int $limit): array
+    {
+        try {
+            $statement = $this->pdo->prepare('SELECT rowid, channel_id, start_ts, stop_ts, data FROM programmes WHERE rowid > ? ORDER BY rowid LIMIT ?');
+            $statement->execute([$afterRowid, $limit]);
+
+            return array_values($this->fetchRawRows($statement));
+        } catch (PDOException $e) {
+            throw EpgCacheBusyException::forSqlite($e) ?? $e;
+        }
+    }
+
+    /**
+     * Fetch specific rows by rowid in a single query, so a caller re-verifying
+     * a batch of patch locators does not open one connection/query per row.
+     *
+     * A read that failed because another writer holds SQLite's lock is not a
+     * missing row: it surfaces as {@see EpgCacheBusyException} so the caller can
+     * report retryable contention - the same distinction
+     * {@see readCacheRevision()} makes for the revision pre-check.
+     *
+     * @param  list<int>  $rowids
+     * @return array<int, array{rowid: int, channel_id: string, start_ts: int, stop_ts: ?int, data: string}> keyed by rowid
+     *
+     * @throws EpgCacheBusyException when another connection holds the lock
+     */
+    public function readRowsByIds(array $rowids): array
+    {
+        if ($rowids === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($rowids), '?'));
+
+        try {
+            $statement = $this->pdo->prepare("SELECT rowid, channel_id, start_ts, stop_ts, data FROM programmes WHERE rowid IN ({$placeholders})");
+            $statement->execute(array_values($rowids));
+
+            return $this->fetchRawRows($statement);
+        } catch (PDOException $e) {
+            throw EpgCacheBusyException::forSqlite($e) ?? $e;
+        }
+    }
+
+    /**
+     * The cache revision this store publishes, or null for a store written
+     * before revisions existed - a legacy cache that stays read-only.
+     *
+     * A read that failed because another writer holds SQLite's lock is not a
+     * cache format: it surfaces as {@see EpgCacheBusyException} so the caller
+     * can report retryable contention instead of a legacy read-only cache.
+     */
+    public function readCacheRevision(): ?string
+    {
+        try {
+            $statement = $this->pdo->prepare('SELECT value FROM '.self::CACHE_STATE_TABLE.' WHERE key = ?');
+            $statement->execute([self::REVISION_KEY]);
+            $value = $statement->fetchColumn();
+        } catch (PDOException $e) {
+            if ($busy = EpgCacheBusyException::forSqlite($e)) {
+                throw $busy;
+            }
+
+            return null;
+        }
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Apply a prevalidated enrichment batch in place, all-or-nothing.
+     *
+     * One `BEGIN IMMEDIATE` transaction on the single canonical store: the
+     * cache revision and every targeted row revision are re-read and must match
+     * the caller's expectations before the first UPDATE, and the new cache
+     * revision is committed together with the row updates. Readers therefore
+     * observe either the state before or after the batch, never a partially
+     * applied one, and an UPDATE that fails aborts the whole batch instead of
+     * silently no-op'ing.
+     *
+     * @param  string  $expectedCacheRevision  revision the caller validated against
+     * @param  array<int, string>  $dataByRowid  new JSON blob keyed by rowid
+     * @param  array<int, string>  $expectedRevisions  row revision keyed by rowid
+     * @return array{status: string, revision: string|null} status is applied, noop, conflict, stale_snapshot or legacy_cache_read_only
+     *
+     * @throws EpgCacheBusyException when another connection holds the write lock
+     */
+    public function applyConditionalUpdates(string $expectedCacheRevision, array $dataByRowid, array $expectedRevisions): array
+    {
+        try {
+            $this->pdo->exec('BEGIN IMMEDIATE');
+
+            $revision = $this->readCacheRevision();
+            if ($revision === null) {
+                return $this->failedConditionalUpdate('legacy_cache_read_only', null);
+            }
+            if (! hash_equals($revision, $expectedCacheRevision)) {
+                return $this->failedConditionalUpdate('stale_snapshot', $revision);
+            }
+
+            $current = $this->readRowsByIds(array_keys($dataByRowid));
+            foreach ($expectedRevisions as $rowid => $expected) {
+                $row = $current[(int) $rowid] ?? null;
+                if ($row === null || ! hash_equals($expected, self::rawRowRevision($row))) {
+                    return $this->failedConditionalUpdate('conflict', $revision);
+                }
+            }
+
+            $this->beforeCommit();
+
+            $statement = $this->pdo->prepare('UPDATE programmes SET data = ? WHERE rowid = ?');
+            foreach ($dataByRowid as $rowid => $data) {
+                $statement->execute([$data, (int) $rowid]);
+            }
+
+            $next = self::freshRevision();
+            $this->pdo->prepare('UPDATE '.self::CACHE_STATE_TABLE.' SET value = ? WHERE key = ?')->execute([$next, self::REVISION_KEY]);
+            $this->pdo->commit();
+
+            return ['status' => 'applied', 'revision' => $next];
+        } catch (PDOException $e) {
+            $this->rollBack();
+
+            throw EpgCacheBusyException::forSqlite($e) ?? $e;
+        } catch (Throwable $e) {
+            $this->rollBack();
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Run SQLite's fast structural check. Cheaper than `PRAGMA integrity_check`
+     * and enough to catch a truncated or partially-written database file.
+     */
+    public function quickCheck(): bool
+    {
+        return $this->pdo->query('PRAGMA quick_check')->fetchColumn() === 'ok';
+    }
+
+    /**
+     * Called inside the conditional-update transaction, after every revision has
+     * been re-verified and before the revision bump + COMMIT. Exists so a test
+     * can observe what a concurrent reader sees while a batch is still
+     * unpublished.
+     */
+    protected function beforeCommit(): void {}
+
+    /** @param array{status: string, revision: string|null} $result */
+    private function failedConditionalUpdate(string $status, ?string $revision): array
+    {
+        $this->rollBack();
+
+        return ['status' => $status, 'revision' => $revision];
+    }
+
+    /** Release the write transaction, tolerating a transaction SQLite already rolled back. */
+    private function rollBack(): void
+    {
+        try {
+            if ($this->pdo?->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+        } catch (Throwable) {
+            // Nothing left to release.
+        }
+    }
+
+    private static function freshRevision(): string
+    {
+        return bin2hex(random_bytes(16));
+    }
+
+    /**
+     * Drain a `rowid, channel_id, start_ts, stop_ts, data` result set into
+     * normalised raw rows keyed by rowid.
+     *
+     * @return array<int, array{rowid: int, channel_id: string, start_ts: int, stop_ts: ?int, data: string}>
+     */
+    private function fetchRawRows(PDOStatement $statement): array
+    {
+        $rows = [];
+        while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $raw = self::rawRow($row);
+            $rows[$raw['rowid']] = $raw;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array{rowid: int|string, channel_id: string, start_ts: int|string, stop_ts: int|string|null, data: string}  $row
+     * @return array{rowid: int, channel_id: string, start_ts: int, stop_ts: ?int, data: string}
+     */
+    private static function rawRow(array $row): array
+    {
+        return [
+            'rowid' => (int) $row['rowid'],
+            'channel_id' => $row['channel_id'],
+            'start_ts' => (int) $row['start_ts'],
+            'stop_ts' => $row['stop_ts'] !== null ? (int) $row['stop_ts'] : null,
+            'data' => $row['data'],
+        ];
     }
 
     /**

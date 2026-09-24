@@ -35,25 +35,23 @@ class EpgCacheService
 {
     private const CACHE_VERSION = 'v2';
 
-    /** Older cache versions that are still served for reads until the next sync writes v2. */
-    private const PREVIOUS_CACHE_VERSIONS = ['v1'];
+    /** File names of the one canonical cache, owned by {@see EpgCacheStorage}. */
+    private const CHANNELS_FILE = EpgCacheStorage::CHANNELS_FILE;
 
-    private const CHANNELS_FILE = 'channels.json';
-
-    private const METADATA_FILE = 'metadata.json';
+    private const METADATA_FILE = EpgCacheStorage::METADATA_FILE;
 
     private const MAX_PROGRAMMES = 10000000; // Safety limit
 
     /**
-     * Single-file SQLite store of all cached programmes for an EPG, written
-     * inside the versioned cache dir. Replaces the legacy per-date
+     * Single-file SQLite store of all cached programmes for an EPG, and the only
+     * copy of that data on disk. Replaces the legacy per-date
      * `programmes-{date}.jsonl` files and their `.index.json` offset index;
      * reads fall back to the JSONL scan when this file is absent (v1 caches, or
      * v2 caches written before the SQLite switch).
      *
      * @see EpgProgrammeStore
      */
-    private const PROGRAMMES_DB_FILE = 'programmes.sqlite';
+    private const PROGRAMMES_DB_FILE = EpgCacheStorage::PROGRAMMES_DB_FILE;
 
     /**
      * Per-instance memo of opened {@see EpgProgrammeStore} read handles, keyed
@@ -66,20 +64,14 @@ class EpgCacheService
     private array $programmeStores = [];
 
     /**
-     * Get the cache directory path for an EPG
+     * Per-instance memo of the resolved active cache directories, keyed by EPG
+     * id, so one request keeps reading the same directory. There is one
+     * canonical cache per EPG; a rebuild replaces the files inside it, and this
+     * service forgets the memo after publishing a rebuild itself.
+     *
+     * @var array<int, string>
      */
-    private function getCacheDir(Epg $epg): string
-    {
-        return "epg-cache/{$epg->uuid}/".self::CACHE_VERSION;
-    }
-
-    /**
-     * Get cache file path for write operations (always current version).
-     */
-    private function getCacheFilePath(Epg $epg, string $filename): string
-    {
-        return $this->getCacheDir($epg).'/'.$filename;
-    }
+    private array $activeCacheDirectories = [];
 
     /**
      * Returns the directory of the best available cache: current version first,
@@ -91,19 +83,16 @@ class EpgCacheService
      */
     private function getActiveCacheDir(Epg $epg): string
     {
-        $currentDir = $this->getCacheDir($epg);
-        if (Storage::disk('local')->exists($currentDir.'/'.self::METADATA_FILE)) {
-            return $currentDir;
+        if (array_key_exists($epg->id, $this->activeCacheDirectories)) {
+            return $this->activeCacheDirectories[$epg->id];
         }
 
-        foreach (self::PREVIOUS_CACHE_VERSIONS as $version) {
-            $legacyDir = "epg-cache/{$epg->uuid}/{$version}";
-            if (Storage::disk('local')->exists($legacyDir.'/'.self::METADATA_FILE)) {
-                return $legacyDir;
-            }
-        }
+        return $this->activeCacheDirectories[$epg->id] = $this->cacheStorage()->resolve($epg);
+    }
 
-        return $currentDir;
+    private function cacheStorage(): EpgCacheStorage
+    {
+        return app(EpgCacheStorage::class);
     }
 
     /**
@@ -181,36 +170,50 @@ class EpgCacheService
             $totalChannels = $epg->channel_count ?? $epg->channels()->count();
             $totalProgrammes = $epg->programme_count ?? 150000; // Default estimate
 
-            // Start by clearing existing cache
-            $this->clearCache($epg);
-            $cacheDir = $this->getCacheDir($epg);
-            Storage::disk('local')->makeDirectory($cacheDir);
-
-            // Parse and save channels and programmes in a single pass
-            Log::debug("Parsing EPG data for {$epg->name}");
-            $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes);
-            Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
-
-            // Drop any read handle memoized before this rebuild so the freshly
-            // swapped-in SQLite store (not the pre-rebuild file, or a cached
-            // "no store, use JSONL" null) is what populateDvrProgrammes and
-            // later reads on this instance pick up.
-            $this->forgetProgrammeStore($epg);
-
-            // Save metadata
-            $metadata = [
-                'cache_created' => time(),
-                'cache_version' => self::CACHE_VERSION,
-                'epg_uuid' => $epg->uuid,
-                'total_channels' => $stats['channels'],
-                'total_programmes' => $stats['programmes'],
-                'programme_date_range' => $stats['date_range'],
+            // Build every file of the rebuild next to the canonical cache and
+            // swap them in only once parsing succeeded: the one canonical cache
+            // stays readable - and untouched - for the whole rebuild.
+            $storage = $this->cacheStorage();
+            $directory = $storage->beginRebuild($epg);
+            $staged = [
+                self::PROGRAMMES_DB_FILE => $storage->stagedPath($directory, self::PROGRAMMES_DB_FILE),
+                self::CHANNELS_FILE => $storage->stagedPath($directory, self::CHANNELS_FILE),
+                self::METADATA_FILE => $storage->stagedPath($directory, self::METADATA_FILE),
             ];
 
-            Storage::disk('local')->put(
-                $this->getCacheFilePath($epg, self::METADATA_FILE),
-                json_encode($metadata, JSON_PRETTY_PRINT)
-            );
+            try {
+                // Parse and save channels and programmes in a single pass
+                Log::debug("Parsing EPG data for {$epg->name}");
+                $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes, $staged);
+                Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
+
+                // Save metadata
+                $metadata = [
+                    'cache_created' => time(),
+                    'cache_version' => self::CACHE_VERSION,
+                    'epg_uuid' => $epg->uuid,
+                    'total_channels' => $stats['channels'],
+                    'total_programmes' => $stats['programmes'],
+                    'programme_date_range' => $stats['date_range'],
+                ];
+
+                Storage::disk('local')->put(
+                    $staged[self::METADATA_FILE],
+                    json_encode($metadata, JSON_PRETTY_PRINT)
+                );
+
+                $storage->publishRebuild($epg, $staged);
+            } catch (\Throwable $e) {
+                // Never leave staging files behind for a rebuild that failed.
+                $storage->discardStaged($staged);
+
+                throw $e;
+            }
+
+            // Drop any read handle memoized before this rebuild so subsequent
+            // local reads resolve the rebuilt cache.
+            $this->forgetProgrammeStore($epg);
+            $this->forgetActiveCacheDirectory($epg);
 
             // Flag EPG as cached
             $epg->update([
@@ -345,8 +348,10 @@ class EpgCacheService
      * Parse and save EPG data in a single pass (optimized for performance)
      * This method parses both channels and programmes in one pass through the file,
      * reducing processing time by ~50% compared to double parsing.
+     *
+     * @param  array<string, string>  $staged  canonical filename => staging path written by this rebuild
      */
-    private function parseAndSaveEpgDataSinglePass(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes): array
+    private function parseAndSaveEpgDataSinglePass(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes, array $staged): array
     {
         $reader = new XMLReader;
         $reader->open('compress.zlib://'.$filePath);
@@ -361,7 +366,7 @@ class EpgCacheService
         $progressUpdateInterval = 5000; // Update progress every 5000 items instead of 50
 
         $store = new EpgProgrammeStore;
-        $store->beginWrite(Storage::disk('local')->path($this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE)));
+        $store->beginWrite(Storage::disk('local')->path($staged[self::PROGRAMMES_DB_FILE]));
 
         try {
             while (@$reader->read()) {
@@ -402,7 +407,7 @@ class EpgCacheService
 
                         // Save in larger batches for better performance
                         if (count($channelBatch) >= $channelBatchSize) {
-                            $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
+                            $this->saveChannelBatchOptimized($staged[self::CHANNELS_FILE], $channelBatch);
                             $channelBatch = [];
                         }
                     }
@@ -489,10 +494,11 @@ class EpgCacheService
 
             // Save any remaining channels
             if (! empty($channelBatch)) {
-                $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
+                $this->saveChannelBatchOptimized($staged[self::CHANNELS_FILE], $channelBatch);
             }
 
-            // Commit, index, and atomically swap the SQLite store into place.
+            // Commit and index the staged store. Publishing it is the caller's
+            // job: the file only becomes canonical once the rebuild is complete.
             $store->finish();
         } catch (\Throwable $e) {
             $store->discard();
@@ -510,11 +516,12 @@ class EpgCacheService
     }
 
     /**
-     * Optimized channel batch save using JSONL append instead of merge
+     * Merge one batch of channels into the rebuild's staged channels file.
+     *
+     * @param  string  $channelsPath  canonical-relative path of the staged channels file
      */
-    private function saveChannelBatchOptimized(Epg $epg, array $channelBatch, bool $isFirst): void
+    private function saveChannelBatchOptimized(string $channelsPath, array $channelBatch): void
     {
-        $channelsPath = $this->getCacheFilePath($epg, self::CHANNELS_FILE);
         $fullPath = Storage::disk('local')->path($channelsPath);
 
         // Ensure directory exists
@@ -584,6 +591,15 @@ class EpgCacheService
             $this->programmeStores[$epg->id]?->close();
             unset($this->programmeStores[$epg->id]);
         }
+    }
+
+    /**
+     * Forget the cache directory memoized by this service after it publishes a
+     * rebuild itself.
+     */
+    private function forgetActiveCacheDirectory(Epg $epg): void
+    {
+        unset($this->activeCacheDirectories[$epg->id]);
     }
 
     /**
@@ -935,38 +951,6 @@ class EpgCacheService
             Log::error("Error reading cache metadata: {$e->getMessage()}");
 
             return null;
-        }
-    }
-
-    /**
-     * Clear cache for an EPG
-     */
-    public function clearCache(Epg $epg): bool
-    {
-        try {
-            // Flag EPG as not cached
-            $epg->update([
-                'is_cached' => false,
-                'cache_meta' => null,
-                'cache_progress' => 0,
-            ]);
-
-            // Delete current version directory
-            Storage::disk('local')->deleteDirectory($this->getCacheDir($epg));
-
-            // Also delete any legacy version directories so stale data is not left on disk
-            foreach (self::PREVIOUS_CACHE_VERSIONS as $version) {
-                Storage::disk('local')->deleteDirectory("epg-cache/{$epg->uuid}/{$version}");
-            }
-
-            // Log cache clearing
-            Log::debug("Cleared cache for EPG {$epg->name}");
-
-            return true;
-        } catch (Exception $e) {
-            Log::error("Failed to clear cache for EPG {$epg->name}: {$e->getMessage()}");
-
-            return false;
         }
     }
 

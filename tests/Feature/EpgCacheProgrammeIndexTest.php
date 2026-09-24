@@ -1,5 +1,7 @@
 <?php
 
+use App\Events\EpgCreated;
+use App\Events\PlaylistCreated;
 use App\Models\Channel;
 use App\Models\DvrSetting;
 use App\Models\Epg;
@@ -8,13 +10,16 @@ use App\Models\EpgProgramme;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use App\Services\EpgCacheStorage;
 use App\Services\EpgProgrammeStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Event::fake([EpgCreated::class, PlaylistCreated::class]);
     Storage::fake('local');
 });
 
@@ -32,8 +37,8 @@ beforeEach(function () {
 function cacheXmltvForIndex(array $channelIds, array $programmes): array
 {
     $user = User::factory()->create();
-    $playlist = Playlist::factory()->for($user)->create(['dummy_epg' => false]);
-    $epg = Epg::factory()->for($user)->create(['url' => 'https://example.com/index.xml']);
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($user)->create(['dummy_epg' => false]));
+    $epg = Epg::withoutEvents(fn () => Epg::factory()->for($user)->create(['url' => 'https://example.com/index.xml']));
 
     foreach ($channelIds as $channelId) {
         $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
@@ -71,7 +76,7 @@ function cacheXmltvForIndex(array $channelIds, array $programmes): array
     return ['epg' => $epg, 'playlist' => $playlist, 'date' => now()->format('Y-m-d')];
 }
 
-it('writes a single programmes.sqlite and no legacy jsonl artifacts', function () {
+it('writes a single programmes.sqlite and no legacy jsonl or staging artifacts', function () {
     ['epg' => $epg] = cacheXmltvForIndex(
         ['channel.a', 'channel.b'],
         [
@@ -81,9 +86,11 @@ it('writes a single programmes.sqlite and no legacy jsonl artifacts', function (
         ],
     );
 
-    $files = Storage::disk('local')->files("epg-cache/{$epg->uuid}/v2");
+    $cacheRoot = "epg-cache/{$epg->uuid}/v2";
+    $activeDirectory = app(EpgCacheStorage::class)->resolve($epg);
+    $files = Storage::disk('local')->allFiles($cacheRoot);
 
-    expect($files)->toContain("epg-cache/{$epg->uuid}/v2/programmes.sqlite")
+    expect($files)->toContain("{$activeDirectory}/programmes.sqlite")
         ->and(collect($files)->filter(fn ($f) => str_contains($f, '.jsonl'))->all())->toBe([])
         ->and(collect($files)->filter(fn ($f) => str_contains($f, '.building'))->all())->toBe([]);
 });
