@@ -68,9 +68,9 @@ it('keeps TMDB enrichment on a VOD channel when the provider metadata is refresh
     $info = $channel->refresh()->info;
     expect($info['plot'])->toBe('Provider plot')
         ->and($info['cover_big'])->toBe('http://xtream.test/cover.jpg')
-        ->and($info['cast_list'])->toBe(tmdbEnrichmentFixture()['cast_list'])
+        ->and($info['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list'])
         ->and($info['clearlogo'])->toBe(tmdbEnrichmentFixture()['clearlogo'])
-        ->and($info['related_tmdb'])->toBe(tmdbEnrichmentFixture()['related_tmdb']);
+        ->and($info['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb']);
 });
 
 it('lets provider-sent values win over preserved TMDB enrichment keys', function () {
@@ -116,9 +116,9 @@ it('keeps TMDB enrichment on a series when the provider metadata is refreshed', 
 
     $metadata = $series->refresh()->metadata;
     expect($metadata['plot'])->toBe('Provider plot')
-        ->and($metadata['cast_list'])->toBe(tmdbEnrichmentFixture()['cast_list'])
+        ->and($metadata['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list'])
         ->and($metadata['clearlogo'])->toBe(tmdbEnrichmentFixture()['clearlogo'])
-        ->and($metadata['related_tmdb'])->toBe(tmdbEnrichmentFixture()['related_tmdb']);
+        ->and($metadata['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb']);
 });
 
 it('returns cast_list and clearlogo from get_vod_info when auto_fetch_vod_metadata is off', function () {
@@ -166,7 +166,7 @@ it('returns cast_list and clearlogo from get_vod_info when auto_fetch_vod_metada
         ->assertJsonPath('info.cast_list.0.name', 'Keanu Reeves')
         ->assertJsonPath('info.clearlogo', tmdbEnrichmentFixture()['clearlogo']);
 
-    expect($channel->refresh()->info['cast_list'])->toBe(tmdbEnrichmentFixture()['cast_list']);
+    expect($channel->refresh()->info['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list']);
 });
 
 function providerVodInfoXtream(): object
@@ -278,5 +278,5 @@ it('keeps TMDB-owned series columns over the provider refresh when TMDB is prefe
         ->and((string) $series->rating)->toBe('9.5')
         ->and($series->plot)->toBe('Provider plot')
         ->and($series->metadata['vote_count'])->toBe(15000)
-        ->and($series->metadata['cast_list'])->toBe(tmdbEnrichmentFixture()['cast_list']);
+        ->and($series->metadata['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list']);
 });
