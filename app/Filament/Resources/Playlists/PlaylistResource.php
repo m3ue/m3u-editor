@@ -6,6 +6,7 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Filament\Actions\CronHelperAction;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Actions\ModalActionGroup;
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Concerns\HasCopilotSupport;
@@ -624,6 +625,10 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('series')
+                    ->hidden(fn ($record): bool => ! $record->xtream),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('vod')
+                    ->hidden(fn ($record): bool => ! $record->xtream),
                 Action::make('reset_processing')
                     ->label(__('Reset Processing State'))
                     ->icon('heroicon-o-arrow-path')
@@ -3859,6 +3864,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ModalActionGroup::section('Processing', [
                 Action::make('process')
                     ->label(__('Sync and Process'))
+                    ->color('success')
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         // For media server playlists, dispatch the media server sync job
@@ -3945,7 +3951,8 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->body(__('The playlist is no longer processing. You can now run new syncs.'))
                             ->send();
                     })
-                    ->visible(fn (Playlist $record) => $record->isProcessing() && ! ($record->is_network_playlist || $record->isMediaServerPlaylist())),
+                    ->visible(fn (Playlist $record) => ! ($record->is_network_playlist || $record->isMediaServerPlaylist()))
+                    ->disabled(fn (Playlist $record) => ! $record->isProcessing()),
                 Action::make('process_series')
                     ->label(__('Fetch Provider Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
@@ -3996,6 +4003,10 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('series')
+                    ->hidden(fn ($record): bool => ! $record->xtream || $record->is_network_playlist),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('vod')
+                    ->hidden(fn ($record): bool => ! $record->xtream || $record->is_network_playlist),
             ]),
 
             // -- Downloads & Links --
