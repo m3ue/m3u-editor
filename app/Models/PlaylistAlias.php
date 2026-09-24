@@ -1358,8 +1358,10 @@ class PlaylistAlias extends Model
      * describing what the URL currently contains.
      *
      * For Xtream playlists the stored xtream_config is the source of truth, and the entry
-     * whose provider URL matches it is used (falling back to the first entry when it has
-     * credentials, as aliases always have). For M3U playlists (no stored config) the entry
+     * whose provider URL matches it is used. When none matches, a standard-playlist or
+     * single-entry alias falls back to its first entry (e.g. after the playlist's DNS
+     * failover moved it to another URL); a multi-provider alias leaves the stream alone
+     * rather than applying another provider's entry. For M3U playlists (no stored config) the entry
      * is the one whose provider URL the stream URL starts with; credentials are parsed from
      * the stream URL when it is Xtream-shaped.
      *
@@ -1376,9 +1378,7 @@ class PlaylistAlias extends Model
         if ($playlistXtreamConfig) {
             $entry = $this->findXtreamConfigByUrl((string) ($playlistXtreamConfig['url'] ?? ''));
 
-            // An entry without credentials only swaps the provider URL, so it must match
-            // the source explicitly rather than being applied to any provider.
-            if (! $entry && self::entryHasCredentials($primaryEntry)) {
+            if (! $entry && ($this->playlist_id !== null || count($this->xtream_config) === 1)) {
                 $entry = $primaryEntry;
             }
 
