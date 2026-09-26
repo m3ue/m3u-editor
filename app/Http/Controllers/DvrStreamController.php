@@ -3,16 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\DvrRecordingStatus;
-use App\Models\CustomPlaylist;
+use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\DvrRecording;
-use App\Models\MergedPlaylist;
-use App\Models\Playlist;
-use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\DvrCapabilityGate;
 use App\Services\M3uProxyService;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
+use App\Services\PlaylistCredentialResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,7 +21,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DvrStreamController extends Controller
 {
-    public function __construct(protected M3uProxyService $proxy) {}
+    public function __construct(protected M3uProxyService $proxy, protected PlaylistCredentialResolver $resolver) {}
 
     /**
      * Stream a DVR recording.
@@ -81,62 +78,27 @@ class DvrStreamController extends Controller
         }
 
         $fullPath = Storage::disk($disk)->path($recording->file_path);
-        $fileSize = filesize($fullPath);
-        $mimeType = $recording->resolveMimeType();
 
-        $range = $request->header('Range');
-
-        if ($range && preg_match('/bytes=(\d+)-(\d*)/', $range, $matches)) {
-            $start = (int) $matches[1];
-            $end = isset($matches[2]) && $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
-            $length = $end - $start + 1;
-
-            $headers = [
-                'Content-Type' => $mimeType,
-                'Content-Length' => $length,
-                'Content-Range' => "bytes {$start}-{$end}/{$fileSize}",
-                'Accept-Ranges' => 'bytes',
-                'Content-Disposition' => 'inline; filename="'.basename($recording->file_path).'"',
-            ];
-
-            return response()->stream(function () use ($fullPath, $start, $length) {
-                $handle = fopen($fullPath, 'rb');
-                if ($handle === false) {
-                    return;
-                }
-                fseek($handle, $start);
-                $remaining = $length;
-
-                while (! feof($handle) && $remaining > 0) {
-                    $chunkSize = min(8192, $remaining);
-                    echo fread($handle, $chunkSize);
-                    $remaining -= $chunkSize;
-                }
-
-                fclose($handle);
-            }, 206, $headers);
+        // Storage::size() throws on a missing file; some drivers return
+        // false. Both are unacceptable for the int $fileSize contract
+        // that StreamLocalFile::serve() enforces.
+        try {
+            $fileSize = Storage::disk($disk)->size($recording->file_path);
+        } catch (\Throwable) {
+            abort(404, 'Recording file not found on disk');
         }
+        if ($fileSize === false || $fileSize < 1) {
+            abort(404, 'Recording file not found on disk');
+        }
+        $fileSize = (int) $fileSize;
 
-        $headers = [
-            'Content-Type' => $mimeType,
-            'Content-Length' => $fileSize,
-            'Accept-Ranges' => 'bytes',
-            'Content-Disposition' => 'inline; filename="'.basename($recording->file_path).'"',
-        ];
-
-        return response()->stream(function () use ($fullPath) {
-            $handle = fopen($fullPath, 'rb');
-            if ($handle === false) {
-                return;
-            }
-
-            while (! feof($handle)) {
-                echo fread($handle, 8192);
-                flush();
-            }
-
-            fclose($handle);
-        }, 200, $headers);
+        return StreamLocalFile::serve(
+            fullPath: $fullPath,
+            fileSize: $fileSize,
+            mimeType: $recording->resolveMimeType(),
+            filename: basename($recording->file_path),
+            range: $request->header('Range'),
+        );
     }
 
     /**
@@ -290,10 +252,13 @@ class DvrStreamController extends Controller
      * 1. PlaylistAuth username/password lookup
      * 2. Fallback: username = user's name, password = any playlist UUID owned by that user
      *
-     * Recordings must additionally be scoped to the resolved PlaylistAuth (Method 1) so one
-     * guest credential can't reach another guest's recordings just because they share an
-     * owning user — mirrors the playlist_auth_id scoping XtreamApiController applies to every
-     * other DVR query.
+     * The actual credential resolution is delegated to the shared
+     * `PlaylistCredentialResolver` service. This wrapper remains here
+     * because the DVR query then needs to additionally filter by the
+     * resolved PlaylistAuth (Method 1) so one guest credential cannot
+     * reach another guest's recordings just because they share an
+     * owning user (mirrors the playlist_auth_id scoping
+     * XtreamApiController applies to every other DVR query).
      *
      * @return array{0: ?User, 1: ?PlaylistAuth, 2: bool} The owning user, the resolved guest
      *                                                    credential (null for owner auth), and
@@ -302,30 +267,18 @@ class DvrStreamController extends Controller
     private function resolveUser(string $username, string $password): array
     {
         // Method 1: PlaylistAuth credentials
-        $playlistAuth = PlaylistAuth::where('username', $username)
-            ->where('password', $password)
-            ->where('enabled', true)
-            ->first();
+        $playlistAuth = $this->resolver->resolveAuth($username, $password);
 
-        if ($playlistAuth && ! $playlistAuth->isExpired()) {
+        if ($playlistAuth) {
             $playlist = $playlistAuth->getAssignedModel();
 
             return [$playlist?->user, $playlistAuth, true];
         }
 
         // Method 2: password = playlist UUID, username = owner's name
-        $playlistTypes = [Playlist::class, MergedPlaylist::class, CustomPlaylist::class, PlaylistAlias::class];
-
-        foreach ($playlistTypes as $type) {
-            try {
-                $playlist = $type::with('user')->where('uuid', $password)->firstOrFail();
-
-                if ($playlist->user && $playlist->user->name === $username) {
-                    return [$playlist->user, null, false];
-                }
-            } catch (ModelNotFoundException) {
-                // Try next type
-            }
+        $playlist = $this->resolver->resolveByUuid($password, $username);
+        if ($playlist) {
+            return [$playlist->user, null, false];
         }
 
         return [null, null, false];

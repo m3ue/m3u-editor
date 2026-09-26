@@ -66,6 +66,16 @@ Schedule::command('app:logo-cleanup --force')
 Schedule::command('queue:prune-failed --hours=48')
     ->daily();
 
+// Cached content cleanup: remove files whose channel/episode left its playlist
+// (playlists in "automatic" retention mode), then rows that never got a file.
+Schedule::command('cache:cleanup')
+    ->dailyAt('03:00')
+    ->withoutOverlapping();
+
+Schedule::command('cache:cleanup-orphans')
+    ->dailyAt('03:30')
+    ->withoutOverlapping();
+
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Facades\ProxyFacade;
+use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
@@ -428,77 +429,22 @@ class MediaServerProxyController extends Controller
             $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
             $contentType = $this->getContentTypeForContainer($extension);
 
-            // Handle range requests for video seeking
-            $start = 0;
-            $end = $fileSize - 1;
-            $statusCode = 200;
-
-            $headers = [
-                'Content-Type' => $contentType,
-                'Accept-Ranges' => 'bytes',
-                'Content-Disposition' => 'inline; filename="'.basename($filePath).'"',
-                'X-Content-Duration' => 'unknown',
-            ];
-
-            if ($request->hasHeader('Range')) {
-                $range = $request->header('Range');
-
-                if (preg_match('/bytes=(\d*)-(\d*)/', $range, $matches)) {
-                    $start = $matches[1] !== '' ? (int) $matches[1] : 0;
-                    $end = $matches[2] !== '' ? (int) $matches[2] : $fileSize - 1;
-
-                    // Validate range
-                    if ($start > $end || $start >= $fileSize) {
-                        return response('', 416, [
-                            'Content-Range' => "bytes */{$fileSize}",
-                        ]);
-                    }
-
-                    $end = min($end, $fileSize - 1);
-                    $statusCode = 206;
-                    $headers['Content-Range'] = "bytes {$start}-{$end}/{$fileSize}";
-                }
-            }
-
-            $length = $end - $start + 1;
-            $headers['Content-Length'] = $length;
-
             Log::debug('Streaming local media file', [
                 'integration_id' => $integration,
                 'file_path' => $filePath,
                 'file_size' => $fileSize,
                 'range' => $request->header('Range'),
-                'start' => $start,
-                'end' => $end,
-                'length' => $length,
             ]);
 
-            return new StreamedResponse(function () use ($filePath, $start, $end) {
-                $handle = fopen($filePath, 'rb');
-
-                if (! $handle) {
-                    return;
-                }
-
-                fseek($handle, $start);
-                $remaining = $end - $start + 1;
-                $bufferSize = 1024 * 1024; // 1MB chunks
-
-                while ($remaining > 0 && ! feof($handle) && connection_status() === CONNECTION_NORMAL) {
-                    $readSize = min($bufferSize, $remaining);
-                    $data = fread($handle, $readSize);
-
-                    if ($data === false) {
-                        break;
-                    }
-
-                    echo $data;
-                    flush();
-                    $remaining -= strlen($data);
-                }
-
-                fclose($handle);
-            }, $statusCode, $headers);
+            return StreamLocalFile::serve(
+                fullPath: $filePath,
+                fileSize: $fileSize,
+                mimeType: $contentType,
+                filename: basename($filePath),
+                range: $request->header('Range'),
+                extraHeaders: ['X-Content-Duration' => 'unknown'],
+                chunkSize: 1024 * 1024,
+            );
         } catch (\Exception $e) {
             Log::error('Exception in local media stream', [
                 'integration_id' => $integration,

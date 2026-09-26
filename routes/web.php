@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\BackupDownloadController;
+use App\Http\Controllers\CachedContentStreamController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\CustomPlaylistController;
 use App\Http\Controllers\DvrRecordingDownloadController;
@@ -181,6 +182,11 @@ Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class,
     ->name('dvr.recording.edl');
 Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');
+
+// Cached VOD/episode files. Auth matches the DVR route: owner name + playlist
+// UUID, or PlaylistAuth credentials.
+Route::get('/cached-content/{username}/{password}/{uuid}.{format?}', [CachedContentStreamController::class, 'stream'])
+    ->name('cached-content.stream');
 
 // Auth-aware HDHR routes (path-based auth to support clients that ignore query string auth)
 Route::get('/{uuid}/hdhr/{username}/{password}/device.xml', [PlaylistGenerateController::class, 'hdhr'])

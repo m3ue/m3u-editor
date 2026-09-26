@@ -29,6 +29,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\CachedContentDispatchService;
 use App\Services\DateFormatService;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
@@ -248,6 +249,19 @@ class VodResource extends Resource implements CopilotResource
                 ->label(__('Metadata'))
                 ->icon(fn ($record): string => $record->has_metadata ? 'heroicon-o-check-circle' : 'heroicon-o-minus')
                 ->color(fn ($record): string => $record->has_metadata ? 'success' : 'gray'),
+            IconColumn::make('is_cached')
+                ->label(__('Cached'))
+                ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+                ->getStateUsing(fn (Channel $record): bool => $record->isCached())
+                ->boolean()
+                ->trueIcon('heroicon-o-circle-stack')
+                ->falseIcon('heroicon-o-circle-stack')
+                ->trueColor('info')
+                ->falseColor('gray')
+                ->tooltip(fn (?bool $state): string => $state
+                    ? __('Cached file available. Playback will use the local cache.')
+                    : __('Not cached. Use "Cache Now" to download the file for offline playback.'))
+                ->toggleable(),
             ToggleColumn::make('probe_enabled')
                 ->label(__('Probe Enabled'))
                 ->disabled(fn (Channel $record): bool => (bool) $record->aio_integration_id)
@@ -510,6 +524,27 @@ class VodResource extends Resource implements CopilotResource
         ];
     }
 
+    public static function getCacheNowAction(): Action
+    {
+        return Action::make('cache_now')
+            ->label(__('Cache Now'))
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('info')
+            ->visible(function (Channel $record): bool {
+                $service = app(CachedContentDispatchService::class);
+
+                return $service->isEnabled() && $service->canCache($record);
+            })
+            ->requiresConfirmation()
+            ->modalHeading(__('Cache this VOD?'))
+            ->modalDescription(fn (Channel $record): string => __('Dispatch a background job to download ":title" to local storage for offline playback.', ['title' => $record->display_title]))
+            ->modalSubmitActionLabel(__('Cache now'))
+            ->action(function (Channel $record): void {
+                $result = app(CachedContentDispatchService::class)->dispatch($record);
+                CachedContentDispatchService::cacheNowNotification($record, $result)->send();
+            });
+    }
+
     public static function getTableActions(): array
     {
         return [
@@ -714,6 +749,7 @@ class VodResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-signal')
                     ->modalDescription(__('Probe this VOD with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
+                self::getCacheNowAction(),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this VOD channel? This action cannot be undone.'))

@@ -7,6 +7,7 @@ use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Jobs\UpdateXtreamStats;
+use App\Settings\GeneralSettings;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
@@ -97,11 +98,29 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
+        'share_cache_across_playlists' => 'boolean',
     ];
 
     public function getFolderPathAttribute(): string
     {
         return "playlist/{$this->uuid}";
+    }
+
+    /**
+     * Effective cache retention mode: this playlist's override when set,
+     * otherwise the global `general.cache_retention_mode` (default
+     * `automatic`). Values: automatic, never-expire, manual.
+     */
+    public function effectiveCacheRetentionMode(): string
+    {
+        $override = $this->cache_retention_mode;
+        if (is_string($override) && $override !== '') {
+            return $override;
+        }
+
+        $global = app(GeneralSettings::class)->cache_retention_mode ?? null;
+
+        return is_string($global) && $global !== '' ? $global : 'automatic';
     }
 
     public function getFilePathAttribute(): string

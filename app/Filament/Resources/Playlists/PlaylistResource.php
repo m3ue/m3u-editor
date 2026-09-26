@@ -9,6 +9,7 @@ use App\Filament\Actions\CronHelperAction;
 use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Actions\ModalActionGroup;
 use App\Filament\Actions\RegexTesterAction;
+use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Pages\EasyEditor;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
@@ -56,6 +57,7 @@ use App\Services\ProfileService;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Services\XtreamService;
+use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -3322,6 +3324,28 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->placeholder(__('e.g. Bearer abc123')),
                                 ]),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                ]),
+            Section::make(__('Cache'))
+                ->description(__('Options for cached VOD and episode downloads. Caching must be enabled in Settings > Cache.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->hidden(fn (): bool => ! (app(GeneralSettings::class)->enable_cache ?? false))
+                ->schema([
+                    Toggle::make('share_cache_across_playlists')
+                        ->label(__('Share cache across playlists'))
+                        ->inline(false)
+                        ->helperText(__('Let your other playlists play this playlist\'s cached files for the same movie or episode instead of downloading their own copy. Only affects playlists you own.'))
+                        ->default(fn (): bool => (bool) (app(GeneralSettings::class)->default_share_cache_across_playlists ?? false)),
+                    Select::make('cache_retention_mode')
+                        ->label(__('Cache retention mode'))
+                        ->options(ManageCacheSettings::cacheRetentionOptions())
+                        ->placeholder(fn (): string => __('Use global default (:mode)', [
+                            'mode' => ManageCacheSettings::cacheRetentionOptions()[app(GeneralSettings::class)->cache_retention_mode ?: 'automatic']
+                                ?? ManageCacheSettings::cacheRetentionOptions()['automatic'],
+                        ]))
+                        ->helperText(__('Overrides the global retention mode for this playlist. Leave empty to use the global setting.')),
                 ]),
             Section::make(__('EPG Output'))
                 ->description(__('EPG output options'))

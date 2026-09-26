@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
@@ -96,6 +97,62 @@ class Episode extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    /**
+     * TMDB/TVDB identity of this episode (the parent series' ids plus season
+     * and episode number), used to find a cached copy shared by another of
+     * the same user's playlists. Episodes without an external id get a
+     * per-episode key so they never match anything else.
+     */
+    public function cacheFingerprint(): string
+    {
+        $series = $this->series;
+        $seriesTmdb = ($series && $series->tmdb_id !== null) ? (string) $series->tmdb_id : null;
+        $seriesTvdb = ($series && $series->tvdb_id !== null) ? (string) $series->tvdb_id : null;
+        $episodeTmdb = $this->tmdb_id !== null ? (string) $this->tmdb_id : null;
+
+        $effectiveTmdb = $seriesTmdb ?? $episodeTmdb;
+        $hasExternalId = ($effectiveTmdb !== null && $effectiveTmdb !== '')
+            || ($seriesTvdb !== null && $seriesTvdb !== '');
+
+        return CachedContentFile::fingerprintFor([
+            'content_type' => 'episode',
+            'tmdb_id' => $effectiveTmdb,
+            'tvdb_id' => $seriesTvdb,
+            'season_number' => $this->season,
+            'episode_number' => $this->episode_num,
+            'local_key' => $hasExternalId ? null : 'ep'.$this->id,
+        ]);
+    }
+
+    /**
+     * The cached file downloaded for this episode, if any (any status).
+     */
+    public function cachedContentFile(): MorphOne
+    {
+        return $this->morphOne(CachedContentFile::class, 'cacheable');
+    }
+
+    /**
+     * Provider URL a cache download fetches (honors a custom URL override).
+     */
+    public function cacheSourceUrl(): string
+    {
+        return (string) $this->url;
+    }
+
+    /**
+     * Whether a Completed cached file can serve this episode: its own, or
+     * one shared by another of the same user's playlists.
+     */
+    public function isCached(): bool
+    {
+        if (! $this->playlist_id) {
+            return false;
+        }
+
+        return CachedContentFile::query()->servableFor($this)->exists();
     }
 
     /**

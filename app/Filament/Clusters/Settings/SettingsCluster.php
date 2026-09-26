@@ -6,6 +6,7 @@ use App\Filament\Clusters\Settings\Pages\ManageAlertSettings;
 use App\Filament\Clusters\Settings\Pages\ManageApiSettings;
 use App\Filament\Clusters\Settings\Pages\ManageAssetSettings;
 use App\Filament\Clusters\Settings\Pages\ManageBackupSettings;
+use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Clusters\Settings\Pages\ManageCopilotSettings;
 use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
@@ -49,6 +50,7 @@ class SettingsCluster extends Cluster
             ManageBackupSettings::class,
             ManageSmtpSettings::class,
             ManageApiSettings::class,
+            ManageCacheSettings::class,
             ManageIntegrationSettings::class,
             ManageCopilotSettings::class,
             ManageAlertSettings::class,

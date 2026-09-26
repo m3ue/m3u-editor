@@ -60,6 +60,13 @@ return [
             'throw' => false,
         ],
 
+        'cache' => [
+            'driver' => 'local',
+            'root' => env('CACHE_STORAGE_PATH', storage_path('app/private/cache')),
+            'serve' => false,
+            'throw' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

@@ -28,7 +28,7 @@ class ManageIntegrationSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'integrations';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 11;
 
     public static function getNavigationLabel(): string
     {

@@ -194,3 +194,59 @@ it('returns 403 for a disabled integration', function () {
 
     $response->assertForbidden();
 });
+
+// ── Range serving (shared StreamLocalFile helper) ─────────────────────────────
+
+function localRangeFixture(object $test): array
+{
+    $dir = $test->baseDir.'/movies';
+    File::ensureDirectoryExists($dir);
+    file_put_contents($dir.'/movie.mkv', '0123456789');
+
+    $integration = makeLocalIntegration($test->user->id, [
+        ['path' => $dir, 'type' => 'movies', 'name' => 'Movies'],
+    ]);
+
+    return [$integration, $dir.'/movie.mkv'];
+}
+
+it('streams the full file with the local media headers', function () {
+    [$integration, $file] = localRangeFixture($this);
+
+    $response = $this->get(streamUrl($integration->id, $file));
+
+    $response->assertOk()
+        ->assertHeader('Content-Length', '10')
+        ->assertHeader('Accept-Ranges', 'bytes')
+        ->assertHeader('X-Content-Duration', 'unknown');
+    expect($response->streamedContent())->toBe('0123456789');
+});
+
+it('serves a closed byte range as 206', function () {
+    [$integration, $file] = localRangeFixture($this);
+
+    $response = $this->get(streamUrl($integration->id, $file), ['Range' => 'bytes=2-5']);
+
+    $response->assertStatus(206)
+        ->assertHeader('Content-Range', 'bytes 2-5/10')
+        ->assertHeader('Content-Length', '4')
+        ->assertHeader('X-Content-Duration', 'unknown');
+    expect($response->streamedContent())->toBe('2345');
+});
+
+it('serves a suffix byte range from the end of the file', function () {
+    [$integration, $file] = localRangeFixture($this);
+
+    $response = $this->get(streamUrl($integration->id, $file), ['Range' => 'bytes=-3']);
+
+    $response->assertStatus(206)->assertHeader('Content-Range', 'bytes 7-9/10');
+    expect($response->streamedContent())->toBe('789');
+});
+
+it('returns 416 for a range past the end of the file', function () {
+    [$integration, $file] = localRangeFixture($this);
+
+    $this->get(streamUrl($integration->id, $file), ['Range' => 'bytes=20-30'])
+        ->assertStatus(416)
+        ->assertHeader('Content-Range', 'bytes */10');
+});
