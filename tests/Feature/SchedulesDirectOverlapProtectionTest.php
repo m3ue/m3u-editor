@@ -5,9 +5,14 @@ use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Http::preventStrayRequests();
+});
 
 it('routes SchedulesDirect EPG syncs onto the dedicated single-worker queue', function () {
     Queue::fake();

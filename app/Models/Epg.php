@@ -40,6 +40,7 @@ class Epg extends Model
         'sd_login_cooldown_until' => 'datetime',
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
+        'sd_lineup_ids' => 'array',
         'sd_errors' => 'array',
         'sd_days_to_import' => 'integer',
         'sd_metadata' => 'array',
@@ -173,7 +174,42 @@ class Epg extends Model
 
     public function hasSchedulesDirectLineup(): bool
     {
-        return ! empty($this->sd_lineup_id);
+        return $this->configuredSchedulesDirectLineupIds() !== [];
+    }
+
+    /**
+     * Return the configured SchedulesDirect lineups in deterministic selection order.
+     * Existing rows retain their legacy single-lineup configuration until a multi-lineup
+     * selection is explicitly saved.
+     *
+     * @return array<int, string>
+     */
+    public function configuredSchedulesDirectLineupIds(): array
+    {
+        $lineupIds = collect($this->sd_lineup_ids ?? [])
+            ->filter(fn (mixed $lineupId): bool => is_string($lineupId) && filled(trim($lineupId)))
+            ->map(fn (string $lineupId): string => trim($lineupId))
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($lineupIds !== []) {
+            return $lineupIds;
+        }
+
+        return filled($this->sd_lineup_id) ? [(string) $this->sd_lineup_id] : [];
+    }
+
+    /**
+     * Normalize a newly saved multi-lineup selection and maintain the legacy primary
+     * lineup field for callers that still need one lineup identifier.
+     */
+    public function synchronizeSchedulesDirectLineupIds(): void
+    {
+        $lineupIds = $this->configuredSchedulesDirectLineupIds();
+
+        $this->sd_lineup_ids = $lineupIds;
+        $this->sd_lineup_id = $lineupIds[0] ?? null;
     }
 
     public function isMerged(): bool
