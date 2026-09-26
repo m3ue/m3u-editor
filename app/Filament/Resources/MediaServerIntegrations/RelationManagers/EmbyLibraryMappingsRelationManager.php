@@ -540,7 +540,26 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                 CreateAction::make()
                     ->label(__('Publish to Emby'))
                     ->modalSubmitActionLabel(__('Publish to Emby'))
-                    ->using(fn (array $data): Model => $this->publish($data))
+                    ->using(function (array $data): Model {
+                        try {
+                            return $this->publish($data);
+                        } catch (ValidationException $exception) {
+                            $messages = $exception->errors();
+
+                            Notification::make()
+                                ->danger()
+                                ->title((string) collect($messages)->flatten()->first())
+                                ->send();
+
+                            throw ValidationException::withMessages(
+                                collect($messages)
+                                    ->mapWithKeys(fn (array $messages, string $field): array => [
+                                        "mountedActions.0.data.{$field}" => $messages,
+                                    ])
+                                    ->all(),
+                            );
+                        }
+                    })
                     ->slideOver(),
             ])
             ->recordActions([

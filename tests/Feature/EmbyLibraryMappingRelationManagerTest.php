@@ -841,6 +841,10 @@ it('keeps confirmed setup while rolling back mapping state when Emby rejects lib
         'sources' => ['vod:'.$group->id],
         'destination' => '__new__',
         'new_library_name' => 'Managed Movies',
+    ])->assertNotified();
+
+    expect($component->instance()->getErrorBag()->keys())->toBe([
+        'mountedActions.0.data.destination',
     ]);
 
     $errors = $component->instance()->getErrorBag()->all();
@@ -857,6 +861,8 @@ it('keeps confirmed setup while rolling back mapping state when Emby rejects lib
         ->emby_publisher_writable_paths->toBeNull()
         ->and($integration->getEmbyPublisherWritablePaths())
         ->toBe(['/config/plugins/m3u-editor/managed-publishing']);
+
+    $component->assertMountedActionModalSee('Publish to Emby');
 });
 
 it('creates an owned mapping from eligible unified source and destination choices', function () {
