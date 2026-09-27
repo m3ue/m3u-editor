@@ -353,7 +353,7 @@ it('keeps a disabled rule in dynamic_groups_config when the sync drops its stale
     (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
 
     expect(DynamicGroup::where('playlist_id', $this->playlist->id)->pluck('name')->all())->toBe(['Active'])
-        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toEqual($rules);
 });
 
 it('keeps every rule in dynamic_groups_config when the sync runs with TMDB unconfigured', function () {
@@ -366,7 +366,7 @@ it('keeps every rule in dynamic_groups_config when the sync runs with TMDB uncon
     (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
 
     expect(DynamicGroup::where('playlist_id', $this->playlist->id)->count())->toBe(0)
-        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toEqual($rules);
 });
 
 it('rolls back the delete when removing the rule from the playlist fails', function () {
@@ -386,5 +386,5 @@ it('rolls back the delete when removing the rule from the playlist fails', funct
     expect(fn () => $target->delete())->toThrow(RuntimeException::class, 'Playlist save failed');
 
     expect(DynamicGroup::find($target->id))->not->toBeNull()
-        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toEqual($rules);
 });
