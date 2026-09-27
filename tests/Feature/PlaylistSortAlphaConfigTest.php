@@ -63,6 +63,7 @@ it('offers only valid sort columns for each target', function (string $target, a
         'series_categories',
         [
             'release_date' => 'Release Date',
+            'recent_activity' => 'Most Recent Activity',
             'rating' => 'Rating',
         ],
     ],

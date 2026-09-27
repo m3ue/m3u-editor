@@ -281,6 +281,16 @@ return [
         'e9351da168bc',
         '887429bb5f5a',
         'bd47bbeb172a',
+        // Same helper renamed to bulkSortByExpression() and given an optional
+        // $joinSqlByDriver (plus bound $joinBindings) for the series "most recent
+        // activity" sort. The join SQL comes only from seriesRecentActivityExprs(),
+        // built from compile-time literals and a hardcoded $episodeScopeSql passed
+        // by SortService's own call sites; category/playlist ids and today's date
+        // are bound ? placeholders. The last hash is that sort's fallback-driver
+        // selectRaw(), which interpolates the same literal expression.
+        'e6ca20c46d15',
+        'ca85fe8662a8',
+        'aadeb861b896',
 
         // SortService natural-sort rewrite (issue #1369): same guarantees as the
         // original SortService entries above, just on new lines/hashes.

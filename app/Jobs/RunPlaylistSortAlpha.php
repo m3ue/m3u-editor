@@ -36,6 +36,7 @@ class RunPlaylistSortAlpha implements ShouldQueue
     private const SERIES_SORT_METHODS = [
         'release_date' => ['playlist' => 'bulkSortPlaylistSeriesByReleaseDate', 'scoped' => 'bulkSortCategorySeriesByReleaseDate'],
         'rating' => ['playlist' => 'bulkSortPlaylistSeriesByRating', 'scoped' => 'bulkSortCategorySeriesByRating'],
+        'recent_activity' => ['playlist' => 'bulkSortPlaylistSeriesByRecentActivity', 'scoped' => 'bulkSortCategorySeriesByRecentActivity'],
     ];
 
     /**

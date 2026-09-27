@@ -2,8 +2,8 @@
 
 namespace App\Filament\Resources\Series\Pages;
 
-use App\Facades\SortFacade;
 use App\Filament\Actions\RegexTesterAction;
+use App\Filament\Actions\SortSeriesByDateAction;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
@@ -254,44 +254,7 @@ class ListSeries extends ListRecords
                     ->modalDescription(__('Sync .strm files now? This will generate .strm files for enabled series.'))
                     ->modalSubmitActionLabel(__('Yes, sync now')),
 
-                Action::make('sort_release_date')
-                    ->label(__('Sort by Release Date'))
-                    ->icon('heroicon-o-calendar-days')
-                    ->schema([
-                        Select::make('playlist')
-                            ->label(__('Playlist'))
-                            ->required()
-                            ->helperText(__('Select the Playlist you would like to sort Series by release date for.'))
-                            ->options(Playlist::where(['user_id' => auth()->id()])->get(['name', 'id'])->pluck('name', 'id'))
-                            ->searchable(),
-                        Select::make('sort')
-                            ->label(__('Sort Order'))
-                            ->options([
-                                'DESC' => 'Newest first (2026 to 1950)',
-                                'ASC' => 'Oldest first (1950 to 2026)',
-                            ])
-                            ->default('DESC')
-                            ->required(),
-                    ])
-                    ->action(function (array $data): void {
-                        $playlist = Playlist::find($data['playlist'] ?? null);
-                        if (! $playlist) {
-                            return;
-                        }
-                        SortFacade::bulkSortPlaylistSeriesByReleaseDate($playlist, $data['sort'] ?? 'DESC');
-                    })
-                    ->after(function () {
-                        Notification::make()
-                            ->success()
-                            ->title(__('Series Sorted by Release Date'))
-                            ->body(__('Series have been sorted by release date across the playlist.'))
-                            ->send();
-                    })
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-calendar-days')
-                    ->modalIcon('heroicon-o-calendar-days')
-                    ->modalDescription(__('Sort all Series in the selected playlist by release date? This will update the sort order within each category.'))
-                    ->modalSubmitActionLabel(__('Yes, sort now')),
+                SortSeriesByDateAction::forPlaylist(),
 
                 Action::make('find-replace')
                     ->label(__('Find & Replace'))

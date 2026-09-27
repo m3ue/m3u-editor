@@ -2829,6 +2829,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     return match ($get('target')) {
                                         'series_categories' => [
                                             'release_date' => 'Release Date',
+                                            'recent_activity' => __('Most Recent Activity'),
                                             'rating' => __('Rating'),
                                         ],
                                         'vod_groups' => [
@@ -2842,7 +2843,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->live()
                                 ->default('title')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', in_array(($state ?? ''), ['release_date', 'rating'], true) ? 'DESC' : 'ASC'))
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', in_array(($state ?? ''), ['release_date', 'recent_activity', 'rating'], true) ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))
