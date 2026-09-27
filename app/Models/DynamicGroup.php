@@ -51,6 +51,13 @@ class DynamicGroup extends Model
         'last_synced_at' => 'datetime',
     ];
 
+    protected static function booted(): void
+    {
+        static::deleted(function (DynamicGroup $group): void {
+            $group->removeRuleFromPlaylistConfig();
+        });
+    }
+
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
@@ -146,5 +153,53 @@ class DynamicGroup extends Model
     {
         return collect($config ?? [])
             ->contains(fn (array $rule): bool => (bool) ($rule['enabled'] ?? false));
+    }
+
+    /**
+     * Strip every rule in the owning playlist's `dynamic_groups_config` whose
+     * (type, source, trim(name)) triple matches this row, then persist
+     * quietly. Called from the model's `deleted` hook so the three Filament
+     * delete surfaces (VOD / Series listing DeleteActions, View page
+     * DeleteAction) — and any future bulk delete — stay in lockstep with
+     * SyncDynamicGroups, which keys rows to rules by that exact triple and
+     * would otherwise recreate the deleted row on the next sync.
+     *
+     * `saveQuietly()` is intentional: Playlist::updated in AppServiceProvider
+     * dispatches PlaylistUpdated, which fans out the user's "updated"
+     * post-processes (webhooks/scripts) and re-syncs the primary profile.
+     * Deleting a derived group is not a playlist edit and must not trigger
+     * either side effect.
+     */
+    public function removeRuleFromPlaylistConfig(): void
+    {
+        $playlist = $this->playlist;
+        if ($playlist === null) {
+            return;
+        }
+
+        $config = $playlist->dynamic_groups_config;
+        if ($config === null) {
+            return;
+        }
+
+        $rowType = (string) $this->type;
+        $rowSource = (string) $this->source;
+        $rowName = trim((string) $this->name);
+
+        $filtered = array_values(array_filter(
+            $config,
+            fn (array $rule): bool => ! (
+                (string) ($rule['type'] ?? '') === $rowType
+                && (string) ($rule['source'] ?? '') === $rowSource
+                && trim((string) ($rule['name'] ?? '')) === $rowName
+            ),
+        ));
+
+        if (count($filtered) === count($config)) {
+            return;
+        }
+
+        $playlist->dynamic_groups_config = $filtered;
+        $playlist->saveQuietly();
     }
 }
