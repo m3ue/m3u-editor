@@ -51,13 +51,13 @@ it('ranks a series with a newer episode ahead of a series that premiered more re
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'DESC');
 
-    expect($seriesB->refresh()->sort)->toBe(1)
-        ->and($seriesA->refresh()->sort)->toBe(2);
+    expect((int) $seriesB->refresh()->sort)->toBe(1)
+        ->and((int) $seriesA->refresh()->sort)->toBe(2);
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'ASC');
 
-    expect($seriesA->refresh()->sort)->toBe(1)
-        ->and($seriesB->refresh()->sort)->toBe(2);
+    expect((int) $seriesA->refresh()->sort)->toBe(1)
+        ->and((int) $seriesB->refresh()->sort)->toBe(2);
 });
 
 it('reads TMDB and AIOStreams episode air dates, ignoring unaired episodes', function () {
@@ -71,9 +71,9 @@ it('reads TMDB and AIOStreams episode air dates, ignoring unaired episodes', fun
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'DESC');
 
-    expect($aio->refresh()->sort)->toBe(1)
-        ->and($tmdb->refresh()->sort)->toBe(2)
-        ->and($upcoming->refresh()->sort)->toBe(3);
+    expect((int) $aio->refresh()->sort)->toBe(1)
+        ->and((int) $tmdb->refresh()->sort)->toBe(2)
+        ->and((int) $upcoming->refresh()->sort)->toBe(3);
 });
 
 it('falls back to the series release date and sinks undated series in both directions', function () {
@@ -85,15 +85,15 @@ it('falls back to the series release date and sinks undated series in both direc
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'DESC');
 
-    expect($withEpisode->refresh()->sort)->toBe(1)
-        ->and($releaseDateOnly->refresh()->sort)->toBe(2)
-        ->and($undated->refresh()->sort)->toBe(3);
+    expect((int) $withEpisode->refresh()->sort)->toBe(1)
+        ->and((int) $releaseDateOnly->refresh()->sort)->toBe(2)
+        ->and((int) $undated->refresh()->sort)->toBe(3);
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'ASC');
 
-    expect($releaseDateOnly->refresh()->sort)->toBe(1)
-        ->and($withEpisode->refresh()->sort)->toBe(2)
-        ->and($undated->refresh()->sort)->toBe(3);
+    expect((int) $releaseDateOnly->refresh()->sort)->toBe(1)
+        ->and((int) $withEpisode->refresh()->sort)->toBe(2)
+        ->and((int) $undated->refresh()->sort)->toBe(3);
 });
 
 it('only re-sorts series in the given category', function () {
@@ -106,9 +106,9 @@ it('only re-sorts series in the given category', function () {
 
     $this->service->bulkSortCategorySeriesByRecentActivity($this->category, 'DESC');
 
-    expect($new->refresh()->sort)->toBe(1)
-        ->and($old->refresh()->sort)->toBe(2)
-        ->and($untouched->refresh()->sort)->toBe(99);
+    expect((int) $new->refresh()->sort)->toBe(1)
+        ->and((int) $old->refresh()->sort)->toBe(2)
+        ->and((int) $untouched->refresh()->sort)->toBe(99);
 });
 
 it('runs recent activity rules from the playlist sort config', function () {
@@ -122,8 +122,8 @@ it('runs recent activity rules from the playlist sort config', function () {
 
     (new RunPlaylistSortAlpha($this->playlist->refresh()))->handle();
 
-    expect($new->refresh()->sort)->toBe(1)
-        ->and($old->refresh()->sort)->toBe(2);
+    expect((int) $new->refresh()->sort)->toBe(1)
+        ->and((int) $old->refresh()->sort)->toBe(2);
 });
 
 it('sorts categories by recent activity via the bulk action', function () {
@@ -137,8 +137,8 @@ it('sorts categories by recent activity via the bulk action', function () {
         ->assertHasNoTableBulkActionErrors()
         ->assertNotified('Series Sorted by Most Recent Activity');
 
-    expect($new->refresh()->sort)->toBe(1)
-        ->and($old->refresh()->sort)->toBe(2);
+    expect((int) $new->refresh()->sort)->toBe(1)
+        ->and((int) $old->refresh()->sort)->toBe(2);
 });
 
 it('sorts a playlist by recent activity via the Series list header action', function () {
@@ -151,8 +151,8 @@ it('sorts a playlist by recent activity via the Series list header action', func
         ->assertHasNoActionErrors()
         ->assertNotified('Series Sorted by Most Recent Activity');
 
-    expect($new->refresh()->sort)->toBe(1)
-        ->and($old->refresh()->sort)->toBe(2);
+    expect((int) $new->refresh()->sort)->toBe(1)
+        ->and((int) $old->refresh()->sort)->toBe(2);
 });
 
 it('keeps release date as the default sort method on the Series list header action', function () {
@@ -165,6 +165,6 @@ it('keeps release date as the default sort method on the Series list header acti
         ->assertHasNoActionErrors()
         ->assertNotified('Series Sorted by Release Date');
 
-    expect($newer->refresh()->sort)->toBe(1)
-        ->and($older->refresh()->sort)->toBe(2);
+    expect((int) $newer->refresh()->sort)->toBe(1)
+        ->and((int) $older->refresh()->sort)->toBe(2);
 });
