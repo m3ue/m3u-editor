@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Per-playlist virtual group computed from TMDB list endpoints.
@@ -156,13 +157,57 @@ class DynamicGroup extends Model
     }
 
     /**
-     * Strip every rule in the owning playlist's `dynamic_groups_config` whose
-     * (type, source, trim(name)) triple matches this row, then persist
-     * quietly. Called from the model's `deleted` hook so the three Filament
-     * delete surfaces (VOD / Series listing DeleteActions, View page
-     * DeleteAction) — and any future bulk delete — stay in lockstep with
-     * SyncDynamicGroups, which keys rows to rules by that exact triple and
+     * Normalized (type, source, name) identity for a `dynamic_groups_config`
+     * rule. SyncDynamicGroups keys DynamicGroup rows to rules by this triple,
+     * so any code matching a row back to its rule must use the same
+     * normalization or the two drift apart (a deleted group would then be
+     * recreated on the next sync, see issue #1550).
+     *
+     * @param  array<string, mixed>  $rule
+     * @return array{type: string, source: string, name: string}
+     */
+    public static function ruleIdentity(array $rule): array
+    {
+        return [
+            'type' => (string) ($rule['type'] ?? ''),
+            'source' => (string) ($rule['source'] ?? ''),
+            'name' => trim((string) ($rule['name'] ?? '')),
+        ];
+    }
+
+    /**
+     * Whether a `dynamic_groups_config` rule is the one this row was
+     * materialized from.
+     *
+     * @param  array<string, mixed>  $rule
+     */
+    public function matchesRule(array $rule): bool
+    {
+        return self::ruleIdentity($rule) === self::ruleIdentity($this->only(['type', 'source', 'name']));
+    }
+
+    /**
+     * Wrap the delete in a transaction so the row delete and the
+     * `deleted` hook's rule removal commit together. Without it, a failed
+     * playlist save would leave the rule behind and the next sync would
+     * recreate the group.
+     */
+    public function delete(): ?bool
+    {
+        return DB::transaction(fn (): ?bool => parent::delete());
+    }
+
+    /**
+     * Strip every rule in the owning playlist's `dynamic_groups_config` that
+     * matches this row (see ruleIdentity()), then persist quietly. Called
+     * from the model's `deleted` hook so the three Filament delete surfaces
+     * (VOD / Series listing DeleteActions, View page DeleteAction) and any
+     * future bulk delete stay in lockstep with SyncDynamicGroups, which
      * would otherwise recreate the deleted row on the next sync.
+     *
+     * Only model-level deletes reach this hook. SyncDynamicGroups' stale-row
+     * cleanup deliberately uses a query-builder delete so that disabling a
+     * rule (or syncing while TMDB is unconfigured) never strips rules here.
      *
      * `saveQuietly()` is intentional: Playlist::updated in AppServiceProvider
      * dispatches PlaylistUpdated, which fans out the user's "updated"
@@ -182,17 +227,9 @@ class DynamicGroup extends Model
             return;
         }
 
-        $rowType = (string) $this->type;
-        $rowSource = (string) $this->source;
-        $rowName = trim((string) $this->name);
-
         $filtered = array_values(array_filter(
             $config,
-            fn (array $rule): bool => ! (
-                (string) ($rule['type'] ?? '') === $rowType
-                && (string) ($rule['source'] ?? '') === $rowSource
-                && trim((string) ($rule['name'] ?? '')) === $rowName
-            ),
+            fn (array $rule): bool => ! $this->matchesRule($rule),
         ));
 
         if (count($filtered) === count($config)) {

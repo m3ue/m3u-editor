@@ -55,8 +55,8 @@ function seedConfigAndRowsForIssue1550Test($t): array
     //   [0] 'Keep First'  (vod / trending)
     //   [1] 'Target'      (vod / trending) ← the row we'll delete
     //   [2] '  Target  '  (vod / trending, name with surrounding whitespace)
-    //   [3] 'Target'      (series / trending, same name, different type — must survive)
-    //   [4] 'Target'      (vod / popular,   same name, different source — must survive)
+    //   [3] 'Target'      (series / trending, same name, different type - must survive)
+    //   [4] 'Target'      (vod / popular,   same name, different source - must survive)
     //   [5] 'Keep Last'   (vod / trending)
     $rules = [
         ['enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Keep First', 'tmdb_params' => []],
@@ -69,7 +69,7 @@ function seedConfigAndRowsForIssue1550Test($t): array
 
     $t->playlist->updateQuietly(['dynamic_groups_config' => $rules]);
 
-    // Materialize the target row — the one whose triple (vod, trending,
+    // Materialize the target row - the one whose triple (vod, trending,
     // trim('Target')) matches rule [1]. Also materialize a couple of
     // survivors so the listing pages have something to render alongside.
     $target = DynamicGroup::create([
@@ -113,14 +113,14 @@ it('removes the matching rule from dynamic_groups_config when deleted via the VO
     $names = array_column($config, 'name');
 
     // The rule whose triple (vod, trending, Target) matches the deleted
-    // row is gone — and so is the whitespace variant, because the match
+    // row is gone - and so is the whitespace variant, because the match
     // uses trim() on both sides (mirrors SyncDynamicGroups::runSync()).
     expect(array_filter($config, fn (array $r): bool => trim((string) $r['name']) === 'Target' && $r['type'] === 'vod' && $r['source'] === 'trending'))->toBeEmpty()
         ->and($names)->not->toContain('  Target  ');
 
     // Survivors remain in their original order (no reindex/reorder
     // regression) and the same-name but different-type / different-source
-    // rules are preserved — the match is by full triple.
+    // rules are preserved - the match is by full triple.
     expect($names)->toContain('Keep First')
         ->and($names)->toContain('Keep Last');
 
@@ -204,7 +204,7 @@ it('does not recreate the deleted DynamicGroup when SyncDynamicGroups runs after
 
     // Configure a real TmdbService binding for the sync (the SyncDynamicGroups
     // job uses app(TmdbService::class) directly, not the Mockery mock we
-    // installed in beforeEach — install a fully working TmdbService whose
+    // installed in beforeEach - install a fully working TmdbService whose
     // HTTP calls are faked here).
     $settings = new GeneralSettings;
     $settings->tmdb_api_key = 'fake-api-key';
@@ -225,7 +225,7 @@ it('does not recreate the deleted DynamicGroup when SyncDynamicGroups runs after
         ], 200),
     ]);
 
-    // Delete via the VOD listing DeleteAction (any surface would do — the
+    // Delete via the VOD listing DeleteAction (any surface would do - the
     // point is the model hook should fire).
     Livewire::test(ListVodDynamicGroups::class)
         ->callTableAction('delete', $target);
@@ -240,7 +240,7 @@ it('does not recreate the deleted DynamicGroup when SyncDynamicGroups runs after
     // The deleted row must NOT come back. The two 'Keep *' rows are still
     // there because their rules survived. Same-name but different-type /
     // different-source rules also survive (their rows weren't deleted in
-    // the first place — only the (vod, trending, Target) row was).
+    // the first place - only the (vod, trending, Target) row was).
     $remaining = DynamicGroup::where('playlist_id', $this->playlist->id)->get();
     expect($remaining->where('name', 'Target')->where('type', 'vod')->where('source', 'trending'))->toBeEmpty()
         ->and($remaining->pluck('name')->all())->toContain('Keep First')
@@ -250,7 +250,7 @@ it('does not recreate the deleted DynamicGroup when SyncDynamicGroups runs after
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PlaylistUpdated must not fire on DynamicGroup delete — that's the whole
+// PlaylistUpdated must not fire on DynamicGroup delete - that's the whole
 // point of saveQuietly(). If it did fire, the user's "updated"
 // post-processes (webhooks / scripts) and primary-profile sync would run.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -301,7 +301,7 @@ it('removeRuleFromPlaylistConfig is a no-op when the playlist has no dynamic_gro
 });
 
 it('removeRuleFromPlaylistConfig does not write when no rule matched (no config churn)', function () {
-    // Config has a rule with a different name — nothing should be removed,
+    // Config has a rule with a different name - nothing should be removed,
     // and the playlist's updated_at must not bump.
     $this->playlist->updateQuietly([
         'dynamic_groups_config' => [
@@ -326,4 +326,65 @@ it('removeRuleFromPlaylistConfig does not write when no rule matched (no config 
     expect($playlist->dynamic_groups_config)->toHaveCount(1)
         ->and($playlist->dynamic_groups_config[0]['name'])->toBe('Unrelated')
         ->and($playlist->updated_at->eq($beforeUpdatedAt))->toBeTrue();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SyncDynamicGroups' stale-row cleanup must never strip rules. Only
+// user-initiated (model-level) deletes should touch dynamic_groups_config.
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('keeps a disabled rule in dynamic_groups_config when the sync drops its stale row', function () {
+    $rules = [
+        ['enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Active', 'tmdb_params' => []],
+        ['enabled' => false, 'type' => 'vod', 'source' => 'trending', 'name' => 'Paused', 'tmdb_params' => []],
+    ];
+    $this->playlist->updateQuietly(['dynamic_groups_config' => $rules]);
+
+    foreach (['Active', 'Paused'] as $name) {
+        DynamicGroup::create([
+            'playlist_id' => $this->playlist->id,
+            'user_id' => $this->user->id,
+            'type' => 'vod',
+            'source' => 'trending',
+            'name' => $name,
+        ]);
+    }
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    expect(DynamicGroup::where('playlist_id', $this->playlist->id)->pluck('name')->all())->toBe(['Active'])
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
+});
+
+it('keeps every rule in dynamic_groups_config when the sync runs with TMDB unconfigured', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(false);
+    app()->instance(TmdbService::class, $tmdb);
+
+    ['rules' => $rules] = seedConfigAndRowsForIssue1550Test($this);
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    expect(DynamicGroup::where('playlist_id', $this->playlist->id)->count())->toBe(0)
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
+});
+
+it('rolls back the delete when removing the rule from the playlist fails', function () {
+    ['target' => $target, 'rules' => $rules] = seedConfigAndRowsForIssue1550Test($this);
+
+    $failingPlaylist = new class extends Playlist
+    {
+        public function saveQuietly(array $options = []): bool
+        {
+            throw new RuntimeException('Playlist save failed');
+        }
+    };
+    $failingPlaylist->setRawAttributes($this->playlist->fresh()->getAttributes(), true);
+    $failingPlaylist->exists = true;
+    $target->setRelation('playlist', $failingPlaylist);
+
+    expect(fn () => $target->delete())->toThrow(RuntimeException::class, 'Playlist save failed');
+
+    expect(DynamicGroup::find($target->id))->not->toBeNull()
+        ->and($this->playlist->fresh()->dynamic_groups_config)->toBe($rules);
 });

@@ -103,9 +103,7 @@ class SyncDynamicGroups implements ShouldQueue
 
         if ($tmdb->isConfigured() && $rules->isNotEmpty()) {
             foreach ($rules as $index => $rule) {
-                $type = (string) ($rule['type'] ?? '');
-                $source = (string) ($rule['source'] ?? '');
-                $name = trim((string) ($rule['name'] ?? ''));
+                ['type' => $type, 'source' => $source, 'name' => $name] = DynamicGroup::ruleIdentity($rule);
                 $params = (array) ($rule['tmdb_params'] ?? []);
 
                 if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
@@ -139,6 +137,10 @@ class SyncDynamicGroups implements ShouldQueue
             ->map(fn (DynamicGroup $dg): int => (int) $dg->id)
             ->all();
 
+        // Must stay a query-builder delete: DynamicGroup's `deleted` model
+        // hook strips the matching rule from dynamic_groups_config, which is
+        // only correct for user-initiated deletes. Firing it here would wipe
+        // disabled rules, or every rule when TMDB is unconfigured.
         if ($staleIds !== []) {
             DynamicGroup::whereIn('id', $staleIds)->delete();
         }
