@@ -19,6 +19,7 @@ trait DoesNotSupportLibraryCreation
         array $paths,
         bool $refreshLibrary = true,
         ?string $libraryId = null,
+        bool $createIfMissing = true,
     ): array {
         return [
             'success' => false,

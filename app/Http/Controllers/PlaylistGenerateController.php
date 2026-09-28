@@ -30,6 +30,11 @@ class PlaylistGenerateController extends Controller
             return $this->generateNetworkPlaylist($request, $playlist);
         }
 
+        // Ensure M3U output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->m3u_enabled)) {
+            return $response;
+        }
+
         switch (class_basename($playlist)) {
             case 'Playlist':
                 $type = 'standard';
@@ -415,6 +420,11 @@ class PlaylistGenerateController extends Controller
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 
+        // Ensure HDHR output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->hdhr_enabled)) {
+            return $response;
+        }
+
         // Setup the HDHR device info (pass through optional path auth)
         $deviceInfo = $this->getDeviceInfo($request, $playlist, $username, $password);
         // Ensure XML special characters are escaped (e.g., '&' -> '&amp;') to avoid parser errors
@@ -438,6 +448,11 @@ class PlaylistGenerateController extends Controller
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         if (! $playlist) {
             return response()->json(['Error' => 'Playlist Not Found'], 404);
+        }
+
+        // Ensure HDHR output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->hdhr_enabled)) {
+            return $response;
         }
 
         // Check auth (prefer path-based auth if present)
@@ -486,6 +501,11 @@ class PlaylistGenerateController extends Controller
             return response()->json(['Error' => 'Playlist Not Found'], 404);
         }
 
+        // Ensure HDHR output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->hdhr_enabled)) {
+            return $response;
+        }
+
         // Return the HDHR device info (pass through optional path auth)
         return $this->getDeviceInfo($request, $playlist, $username, $password);
     }
@@ -496,6 +516,11 @@ class PlaylistGenerateController extends Controller
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         if (! $playlist) {
             return response()->json(['Error' => 'Playlist Not Found'], 404);
+        }
+
+        // Ensure HDHR output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->hdhr_enabled)) {
+            return $response;
         }
 
         // Build the channel query
@@ -663,6 +688,15 @@ class PlaylistGenerateController extends Controller
             'Source' => 'Cable',
             'SourceList' => ['Cable'],
         ]);
+    }
+
+    private function outputDisabledResponse(bool $outputEnabled)
+    {
+        if ($outputEnabled) {
+            return null;
+        }
+
+        return response()->json(['Error' => 'Output disabled'], 403);
     }
 
     private function getDeviceInfo(Request $request, $playlist, ?string $username = null, ?string $password = null)

@@ -3,39 +3,27 @@
 @php($hdhrUrl = $urls['hdhr'])
 @php($publicUrl = url('/playlist/v/' . $this->record->uuid))
 <div class="space-y-6">
-    <div>
-        <span class="text-sm leading-6 font-medium text-gray-950 dark:text-white"> M3U URL </span>
-        <div class="flex items-center justify-start gap-2">
-            <x-filament::input.wrapper>
-                <x-slot name="prefix">
-                    <x-copy-to-clipboard :text="$m3uUrl" />
-                </x-slot>
-                <x-filament::input type="text" :value="$m3uUrl" readonly />
-                <x-slot name="suffix">.m3u</x-slot>
-            </x-filament::input.wrapper>
-            <x-qr-modal :title="$this->record->name" body="M3U URL" :text="$m3uUrl" />
-        </div>
-        <div class="fi-fo-field-wrp-helper-text mt-1 text-sm break-words text-gray-500">
-            Access playlist in M3U format.
-        </div>
-    </div>
+    <x-output-url-field
+        label="M3U URL"
+        :enabled="$this->record->m3u_enabled"
+        :url="$m3uUrl"
+        suffix=".m3u"
+        qr-body="M3U URL"
+        :record-name="$this->record->name"
+        description="Access playlist in M3U format."
+        :disabled-description="__('M3U output is disabled for this playlist. Enable it in the playlist settings to generate a URL.')"
+    />
 
-    <div>
-        <span class="text-sm leading-6 font-medium text-gray-950 dark:text-white"> HDHR URL </span>
-        <div class="flex items-center justify-start gap-2">
-            <x-filament::input.wrapper>
-                <x-slot name="prefix">
-                    <x-copy-to-clipboard :text="$hdhrUrl" />
-                </x-slot>
-                <x-filament::input type="text" :value="$hdhrUrl" readonly />
-                <x-slot name="suffix">hdhr</x-slot>
-            </x-filament::input.wrapper>
-            <x-qr-modal :title="$this->record->name" body="HDHR URL" :text="$hdhrUrl" />
-        </div>
-        <div class="fi-fo-field-wrp-helper-text mt-1 text-sm break-words text-gray-500">
-            Access playlist in HDHR format, for players like Plex and Jellyfin.
-        </div>
-    </div>
+    <x-output-url-field
+        label="HDHR URL"
+        :enabled="$this->record->hdhr_enabled"
+        :url="$hdhrUrl"
+        suffix="hdhr"
+        qr-body="HDHR URL"
+        :record-name="$this->record->name"
+        description="Access playlist in HDHR format, for players like Plex and Jellyfin."
+        :disabled-description="__('HDHR output is disabled for this playlist. Enable it in the playlist settings to generate a URL.')"
+    />
 
     <div>
         <span class="text-sm leading-6 font-medium text-gray-950 dark:text-white"> Public URL </span>

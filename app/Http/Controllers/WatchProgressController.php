@@ -101,6 +101,12 @@ class WatchProgressController extends Controller
             $completed = $positionSeconds >= ($durationSeconds * 0.9);
         }
 
+        // Only set tmdb_id when it resolves - a transient lookup miss should never
+        // clobber a previously-recorded value on a later position update for the
+        // same stream_id, since that value is what lets us re-link this row if the
+        // stream_id itself goes stale later (e.g. a media-server library flush).
+        $tmdbId = $this->resolveTmdbId($contentType, $streamId);
+
         $progress = ViewerWatchProgress::updateOrCreate(
             [
                 'playlist_viewer_id' => $viewer->id,
@@ -110,6 +116,7 @@ class WatchProgressController extends Controller
             [
                 'series_id' => $seriesId,
                 'season_number' => $seasonNumber,
+                ...($tmdbId !== null ? ['tmdb_id' => $tmdbId] : []),
                 'position_seconds' => $positionSeconds,
                 'duration_seconds' => $durationSeconds,
                 'completed' => $completed,
@@ -316,6 +323,20 @@ class WatchProgressController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the TMDB id for the content currently being recorded, so it can be
+     * stored alongside the progress row and used to re-link that row if stream_id
+     * ever goes stale (e.g. after a media-server library flush regenerates ids).
+     */
+    private function resolveTmdbId(string $contentType, int $streamId): ?int
+    {
+        return match ($contentType) {
+            'vod' => Channel::find($streamId)?->getTmdbId(),
+            'episode' => Episode::where('id', $streamId)->value('tmdb_id'),
+            default => null,
+        };
     }
 
     private function resolvePlaylistFromContent(string $contentType, int $streamId): ?Playlist

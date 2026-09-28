@@ -192,16 +192,19 @@ class AedExtractorService
 
             $startTime->setTimezone($outputTimezone);
 
-            // If no year was in the date format, snap to the nearest upcoming occurrence.
-            // Compare calendar dates in the output timezone (not a sliding instant buffer):
-            // only roll the year forward once the event's output-timezone date has fully
-            // passed today's output-timezone date. A fixed-hour buffer would treat two
-            // events on the same source date inconsistently depending on time of day.
+            // If no year was in the date format, snap to the nearest occurrence (last year,
+            // this year or next year). A finished event whose title the provider hasn't
+            // updated stays in the past instead of jumping a full year ahead, while a date
+            // across New Year (e.g. "01.02" seen on Dec 30) still lands in the next year.
+            // Compare calendar dates in the output timezone (not instants) so two events on
+            // the same source date are always treated the same regardless of time of day.
             if (! $dateString || ! str_contains($profile->date_format ?? '', 'Y')) {
                 $today = Carbon::now($outputTimezone)->startOfDay();
-                if ($startTime->lt($today)) {
-                    $startTime->addYear();
-                }
+                $startTime = collect([
+                    $startTime->copy()->subYear(),
+                    $startTime,
+                    $startTime->copy()->addYear(),
+                ])->sortBy(fn (Carbon $candidate): float => abs($today->diffInDays($candidate->copy()->startOfDay())))->first();
             }
 
             return $startTime;

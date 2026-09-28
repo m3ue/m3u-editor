@@ -33,7 +33,7 @@ class ManageCopilotSettings extends BaseSettingsPage
 
     protected static ?string $slug = 'ai-copilot';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?int $navigationSort = 12;
 
     public static function getNavigationLabel(): string
     {

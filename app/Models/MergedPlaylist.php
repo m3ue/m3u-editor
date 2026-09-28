@@ -44,6 +44,10 @@ class MergedPlaylist extends Model
         'id_channel_by' => PlaylistChannelId::class,
         'disable_m3u_xtream_format' => 'boolean',
         'aiostreams_integration_id' => 'integer',
+        'hdhr_enabled' => 'boolean',
+        'm3u_enabled' => 'boolean',
+        'xapi_enabled' => 'boolean',
+        'xmltv_enabled' => 'boolean',
     ];
 
     public function user(): BelongsTo

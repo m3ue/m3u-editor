@@ -1040,6 +1040,8 @@ class AppServiceProvider extends ServiceProvider
                     'epg/',
                     'user/',
                     'channel/',
+                    'recordings',
+                    'series-rules',
                     'proxy/',
                     'group/',
                     'player_api.php',

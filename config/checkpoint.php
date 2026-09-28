@@ -268,6 +268,29 @@ return [
         '361a8a8465de',
         '53e3187b2a5f',
         'a215f7e698e0',
+        // SortService bulkSortByRatingExpression(): shared helper used by all four
+        // bulkSort{GroupChannels,CategorySeries,PlaylistVod,PlaylistSeries}ByRating
+        // methods (consolidated from separate near-duplicate methods, same guarantees
+        // as the release-date methods above). $table/$whereSql are hardcoded string
+        // literals passed only by SortService's own call sites, never user input;
+        // $isNullExprByDriver/$valueExprByDriver are compile-time SQL literals keyed
+        // by the PDO driver name; $direction is ternary-validated to 'ASC'|'DESC';
+        // group/category/playlist ids are passed as bound ? placeholders.
+        '17d06f104bc5',
+        '03d5bc0d50c7',
+        'e9351da168bc',
+        '887429bb5f5a',
+        'bd47bbeb172a',
+        // Same helper renamed to bulkSortByExpression() and given an optional
+        // $joinSqlByDriver (plus bound $joinBindings) for the series "most recent
+        // activity" sort. The join SQL comes only from seriesRecentActivityExprs(),
+        // built from compile-time literals and a hardcoded $episodeScopeSql passed
+        // by SortService's own call sites; category/playlist ids and today's date
+        // are bound ? placeholders. The last hash is that sort's fallback-driver
+        // selectRaw(), which interpolates the same literal expression.
+        'e6ca20c46d15',
+        'ca85fe8662a8',
+        '47a7230258a5',
 
         // SortService natural-sort rewrite (issue #1369): same guarantees as the
         // original SortService entries above, just on new lines/hashes.

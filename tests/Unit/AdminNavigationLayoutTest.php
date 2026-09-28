@@ -43,6 +43,15 @@ it('builds a canonical snapshot matching the schema order with nothing hidden', 
         ->and($snapshot['items']['playlist']['hidden'])->toBe([]);
 });
 
+it('places Dynamic Groups after VOD Groups and Categories in the canonical navigation', function () {
+    $schema = AdminNavigationSchema::groups(defaultPanelSettings());
+
+    expect(array_keys($schema['vod_channels']['items']))
+        ->toBe(['vod_groups', 'vod_dynamic_groups', 'vods'])
+        ->and(array_keys($schema['series']['items']))
+        ->toBe(['categories', 'series_dynamic_groups', 'series']);
+});
+
 it('builds the shipped simplified default from the schema, keyed by every group', function () {
     $simplified = AdminNavigationLayout::simplifiedDefault(defaultPanelSettings());
     $schema = AdminNavigationSchema::groups(defaultPanelSettings());

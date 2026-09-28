@@ -2,12 +2,14 @@
 
 use App\Jobs\CopyAttributesToPlaylist;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\ProviderMigrationPlanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -282,4 +284,84 @@ it('accepts a matching plan fingerprint from the planner', function () {
     migrationJob($source, $target, ['planFingerprint' => $fingerprint])->handle();
 
     expect($targetZee->refresh()->enabled)->toBeTrue();
+});
+
+it('falls back to the title for the display name when name is empty', function () {
+    $source = Playlist::factory()->create(['user_id' => $this->user->id]);
+    $target = Playlist::factory()->create(['user_id' => $this->user->id]);
+
+    $sourceChannel = Channel::factory()->create([
+        'playlist_id' => $source->id,
+        'user_id' => $this->user->id,
+        'is_vod' => false,
+        'name' => '',
+        'title' => 'Distrito Comedia (1080p)',
+        'stream_id' => 'DistritoComedia.mx@SD',
+        'enabled' => true,
+    ]);
+    Channel::factory()->create([
+        'playlist_id' => $target->id,
+        'user_id' => $this->user->id,
+        'is_vod' => false,
+        'name' => '',
+        'title' => 'Distrito Comedia (1080p)',
+        'stream_id' => 'DistritoComedia.mx@SD',
+        'enabled' => false,
+    ]);
+
+    $plan = app(ProviderMigrationPlanner::class)->plan($source, $target->id);
+
+    expect($plan['matched'])->toHaveCount(1)
+        ->and($plan['matched'][0]['source']['name'])->toBe('Distrito Comedia (1080p)')
+        ->and($plan['matched'][0]['target']['name'])->toBe('Distrito Comedia (1080p)');
+});
+
+it('repoints custom playlist membership from the matched source channel onto its replacement', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee, 'targetZee' => $targetZee] = migrationFixture($this->user);
+
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $customPlaylist->channels()->attach($sourceZee->id, ['channel_number' => 5, 'sort' => 1.5]);
+    $sourceZee->attachTag('Favorites', $customPlaylist->uuid);
+
+    $job = migrationJob($source, $target);
+    $job->handle();
+
+    expect($customPlaylist->channels()->pluck('channel_id')->all())->toBe([$targetZee->id]);
+
+    $pivot = DB::table('channel_custom_playlist')
+        ->where('custom_playlist_id', $customPlaylist->id)
+        ->first();
+    expect((int) $pivot->channel_number)->toBe(5)
+        ->and((float) $pivot->sort)->toBe(1.5)
+        ->and($targetZee->getCustomGroupName($customPlaylist->uuid))->toBe('Favorites')
+        ->and($job->report['custom_playlist_rows_repointed'])->toBe(1);
+});
+
+it('does not touch custom playlist membership when migrateCustomPlaylists is disabled', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee] = migrationFixture($this->user);
+
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    $customPlaylist->channels()->attach($sourceZee->id);
+
+    migrationJob($source, $target, ['migrateCustomPlaylists' => false])->handle();
+
+    expect($customPlaylist->channels()->pluck('channel_id')->all())->toBe([$sourceZee->id]);
+});
+
+it('drops the stale source row and keeps the existing membership on a custom playlist collision', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee, 'targetZee' => $targetZee] = migrationFixture($this->user);
+
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id]);
+    // The replacement channel is already independently a member of this custom playlist.
+    $customPlaylist->channels()->attach($targetZee->id, ['channel_number' => 9]);
+    $customPlaylist->channels()->attach($sourceZee->id, ['channel_number' => 2]);
+
+    $job = migrationJob($source, $target);
+    $job->handle();
+
+    $memberships = DB::table('channel_custom_playlist')->where('custom_playlist_id', $customPlaylist->id)->get();
+    expect($memberships)->toHaveCount(1)
+        ->and((int) $memberships->first()->channel_id)->toBe($targetZee->id)
+        ->and((int) $memberships->first()->channel_number)->toBe(9)
+        ->and($job->report['custom_playlist_rows_dropped'])->toBe(1);
 });

@@ -101,6 +101,130 @@ it('lists a merged group once, in the parent sort slot, for group categories', f
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// PlaylistAlias custom live group sort
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('orders live categories by the alias custom group order, overriding group sort_order', function () {
+    // Default sort_order would yield News (1) before Sports (2).
+    $news = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'News', 'name_internal' => 'News', 'type' => 'live', 'sort_order' => 1,
+    ]);
+    $sports = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'live', 'sort_order' => 2,
+    ]);
+    Channel::factory()->for($this->playlist)->for($news)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'group_internal' => 'News',
+    ]);
+    Channel::factory()->for($this->playlist)->for($sports)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'group_internal' => 'Sports',
+    ]);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Sort Alias', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_filter' => [
+            'selected_groups' => ['News', 'Sports'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports', 'News'],
+        ],
+    ]);
+
+    $categories = XtreamCategoryService::groupCategories($alias, isVod: false);
+
+    expect(array_column($categories, 'category_name'))->toBe(['Sports', 'News']);
+});
+
+it('falls back to group sort_order for live categories when the alias custom sort is disabled', function () {
+    $news = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'News', 'name_internal' => 'News', 'type' => 'live', 'sort_order' => 1,
+    ]);
+    $sports = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'live', 'sort_order' => 2,
+    ]);
+    Channel::factory()->for($this->playlist)->for($news)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'group_internal' => 'News',
+    ]);
+    Channel::factory()->for($this->playlist)->for($sports)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'group_internal' => 'Sports',
+    ]);
+
+    // Order present but the toggle is off - ignored, same as getChannelQuery().
+    $alias = PlaylistAlias::create([
+        'name' => 'Sort Alias', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_filter' => [
+            'selected_groups' => ['News', 'Sports'],
+            'sort_live_groups_custom' => false,
+            'live_group_order' => ['Sports', 'News'],
+        ],
+    ]);
+
+    $categories = XtreamCategoryService::groupCategories($alias, isVod: false);
+
+    expect(array_column($categories, 'category_name'))->toBe(['News', 'Sports']);
+});
+
+it('places live categories not in the alias custom order after the ordered ones', function () {
+    $news = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'News', 'name_internal' => 'News', 'type' => 'live', 'sort_order' => 1,
+    ]);
+    $sports = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'live', 'sort_order' => 2,
+    ]);
+    $comedy = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Comedy', 'name_internal' => 'Comedy', 'type' => 'live', 'sort_order' => 3,
+    ]);
+    foreach ([$news, $sports, $comedy] as $group) {
+        Channel::factory()->for($this->playlist)->for($group)->create([
+            'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'group_internal' => $group->name_internal,
+        ]);
+    }
+
+    // Only Sports is explicitly ordered; News & Comedy fall back to sort_order.
+    $alias = PlaylistAlias::create([
+        'name' => 'Sort Alias', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_filter' => [
+            'selected_groups' => ['News', 'Sports', 'Comedy'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports'],
+        ],
+    ]);
+
+    $categories = XtreamCategoryService::groupCategories($alias, isVod: false);
+
+    expect(array_column($categories, 'category_name'))->toBe(['Sports', 'News', 'Comedy']);
+});
+
+it('does not apply the alias custom live group order to VOD categories', function () {
+    $news = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'News', 'name_internal' => 'News', 'type' => 'vod', 'sort_order' => 1,
+    ]);
+    $sports = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'vod', 'sort_order' => 2,
+    ]);
+    Channel::factory()->for($this->playlist)->for($news)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => true, 'group_internal' => 'News',
+    ]);
+    Channel::factory()->for($this->playlist)->for($sports)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => true, 'group_internal' => 'Sports',
+    ]);
+
+    $alias = PlaylistAlias::create([
+        'name' => 'Sort Alias', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_filter' => [
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['Sports', 'News'],
+        ],
+    ]);
+
+    $categories = XtreamCategoryService::groupCategories($alias, isVod: true);
+
+    expect(array_column($categories, 'category_name'))->toBe(['News', 'Sports']);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Dynamic (TMDB) group projection
 // ──────────────────────────────────────────────────────────────────────────────
 

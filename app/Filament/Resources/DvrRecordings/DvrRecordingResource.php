@@ -131,10 +131,7 @@ class DvrRecordingResource extends Resource
                                     ImageEntry::make('channel_icon')
                                         ->label(__('Channel Icon'))
                                         ->hidden(fn (DvrRecording $record): bool => ! $record->channel_icon)
-                                        ->height(80)
-                                        ->width(80)
-                                        ->square()
-                                        ->extraImgAttributes(['class' => 'rounded-md']),
+                                        ->extraImgAttributes(['class' => 'h-20 w-auto max-w-full object-contain rounded-md']),
                                 ]),
                         ]),
 

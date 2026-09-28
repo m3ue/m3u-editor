@@ -32,6 +32,7 @@ class ProviderMigrationPlanRow extends Model
 
     protected $casts = [
         'candidate_target_channel_ids' => 'array',
+        'custom_playlist_names' => 'array',
         'include' => 'boolean',
         'epg_confirmed' => 'boolean',
         'user_id' => 'integer',

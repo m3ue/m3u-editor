@@ -37,6 +37,15 @@ class XtreamCategoryService
      * merged group stands in for its children (which never appear on their own),
      * and a child group's channels are what make the parent category eligible.
      *
+     * For a live-content PlaylistAlias with a custom group sort enabled (see
+     * PlaylistAlias::hasCustomLiveGroupSort()), a category ranks by the lowest
+     * saved-order position among its constituent groups' `name_internal` values,
+     * mirroring the `channels.group_internal` CASE ordering
+     * PlaylistGenerateController::getChannelQuery() applies to the channel/M3U
+     * listing, so the category tabs most Xtream-API clients build their group
+     * menu from stay in sync with it. Groups outside the saved order fall
+     * through to the normal sort_order below.
+     *
      * @param  Playlist|MergedPlaylist|PlaylistAlias  $playlist
      * @param  array<int, string>  $aliasGroupFilter  provider group names an alias is limited to
      * @return array<int, array{category_id: string, category_name: string, parent_id: int}>
@@ -58,17 +67,30 @@ class XtreamCategoryService
             })
             ->get();
 
+        $customOrder = (! $isVod && $playlist instanceof PlaylistAlias && $playlist->hasCustomLiveGroupSort())
+            ? array_flip($playlist->getLiveGroupSortOrder())
+            : null;
+        $unmatchedOffset = $customOrder !== null ? count($customOrder) : 0;
+
         $categories = [];
         foreach ($groups as $group) {
             $id = (string) ($group->parent_id ?? $group->id);
+            $defaultSort = $group->parent?->sort_order ?? $group->sort_order ?? 999999;
+            $sort = $customOrder !== null && isset($customOrder[$group->name_internal])
+                ? $customOrder[$group->name_internal]
+                : $unmatchedOffset + $defaultSort;
+
             if (isset($categories[$id])) {
+                $categories[$id]['_sort'] = min($categories[$id]['_sort'], $sort);
+
                 continue;
             }
+
             $categories[$id] = [
                 'category_id' => $id,
                 'category_name' => $group->parent?->name ?? $group->name,
                 'parent_id' => 0,
-                '_sort' => $group->parent?->sort_order ?? $group->sort_order ?? 999999,
+                '_sort' => $sort,
             ];
         }
 

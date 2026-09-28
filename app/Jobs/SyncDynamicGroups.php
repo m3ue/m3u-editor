@@ -103,58 +103,19 @@ class SyncDynamicGroups implements ShouldQueue
 
         if ($tmdb->isConfigured() && $rules->isNotEmpty()) {
             foreach ($rules as $index => $rule) {
-                $type = (string) ($rule['type'] ?? '');
-                $source = (string) ($rule['source'] ?? '');
-                $name = trim((string) ($rule['name'] ?? ''));
+                ['type' => $type, 'source' => $source, 'name' => $name] = DynamicGroup::ruleIdentity($rule);
                 $params = (array) ($rule['tmdb_params'] ?? []);
 
                 if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
                     continue;
                 }
 
-                $tmdbIds = $this->collectTmdbIds($tmdb, $type, $source, $params);
                 $triple = $type.':'.$source.':'.$name;
-                $existingForTriple = DynamicGroup::where('playlist_id', $playlist->id)
-                    ->where('type', $type)
-                    ->where('source', $source)
-                    ->where('name', $name)
-                    ->first();
+                $group = $this->materializeRule($playlist, $type, $source, $name, $params, $index, $tmdb);
 
-                if ($tmdbIds === []) {
-                    // TMDB returned no ids for this rule. TmdbService returns
-                    // [] on any error (timeout, non-2xx, rate-limit — see its
-                    // catch blocks), so this is also the transient-failure
-                    // path. If we already have a DynamicGroup row for this
-                    // triple, treat the run as a no-op for it: keep the row
-                    // and its membership intact so the Xtream category id
-                    // (offset + id) stays stable. Only skip the create when
-                    // there's no row yet.
-                    if ($existingForTriple !== null) {
-                        $validKeys[] = $triple;
-                    }
-
-                    continue;
+                if ($group !== null) {
+                    $validKeys[] = $triple;
                 }
-
-                $group = DynamicGroup::updateOrCreate(
-                    [
-                        'playlist_id' => $playlist->id,
-                        'type' => $type,
-                        'source' => $source,
-                        'name' => $name,
-                    ],
-                    [
-                        'user_id' => $playlist->user_id,
-                        'tmdb_params' => $params,
-                        'sort_order' => $index,
-                        'enabled' => true,
-                        'last_synced_at' => now(),
-                    ],
-                );
-
-                $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
-
-                $validKeys[] = $triple;
             }
         }
 
@@ -176,9 +137,85 @@ class SyncDynamicGroups implements ShouldQueue
             ->map(fn (DynamicGroup $dg): int => (int) $dg->id)
             ->all();
 
+        // Must stay a query-builder delete: DynamicGroup's `deleted` model
+        // hook strips the matching rule from dynamic_groups_config, which is
+        // only correct for user-initiated deletes. Firing it here would wipe
+        // disabled rules, or every rule when TMDB is unconfigured.
         if ($staleIds !== []) {
             DynamicGroup::whereIn('id', $staleIds)->delete();
         }
+    }
+
+    /**
+     * Materialize one Dynamic Group rule into a DynamicGroup row + its
+     * membership. Public so the CreateDynamicGroup header action on the
+     * VOD / Series Dynamic Groups listing pages can call it synchronously
+     * after appending a rule to a playlist's `dynamic_groups_config`.
+     *
+     * Returns:
+     *  - null when the rule is invalid (no usable type/source/name), or when
+     *    TMDB returned no ids AND no pre-existing DynamicGroup row for this
+     *    (playlist, type, source, name) tuple. The latter matches the
+     *    existing batch-job behavior: a rule with empty TMDB results is a
+     *    no-op for new rules (the next sync will retry once TMDB is healthy)
+     *    but is also a no-op for existing rules (keeps the Xtream category id
+     *    stable).
+     *  - the DynamicGroup row otherwise. `last_synced_at` is set, sort_order
+     *    is recorded, and membership is rewritten from the current TMDB
+     *    snapshot. `enabled` is forced true because the caller already
+     *    filtered disabled rules upstream.
+     */
+    public function materializeRule(
+        Playlist $playlist,
+        string $type,
+        string $source,
+        string $name,
+        array $params,
+        int $sortOrder,
+        TmdbService $tmdb,
+    ): ?DynamicGroup {
+        if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
+            return null;
+        }
+
+        $tmdbIds = $this->collectTmdbIds($tmdb, $type, $source, $params);
+        $existingForTriple = DynamicGroup::where('playlist_id', $playlist->id)
+            ->where('type', $type)
+            ->where('source', $source)
+            ->where('name', $name)
+            ->first();
+
+        if ($tmdbIds === []) {
+            // TMDB returned no ids for this rule. TmdbService returns
+            // [] on any error (timeout, non-2xx, rate-limit - see its
+            // catch blocks), so this is also the transient-failure
+            // path. If we already have a DynamicGroup row for this
+            // triple, treat the run as a no-op for it: keep the row
+            // and its membership intact so the Xtream category id
+            // (offset + id) stays stable. Only skip the create when
+            // there's no row yet.
+            return $existingForTriple;
+        }
+
+        $group = DynamicGroup::updateOrCreate(
+            [
+                'playlist_id' => $playlist->id,
+                'type' => $type,
+                'source' => $source,
+                'name' => $name,
+            ],
+            [
+                'user_id' => $playlist->user_id,
+                'tmdb_params' => $params,
+                'sort_order' => $sortOrder,
+                'enabled' => true,
+                'last_synced_at' => now(),
+            ],
+        );
+
+        $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
+
+        return $group;
     }
 
     /**

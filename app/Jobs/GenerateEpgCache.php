@@ -95,6 +95,7 @@ class GenerateEpgCache implements ShouldBeUnique, ShouldQueue
                 'status' => Status::Completed,
                 'is_cached' => true,
                 'cache_progress' => 100,
+                'cache_time' => $duration,
                 'processing_started_at' => null,
                 'processing_phase' => null,
             ]);

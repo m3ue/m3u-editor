@@ -189,6 +189,12 @@ class DvrRequestsAiostreamsTabs
                                     ->numeric()
                                     ->minValue(1)
                                     ->placeholder(__('Keep all')),
+                                TextInput::make('dvr_sports_dedup_days')
+                                    ->label(__('Sports Dedup Window (Days)'))
+                                    ->helperText(__('How many days a sports airing without season/episode data is treated as a replay of a recent game (skipped). A same-title airing beyond this window is a new event and is recorded. Blank uses the 2-day default.'))
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->placeholder('2'),
                             ]),
                     ]),
             ])

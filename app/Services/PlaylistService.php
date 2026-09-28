@@ -371,7 +371,7 @@ class PlaylistService
     public static function getChannelBaseUrl(Playlist|PlaylistAlias $source, $channelId): string
     {
         $config = $source instanceof PlaylistAlias
-            ? $source->getPrimaryXtreamConfig()
+            ? $source->getPrimaryCredentialConfig()
             : $source->xtream_config;
 
         if (! $config) {
@@ -388,7 +388,7 @@ class PlaylistService
     public static function getSeriesBaseUrl(Playlist|PlaylistAlias $source, $seriesId): string
     {
         $config = $source instanceof PlaylistAlias
-            ? $source->getPrimaryXtreamConfig()
+            ? $source->getPrimaryCredentialConfig()
             : $source->xtream_config;
 
         if (! $config) {
@@ -888,6 +888,28 @@ class PlaylistService
         }
 
         return strtr($template, $replacements);
+    }
+
+    public static function getOutputTogglesSchema(): array
+    {
+        return [
+            Fieldset::make(__('Enabled output types'))
+                ->columns(4)
+                ->schema([
+                    Toggle::make('hdhr_enabled')
+                        ->label(__('HDHR'))
+                        ->default(true),
+                    Toggle::make('m3u_enabled')
+                        ->label(__('M3U'))
+                        ->default(true),
+                    Toggle::make('xapi_enabled')
+                        ->label(__('Xtream API'))
+                        ->default(true),
+                    Toggle::make('xmltv_enabled')
+                        ->label(__('XMLTV (EPG)'))
+                        ->default(true),
+                ]),
+        ];
     }
 
     /**

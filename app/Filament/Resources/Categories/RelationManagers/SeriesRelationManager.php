@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Categories\RelationManagers;
 
 use App\Filament\Resources\Series\SeriesResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
@@ -11,6 +12,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class SeriesRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
+
     // use HasToggleableTable;
 
     protected static string $relationship = 'series';

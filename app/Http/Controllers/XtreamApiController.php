@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Casts\UtcDateTime;
 use App\Enums\ChannelLogoType;
 use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
@@ -11,6 +12,7 @@ use App\Enums\PlaylistChannelId;
 use App\Events\ViewerFavoriteEvent;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Jobs\FetchTmdbIds;
 use App\Jobs\RefreshMediaServerLibraryJob;
 use App\Models\ArrIntegration;
 use App\Models\Category;
@@ -40,13 +42,15 @@ use App\Models\ViewerWatchProgress;
 use App\Providers\VersionServiceProvider;
 use App\Services\AIOStreamsAuthorizationService;
 use App\Services\ContentRequestService;
-use App\Services\DvrCapabilityGate;
+use App\Services\DvrAccessScope;
 use App\Services\DvrRecorderService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\TmdbService;
 use App\Services\VodFileNameService;
+use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
 use App\Support\SeriesKey;
@@ -1290,10 +1294,28 @@ class XtreamApiController extends Controller
                     refresh: ! $playlist->auto_fetch_series_metadata,
                     sync: false,
                     dispatchTmdb: (bool) $playlist->auto_fetch_series_metadata,
+                    // With on-demand TMDB enrichment on, an enriched series keeps its TMDB
+                    // fields rather than having the provider refresh overwrite them.
+                    preferTmdb: (bool) app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch,
                 );
                 if ($results !== null && $results !== false) {
                     // Provider returned new data — reload the model with fresh relations
                     $seriesItem = $seriesItem->fresh(['seasons.episodes', 'category']) ?? $seriesItem;
+                }
+            }
+
+            // On-demand TMDB enrichment: global opt-in (Settings > Integrations > TMDB >
+            // "Auto-enrichment on fetch"), for installs that don't run the bulk "Fetch TMDB
+            // Metadata" action. processSingleSeries() is self-gating on existing tmdb_id/
+            // plot/cover/cast_list/related_tmdb, so once a series is fully enriched this
+            // is a cheap no-op on every later view - a one-time cost per series, persisted
+            // to $seriesItem. Media server series (Plex/Emby) are included: their synced
+            // metadata often has plot/cover but a cast_list with no TMDB person ids, so
+            // the self-gating check still routes them through TMDB to fill that gap.
+            if (app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch) {
+                $tmdb = app(TmdbService::class);
+                if ($tmdb->isConfigured()) {
+                    app(FetchTmdbIds::class)->processSingleSeries($tmdb, $seriesItem, backfillEnrichment: true);
                 }
             }
 
@@ -1827,7 +1849,25 @@ class XtreamApiController extends Controller
                 // one-time cached fetch. Skip the TMDB dispatch (unrelated to freshness, and
                 // shouldn't be re-triggered on every client request), and don't fail the
                 // request if the live call errors - fall back to the cached data instead.
-                $channel->fetchMetadata(refresh: true, skipTmdb: true);
+                // With on-demand TMDB enrichment on, an enriched title keeps its TMDB fields
+                // rather than having this provider refresh overwrite them.
+                $channel->fetchMetadata(
+                    refresh: true,
+                    skipTmdb: true,
+                    preferTmdb: (bool) app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch,
+                );
+            }
+
+            // On-demand TMDB enrichment: global opt-in (Settings > Integrations > TMDB >
+            // "Auto-enrichment on fetch"), for installs that don't run the bulk "Fetch TMDB
+            // Metadata" action. processVodChannel() is self-gating on existing tmdb_id/
+            // cast_list/etc., so once a title is enriched this is a cheap no-op on every
+            // later view - a one-time cost per title, persisted to $channel.
+            if (app(GeneralSettings::class)->tmdb_auto_enrich_on_fetch) {
+                $tmdb = app(TmdbService::class);
+                if ($tmdb->isConfigured()) {
+                    app(FetchTmdbIds::class)->processVodChannel($tmdb, $channel, backfillEnrichment: true);
+                }
             }
 
             // Build info section - use channel's info field if available, otherwise build from channel data
@@ -1967,6 +2007,44 @@ class XtreamApiController extends Controller
                 'info' => $defaultInfo,
                 'movie_data' => $defaultMovieData,
             ]));
+        } elseif ($action === 'get_actor_filmography') {
+            $personId = $request->input('person_id');
+            $name = trim((string) $request->input('name', ''));
+
+            if ((! $personId || ! is_numeric($personId)) && $name === '') {
+                return response()->json(['error' => 'person_id or name parameter is required for get_actor_filmography action'], 400);
+            }
+
+            $service = app(TmdbService::class);
+            $personId = $personId && is_numeric($personId) ? (int) $personId : 0;
+
+            if ($personId <= 0) {
+                $personId = (int) ($service->searchPersonIdByName($name) ?? 0);
+            }
+
+            if ($personId <= 0) {
+                return response()->json(['error' => 'Actor not found'], 404);
+            }
+
+            $person = $service->getPersonDetails($personId);
+
+            if (! $person) {
+                return response()->json(['error' => 'Actor not found'], 404);
+            }
+
+            if ($playlist->enable_logo_proxy && ! empty($person['photo'])) {
+                $person['photo'] = $this->proxyImageUrl($person['photo'], self::photoProxyWidth());
+            }
+
+            $credits = $this->resolveFilmographyLibraryMeta(
+                $service->getPersonCombinedCredits($personId),
+                $playlist
+            );
+
+            return response()->json([
+                'person' => $person,
+                'credits' => $credits,
+            ]);
         } elseif ($action === 'get_short_epg') {
             // Handle network playlists - return EPG from network schedule
             if ($isNetworkPlaylist) {
@@ -2996,7 +3074,20 @@ class XtreamApiController extends Controller
 
         $results = $query->limit($limit)->get();
 
-        $enriched = $results->map(function (ViewerWatchProgress $progress): array {
+        $linker = app(WatchProgressLinker::class);
+        $results->each(fn (ViewerWatchProgress $progress) => $linker->ensureLinked($progress, $playlist));
+
+        $enriched = $results->map(function (ViewerWatchProgress $progress): ?array {
+            // vod/episode rows whose stream_id no longer resolves (and couldn't be
+            // relinked via tmdb_id above) point at deleted content - drop them
+            // instead of surfacing a dead card the client can't do anything with.
+            if ($progress->content_type === 'vod' && ! $progress->channel) {
+                return null;
+            }
+            if ($progress->content_type === 'episode' && ! $progress->episode) {
+                return null;
+            }
+
             $data = $progress->toArray();
 
             if ($progress->content_type === 'episode') {
@@ -3084,7 +3175,7 @@ class XtreamApiController extends Controller
             unset($data['channel'], $data['episode']);
 
             return $data;
-        });
+        })->filter()->values();
 
         if ($includeUpNext) {
             $enriched = $this->appendUpNextEntries($enriched, $results, $viewer, $playlist, $limit);
@@ -3425,7 +3516,7 @@ class XtreamApiController extends Controller
      * Role-based downscale widths baked into proxied artwork URLs so clients
      * pull a right-sized file. Null (resize disabled) leaves URLs unchanged.
      */
-    private static function posterProxyWidth(): ?int
+    public static function posterProxyWidth(): ?int
     {
         return config('proxy.image_resize_enabled', true)
             ? (int) config('proxy.image_resize_poster_width', 600)
@@ -3446,7 +3537,7 @@ class XtreamApiController extends Controller
             : null;
     }
 
-    private function proxyImageUrl(?string $url, ?int $width = null): ?string
+    public static function proxyImageUrl(?string $url, ?int $width = null): ?string
     {
         if (! $url || ! filter_var($url, FILTER_VALIDATE_URL) || str_starts_with($url, url('/'))) {
             return $url;
@@ -3964,6 +4055,71 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * Annotate an actor's TMDB combined credits with whether each one exists
+     * as a Series/VOD channel in the given playlist's library, and that local
+     * record's id, so the client can deep-link straight to it. Mirrors
+     * resolveRelatedLibraryItems()'s batched whereIn lookup - the credit list
+     * is small and bounded (TMDB's own response), so this stays cheap without
+     * needing a cursor over the whole library.
+     *
+     * @param  array<int, array<string, mixed>>  $credits
+     * @param  Playlist|MergedPlaylist  $playlist  Untyped to match resolveRelatedLibraryItems() -
+     *                                             authenticate() can hand back either, and both expose compatible
+     *                                             series()/channels() relations.
+     * @return array<int, array<string, mixed>>
+     */
+    private function resolveFilmographyLibraryMeta(array $credits, $playlist): array
+    {
+        $movieTmdbIds = [];
+        $seriesTmdbIds = [];
+
+        foreach ($credits as $credit) {
+            $tmdbId = (int) ($credit['tmdb_id'] ?? 0);
+            if (! $tmdbId) {
+                continue;
+            }
+
+            if (($credit['media_type'] ?? null) === 'tv') {
+                $seriesTmdbIds[$tmdbId] = true;
+            } else {
+                $movieTmdbIds[$tmdbId] = true;
+            }
+        }
+
+        $channelIdsByTmdbId = collect();
+        if (! empty($movieTmdbIds)) {
+            $channelIdsByTmdbId = PlaylistGenerateController::getChannelQuery($playlist, isVod: true)
+                ->whereIn('channels.tmdb_id', array_keys($movieTmdbIds))
+                ->get(['id', 'tmdb_id'])
+                ->keyBy('tmdb_id');
+        }
+
+        $seriesIdsByTmdbId = collect();
+        if (! empty($seriesTmdbIds)) {
+            $seriesIdsByTmdbId = $playlist->series()
+                ->where('enabled', true)
+                ->whereIn('series.tmdb_id', array_keys($seriesTmdbIds))
+                ->get(['id', 'tmdb_id'])
+                ->keyBy('tmdb_id');
+        }
+
+        return array_map(function (array $credit) use ($channelIdsByTmdbId, $seriesIdsByTmdbId, $playlist): array {
+            $tmdbId = (int) ($credit['tmdb_id'] ?? 0);
+            $isSeries = ($credit['media_type'] ?? null) === 'tv';
+            $match = $tmdbId ? ($isSeries ? $seriesIdsByTmdbId->get($tmdbId) : $channelIdsByTmdbId->get($tmdbId)) : null;
+
+            if ($playlist->enable_logo_proxy && ! empty($credit['poster_url'])) {
+                $credit['poster_url'] = $this->proxyImageUrl($credit['poster_url'], self::posterProxyWidth());
+            }
+
+            $credit['in_library'] = (bool) $match;
+            $credit['local_id'] = $match ? (int) $match->id : null;
+
+            return $credit;
+        }, $credits);
+    }
+
+    /**
      * Whether a specific recording's EDL/DVR metadata may be surfaced to the
      * caller. DVR recording listings (getDvrRecordings/getDvrRecording) scope
      * their query by playlist_auth_id, but the VOD/series library items a
@@ -3981,16 +4137,8 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * Single source of truth for whether DVR is usable at all: global config,
-     * the effective playlist's DvrSetting, and (for guest credentials) the
-     * PlaylistAuth's own dvr_enabled flag. Both feature advertisement and every
-     * direct DVR action must agree with this result.
-     *
-     * For a CustomPlaylist/MergedPlaylist wrapper, capability is granted if
-     * EITHER the wrapper's own DvrSetting is enabled OR any source Playlist
-     * behind it has DVR enabled - mirrors resolveDvrSettingIds() so a wrapper
-     * whose channels come from a DVR-enabled source isn't gated out before its
-     * recordings are even looked up.
+     * Single source of truth for whether DVR is usable at all - see
+     * DvrAccessScope::grantedForSettingIds().
      */
     private function dvrCapabilityGranted(
         Playlist|CustomPlaylist|MergedPlaylist|null $dvrPlaylist,
@@ -4001,14 +4149,10 @@ class XtreamApiController extends Controller
             return false;
         }
 
-        $settingIds = $this->resolveDvrSettingIds($dvrPlaylist);
-
-        if ($settingIds === []) {
-            return false;
-        }
-
-        return DvrSetting::whereIn('id', $settingIds)->get()->contains(
-            fn (DvrSetting $setting) => DvrCapabilityGate::granted($setting, $playlistAuth, $authMethod === 'playlist_auth')
+        return DvrAccessScope::grantedForSettingIds(
+            DvrAccessScope::settingIdsForPlaylist($dvrPlaylist),
+            $playlistAuth,
+            $authMethod === 'playlist_auth'
         );
     }
 
@@ -4018,80 +4162,16 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * Resolve every DVR setting id a playlist's recordings could be filed under: its own
-     * dvrSetting (if configured directly on it), plus the dvrSettings of the source
-     * Playlists behind it when it's a CustomPlaylist or MergedPlaylist wrapper. Used by the
-     * DVR list/get/cancel/delete endpoints so a recording remains visible and manageable no
-     * matter which of those it was scheduled against.
-     *
      * @return array<int, int>
      */
     private function resolveDvrSettingIds($playlist): array
     {
-        if ($playlist instanceof Playlist) {
-            return $playlist->dvrSetting ? [$playlist->dvrSetting->id] : [];
-        }
-
-        $sourcePlaylistIds = $playlist instanceof MergedPlaylist
-            ? DB::table('merged_playlist_playlist')
-                ->where('merged_playlist_id', $playlist->id)
-                ->where(function ($query) {
-                    // Skip sources fully excluded from the merge (all content-type
-                    // toggles off) — their DVR settings shouldn't be reachable
-                    // through this wrapper either.
-                    $query->where('include_live', true)
-                        ->orWhere('include_vod', true)
-                        ->orWhere('include_series', true);
-                })
-                ->pluck('playlist_id')
-            : $playlist->channels()
-                ->whereNotNull('channels.playlist_id')
-                ->groupBy('channels.playlist_id')
-                ->distinct()
-                ->pluck('channels.playlist_id');
-
-        $settingIds = DvrSetting::whereIn('playlist_id', $sourcePlaylistIds)
-            ->pluck('id')
-            ->toArray();
-
-        // Include the wrapper's own setting too, in case a recording was ever
-        // scheduled against it directly.
-        if ($playlist->dvrSetting) {
-            $settingIds[] = $playlist->dvrSetting->id;
-        }
-
-        return array_values(array_unique($settingIds));
+        return DvrAccessScope::settingIdsForPlaylist($playlist);
     }
 
-    /**
-     * Resolve the single DvrSetting a new recording/rule should be written against,
-     * when accessed through a CustomPlaylist/MergedPlaylist wrapper. Mirrors
-     * resolveDvrSettingIds()'s read-side resolution, but a write needs exactly one
-     * target: prefers the given channel's own source Playlist's DvrSetting (so
-     * scheduling a specific channel through a wrapper always lands on the right
-     * source, even when the wrapper spans multiple DVR-enabled sources), then falls
-     * back to the wrapper's own DvrSetting, then the first DVR-enabled source
-     * resolved via resolveDvrSettingIds() (covers the "any channel" series-rule case).
-     */
     private function resolveDvrSettingForWrite($playlist, ?int $channelId = null): ?DvrSetting
     {
-        if ($channelId) {
-            $channel = $playlist->channels()->where('channels.id', $channelId)->first();
-            if ($channel?->playlist_id) {
-                $setting = DvrSetting::where('playlist_id', $channel->playlist_id)->first();
-                if ($setting?->enabled) {
-                    return $setting;
-                }
-            }
-        }
-
-        if ($playlist->dvrSetting) {
-            return $playlist->dvrSetting;
-        }
-
-        $settingIds = $this->resolveDvrSettingIds($playlist);
-
-        return $settingIds === [] ? null : DvrSetting::find($settingIds[0]);
+        return DvrAccessScope::settingForWriteOnPlaylist($playlist, $channelId);
     }
 
     /**
@@ -4617,6 +4697,30 @@ class XtreamApiController extends Controller
         // app.timezone's wall-clock before Eloquent formats them for storage, or the
         // round-trip re-read will reconstruct the wrong absolute instant.
         $appTz = config('app.timezone', 'UTC');
+        $manualStart = Carbon::parse($startTime)->setTimezone($appTz);
+        $manualEnd = Carbon::parse($endTime)->setTimezone($appTz);
+
+        // Duplicate guard: same dvr_setting, same channel, same auth, overlapping
+        // manual_start/manual_end window. Mirrors createDvrSeriesRule's pattern
+        // below so a double-tap or two devices scheduling the same airing return
+        // 409 + the existing rule's id instead of creating a second manual rule.
+        $existing = DvrRecordingRule::where('dvr_setting_id', $dvrSetting->id)
+            ->where('type', DvrRuleType::Manual)
+            ->where('enabled', true)
+            ->where('channel_id', $channelId)
+            ->where('manual_start', '<', UtcDateTime::forQuery($manualEnd))
+            ->where('manual_end', '>', UtcDateTime::forQuery($manualStart))
+            ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'error' => 'A recording for this airing already exists',
+                'rule_id' => $existing->id,
+                'duplicate' => true,
+            ], 409);
+        }
+
         $rule = DvrRecordingRule::create([
             'user_id' => $dvrSetting->user_id,
             'dvr_setting_id' => $dvrSetting->id,
@@ -4625,8 +4729,8 @@ class XtreamApiController extends Controller
             'channel_id' => $channelId,
             'series_title' => $title,
             'match_mode' => DvrMatchMode::Exact,
-            'manual_start' => Carbon::parse($startTime)->setTimezone($appTz),
-            'manual_end' => Carbon::parse($endTime)->setTimezone($appTz),
+            'manual_start' => $manualStart,
+            'manual_end' => $manualEnd,
             'start_early_seconds' => (int) $request->input('start_early_seconds', $dvrSetting->default_start_early_seconds ?? 0),
             'end_late_seconds' => (int) $request->input('end_late_seconds', $dvrSetting->default_end_late_seconds ?? 0),
             'enabled' => true,
@@ -5404,7 +5508,14 @@ class XtreamApiController extends Controller
         $username = $request->input('username');
         $password = $request->input('password');
 
-        return PlaylistFacade::authenticate($username, $password);
+        $result = PlaylistFacade::authenticate($username, $password);
+
+        // Ensure Xtream API output is enabled for this playlist
+        if (is_array($result) && $result[0] !== null && ! $result[0]->xapi_enabled) {
+            $result[0] = null;
+        }
+
+        return $result;
     }
 
     private function formatRuntimeFromSeconds(?int $seconds): ?string

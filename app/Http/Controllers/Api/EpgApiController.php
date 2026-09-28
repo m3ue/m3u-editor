@@ -694,12 +694,14 @@ class EpgApiController extends Controller
                                 return $p;
                             };
 
-                            // Pre-event fill: window start → event start (skipped when pre_event_format is null)
+                            // Pre-event fill: window start → event start, capped at the window end so a
+                            // far-off event can't generate months of padding (skipped when pre_event_format is null)
+                            $preEventEnd = $event->start->lt($windowEnd) ? $event->start : $windowEnd;
                             $cursor = $windowStart->copy();
-                            while ($cursor->lt($event->start)) {
+                            while ($cursor->lt($preEventEnd)) {
                                 $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
-                                if ($slotEnd->gt($event->start)) {
-                                    $slotEnd = $event->start->copy();
+                                if ($slotEnd->gt($preEventEnd)) {
+                                    $slotEnd = $preEventEnd->copy();
                                 }
                                 $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $event, $cursor);
                                 if ($preTitle !== null) {
@@ -708,8 +710,10 @@ class EpgApiController extends Controller
                                 $cursor = $slotEnd;
                             }
 
-                            // The event itself
-                            $dummyProgrammes[] = $buildProgramme($event->start, $event->end, $event->title, $event->description);
+                            // The event itself (only when it starts inside the window)
+                            if ($event->start->lt($windowEnd)) {
+                                $dummyProgrammes[] = $buildProgramme($event->start, $event->end, $event->title, $event->description);
+                            }
 
                             // Post-event fill: event end → window end (skipped when post_event_format is null)
                             if ($postTitle !== null) {

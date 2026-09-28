@@ -1,7 +1,6 @@
 <?php
 
 use App\Jobs\DvrRetentionCleanup;
-use App\Jobs\DvrSchedulerTick;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -67,6 +66,16 @@ Schedule::command('app:logo-cleanup --force')
 Schedule::command('queue:prune-failed --hours=48')
     ->daily();
 
+// Cached content cleanup: remove files whose channel/episode left its playlist
+// (playlists in "automatic" retention mode), then rows that never got a file.
+Schedule::command('cache:cleanup')
+    ->dailyAt('03:00')
+    ->withoutOverlapping();
+
+Schedule::command('cache:cleanup-orphans')
+    ->dailyAt('03:30')
+    ->withoutOverlapping();
+
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')
     ->daily();
@@ -110,8 +119,10 @@ if (config('proxy.proxy_integration_enabled', true)) {
         ->withoutOverlapping();
 
     if (config('dvr.dvr_enabled', true)) {
-        // DVR scheduler tick — every minute, trigger and stop scheduled recordings
-        Schedule::job(new DvrSchedulerTick)->everyMinute()->withoutOverlapping();
+        // DVR scheduler tick — every minute, trigger and stop scheduled recordings.
+        // Runs as a plain command (like app:refresh-playlist/app:refresh-epg) rather
+        // than a queued job, so an idle tick doesn't show up in Horizon/queue monitoring.
+        Schedule::command('app:dvr-scheduler-tick')->everyMinute()->withoutOverlapping();
 
         // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
         Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();

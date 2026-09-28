@@ -8,8 +8,11 @@ use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use App\Services\DvrSchedulerService;
 use App\Settings\GeneralSettings;
+use App\Support\SeriesKey;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 trait HasDvrMatchedAirings
 {
@@ -79,12 +82,60 @@ trait HasDvrMatchedAirings
             return [];
         }
 
+        // Run the actual scheduler logic in dry-run mode to determine
+        // which airings will be recorded vs skipped. This ensures
+        // consistency between the preview and actual scheduling.
+        $scheduler = app(DvrSchedulerService::class);
+        $scheduledIds = $scheduler->matchSeriesRuleDryRun($rule, 14 * 24 * 60);
+        Log::debug('DVR: resolveMatchedAirings dry run result', [
+            'scheduled_count' => count($scheduledIds['scheduled'] ?? []),
+            'skipped_count' => count($scheduledIds['skipped'] ?? []),
+        ]);
+
         $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
         $channelNames = static::resolveAiringChannelNames($channelIds);
         $timezone = config('dev.timezone') ?? app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
-        return $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone) {
+        return $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone, $rule, $scheduledIds) {
             [$season, $episode, $subtitle, $description] = static::parseAiringSeasonEpisode($p);
+
+            $scheduledKeys = $scheduledIds['scheduled_keys'] ?? [];
+            $skipReason = null;
+            $willRecord = in_array($p->id, $scheduledIds['scheduled'] ?? []);
+
+            if (! $willRecord && in_array($p->id, $scheduledIds['skipped'] ?? [])) {
+                $hasSeasonEpisode = $season !== null && $episode !== null;
+                $seriesKey = $hasSeasonEpisode
+                    ? SeriesKey::for($rule->dvrSetting->id, $rule->series_title)
+                    : SeriesKey::for($rule->dvrSetting->id, $p->title);
+                // Mirror the scheduler's dedup identity: S/E programmes key on
+                // season|episode; sports (no S/E) key on the airing date
+                // within the setting's dedup window - a same-title airing is
+                // a replay of a recent game (skipped) but a re-match beyond
+                // the window is a new event (recorded).
+                $windowDays = $rule->sportsDedupDays();
+                $lookupKey = ($seriesKey ?? '').'|'.($hasSeasonEpisode
+                    ? ($season ?? '').'|'.($episode ?? '')
+                    : ($p->start_time?->toDateString() ?? '').'|');
+                $inWindowScheduled = $hasSeasonEpisode
+                    ? in_array($lookupKey, $scheduledKeys)
+                    : $rule->sportsAlreadyScheduled($seriesKey ?? '', $p->start_time, $windowDays, $scheduledKeys);
+
+                // Check the actual recording status to differentiate
+                $recordingStatus = $seriesKey !== null
+                    ? ($hasSeasonEpisode
+                        ? $rule->getEpisodeRecordingStatus($seriesKey, $season, $episode)
+                        : $rule->getEpisodeRecordingStatusOnDate($seriesKey, $p->start_time, $windowDays))
+                    : null;
+
+                if ($inWindowScheduled) {
+                    $skipReason = 'already_scheduled';
+                } elseif (in_array($recordingStatus, ['scheduled', 'recording', 'post_processing'])) {
+                    $skipReason = 'already_scheduled';
+                } else {
+                    $skipReason = 'already_recorded';
+                }
+            }
 
             return [
                 'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
@@ -95,6 +146,8 @@ trait HasDvrMatchedAirings
                 'description' => $description,
                 'is_new' => $p->is_new,
                 'premiere' => $p->premiere,
+                'will_record' => $willRecord,
+                'skip_reason' => $skipReason,
             ];
         })->values()->all();
     }
@@ -119,46 +172,79 @@ trait HasDvrMatchedAirings
         }
 
         if ($rule->channel_id) {
-            $channelQuery = Channel::where('id', $rule->channel_id)->with('epgChannel');
-
-            if (! $includeDisabled) {
-                $channelQuery->where('enabled', true);
-            }
-
-            $stringId = $channelQuery->first()?->epgChannel?->channel_id;
-
-            return $stringId ? [$stringId] : [];
+            return static::resolveEpgScopeForChannelLabel($rule, $rule->channel_id, $includeDisabled);
         }
 
         if ($rule->source_channel_id) {
-            $channelQuery = Channel::where('id', $rule->source_channel_id)->with('epgChannel');
-
-            if (! $includeDisabled) {
-                $channelQuery->where('enabled', true);
-            }
-
-            $stringId = $channelQuery->first()?->epgChannel?->channel_id;
-
-            return $stringId ? [$stringId] : [];
+            return static::resolveEpgScopeForChannelLabel($rule, $rule->source_channel_id, $includeDisabled);
         }
 
-        $channelQuery = $rule->dvrSetting->ownerChannels();
+        $ownerChannelsSubquery = $rule->dvrSetting->ownerChannelsSubquery();
 
-        if (! $channelQuery) {
+        if (! $ownerChannelsSubquery) {
             return [];
         }
 
-        $channelQuery->whereNotNull('channels.epg_channel_id')
-            ->with('epgChannel');
+        // Resolve distinct EPG channel string IDs entirely at the database
+        // level - playlists can have hundreds of thousands of channels, and
+        // this runs on every keystroke of the matched-airings preview, so
+        // hydrating every Channel/EpgChannel model here is not an option.
+        $query = Channel::whereIn('channels.id', $ownerChannelsSubquery)
+            ->whereNotNull('channels.epg_channel_id')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
 
         if (! $includeDisabled) {
-            $channelQuery->where('channels.enabled', true);
+            $query->where('channels.enabled', true);
         }
 
-        return $channelQuery->get()
-            ->map(fn (Channel $c) => $c->epgChannel?->channel_id)
+        return $query->distinct()
+            ->pluck('epg_channels.channel_id')
             ->filter()
-            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Resolve EPG scope for a rule pinned to a specific channel. The channel
+     * selector groups channels by displayed label (title, falling back to
+     * name) because IPTV providers commonly list several duplicate rows for
+     * the same channel (quality/stream variants) - one enabled, one not,
+     * sometimes with different EPG mappings or none at all. Pinning to a
+     * channel must therefore scope to every channel sharing that label, not
+     * just the single DB row the user happened to select, or picking a
+     * duplicate with no (or a stale) EPG mapping silently hides airings a
+     * sibling duplicate would have matched.
+     *
+     * @return list<string>
+     */
+    private static function resolveEpgScopeForChannelLabel(DvrRecordingRule $rule, int $channelId, bool $includeDisabled): array
+    {
+        $pinned = Channel::find($channelId, ['id', 'title', 'name']);
+
+        if (! $pinned) {
+            return [];
+        }
+
+        $label = $pinned->title ?: $pinned->name;
+
+        $ownerChannelsSubquery = $rule->dvrSetting->ownerChannelsSubquery();
+
+        if (! $ownerChannelsSubquery) {
+            return [];
+        }
+
+        $query = Channel::whereIn('channels.id', $ownerChannelsSubquery)
+            ->where(fn (Builder $q) => $q->where('channels.title', $label)->orWhere('channels.name', $label))
+            ->whereNotNull('channels.epg_channel_id')
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
+
+        if (! $includeDisabled) {
+            $query->where('channels.enabled', true);
+        }
+
+        return $query->distinct()
+            ->pluck('epg_channels.channel_id')
+            ->filter()
             ->values()
             ->all();
     }

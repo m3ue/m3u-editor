@@ -52,6 +52,7 @@
         "laravel/pail": "^1.1",
         "laravel/pint": "^1.30",
         "laravel/sail": "^1.39",
+        "laravel/vet": "^0.1.2",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.1",
         "pestphp/pest": "^5.0",
@@ -92,6 +93,7 @@
         ],
         "security:scan": [
             "composer audit --format=summary",
+            "vendor/bin/vet",
             "npm audit --audit-level=high",
             "php artisan checkpoint:scan"
         ]
@@ -106,6 +108,7 @@
         "preferred-install": "dist",
         "sort-packages": true,
         "allow-plugins": {
+            "laravel/vet": true,
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
         }

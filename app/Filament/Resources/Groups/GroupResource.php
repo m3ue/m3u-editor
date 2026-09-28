@@ -95,7 +95,7 @@ class GroupResource extends Resource implements CopilotResource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with('parent')
+                $query->with(['parent', 'playlist'])
                     ->withCount('live_channels')
                     ->withCount('enabled_live_channels')
                     ->withCount('children')
@@ -138,9 +138,8 @@ class GroupResource extends Resource implements CopilotResource
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))
                     ->toggleable()
-                    ->tooltip(__('Auto enable newly added group channels'))
-                    ->tooltip(fn ($record) => $record->playlist?->enable_channels ? 'Playlist auto-enable new channels is enabled, all group channels will automatically be enabled on next sync.' : 'Auto enable newly added group channels')
-                    ->disabled(fn ($record) => $record->playlist?->enable_channels)
+                    ->tooltip(fn ($record) => $record->playlist?->enable_channels ? __('Playlist "Enable new Live channels" is on, so all new channels added to this group will be enabled on sync.') : __('Auto enable newly added group channels'))
+                    ->disabled(fn ($record) => (bool) $record->playlist?->enable_channels)
                     ->getStateUsing(fn ($record) => $record->playlist?->enable_channels ? true : $record->enabled)
                     ->sortable(),
                 TextColumn::make('name_internal')

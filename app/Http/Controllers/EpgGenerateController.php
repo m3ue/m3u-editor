@@ -42,6 +42,15 @@ class EpgGenerateController extends Controller
         return htmlspecialchars((string) $value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
     }
 
+    private function outputDisabledResponse(bool $outputEnabled)
+    {
+        if ($outputEnabled) {
+            return null;
+        }
+
+        return response()->json(['Error' => 'Output disabled'], 403);
+    }
+
     /**
      * Generate the EPG XML file
      *
@@ -58,6 +67,11 @@ class EpgGenerateController extends Controller
         // Handle network playlists - generate EPG from networks
         if ($playlist instanceof Playlist && $playlist->is_network_playlist) {
             return $this->generateNetworkPlaylistEpg($playlist);
+        }
+
+        // Ensure XMLTV output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->xmltv_enabled)) {
+            return $response;
         }
 
         // Check if we have a valid cached file
@@ -80,6 +94,11 @@ class EpgGenerateController extends Controller
         $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         if (! $playlist) {
             return response()->json(['Error' => 'Playlist Not Found'], 404);
+        }
+
+        // Ensure XMLTV output is enabled
+        if ($response = $this->outputDisabledResponse($playlist->xmltv_enabled)) {
+            return $response;
         }
 
         // Check if we have a valid cached file
@@ -506,12 +525,14 @@ class EpgGenerateController extends Controller
                             $buffer .= '  </programme>'.PHP_EOL;
                         };
 
-                        // Pre-event fill: window start → event start (skipped when pre_event_format is null)
+                        // Pre-event fill: window start → event start, capped at the window end so a
+                        // far-off event can't generate months of padding (skipped when pre_event_format is null)
+                        $preEventEnd = $aedEvent->start->lt($windowEnd) ? $aedEvent->start : $windowEnd;
                         $cursor = $windowStart->copy();
-                        while ($cursor->lt($aedEvent->start)) {
+                        while ($cursor->lt($preEventEnd)) {
                             $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
-                            if ($slotEnd->gt($aedEvent->start)) {
-                                $slotEnd = $aedEvent->start->copy();
+                            if ($slotEnd->gt($preEventEnd)) {
+                                $slotEnd = $preEventEnd->copy();
                             }
                             $preTitle = $aedExtractor->preEventTitle($aedProfile, $rawTitle, $aedEvent, $cursor);
                             if ($preTitle !== null) {
@@ -520,19 +541,21 @@ class EpgGenerateController extends Controller
                             $cursor = $slotEnd;
                         }
 
-                        // The event itself
-                        $start = str_replace(':', '', $aedEvent->start->format('YmdHis P'));
-                        $stop = str_replace(':', '', $aedEvent->end->format('YmdHis P'));
-                        $buffer .= '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
-                        $buffer .= '    <title>'.$aedTitle.'</title>'.PHP_EOL;
-                        if ($aedIcon) {
-                            $buffer .= '    <icon src="'.$aedIcon.'"/>'.PHP_EOL;
+                        // The event itself (only when it starts inside the window)
+                        if ($aedEvent->start->lt($windowEnd)) {
+                            $start = str_replace(':', '', $aedEvent->start->format('YmdHis P'));
+                            $stop = str_replace(':', '', $aedEvent->end->format('YmdHis P'));
+                            $buffer .= '  <programme channel="'.$tvgId.'" start="'.$start.'" stop="'.$stop.'">'.PHP_EOL;
+                            $buffer .= '    <title>'.$aedTitle.'</title>'.PHP_EOL;
+                            if ($aedIcon) {
+                                $buffer .= '    <icon src="'.$aedIcon.'"/>'.PHP_EOL;
+                            }
+                            $buffer .= '    <desc>'.$aedDesc.'</desc>'.PHP_EOL;
+                            if ($aedCategory) {
+                                $buffer .= '    <category lang="en">'.$aedCategory.'</category>'.PHP_EOL;
+                            }
+                            $buffer .= '  </programme>'.PHP_EOL;
                         }
-                        $buffer .= '    <desc>'.$aedDesc.'</desc>'.PHP_EOL;
-                        if ($aedCategory) {
-                            $buffer .= '    <category lang="en">'.$aedCategory.'</category>'.PHP_EOL;
-                        }
-                        $buffer .= '  </programme>'.PHP_EOL;
 
                         // Post-event fill: event end → window end (skipped when post_event_format is null)
                         if ($postTitleEscaped !== null) {

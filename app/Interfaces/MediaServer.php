@@ -30,6 +30,7 @@ interface MediaServer
         array $paths,
         bool $refreshLibrary = true,
         ?string $libraryId = null,
+        bool $createIfMissing = true,
     ): array;
 
     public function fetchMovies(): Collection;

@@ -3,6 +3,7 @@
 use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Jobs\CopyAttributesToPlaylist;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Playlist;
 use App\Models\ProviderMigrationPlanRow;
 use App\Models\User;
@@ -190,6 +191,40 @@ it('releases another row when a manual match points at an already-claimed replac
         ->and($autoMatched->refresh()->matched_target_channel_id)->toBeNull()
         ->and($autoMatched->bucket)->toBe('unmatched')
         ->and($autoMatched->include)->toBeFalse();
+});
+
+it('lists which custom playlist each matched channel belongs to, with its custom group tag', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee] = pageFixture($this->user);
+
+    $customPlaylist = CustomPlaylist::factory()->create(['user_id' => $this->user->id, 'name' => 'My Bouquet']);
+    $customPlaylist->channels()->attach($sourceZee->id);
+    $sourceZee->attachTag('Favorites', $customPlaylist->uuid);
+
+    Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->call('buildPreview');
+
+    $row = ProviderMigrationPlanRow::query()
+        ->where('source_playlist_id', $source->id)
+        ->where('source_channel_id', $sourceZee->id)
+        ->firstOrFail();
+
+    expect($row->custom_playlist_names)->toBe(['My Bouquet (Favorites)']);
+});
+
+it('leaves custom_playlist_names empty for channels not in any custom playlist', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee] = pageFixture($this->user);
+
+    Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->call('buildPreview');
+
+    $row = ProviderMigrationPlanRow::query()
+        ->where('source_playlist_id', $source->id)
+        ->where('source_channel_id', $sourceZee->id)
+        ->firstOrFail();
+
+    expect($row->custom_playlist_names)->toBeNull();
 });
 
 it('prunes stale rows on mount', function () {

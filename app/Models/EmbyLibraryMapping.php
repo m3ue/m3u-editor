@@ -24,7 +24,7 @@ class EmbyLibraryMapping extends Model
      */
     public const LIBRARY_TYPES = ['movies', 'tvshows', 'mixed'];
 
-    public const SOURCE_KINDS = ['vod_group', 'series_category', 'custom_playlist_group', 'all'];
+    public const SOURCE_KINDS = ['vod_group', 'series_category', 'dynamic_group', 'custom_playlist_group', 'all'];
 
     public const DEFAULT_OPTIONS = [
         'naming' => 'media-year',
@@ -46,6 +46,7 @@ class EmbyLibraryMapping extends Model
         'collection_type',
         'output_path',
         'is_managed',
+        'library_create_requested_at',
         'options',
         'last_planned_revision',
         'last_applied_revision',
@@ -112,6 +113,7 @@ class EmbyLibraryMapping extends Model
             'is_managed' => 'boolean',
             'options' => 'array',
             'last_success_at' => 'datetime',
+            'library_create_requested_at' => 'datetime',
         ];
     }
 

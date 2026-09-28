@@ -15,6 +15,7 @@ use App\Models\Series;
 use App\Services\LocalMediaService;
 use App\Services\MediaServerService;
 use App\Services\TmdbService;
+use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -489,6 +490,15 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                     $info[$key] = $value;
                 }
             }
+
+            // A TMDB-checked channel keeps the fields TMDB owns (clearlogo, cast_list,
+            // backdrop, etc.) so a TMDB fetch isn't rolled back by the next sync;
+            // TMDB-only keys are carried over by the merge above.
+            $info = TmdbEnrichment::preserveOnProviderRefresh(
+                $existingInfo,
+                $info,
+                TmdbEnrichment::isTmdbChecked($existingInfo) ? TmdbEnrichment::MEDIA_SERVER_PREFERRED_VOD_INFO_KEYS : [],
+            );
         }
 
         // For existing channels that have been TMDB-enriched, preserve the TMDB group/genre
@@ -690,33 +700,38 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         $syncCast = ! empty($actors) ? implode(', ', $actors) : null;
         $syncDirector = ! empty($directors) ? implode(', ', $directors) : null;
 
-        // Preserve a prior TMDB-enriched cast_list / clearlogo when this sync
-        // pass carries none (local libraries return no People / Logo).
-        $syncCastList = ! empty($castList)
-            ? $castList
-            : ($isNewSeries ? null : ($series->metadata['cast_list'] ?? null));
-        $syncClearLogo = $clearLogo
-            ?: ($isNewSeries ? null : ($series->metadata['clearlogo'] ?? null));
-
         $seriesMetadata = [
             'media_server_id' => $seriesId,
             'media_server_type' => $integration->type,
             'official_rating' => $seriesData['OfficialRating'] ?? null,
             'original_title' => $seriesData['OriginalTitle'] ?? null,
         ];
-        if (! empty($syncCastList)) {
-            $seriesMetadata['cast_list'] = $syncCastList;
+        if (! empty($castList)) {
+            $seriesMetadata['cast_list'] = $castList;
         }
-        if (! empty($syncClearLogo)) {
-            $seriesMetadata['clearlogo'] = $syncClearLogo;
+        if (! empty($clearLogo)) {
+            $seriesMetadata['clearlogo'] = $clearLogo;
         }
+
+        // Keep prior TMDB enrichment this sync pass would otherwise wipe: related_tmdb /
+        // vote_count always, cast_list / clearlogo when the server sent none (local
+        // libraries return no People / Logo), and on a TMDB-checked series every
+        // TMDB-owned field, so a TMDB fetch isn't rolled back by the next sync.
+        $isTmdbChecked = TmdbEnrichment::isTmdbChecked($series->metadata);
+        $seriesMetadata = TmdbEnrichment::preserveOnProviderRefresh(
+            $series->metadata,
+            $seriesMetadata,
+            $isTmdbChecked
+                ? TmdbEnrichment::MEDIA_SERVER_PREFERRED_SERIES_METADATA_KEYS
+                : TmdbEnrichment::PREFERRED_SERIES_METADATA_KEYS,
+        );
 
         // For existing series that have been TMDB-enriched, preserve the TMDB genre/category
         // instead of overwriting with the library folder name (e.g., "tv")
         $hasTmdbGenre = ! $isNewSeries && $series->last_metadata_fetch !== null
             && ! empty($series->genre) && $series->genre !== implode(', ', $genres);
 
-        $series->fill([
+        $attributes = [
             'name' => $seriesData['Name'],
             'user_id' => $playlist->user_id,
             'category_id' => $hasTmdbGenre ? $series->category_id : $category->id,
@@ -738,7 +753,18 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'tvdb_id' => $tvdbId ?: ($isNewSeries ? null : $series->tvdb_id),
             'imdb_id' => $imdbId ?: ($isNewSeries ? null : $series->imdb_id),
             'metadata' => $seriesMetadata,
-        ]);
+        ];
+
+        // TMDB-owned columns on a TMDB-checked series keep their TMDB value.
+        if ($isTmdbChecked) {
+            foreach (TmdbEnrichment::MEDIA_SERVER_PREFERRED_SERIES_COLUMNS as $column) {
+                if (! blank($series->{$column})) {
+                    unset($attributes[$column]);
+                }
+            }
+        }
+
+        $series->fill($attributes);
 
         // Only reset last_metadata_fetch for new local-style media series (existing ones keep their timestamp)
         // For non-local-style (Emby/Jellyfin/Plex), set to now() so FetchTmdbIds skips them (they already have metadata)

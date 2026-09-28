@@ -4,12 +4,15 @@ namespace App\Filament\Resources\Groups\RelationManagers;
 
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\VodResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 
 class VodRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
+
     protected static string $relationship = 'vod_channels';
 
     protected static ?string $label = 'VOD Channels';

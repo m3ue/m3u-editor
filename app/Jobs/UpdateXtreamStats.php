@@ -47,10 +47,21 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        // 2. Fetch fresh data
+        // 2. An alias with no provider account to query (no credentials of its own and no
+        // Xtream source) drops any status left from credentials that were since removed.
+        if ($playlist instanceof PlaylistAlias && ! $this->resolveConfig($playlist, $type)) {
+            if ($playlist->getRawOriginal('xtream_status') !== null) {
+                $playlist->update(['xtream_status' => null]);
+            }
+            Cache::put($this->cacheKey, [], 60);
+
+            return;
+        }
+
+        // 3. Fetch fresh data
         $results = $this->fetchXtreamData($playlist, $type);
 
-        // 3. Update DB and Cache
+        // 4. Update DB and Cache
         if (! empty($results)) {
             $playlist->update(['xtream_status' => $results]);
             Cache::put($this->cacheKey, $results, 5); // 5 second cache
@@ -66,7 +77,7 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
     protected function fetchXtreamData($playlist, $type): array
     {
         try {
-            $config = ($type === 'playlist') ? $playlist->xtream_config : $playlist->getPrimaryXtreamConfig();
+            $config = $this->resolveConfig($playlist, $type);
             if (! $config) {
                 return [];
             }
@@ -80,6 +91,24 @@ class UpdateXtreamStats implements ShouldBeUnique, ShouldQueue
 
             return [];
         }
+    }
+
+    /**
+     * The provider account to query. An alias without credentials of its own streams
+     * with its source playlist's account, so that account's status is the one to show.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function resolveConfig(Playlist|PlaylistAlias $playlist, string $type): ?array
+    {
+        if ($type === 'playlist') {
+            return $playlist->xtream_config;
+        }
+
+        $sourcePlaylist = $playlist->getEffectivePlaylist();
+
+        return $playlist->getPrimaryCredentialConfig()
+            ?? ($sourcePlaylist instanceof Playlist ? $sourcePlaylist->xtream_config : null);
     }
 
     /**

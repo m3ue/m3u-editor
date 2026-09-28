@@ -180,6 +180,7 @@ class EmbyJellyfinService implements MediaServer
         array $paths,
         bool $refreshLibrary = true,
         ?string $libraryId = null,
+        bool $createIfMissing = true,
     ): array {
         if (! $this->integration->isEmby()) {
             return $this->libraryResult(false, false, 'Managed library creation is supported only for Emby.');
@@ -288,6 +289,10 @@ class EmbyJellyfinService implements MediaServer
 
             if ($conflictingPathLibrary !== null) {
                 return $this->libraryResult(false, false, 'An Emby library already uses this managed path.', $conflictingPathLibrary, true);
+            }
+
+            if (! $createIfMissing) {
+                return $this->libraryResult(true, false, 'Managed Emby library is pending inventory.');
             }
 
             $response = $this->client(withoutRedirecting: true)->post('/Library/VirtualFolders', [

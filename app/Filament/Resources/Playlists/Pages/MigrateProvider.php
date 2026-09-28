@@ -30,6 +30,7 @@ use Filament\Tables\Table;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -75,6 +76,7 @@ class MigrateProvider extends Page implements HasTable
             'preserve_epg' => true,
             'overwrite' => true,
             'disable_target_only' => false,
+            'migrate_custom_playlists' => true,
         ]);
     }
 
@@ -109,6 +111,7 @@ class MigrateProvider extends Page implements HasTable
                             ->required(),
                         CheckboxList::make('passes')
                             ->label(__('Match passes (in order)'))
+                            ->bulkToggleable()
                             ->options([
                                 ChannelMatchResolver::PASS_TVG_ID => __('Unique shared TVG-ID / Stream ID'),
                                 ChannelMatchResolver::PASS_NAME => __('Unique normalized channel name'),
@@ -119,6 +122,7 @@ class MigrateProvider extends Page implements HasTable
                             ->columns(1),
                         CheckboxList::make('fields')
                             ->label(__('Configuration to copy onto matched channels'))
+                            ->bulkToggleable()
                             ->options([
                                 'enabled' => __('Enabled / disabled state'),
                                 'group' => __('Group assignment and order'),
@@ -145,6 +149,10 @@ class MigrateProvider extends Page implements HasTable
                             ->label(__('Disable channels that are not in this lineup'))
                             ->helperText(__('Turns off replacement channels with no match here, for a strict curated-lineup migration. Nothing is deleted.'))
                             ->default(false),
+                        Toggle::make('migrate_custom_playlists')
+                            ->label(__('Update Custom Playlist membership'))
+                            ->helperText(__('Keeps any Custom Playlist that curated channels from this playlist pointed at the matched replacement channel. Affected channels are listed in the "Custom Playlists" column below once the preview is built.'))
+                            ->default(true),
                     ]),
                 Action::make('buildPreview')
                     ->label(fn (): string => $this->sessionKey ? __('Rebuild preview') : __('Build preview'))
@@ -172,7 +180,11 @@ class MigrateProvider extends Page implements HasTable
             ->color('primary')
             ->visible(fn (): bool => filled($this->sessionKey))
             ->requiresConfirmation()
-            ->modalDescription(__('Only the rows marked "Include" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider. Custom Playlist membership, per-custom-playlist channel numbers and tag-based groups are not part of this migration.'))
+            ->modalDescription(fn (): string => __('Only the rows marked "Include" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider.').' '.(
+                ($this->data['migrate_custom_playlists'] ?? true)
+                    ? __('Custom Playlists that curated channels from this playlist will be repointed at their replacement, keeping per-custom-playlist channel numbers, sort order and custom groups. Source-only rows with no replacement match are left in place.')
+                    : __('Custom Playlist membership is not part of this migration; playlists that curated channels from this source will keep pointing at the old channels.')
+            ))
             ->modalSubmitActionLabel(__('Apply migration'))
             ->action(fn () => $this->apply());
     }
@@ -204,17 +216,28 @@ class MigrateProvider extends Page implements HasTable
                 ->orderBy('source_name'))
             ->paginated([25, 50, 100])
             ->columns([
+                ToggleColumn::make('include')
+                    ->label(__('Include')),
                 TextColumn::make('source_name')
                     ->label(__('Source channel'))
                     ->description(fn (ProviderMigrationPlanRow $record): ?string => $record->source_stream_id)
                     ->searchable(['source_name', 'source_stream_id'])
                     ->sortable(),
-                ToggleColumn::make('include')
-                    ->label(__('Include')),
+                TextColumn::make('matched_target_name')
+                    ->label(__('Replacement channel'))
+                    ->description(fn (ProviderMigrationPlanRow $record): ?string => $record->matched_target_stream_id)
+                    ->placeholder('-')
+                    ->searchable(['matched_target_name', 'matched_target_stream_id']),
                 TextColumn::make('source_group')
                     ->label(__('Source group'))
                     ->toggleable()
                     ->sortable(),
+                TextColumn::make('custom_playlist_names')
+                    ->label(__('Custom Playlists'))
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('-')
+                    ->toggleable(),
                 TextColumn::make('bucket')
                     ->label(__('Match'))
                     ->badge()
@@ -224,11 +247,6 @@ class MigrateProvider extends Page implements HasTable
                         default => 'gray',
                     })
                     ->sortable(),
-                TextColumn::make('matched_target_name')
-                    ->label(__('Replacement channel'))
-                    ->description(fn (ProviderMigrationPlanRow $record): ?string => $record->matched_target_stream_id)
-                    ->placeholder('-')
-                    ->searchable(['matched_target_name', 'matched_target_stream_id']),
                 TextColumn::make('match_pass')
                     ->label(__('Matched by'))
                     ->formatStateUsing(fn (?string $state): string => $state ? str_replace('_', ' ', $state) : '-')
@@ -259,6 +277,15 @@ class MigrateProvider extends Page implements HasTable
                     ]),
                 TernaryFilter::make('include')
                     ->label(__('Included')),
+                TernaryFilter::make('in_custom_playlist')
+                    ->label(__('Custom Playlist membership'))
+                    ->placeholder(__('All channels'))
+                    ->trueLabel(__('In a Custom Playlist'))
+                    ->falseLabel(__('Not in a Custom Playlist'))
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereNotNull('custom_playlist_names'),
+                        false: fn (Builder $query): Builder => $query->whereNull('custom_playlist_names'),
+                    ),
             ])
             ->recordActions([
                 Action::make('changeMatch')
@@ -333,6 +360,12 @@ class MigrateProvider extends Page implements HasTable
             'updated_at' => $now,
         ];
 
+        $customPlaylistIndex = $this->buildCustomPlaylistIndex(collect($plan['matched'])
+            ->concat($plan['ambiguous'])
+            ->concat($plan['unmatched_source'])
+            ->pluck('source.id')
+            ->all());
+
         $insert = [];
         foreach ($plan['matched'] as $row) {
             $epg = $row['epg'] ?? null;
@@ -341,6 +374,7 @@ class MigrateProvider extends Page implements HasTable
                 'source_name' => $row['source']['name'],
                 'source_stream_id' => $row['source']['stream_id'],
                 'source_group' => $row['source']['group'],
+                'custom_playlist_names' => $this->encodeCustomPlaylistNames($customPlaylistIndex, $row['source']['id']),
                 'suggested_target_channel_id' => $row['target']['id'],
                 'matched_target_channel_id' => $row['target']['id'],
                 'matched_target_name' => $row['target']['name'],
@@ -362,6 +396,7 @@ class MigrateProvider extends Page implements HasTable
                 'source_name' => $row['source']['name'],
                 'source_stream_id' => $row['source']['stream_id'],
                 'source_group' => $row['source']['group'],
+                'custom_playlist_names' => $this->encodeCustomPlaylistNames($customPlaylistIndex, $row['source']['id']),
                 'suggested_target_channel_id' => null,
                 'matched_target_channel_id' => null,
                 'matched_target_name' => null,
@@ -381,6 +416,7 @@ class MigrateProvider extends Page implements HasTable
                 'source_name' => $row['source']['name'],
                 'source_stream_id' => $row['source']['stream_id'],
                 'source_group' => $row['source']['group'],
+                'custom_playlist_names' => $this->encodeCustomPlaylistNames($customPlaylistIndex, $row['source']['id']),
                 'suggested_target_channel_id' => null,
                 'matched_target_channel_id' => null,
                 'matched_target_name' => null,
@@ -421,6 +457,64 @@ class MigrateProvider extends Page implements HasTable
     }
 
     /**
+     * Look up, for each given source channel id, the Custom Playlists that currently curate it
+     * so the review table can show exactly which Custom Playlist (and custom group, if tagged)
+     * each channel belongs to - one bulk query instead of one per row.
+     *
+     * @param  list<int>  $sourceChannelIds
+     * @return array<int, list<string>>
+     */
+    private function buildCustomPlaylistIndex(array $sourceChannelIds): array
+    {
+        $sourceChannelIds = array_values(array_unique($sourceChannelIds));
+        if (empty($sourceChannelIds)) {
+            return [];
+        }
+
+        $memberships = DB::table('channel_custom_playlist as ccp')
+            ->join('custom_playlists as cp', 'cp.id', '=', 'ccp.custom_playlist_id')
+            ->where('cp.user_id', auth()->id())
+            ->whereIn('ccp.channel_id', $sourceChannelIds)
+            ->select(['ccp.channel_id', 'cp.name as custom_playlist_name', 'cp.uuid'])
+            ->orderBy('cp.name')
+            ->get();
+
+        if ($memberships->isEmpty()) {
+            return [];
+        }
+
+        // Custom group tags are Spatie tags on the channel itself, scoped by the Custom
+        // Playlist's uuid - load them once for every involved channel rather than per row.
+        $channels = Channel::query()
+            ->whereIn('id', $memberships->pluck('channel_id')->unique())
+            ->with('tags')
+            ->get()
+            ->keyBy('id');
+
+        $index = [];
+        foreach ($memberships as $membership) {
+            $label = $membership->custom_playlist_name;
+            $tag = $channels->get($membership->channel_id)?->tags->firstWhere('type', $membership->uuid);
+            if ($tag) {
+                $label .= ' ('.$tag->getAttributeValue('name').')';
+            }
+            $index[$membership->channel_id][] = $label;
+        }
+
+        return $index;
+    }
+
+    /**
+     * @param  array<int, list<string>>  $customPlaylistIndex
+     */
+    private function encodeCustomPlaylistNames(array $customPlaylistIndex, int $sourceChannelId): ?string
+    {
+        return isset($customPlaylistIndex[$sourceChannelId])
+            ? json_encode($customPlaylistIndex[$sourceChannelId])
+            : null;
+    }
+
+    /**
      * Delete any preview rows older than the short review window. Called on every page visit
      * and before each rebuild so the scratch table never accumulates stale data.
      */
@@ -455,6 +549,7 @@ class MigrateProvider extends Page implements HasTable
             migrationMode: true,
             preserveEpg: (bool) ($this->data['preserve_epg'] ?? false),
             disableTargetOnly: (bool) ($this->data['disable_target_only'] ?? false),
+            migrateCustomPlaylists: (bool) ($this->data['migrate_custom_playlists'] ?? true),
             resolvedMap: $resolvedMap,
             planFingerprint: $this->planFingerprint,
         ));
@@ -547,7 +642,7 @@ class MigrateProvider extends Page implements HasTable
 
         $record->update([
             'matched_target_channel_id' => $channel?->id,
-            'matched_target_name' => $channel?->name,
+            'matched_target_name' => $channel ? $this->channelDisplayName($channel) : null,
             'matched_target_stream_id' => $channel?->stream_id,
             'bucket' => $channel ? 'matched' : ($record->bucket === 'matched' ? 'unmatched' : $record->bucket),
             'include' => $channel ? true : $record->include,
@@ -568,12 +663,14 @@ class MigrateProvider extends Page implements HasTable
             ->when($search !== '', fn (Builder $q) => $q->where(fn (Builder $qq) => $qq
                 ->where('name', 'like', "%{$search}%")
                 ->orWhere('name_custom', 'like', "%{$search}%")
+                ->orWhere('title', 'like', "%{$search}%")
+                ->orWhere('title_custom', 'like', "%{$search}%")
                 ->orWhere('stream_id', 'like', "%{$search}%")))
             ->orderBy('name')
             ->limit(50)
-            ->get(['id', 'name', 'name_custom', 'stream_id', 'stream_id_custom'])
+            ->get(['id', 'name', 'name_custom', 'title', 'title_custom', 'stream_id', 'stream_id_custom'])
             ->mapWithKeys(fn (Channel $c): array => [
-                $c->id => trim(($c->name_custom ?: $c->name).' ('.($c->stream_id_custom ?: $c->stream_id).')'),
+                $c->id => trim($this->channelDisplayName($c).' ('.($c->stream_id_custom ?: $c->stream_id).')'),
             ])
             ->all();
     }
@@ -582,12 +679,12 @@ class MigrateProvider extends Page implements HasTable
     {
         $channel = $this->scopedTargetChannels()
             ?->clone()
-            ->find($channelId, ['id', 'name', 'name_custom', 'stream_id', 'stream_id_custom']);
+            ->find($channelId, ['id', 'name', 'name_custom', 'title', 'title_custom', 'stream_id', 'stream_id_custom']);
         if (! $channel) {
             return null;
         }
 
-        return trim(($channel->name_custom ?: $channel->name).' ('.($channel->stream_id_custom ?: $channel->stream_id).')');
+        return trim($this->channelDisplayName($channel).' ('.($channel->stream_id_custom ?: $channel->stream_id).')');
     }
 
     private function candidateLabels(ProviderMigrationPlanRow $record): string
@@ -600,8 +697,18 @@ class MigrateProvider extends Page implements HasTable
 
         return $query
             ->whereIn('id', $ids)
-            ->pluck('name')
+            ->get(['id', 'name', 'name_custom', 'title', 'title_custom'])
+            ->map(fn (Channel $c): string => $this->channelDisplayName($c))
             ->implode(', ');
+    }
+
+    /**
+     * A channel's display name, falling back to the title when the (tvg-)name is empty - some
+     * providers publish an empty name attribute with the real label only in the title.
+     */
+    private function channelDisplayName(Channel $channel): string
+    {
+        return (string) ($channel->name_custom ?: ($channel->name ?: ($channel->title_custom ?: $channel->title)));
     }
 
     /**

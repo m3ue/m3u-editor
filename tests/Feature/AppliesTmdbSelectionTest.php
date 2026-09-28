@@ -7,6 +7,7 @@ use App\Models\Series;
 use App\Models\User;
 use App\Services\TmdbService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -94,4 +95,44 @@ it('persists tmdb vote_count when manually applying a series match', function ()
         ->and($series->fresh()->metadata['cast_list'])->toEqual([
             ['id' => 22970, 'name' => 'Peter Dinklage', 'character' => 'Tyrion Lannister', 'photo' => null],
         ]);
+});
+
+it('applies a series match whose director and genre lists exceed 255 characters', function () {
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'genre' => null,
+        'metadata' => [],
+    ]);
+
+    // Long-running series list every episode director (issue #1548: 295 chars).
+    $directors = implode(', ', array_map(fn (int $i) => "Director Number {$i}", range(1, 20)));
+    $genres = implode(', ', array_map(fn (int $i) => "Genre Number {$i}", range(1, 20)));
+
+    $tmdbService = Mockery::mock(TmdbService::class);
+    $tmdbService->shouldReceive('applyTvSeriesSelection')
+        ->with(70977)
+        ->andReturn([
+            'tmdb_id' => 70977,
+            'name' => 'Nestor Burma',
+        ]);
+    $tmdbService->shouldReceive('getTvSeriesDetails')
+        ->with(70977)
+        ->andReturn([
+            'name' => 'Nestor Burma',
+            'director' => $directors,
+            'genres' => $genres,
+        ]);
+    app()->instance(TmdbService::class, $tmdbService);
+
+    Livewire::test(ViewSeries::class, ['record' => $series->getKey()])
+        ->call('applyTmdbSelection', 70977, 'tv', $series->id, 'series');
+
+    // SQLite (tests) ignores varchar length, so also guard the column types
+    // that Postgres enforces.
+    expect(Schema::getColumnType('series', 'director'))->toBe('text')
+        ->and(Schema::getColumnType('series', 'genre'))->toBe('text')
+        ->and(mb_strlen($directors))->toBeGreaterThan(255)
+        ->and($series->fresh()->tmdb_id)->toBe(70977)
+        ->and($series->fresh()->director)->toBe($directors)
+        ->and($series->fresh()->genre)->toBe($genres);
 });

@@ -994,6 +994,23 @@ class M3uProxyService
     }
 
     /**
+     * Re-apply a PlaylistAlias's provider URL replacement to a URL picked by a provider profile.
+     *
+     * When the source playlist has provider profiles, the profile builds the upstream URL
+     * instead of the alias, so the alias's own transform never runs. The profile's
+     * credentials are kept; only the provider URL is swapped, when the alias entry
+     * matching the stream has URL replacement enabled.
+     */
+    private function applyAliasProviderUrl(string $url, $playlist, Channel|Episode $item): string
+    {
+        if (! $playlist instanceof PlaylistAlias || $url === '') {
+            return $url;
+        }
+
+        return $playlist->replaceProviderUrl($url, $item->getEffectivePlaylist()?->xtream_config);
+    }
+
+    /**
      * Check whether a PlaylistAuth user is within their per-auth stream limit.
      *
      * When the limit is reached and stop-oldest is enabled (per-auth setting takes
@@ -1508,6 +1525,10 @@ class M3uProxyService
             // Use the selected profile as context if available
             $urlContext = $selectedProfile ?? $playlist;
             $primaryUrl = PlaylistUrlService::getChannelUrl($channel, $urlContext);
+
+            if ($selectedProfile) {
+                $primaryUrl = $this->applyAliasProviderUrl($primaryUrl, $playlist, $channel);
+            }
         }
         if (empty($primaryUrl)) {
             throw new Exception('Channel primary URL is empty');
@@ -1556,6 +1577,9 @@ class M3uProxyService
                     // Use the selected profile as context if available
                     $urlContext = $selectedProfile ?? $playlist;
                     $url = PlaylistUrlService::getChannelUrl($ch, $urlContext);
+                    if ($selectedProfile) {
+                        $url = $this->applyAliasProviderUrl($url, $playlist, $ch);
+                    }
 
                     return $this->resolveMediaServerUpstreamUrl($url)['url'] ?? $url;
                 })
@@ -1580,11 +1604,17 @@ class M3uProxyService
                 'profile_id' => $profile->id,
                 'original_channel_id' => $originalChannelId,  // For cross-provider failover pooling
                 'original_playlist_uuid' => $originalPlaylistUuid,  // For cross-provider failover pooling
-                'source_playlist_uuid' => $actualChannel->playlist instanceof Playlist ? $actualChannel->playlist->uuid : null,  // For DVR capacity accounting
                 'is_failover' => $isFailover,
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
             ];
+
+            // Tag the true source Playlist for DVR capacity accounting, but only when one
+            // exists - the proxy API rejects null metadata values, and a channel with no
+            // source Playlist (e.g. created directly under a Custom Playlist) is valid.
+            if ($actualChannel->playlist instanceof Playlist) {
+                $metadata['source_playlist_uuid'] = $actualChannel->playlist->uuid;
+            }
 
             // Add provider profile ID if using profiles
             if ($selectedProfile) {
@@ -1651,9 +1681,15 @@ class M3uProxyService
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_channel_id' => $originalChannelId,  // For cross-provider failover pooling
                 'original_playlist_uuid' => $originalPlaylistUuid,  // For cross-provider failover pooling
-                'source_playlist_uuid' => $actualChannel->playlist instanceof Playlist ? $actualChannel->playlist->uuid : null,  // For DVR capacity accounting
                 'is_failover' => $isFailover,
             ];
+
+            // Tag the true source Playlist for DVR capacity accounting, but only when one
+            // exists - the proxy API rejects null metadata values, and a channel with no
+            // source Playlist (e.g. created directly under a Custom Playlist) is valid.
+            if ($actualChannel->playlist instanceof Playlist) {
+                $metadata['source_playlist_uuid'] = $actualChannel->playlist->uuid;
+            }
 
             // Add provider profile ID if using profiles
             if ($selectedProfile) {
@@ -1958,7 +1994,7 @@ class M3uProxyService
             ]);
 
             // Transform URL using selected profile
-            $url = $selectedProfile->transformEpisodeUrl($episode);
+            $url = $this->applyAliasProviderUrl($selectedProfile->transformEpisodeUrl($episode), $playlist, $episode);
         }
 
         // Media-server-backed episodes (Plex/Emby/Jellyfin/WebDAV/AIOStreams) store our own
@@ -2008,9 +2044,15 @@ class M3uProxyService
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_episode_id' => $originalEpisodeId,           // Enables findExistingPooledStream reuse
                 'original_playlist_uuid' => $originalPlaylistUuid,
-                'source_playlist_uuid' => $actualEpisode->playlist instanceof Playlist ? $actualEpisode->playlist->uuid : null,  // For wrapper-aware capacity accounting
                 'is_failover' => $actualEpisode->id !== $originalEpisodeId,
             ];
+
+            // Tag the true source Playlist for wrapper-aware capacity accounting, but only
+            // when one exists - the proxy API rejects null metadata values, and an episode
+            // with no source Playlist (e.g. from a Custom Playlist-only entry) is valid.
+            if ($actualEpisode->playlist instanceof Playlist) {
+                $metadata['source_playlist_uuid'] = $actualEpisode->playlist->uuid;
+            }
 
             // Add provider profile ID if using profiles
             if ($selectedProfile) {
@@ -2056,9 +2098,15 @@ class M3uProxyService
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_episode_id' => $originalEpisodeId,           // Enables findExistingPooledStream reuse
                 'original_playlist_uuid' => $originalPlaylistUuid,
-                'source_playlist_uuid' => $actualEpisode->playlist instanceof Playlist ? $actualEpisode->playlist->uuid : null,  // For wrapper-aware capacity accounting
                 'is_failover' => $actualEpisode->id !== $originalEpisodeId,
             ];
+
+            // Tag the true source Playlist for wrapper-aware capacity accounting, but only
+            // when one exists - the proxy API rejects null metadata values, and an episode
+            // with no source Playlist (e.g. from a Custom Playlist-only entry) is valid.
+            if ($actualEpisode->playlist instanceof Playlist) {
+                $metadata['source_playlist_uuid'] = $actualEpisode->playlist->uuid;
+            }
 
             // Add provider profile ID if using profiles
             if ($selectedProfile) {

@@ -265,7 +265,9 @@ class ProviderMigrationPlanner
     {
         return [
             'id' => (int) $channel->id,
-            'name' => $channel->name_custom ?: $channel->name,
+            // Some providers publish an empty tvg-name with the real label only in the title;
+            // fall back so the review table never shows a blank channel identity.
+            'name' => $channel->name_custom ?: ($channel->name ?: ($channel->title_custom ?: $channel->title)),
             'title' => $channel->title_custom ?: $channel->title,
             'stream_id' => $channel->stream_id_custom ?: $channel->stream_id,
             'group' => $channel->group,

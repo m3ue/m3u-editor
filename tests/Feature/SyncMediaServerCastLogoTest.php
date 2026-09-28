@@ -134,3 +134,137 @@ it('maps series People to a null-id cast_list and pulls the Logo image', functio
             ['id' => null, 'name' => 'Diego Luna', 'character' => 'Cassian', 'photo' => 'http://server/img/p9/Primary'],
         ]);
 });
+
+it('keeps TMDB-owned fields on an enriched movie when a re-sync carries server values', function () {
+    $tmdbCast = [['id' => 6384, 'name' => 'Keanu Reeves', 'character' => 'Neo', 'photo' => 'https://image.tmdb.org/k.jpg']];
+    $movie = [
+        'Id' => 'm1',
+        'Name' => 'The Matrix',
+        'Overview' => 'Server plot',
+        'ImageTags' => ['Primary' => 'x', 'Logo' => 'logo-tag'],
+        'People' => [
+            ['Id' => 'p1', 'Name' => 'Keanu Reeves', 'Type' => 'Actor', 'Role' => 'Neo'],
+            ['Id' => 'd1', 'Name' => 'Server Director', 'Type' => 'Director'],
+        ],
+    ];
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie]);
+
+    $channel = Channel::where('playlist_id', $this->playlist->id)->firstOrFail();
+    $channel->update(['info' => array_merge($channel->info, [
+        'cast_list' => $tmdbCast,
+        'clearlogo' => 'https://image.tmdb.org/logo.png',
+        'related_tmdb' => [603, 604],
+        'vote_count' => 25000,
+        'backdrop_path' => ['https://image.tmdb.org/backdrop.jpg'],
+        'cover_big' => 'https://image.tmdb.org/poster.jpg',
+        'plot' => 'TMDB plot',
+        'director' => 'Lana Wachowski, Lilly Wachowski',
+        'rating' => 8.2,
+    ])]);
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie]);
+
+    $info = $channel->fresh()->info;
+
+    expect($info['cast_list'])->toEqual($tmdbCast)
+        ->and($info['clearlogo'])->toBe('https://image.tmdb.org/logo.png')
+        ->and($info['related_tmdb'])->toBe([603, 604])
+        ->and($info['vote_count'])->toBe(25000)
+        ->and($info['backdrop_path'])->toBe(['https://image.tmdb.org/backdrop.jpg'])
+        ->and($info['cover_big'])->toBe('https://image.tmdb.org/poster.jpg')
+        ->and($info['plot'])->toBe('TMDB plot')
+        ->and($info['director'])->toBe('Lana Wachowski, Lilly Wachowski')
+        ->and($info['rating'])->toBe(8.2)
+        ->and($info['cast'])->toBe('Keanu Reeves');
+});
+
+it('still refreshes the server cast_list on a movie TMDB has not enriched', function () {
+    $movie = fn (string $role) => [
+        'Id' => 'm1',
+        'Name' => 'The Matrix',
+        'ImageTags' => ['Primary' => 'x'],
+        'People' => [['Id' => 'p1', 'Name' => 'Keanu Reeves', 'Type' => 'Actor', 'Role' => $role]],
+    ];
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie('Neo')]);
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie('Thomas Anderson')]);
+
+    $channel = Channel::where('playlist_id', $this->playlist->id)->firstOrFail();
+
+    expect($channel->info['cast_list'][0]['character'])->toBe('Thomas Anderson');
+});
+
+it('keeps TMDB-owned fields on an enriched series when a re-sync carries server values', function () {
+    $tmdbCast = [['id' => 1, 'name' => 'Diego Luna', 'character' => 'Cassian', 'photo' => 'https://image.tmdb.org/d.jpg']];
+    $seriesData = [
+        'Id' => 's1',
+        'Name' => 'Andor',
+        'Overview' => 'Server plot',
+        'CommunityRating' => 7.0,
+        'BackdropImageTags' => ['b1'],
+        'ImageTags' => ['Logo' => 'logo-tag'],
+        'People' => [['Id' => 'p9', 'Name' => 'Diego Luna', 'Type' => 'Actor', 'Role' => 'Cassian']],
+    ];
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $series = Series::where('playlist_id', $this->playlist->id)->firstOrFail();
+    $series->update([
+        'metadata' => array_merge($series->metadata, [
+            'cast_list' => $tmdbCast,
+            'clearlogo' => 'https://image.tmdb.org/logo.png',
+            'related_tmdb' => [83867],
+            'vote_count' => 1200,
+        ]),
+        'backdrop_path' => ['https://image.tmdb.org/backdrop.jpg'],
+        'cover' => 'https://image.tmdb.org/poster.jpg',
+        'plot' => 'TMDB plot',
+        'cast' => 'Diego Luna, Stellan Skarsgard',
+        'rating' => 8.4,
+    ]);
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $series = $series->fresh();
+    $metadata = $series->metadata;
+
+    expect($metadata['cast_list'])->toEqual($tmdbCast)
+        ->and($metadata['related_tmdb'])->toBe([83867])
+        ->and($metadata['vote_count'])->toBe(1200)
+        ->and($metadata['clearlogo'])->toBe('https://image.tmdb.org/logo.png')
+        ->and($metadata['media_server_id'])->toBe('s1')
+        ->and($series->backdrop_path)->toBe(['https://image.tmdb.org/backdrop.jpg'])
+        ->and($series->cover)->toBe('https://image.tmdb.org/poster.jpg')
+        ->and($series->plot)->toBe('TMDB plot')
+        ->and($series->cast)->toBe('Diego Luna, Stellan Skarsgard')
+        ->and((float) $series->rating)->toBe(8.4);
+});
+
+it('keeps a TMDB clearlogo and cast_list on a series when the server sends none', function () {
+    $seriesData = ['Id' => 's2', 'Name' => 'Local Show', 'ImageTags' => [], 'People' => []];
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $series = Series::where('playlist_id', $this->playlist->id)->firstOrFail();
+    $series->update(['metadata' => array_merge($series->metadata, [
+        'cast_list' => [['id' => 7, 'name' => 'Someone', 'character' => 'Lead', 'photo' => null]],
+        'clearlogo' => 'https://image.tmdb.org/logo.png',
+    ])]);
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $metadata = $series->fresh()->metadata;
+
+    expect($metadata['clearlogo'])->toBe('https://image.tmdb.org/logo.png')
+        ->and($metadata['cast_list'][0]['id'])->toBe(7);
+});
+
+it('still refreshes server values on a series TMDB has not enriched', function () {
+    $seriesData = fn (string $plot) => ['Id' => 's3', 'Name' => 'Show', 'Overview' => $plot, 'ImageTags' => [], 'People' => []];
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData('First plot')]);
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData('Second plot')]);
+
+    expect(Series::where('playlist_id', $this->playlist->id)->firstOrFail()->plot)->toBe('Second plot');
+});

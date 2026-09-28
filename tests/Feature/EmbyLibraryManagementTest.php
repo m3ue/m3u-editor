@@ -335,6 +335,8 @@ it('does not create a library when the managed inventory request fails', functio
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
 })->with([
     'redirect' => 302,
+    'unauthorized' => 401,
+    'forbidden' => 403,
     'server failure' => 500,
 ]);
 

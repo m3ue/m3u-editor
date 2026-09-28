@@ -25,6 +25,7 @@ use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Rules\CheckIfUrlOrLocalPath;
+use App\Services\CachedContentDispatchService;
 use App\Services\DateFormatService;
 use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
@@ -572,6 +573,21 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-signal')
                     ->modalDescription(__('Probe all episodes of this series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
+                Action::make('cache_all_episodes')
+                    ->label(__('Cache all episodes'))
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('info')
+                    ->visible(fn (Series $record): bool => app(CachedContentDispatchService::class)->isEnabled()
+                        && filled($record->playlist_id))
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-arrow-down-tray')
+                    ->modalHeading(__('Cache all episodes?'))
+                    ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
+                    ->modalSubmitActionLabel(__('Cache all episodes'))
+                    ->action(function (Series $record): void {
+                        $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
+                        CachedContentDispatchService::seriesNotification($counts)->send();
+                    }),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.'))

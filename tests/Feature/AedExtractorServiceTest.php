@@ -225,3 +225,50 @@ test('year rollover does not bump events dated today or later', function () {
 
     expect($result->start->year)->toBe(2026);
 });
+
+test('year rollover keeps a finished event in the past instead of jumping a year ahead', function () {
+    // Regression test for #1549: a stale title (event already over, provider hasn't renamed
+    // the channel) was rolled forward 12 months, producing a year of pre-event padding.
+    Carbon::setTestNow(Carbon::create(2026, 9, 28, 10, 0, 0, 'UTC'));
+
+    $profile = makeProfile([
+        'time_regex' => '(\d{1,2}:\d{2})',
+        'date_regex' => '\((\d{2}\.\d{2})',
+        'date_format' => 'm.d',
+        'time_format' => 'H:i',
+    ]);
+
+    $result = (new AedExtractorService)->extract($profile, 'Event (09.27 19:00)');
+
+    expect($result->start->toDateString())->toBe('2026-09-27');
+});
+
+test('year rollover still moves an early-january date seen in late december into next year', function () {
+    Carbon::setTestNow(Carbon::create(2026, 12, 30, 10, 0, 0, 'UTC'));
+
+    $profile = makeProfile([
+        'time_regex' => '(\d{1,2}:\d{2})',
+        'date_regex' => '\((\d{2}\.\d{2})',
+        'date_format' => 'm.d',
+        'time_format' => 'H:i',
+    ]);
+
+    $result = (new AedExtractorService)->extract($profile, 'Event (01.02 19:00)');
+
+    expect($result->start->toDateString())->toBe('2027-01-02');
+});
+
+test('year rollover moves a late-december date seen in early january into last year', function () {
+    Carbon::setTestNow(Carbon::create(2027, 1, 2, 10, 0, 0, 'UTC'));
+
+    $profile = makeProfile([
+        'time_regex' => '(\d{1,2}:\d{2})',
+        'date_regex' => '\((\d{2}\.\d{2})',
+        'date_format' => 'm.d',
+        'time_format' => 'H:i',
+    ]);
+
+    $result = (new AedExtractorService)->extract($profile, 'Event (12.30 19:00)');
+
+    expect($result->start->toDateString())->toBe('2026-12-30');
+});

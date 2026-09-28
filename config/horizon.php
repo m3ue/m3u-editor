@@ -271,6 +271,25 @@ return [
             'timeout' => 60 * 5,
             'nice' => 5,
         ],
+
+        // Cached content downloads (DownloadCachedContentFile) run here only, so a
+        // slow provider or a 1-hour download can't stall import/sync work. The job
+        // itself allows one download per playlist at a time; maxProcesses caps
+        // downloads across playlists. SQLite deployments collapse to 1 process.
+        'cache-queue' => [
+            'connection' => 'redis',
+            'queue' => ['cache'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => $horizonIntEnv('HORIZON_CACHE_MIN_PROCESSES', 1),
+            'maxProcesses' => $horizonIntEnv('HORIZON_CACHE_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4),
+            'maxTime' => $horizonIntEnv('HORIZON_CACHE_MAX_TIME', 3600),
+            'maxJobs' => $horizonIntEnv('HORIZON_CACHE_MAX_JOBS', 50),
+            'memory' => $horizonIntEnv('HORIZON_CACHE_MEMORY', 256),
+            'tries' => 3,
+            'timeout' => 60 * 60, // 1 hour - cached files can be multi-GB
+            'nice' => 5,
+        ],
     ],
 
     'environments' => [

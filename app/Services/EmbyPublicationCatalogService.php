@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\DynamicGroup;
 use App\Models\EmbyLibraryMapping;
 use App\Models\Episode;
 use App\Models\Series;
@@ -146,6 +147,16 @@ class EmbyPublicationCatalogService
                                     ->where('type', $customPlaylist->uuid));
                         });
                 });
+        } elseif ($mapping->source_kind === 'dynamic_group') {
+            $dynamicGroup = DynamicGroup::query()
+                ->publishableBy($mapping->user_id)
+                ->where('type', 'vod')
+                ->find($mapping->source_identifier);
+            if ($dynamicGroup === null) {
+                return [];
+            }
+
+            $query->whereIn('channels.id', $dynamicGroup->channels()->select('channels.id'));
         } elseif ($mapping->source_kind !== 'all') {
             return [];
         }
@@ -259,6 +270,16 @@ class EmbyPublicationCatalogService
                                     ->where('type', $categoryTagType));
                         });
                 });
+        } elseif ($mapping->source_kind === 'dynamic_group') {
+            $dynamicGroup = DynamicGroup::query()
+                ->publishableBy($mapping->user_id)
+                ->where('type', 'series')
+                ->find($mapping->source_identifier);
+            if ($dynamicGroup === null) {
+                return [];
+            }
+
+            $query->whereIn('series.id', $dynamicGroup->series()->select('series.id'));
         } elseif ($mapping->source_kind !== 'all') {
             return [];
         }

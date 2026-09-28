@@ -16,6 +16,7 @@ use App\Filament\Pages\ReleaseLogs;
 use App\Filament\Pages\RequestContent;
 use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Filament\Resources\Assets\AssetResource;
+use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
 use App\Filament\Resources\Categories\CategoryResource;
 use App\Filament\Resources\Channels\ChannelResource;
 use App\Filament\Resources\ChannelScrubbers\ChannelScrubberResource;
@@ -39,11 +40,14 @@ use App\Filament\Resources\Plugins\PluginResource;
 use App\Filament\Resources\PostProcesses\PostProcessResource;
 use App\Filament\Resources\QueueMonitor\QueueMonitorResource;
 use App\Filament\Resources\Series\SeriesResource;
+use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
 use App\Filament\Resources\StreamProfiles\StreamProfileResource;
 use App\Filament\Resources\Users\UserResource;
+use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
+use App\Settings\GeneralSettings;
 use Filament\Navigation\NavigationItem;
 
 /**
@@ -113,6 +117,11 @@ final class AdminNavigationSchema
                     'playlist_auths' => ['resolve' => fn () => PlaylistAuthResource::getNavigationItems()],
                     'stream_file_settings' => ['resolve' => fn () => StreamFileSettingResource::getNavigationItems()],
                     'channel_scrubbers' => ['resolve' => fn () => ChannelScrubberResource::getNavigationItems()],
+                    'cached_downloads' => [
+                        // Hidden while caching is off, matching the resource's canAccess().
+                        'available' => fn () => (bool) (app(GeneralSettings::class)->enable_cache ?? false),
+                        'resolve' => fn () => CachedContentFileResource::getNavigationItems(),
+                    ],
                 ],
             ],
             'dvr' => [
@@ -153,6 +162,7 @@ final class AdminNavigationSchema
                 'available' => fn () => true,
                 'items' => [
                     'vod_groups' => ['resolve' => fn () => VodGroupResource::getNavigationItems()],
+                    'vod_dynamic_groups' => ['resolve' => fn () => VodDynamicGroupResource::getNavigationItems()],
                     'vods' => ['resolve' => fn () => VodResource::getNavigationItems()],
                 ],
             ],
@@ -162,6 +172,7 @@ final class AdminNavigationSchema
                 'available' => fn () => true,
                 'items' => [
                     'categories' => ['resolve' => fn () => CategoryResource::getNavigationItems()],
+                    'series_dynamic_groups' => ['resolve' => fn () => SeriesDynamicGroupResource::getNavigationItems()],
                     'series' => ['resolve' => fn () => SeriesResource::getNavigationItems()],
                 ],
             ],

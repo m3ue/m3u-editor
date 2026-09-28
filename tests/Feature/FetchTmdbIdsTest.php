@@ -1520,7 +1520,10 @@ it('creates categories for series when auto_create_groups is enabled', function 
 });
 
 it('excludes VOD channels that were attempted but had no match from query when overwrite is false', function () {
-    // This channel was already attempted but no TMDB match was found
+    // This channel was already attempted but no TMDB match was found. Marked via
+    // info['tmdb_search_failed'] rather than bare last_metadata_fetch, since that field
+    // is also stamped by ordinary provider metadata syncs (Channel::fetchMetadata()) and
+    // by media-server syncs (SyncMediaServer) for reasons unrelated to a TMDB attempt.
     Channel::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
@@ -1530,6 +1533,7 @@ it('excludes VOD channels that were attempted but had no match from query when o
         'tmdb_id' => null,
         'imdb_id' => null,
         'last_metadata_fetch' => now(),
+        'info' => ['tmdb_search_failed' => true],
     ]);
 
     $tmdb = Mockery::mock(TmdbService::class);

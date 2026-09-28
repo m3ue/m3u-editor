@@ -96,4 +96,20 @@ class DvrRecordingFactory extends Factory
             'error_message' => fake()->sentence(),
         ]);
     }
+
+    public function purged(): static
+    {
+        $start = now()->subWeek();
+        $end = $start->copy()->addHour();
+
+        return $this->state(fn (array $attributes) => [
+            'status' => DvrRecordingStatus::Purged,
+            'actual_start' => $start,
+            'actual_end' => $end,
+            'duration_seconds' => 3300,
+            'file_path' => null,
+            'scheduled_start' => $start,
+            'scheduled_end' => $end,
+        ]);
+    }
 }

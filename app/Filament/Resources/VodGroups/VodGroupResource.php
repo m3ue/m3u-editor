@@ -100,7 +100,7 @@ class VodGroupResource extends Resource implements CopilotResource
         return $table->persistFiltersInSession()
             ->persistSortInSession()
             ->modifyQueryUsing(function (Builder $query) {
-                $query->with('parent')
+                $query->with(['parent', 'playlist'])
                     ->withCount('vod_channels')
                     ->withCount('enabled_vod_channels')
                     ->withCount('children')
@@ -143,10 +143,9 @@ class VodGroupResource extends Resource implements CopilotResource
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))
                     ->toggleable()
-                    ->tooltip(__('Auto enable newly added group channels'))
-                    ->tooltip(fn ($record) => $record->playlist?->enable_channels ? 'Playlist auto-enable new channels is enabled, all group channels will automatically be enabled on next sync.' : 'Auto enable newly added group channels')
-                    ->disabled(fn ($record) => $record->playlist?->enable_channels)
-                    ->getStateUsing(fn ($record) => $record->playlist?->enable_channels ? true : $record->enabled)
+                    ->tooltip(fn ($record) => $record->playlist?->enable_vod_channels ? __('Playlist "Enable new VOD channels" is on, so all new channels added to this group will be enabled on sync.') : __('Auto enable newly added group channels'))
+                    ->disabled(fn ($record) => (bool) $record->playlist?->enable_vod_channels)
+                    ->getStateUsing(fn ($record) => $record->playlist?->enable_vod_channels ? true : $record->enabled)
                     ->sortable(),
                 TextColumn::make('name_internal')
                     ->label(__('Default name'))

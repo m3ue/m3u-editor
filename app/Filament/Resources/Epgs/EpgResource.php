@@ -115,7 +115,7 @@ class EpgResource extends Resource implements CopilotResource
             ->modifyQueryUsing(function (Builder $query) {
                 $query->withCount([
                     'channels',
-                ]);
+                ])->withHasDvr();
             })
             ->deferLoading()
             ->columns([
@@ -163,6 +163,12 @@ class EpgResource extends Resource implements CopilotResource
                     ->boolean()
                     ->toggleable()
                     ->sortable(),
+                IconColumn::make('has_dvr')
+                    ->label(__('Has DVR'))
+                    ->tooltip(fn (Epg $record) => $record->hasDvrEnabled() ? __('A playlist using this EPG has DVR enabled, so caching also populates DVR programme data') : null)
+                    ->state(fn (Epg $record): bool => $record->hasDvrEnabled())
+                    ->boolean()
+                    ->toggleable(),
                 ToggleColumn::make('auto_sync')
                     ->label(__('Auto Sync'))
                     ->toggleable()
@@ -186,6 +192,11 @@ class EpgResource extends Resource implements CopilotResource
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label(__('Sync Time'))
+                    ->formatStateUsing(fn (string $state): string => gmdate('H:i:s', (int) $state))
+                    ->toggleable()
+                    ->sortable(),
+                TextColumn::make('cache_time')
+                    ->label(__('Cache Time'))
                     ->formatStateUsing(fn (string $state): string => gmdate('H:i:s', (int) $state))
                     ->toggleable()
                     ->sortable(),

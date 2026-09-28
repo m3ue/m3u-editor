@@ -9,6 +9,7 @@
 use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistProfile;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
@@ -100,3 +101,111 @@ test('proxied live stream through M3U-playlist alias sends swapped credentials t
         'http://provider.example.com:8080/newuser/newpass/1234.m3u8',
     ],
 ]);
+
+/**
+ * Stream a channel through an alias with the proxy enabled and return the upstream URL
+ * the editor asked m3u-proxy to fetch.
+ */
+function proxiedAliasStreamUrl(PlaylistAlias $alias, Channel $channel): ?string
+{
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response([
+            'matching_streams' => [],
+            'total_matching' => 0,
+            'total_clients' => 0,
+        ]),
+        '*/streams' => Http::response(['stream_id' => 'test-stream-id']),
+        '*' => Http::response([], 200),
+    ]);
+
+    test()->get("/live/owner/{$alias->uuid}/{$channel->id}.ts")->assertRedirect();
+
+    $createRequest = null;
+    Http::assertSent(function (ClientRequest $request) use (&$createRequest) {
+        if ($request->method() === 'POST' && str_ends_with(parse_url($request->url(), PHP_URL_PATH), '/streams')) {
+            $createRequest = $request;
+
+            return true;
+        }
+
+        return false;
+    });
+
+    return $createRequest['url'] ?? null;
+}
+
+test('proxied stream through an M3U-playlist alias fetches from the replacement url', function () {
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'xtream_config' => null,
+        'enable_proxy' => false,
+        'available_streams' => 0,
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => null,
+        'enabled' => true,
+        'url' => 'http://provider.example.com:8080/live/user/pass/1234.ts',
+    ]);
+
+    $alias = PlaylistAlias::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'VPN Alias',
+        'uuid' => Str::uuid()->toString(),
+        'enable_proxy' => true,
+        'xtream_config' => [[
+            'url' => 'http://provider.example.com:8080',
+            'replace_url_enabled' => true,
+            'replace_url' => 'http://vpn.provider.example.com:8080',
+        ]],
+    ]);
+
+    expect(proxiedAliasStreamUrl($alias, $channel))->toBe('http://vpn.provider.example.com:8080/live/user/pass/1234.ts');
+});
+
+test('proxied stream through an alias of a pooled-provider playlist keeps the profile credentials and replaces the url', function () {
+    $playlist = Playlist::factory()->for($this->user)->createQuietly([
+        'enable_proxy' => false,
+        'profiles_enabled' => true,
+        'available_streams' => 0,
+        'xtream_config' => [
+            'url' => 'http://provider.example.com:8080',
+            'username' => 'olduser',
+            'password' => 'oldpass',
+        ],
+    ]);
+
+    PlaylistProfile::factory()->for($this->user)->create([
+        'playlist_id' => $playlist->id,
+        'is_primary' => true,
+        'priority' => 0,
+        'url' => 'http://provider.example.com:8080',
+        'username' => 'profileuser',
+        'password' => 'profilepass',
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => null,
+        'enabled' => true,
+        'url' => 'http://provider.example.com:8080/live/olduser/oldpass/1234.ts',
+    ]);
+
+    $alias = PlaylistAlias::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'VPN Alias',
+        'uuid' => Str::uuid()->toString(),
+        'enable_proxy' => true,
+        'xtream_config' => [[
+            'url' => 'http://provider.example.com:8080',
+            'replace_url_enabled' => true,
+            'replace_url' => 'http://vpn.provider.example.com:8080',
+        ]],
+    ]);
+
+    expect(proxiedAliasStreamUrl($alias, $channel))->toBe('http://vpn.provider.example.com:8080/live/profileuser/profilepass/1234.ts');
+});

@@ -255,6 +255,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
+                    ...PlaylistFacade::getOutputTogglesSchema(),
                     Toggle::make('disable_m3u_xtream_format')
                         ->label(__('Disable Xtream URL format in M3U output'))
                         ->columnSpan(1)

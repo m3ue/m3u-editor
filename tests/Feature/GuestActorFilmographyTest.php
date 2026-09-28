@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\GuestPanel\Pages\GuestActorFilmography;
+use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Settings\GeneralSettings;
@@ -85,6 +86,12 @@ it('allows access when authenticated with uuid', function () {
 
 it('populates person and filmography on mount', function () {
     setGuestSession($this->playlist->uuid);
+
+    // Seed a VOD matching tmdb_id 100 so the playlist-scoped filter keeps it.
+    Channel::factory()->for($this->owner)->for($this->playlist, 'playlist')->create([
+        'is_vod' => true,
+        'tmdb_id' => 100,
+    ]);
 
     Cache::flush();
 

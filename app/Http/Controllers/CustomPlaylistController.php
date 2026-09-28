@@ -307,7 +307,7 @@ class CustomPlaylistController extends Controller
                 'id' => $channel->id,
                 'group' => $channel->tags->first()?->getAttributeValue('name'),
                 'channel_number' => $channel->pivot->channel_number,
-                'sort' => $channel->pivot->sort,
+                'sort' => $channel->pivot->sort === null ? null : (float) $channel->pivot->sort,
             ],
         ]);
     }

@@ -28,6 +28,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Enumerable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -1049,7 +1050,7 @@ class ProcessM3uImport implements ShouldQueue
                                     continue;
                                 }
 
-                                // Set the source key — hashing and collision detection happen in ProcessM3uImportChunk
+                                // Set the source key - hashing and collision detection happen in assignCollisionSourceIds()
                                 $channel['source_key'] = $channel['title'].$channel['name'].$chGroup;
 
                                 // Update group name to the singular name and return the channel
@@ -1088,7 +1089,7 @@ class ProcessM3uImport implements ShouldQueue
                                 continue;
                             }
 
-                            // Set the source key — hashing and collision detection happen in ProcessM3uImportChunk
+                            // Set the source key - hashing and collision detection happen in assignCollisionSourceIds()
                             $channel['source_key'] = $channel['title'].$channel['name'].$channel['group'];
 
                             // Set channel number, if auto sort is enabled
@@ -1656,6 +1657,29 @@ class ProcessM3uImport implements ShouldQueue
     ): array {
         $playlistId = $playlist->id;
         $categoryIds = $groups->pluck('category_id')->filter(fn ($id) => $id !== null)->unique();
+        $currentNames = $groups->pluck('category_name');
+
+        // Prune stale rows *before* rename/upsert runs, not after. Doing this first frees up
+        // any name a doomed row is squatting on, so a genuine rename below can claim it directly
+        // instead of hitting a same-run name collision (issue #1530: a renamed category colliding
+        // with a stale row's old name left the stale row behind forever - see the conflict branch below).
+        // Guard against wiping everything if the provider temporarily returns an empty response.
+        if ($groups->isNotEmpty()) {
+            SourceGroup::where('playlist_id', $playlistId)
+                ->where('type', $type)
+                ->where(function ($query) use ($categoryIds, $currentNames) {
+                    $query->where(function ($q) use ($categoryIds) {
+                        // Rows tracked by source_group_id that are no longer in the feed.
+                        $q->whereNotNull('source_group_id')
+                            ->whereNotIn('source_group_id', $categoryIds);
+                    })->orWhere(function ($q) use ($currentNames) {
+                        // Legacy null-id rows whose name no longer appears in the feed.
+                        $q->whereNull('source_group_id')
+                            ->whereNotIn('name', $currentNames);
+                    });
+                })
+                ->delete();
+        }
 
         $existingBySourceId = $categoryIds->isNotEmpty()
             ? SourceGroup::where('playlist_id', $playlistId)
@@ -1665,30 +1689,55 @@ class ProcessM3uImport implements ShouldQueue
                 ->keyBy('source_group_id')
             : collect();
 
-        // Pre-load all name→id pairs so rename-collision checks are O(1) instead of one EXISTS query per rename.
+        // Pre-load name→row pairs (id + source_group_id) so rename-collision checks are O(1)
+        // instead of one EXISTS query per rename, and so we can tell apart the two kinds of
+        // name collision below.
         $nameIndex = SourceGroup::where('playlist_id', $playlistId)
             ->where('type', $type)
-            ->pluck('id', 'name');
+            ->get(['id', 'name', 'source_group_id'])
+            ->keyBy('name');
 
         $renames = [];
-        $groups->each(function ($group) use ($existingBySourceId, &$nameIndex, &$renames) {
+        $conflictedCategoryIds = [];
+        $groups->each(function ($group) use ($existingBySourceId, &$nameIndex, &$renames, &$conflictedCategoryIds) {
             $categoryId = $group['category_id'] ?? null;
             if ($categoryId === null) {
                 return;
             }
             $existing = $existingBySourceId->get($categoryId);
             if ($existing && $existing->name !== $group['category_name']) {
-                // If a different row already owns the target name, skip the in-place rename
-                // and let the upsert assign source_group_id to that row instead.
-                $conflictId = $nameIndex->get($group['category_name']);
-                if ($conflictId !== null && $conflictId !== $existing->id) {
+                $conflict = $nameIndex->get($group['category_name']);
+                if ($conflict !== null && $conflict->id !== $existing->id) {
+                    // The early prune above only clears rows the feed no longer references, so
+                    // any row still standing is either currently valid (non-null source_group_id,
+                    // guaranteed present in $categoryIds) or a legacy null-id row.
+                    if ($conflict->source_group_id === null) {
+                        // Legacy row is being absorbed by this rename: the id-tracked row under
+                        // the old name is superseded and, left alone, would become an orphaned
+                        // duplicate sharing this category's source_group_id forever (issue #1530,
+                        // since its own source_group_id would still be in $categoryIds every run).
+                        // Delete it and let the upsert below claim the name onto the legacy row.
+                        $oldName = $existing->name;
+                        $existing->delete();
+                        $renames[$oldName] = $group['category_name'];
+                        $nameIndex->forget($oldName);
+
+                        return;
+                    }
+
+                    // A different, still-current category already owns the target name - a
+                    // genuine same-run collision the provider itself created. Skip the rename
+                    // AND skip upserting this category this run, rather than letting the upsert
+                    // silently steal source_group_id from the row that legitimately owns the name.
+                    $conflictedCategoryIds[] = $categoryId;
+
                     return;
                 }
                 $renames[$existing->name] = $group['category_name'];
                 // Keep $nameIndex current so subsequent iterations see this rename,
                 // preventing a second category from targeting the same name and
                 // hitting the DB unique constraint on (name, playlist_id, type).
-                $nameIndex->put($group['category_name'], $existing->id);
+                $nameIndex->put($group['category_name'], $existing);
                 $nameIndex->forget($existing->name);
                 $existing->update(['name' => $group['category_name']]);
             }
@@ -1711,6 +1760,7 @@ class ProcessM3uImport implements ShouldQueue
         foreach ($groups->chunk(50) as $chunk) {
             $rows = collect($chunk)
                 ->filter(fn ($item) => ($item['category_id'] ?? null) !== null)
+                ->reject(fn ($item) => in_array($item['category_id'], $conflictedCategoryIds, true))
                 ->unique(fn ($item) => $item['category_name'].$playlistId.$type)
                 ->map(fn ($item) => [
                     'name' => $item['category_name'],
@@ -1730,25 +1780,6 @@ class ProcessM3uImport implements ShouldQueue
             }
         }
 
-        // Guard against wiping everything if the provider temporarily returns an empty response.
-        if ($groups->isNotEmpty()) {
-            $currentNames = $groups->pluck('category_name');
-            SourceGroup::where('playlist_id', $playlistId)
-                ->where('type', $type)
-                ->where(function ($query) use ($categoryIds, $currentNames) {
-                    $query->where(function ($q) use ($categoryIds) {
-                        // Rows tracked by source_group_id that are no longer in the feed.
-                        $q->whereNotNull('source_group_id')
-                            ->whereNotIn('source_group_id', $categoryIds);
-                    })->orWhere(function ($q) use ($currentNames) {
-                        // Legacy null-id rows whose name no longer appears in the feed.
-                        $q->whereNull('source_group_id')
-                            ->whereNotIn('name', $currentNames);
-                    });
-                })
-                ->delete();
-        }
-
         $newNames = $groups->pluck('category_name')
             ->unique()
             ->reject(fn ($name) => $name === null || $nameIndex->has($name))
@@ -1757,6 +1788,34 @@ class ProcessM3uImport implements ShouldQueue
         Bouquet::appendNewGroupNames($playlistId, $type, $newNames);
 
         return [$currentSelected, $groups->unique('category_name')->keyBy('category_name')];
+    }
+
+    /**
+     * Assign source_id via collision-relative hashing.
+     *
+     * M3U channels carry a raw `source_key` (title + name + group). The first occurrence
+     * keeps the base md5 hash (backwards-compatible), each subsequent duplicate gets a
+     * :dup:N suffix so all entries survive as distinct channel records. Because the key
+     * includes the group, duplicates can only occur within one group, so the counter map
+     * only needs to span the group being chunked. Channels without a `source_key`
+     * (Xtream) pass through with their existing source_id.
+     */
+    public static function assignCollisionSourceIds(Enumerable $channels): Enumerable
+    {
+        $seen = [];
+
+        return $channels->map(function (array $item) use (&$seen) {
+            if (! empty($item['source_key'])) {
+                $count = $seen[$item['source_key']] ?? 0;
+                $item['source_id'] = $count === 0
+                    ? md5($item['source_key'])
+                    : md5($item['source_key'].':dup:'.$count);
+                $seen[$item['source_key']] = $count + 1;
+            }
+            unset($item['source_key']);
+
+            return $item;
+        });
     }
 
     /**
@@ -1827,6 +1886,9 @@ class ProcessM3uImport implements ShouldQueue
                         }
                         $group->update($data);
                     }
+                    // Hash before chunking so duplicate counters span the whole group,
+                    // not just a single 50-item Job payload.
+                    $channels = self::assignCollisionSourceIds($channels);
                     $channels->chunk(50)->each(function ($chunk) use ($playlistId, $batchNo, $group, $autoSort) {
                         Job::create([
                             'title' => "Processing channel import for group: {$group->name}",

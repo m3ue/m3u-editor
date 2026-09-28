@@ -13,6 +13,11 @@ use App\Filament\Tables\CustomPlaylistCategoriesTable;
 use App\Filament\Tables\CustomPlaylistGroupsTable;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
+use App\Livewire\MediaFlowProxyUrl;
+use App\Livewire\PlaylistEpgUrl;
+use App\Livewire\PlaylistM3uUrl;
+use App\Livewire\XtreamApiInfo;
+use App\Livewire\XtreamDnsStatus;
 use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -39,7 +44,10 @@ use Filament\Forms\Components\ModalTableSelect;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Livewire;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -53,6 +61,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Exists;
+use Override;
 
 class PlaylistAliasResource extends Resource implements CopilotResource
 {
@@ -83,6 +92,53 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     public static function getNavigationSort(): ?int
     {
         return 5;
+    }
+
+    #[Override]
+    public static function infolist(Schema $schema): Schema
+    {
+        return $schema
+            ->components([
+                Fieldset::make(__('Links'))
+                    ->schema([
+                        Section::make()
+                            ->columns(2)
+                            ->schema([
+                                Grid::make()
+                                    ->columnSpan(1)
+                                    ->columns(1)
+                                    ->schema([
+                                        Livewire::make(PlaylistM3uUrl::class)
+                                            ->columnSpanFull(),
+                                    ]),
+                                Grid::make()
+                                    ->columnSpan(1)
+                                    ->columns(1)
+                                    ->schema([
+                                        Livewire::make(PlaylistEpgUrl::class),
+                                    ]),
+                            ]),
+                    ]),
+                Fieldset::make(__('Xtream API'))
+                    ->schema([
+                        Section::make()
+                            ->columns(1)
+                            ->schema([
+                                Livewire::make(XtreamApiInfo::class),
+                                Livewire::make(XtreamDnsStatus::class),
+                            ]),
+                    ]),
+                PlaylistFacade::mediaFlowProxyEnabled()
+                    ? Fieldset::make(__('MediaFlow Proxy'))
+                        ->schema([
+                            Section::make()
+                                ->columns(1)
+                                ->schema([
+                                    Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
+                                ]),
+                        ])
+                    : null,
+            ]);
     }
 
     public static function form(Schema $schema): Schema
@@ -268,6 +324,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 Actions\EditAction::make()
                     ->slideOver()
                     ->button()->hiddenLabel()->size('sm'),
+                Actions\ViewAction::make('view')
+                    ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 Actions\BulkActionGroup::make([
@@ -341,7 +400,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->hidden(fn ($get): bool => ! $get('edit_uuid'))
                 ->required(),
 
-            Schemas\Components\Fieldset::make(__('Source Playlist'))
+            Fieldset::make(__('Source Playlist'))
                 ->schema([
                     // The alias persists to one of three FK columns (playlist_id /
                     // custom_playlist_id / merged_playlist_id). The form presents that as a
@@ -375,7 +434,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             $set('group', null);
                             $set('group_id', null);
                             self::resetGroupFilter($set);
-                            $set('xtream_config', [[]]);
+                            self::setProviderEntries($set, []);
                         })
                         ->helperText(__('Choose the kind of playlist this alias points at. Changing it clears the selected playlist.')),
                     Forms\Components\Select::make('source_id')
@@ -417,7 +476,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                     self::ownedSourceIdField('merged_playlist_id', 'merged_playlists'),
                 ]),
 
-            Schemas\Components\Fieldset::make(__('Provider Credentials'))
+            ...PlaylistFacade::getOutputTogglesSchema(),
+
+            Fieldset::make(__('Provider Credentials'))
                 ->columnSpanFull()
                 ->schema([
                     Forms\Components\Toggle::make('inherit_dns_failover')
@@ -426,23 +487,24 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->default(true)
                         ->columnSpanFull(),
                     Forms\Components\Repeater::make('xtream_config')
-                        ->label(__('Credentials'))
-                        ->helperText(__('Provider credentials to use for this alias. At least one set of credentials is required.'))
+                        ->label(__('Providers'))
+                        ->helperText(__('Each entry applies to the streams from its provider URL. Swap in different credentials, replace the provider URL clients receive, or both.'))
                         ->columns(2)
                         ->defaultItems(0)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: __('The credential(s) URL will be used to match the provider for credential swap. If a URL in the source playlist matches a credential URL, the credentials will be swapped with the ones defined here.')
+                            tooltip: __('The provider URL decides which streams an entry applies to: the Xtream API URL for Xtream playlists, or the start of the stream URLs (e.g. http://provider.com:8080) for M3U playlists. Streams that match no entry are left unchanged.')
                         )
                         ->maxItems(fn (Get $get) => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true) ? null : 1)
                         ->minItems(1)
                         ->collapsible()
-                        ->itemLabel(fn (array $state): ?string => 'Provider: '.parse_url($state['url'] ?? '', PHP_URL_HOST))
+                        ->itemLabel(fn (array $state): ?string => 'Provider: '.parse_url($state['url'] ?? '', PHP_URL_HOST)
+                            .(PlaylistAlias::entryReplacesUrl($state) ? ' -> '.parse_url($state['replace_url'], PHP_URL_HOST) : ''))
                         ->schema([
                             Forms\Components\TextInput::make('url')
-                                ->label(__('Xtream API URL'))
+                                ->label(__('Provider URL'))
                                 ->live()
-                                ->helperText(text: 'Enter the full URL using <url>:<port> format - without trailing slash (/).')
+                                ->helperText(__('The provider URL the source streams use, in <url>:<port> format - without trailing slash (/).'))
                                 ->prefixIcon('heroicon-m-globe-alt')
                                 ->maxLength(4000)
                                 ->url()
@@ -527,18 +589,38 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                             }
                                         }),
                                 ),
+                            // Credentials are optional only when the entry replaces the provider
+                            // URL, and must be given as a pair (empty keeps the provider's own).
                             Forms\Components\TextInput::make('username')
                                 ->label(__('Xtream API Username'))
-                                ->required(),
+                                ->live(onBlur: true)
+                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('password'))),
                             Forms\Components\TextInput::make('password')
                                 ->label(__('Xtream API Password'))
-                                ->required()
+                                ->live(onBlur: true)
+                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('username')))
                                 ->password()
                                 ->revealable(),
+                            Forms\Components\Toggle::make('replace_url_enabled')
+                                ->label(__('Replace provider URL'))
+                                ->helperText(__('Send streams from this provider to a different URL, e.g. a VPN-only address. The rest of the stream URL is kept. Credentials are optional when enabled - leave them empty to keep the provider\'s own.'))
+                                ->default(false)
+                                ->live()
+                                ->columnSpan(2),
+                            Forms\Components\TextInput::make('replace_url')
+                                ->label(__('Replacement URL'))
+                                ->helperText(__('Clients receive this URL in place of the provider URL. When the proxy is enabled, the proxy fetches from it instead, so it must be reachable from the proxy server.'))
+                                ->prefixIcon('heroicon-m-arrows-right-left')
+                                ->maxLength(4000)
+                                ->url()
+                                ->rules([new UrlIsAllowed])
+                                ->visible(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
+                                ->required(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
+                                ->columnSpan(2),
                         ])->columnSpanFull(),
                 ]),
 
-            Schemas\Components\Fieldset::make(__('Streaming Output'))
+            Fieldset::make(__('Streaming Output'))
                 ->columns(2)
                 ->schema([
                     Forms\Components\Toggle::make('enable_proxy')
@@ -614,7 +696,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
-                    Schemas\Components\Fieldset::make(__('Transcoding Settings (optional)'))
+                    Fieldset::make(__('Transcoding Settings (optional)'))
                         ->columnSpanFull()
                         ->schema([
                             Forms\Components\Select::make('stream_profile_id')
@@ -644,7 +726,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
                                 ->placeholder(__('Leave empty for direct stream proxying')),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    Schemas\Components\Fieldset::make(__('HTTP Headers (optional)'))
+                    Fieldset::make(__('HTTP Headers (optional)'))
                         ->columnSpanFull()
                         ->schema([
                             Forms\Components\Repeater::make('custom_headers')
@@ -666,7 +748,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                 ])->columnSpanFull(),
 
-            Schemas\Components\Fieldset::make(__('Auth (optional)'))
+            Fieldset::make(__('Auth (optional)'))
                 ->columns(2)
                 ->schema([
                     Forms\Components\TextInput::make('username')
@@ -698,11 +780,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->columnSpan(2),
                 ]),
 
-            Schemas\Components\Fieldset::make(__('Channel Filter (optional)'))
+            Fieldset::make(__('Channel Filter (optional)'))
                 ->columnSpanFull()
                 ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id') && ! $get('merged_playlist_id'))
                 ->schema([
-                    Schemas\Components\Fieldset::make(__('Bouquets'))
+                    Fieldset::make(__('Bouquets'))
                         ->columnSpanFull()
                         ->schema([
                             Forms\Components\Select::make('bouquets')
@@ -765,7 +847,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                             ? __('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.')
                             : __('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
 
-                    Schemas\Components\Fieldset::make(__('Live channel groups'))
+                    Fieldset::make(__('Live channel groups'))
                         ->schema([
                             ModalTableSelect::make('group_filter.selected_groups')
                                 ->tableConfiguration(SourceGroupsTable::class)
@@ -938,7 +1020,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->dehydrateStateUsing(fn ($state): array => self::liveGroupSortNames($state)),
                         ]),
 
-                    Schemas\Components\Fieldset::make(__('VOD groups'))
+                    Fieldset::make(__('VOD groups'))
                         ->schema([
                             ModalTableSelect::make('group_filter.selected_vod_groups')
                                 ->tableConfiguration(SourceGroupsTable::class)
@@ -1036,7 +1118,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
                         ]),
 
-                    Schemas\Components\Fieldset::make(__('Series categories'))
+                    Fieldset::make(__('Series categories'))
                         ->schema([
                             ModalTableSelect::make('group_filter.selected_categories')
                                 ->tableConfiguration(SourceCategoriesTable::class)
@@ -1500,6 +1582,32 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     }
 
     /**
+     * Seed the provider repeater, one item per provider URL.
+     *
+     * Items are keyed by UUID and carry every field, matching how the repeater keys
+     * items loaded from a record. A list keyed 0..n (or an empty item) breaks the
+     * reactivity of fields inside the item on the create form, e.g. the URL
+     * replacement toggle.
+     *
+     * @param  array<int, string>  $urls
+     */
+    protected static function setProviderEntries(Set $set, array $urls): void
+    {
+        $entries = [];
+        foreach ($urls ?: [''] as $url) {
+            $entries[(string) Str::uuid()] = [
+                'url' => $url,
+                'username' => '',
+                'password' => '',
+                'replace_url_enabled' => false,
+                'replace_url' => null,
+            ];
+        }
+
+        $set('xtream_config', $entries);
+    }
+
+    /**
      * Reset xtream_config to single-config format when switching to a standard Playlist.
      */
     protected static function initializeXtreamConfigForPlaylist(Set $set, ?int $playlistId): void
@@ -1508,22 +1616,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        $playlist = Playlist::find($playlistId);
-        if (! $playlist) {
-            $set('xtream_config', [[]]);
-
-            return;
-        }
-
         // Pre-fill with the playlist's existing xtream config URL if available
-        $xtreamConfig = $playlist->xtream_config ?? [];
-        $set('xtream_config', [
-            [
-                'url' => $xtreamConfig['url'] ?? '',
-                'username' => '',
-                'password' => '',
-            ],
-        ]);
+        $playlist = Playlist::find($playlistId);
+        self::setProviderEntries($set, [$playlist?->xtream_config['url'] ?? '']);
     }
 
     /**
@@ -1540,27 +1635,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // Get all source playlists and pre-populate URLs
-        $sourcePlaylists = $customPlaylist->getSourcePlaylistsForAlias();
-
-        if (empty($sourcePlaylists)) {
-            $set('xtream_config', [[]]);
-
-            return;
-        }
-
-        // Create a config entry for each source playlist with the URL pre-filled
-        $configs = [];
-        foreach ($sourcePlaylists as $source) {
-            $configs[] = [
-                'url' => $source['url'] ?? '',
-                'username' => '',
-                'password' => '',
-            ];
-        }
-
-        $count = count($configs);
-        $set('xtream_config', $configs);
+        // One entry per source playlist, with its URL pre-filled
+        self::setProviderEntries($set, array_map(
+            fn (array $source): string => $source['url'] ?? '',
+            $customPlaylist->getSourcePlaylistsForAlias()
+        ));
     }
 
     /**
@@ -1577,24 +1656,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // Pre-populate one credential row per source playlist that exposes an Xtream URL.
-        $sourcePlaylists = $mergedPlaylist->getSourcePlaylistsForAlias();
-
-        if (empty($sourcePlaylists)) {
-            $set('xtream_config', [[]]);
-
-            return;
-        }
-
-        $configs = [];
-        foreach ($sourcePlaylists as $source) {
-            $configs[] = [
-                'url' => $source['url'] ?? '',
-                'username' => '',
-                'password' => '',
-            ];
-        }
-
-        $set('xtream_config', $configs);
+        // One entry per source playlist that exposes an Xtream URL
+        self::setProviderEntries($set, array_map(
+            fn (array $source): string => $source['url'] ?? '',
+            $mergedPlaylist->getSourcePlaylistsForAlias()
+        ));
     }
 }

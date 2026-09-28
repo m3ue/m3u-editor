@@ -20,6 +20,7 @@ class ViewerWatchProgress extends Model
         'duration_seconds' => 'integer',
         'watch_count' => 'integer',
         'stream_id' => 'integer',
+        'tmdb_id' => 'integer',
         'series_id' => 'integer',
         'season_number' => 'integer',
         'episode_number' => 'integer',

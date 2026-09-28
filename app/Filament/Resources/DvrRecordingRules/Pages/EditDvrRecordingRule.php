@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DvrRecordingRules\Pages;
 
+use App\Filament\Concerns\HasDvrMatchedAiringsPreviewCache;
 use App\Filament\Resources\DvrRecordingRules\DvrRecordingRuleResource;
 use App\Jobs\DvrSchedulerTick;
 use Filament\Actions;
@@ -9,6 +10,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditDvrRecordingRule extends EditRecord
 {
+    use HasDvrMatchedAiringsPreviewCache;
+
     protected static string $resource = DvrRecordingRuleResource::class;
 
     protected function getHeaderActions(): array

@@ -117,22 +117,49 @@ class DvrRecordingRuleResource extends Resource
 
                 Select::make('channel_id')
                     ->label(__('Channel'))
-                    ->options(function (Get $get): array {
+                    ->searchable()
+                    // Playlists can have hundreds of thousands of channels, so this
+                    // must never load/return the full channel list - search matches
+                    // are queried lazily as the user types, selecting only the
+                    // columns needed (Channel rows carry heavy JSON columns like
+                    // movie_data/sync_settings/stream_stats that must not be
+                    // hydrated just to build a dropdown label).
+                    ->getSearchResultsUsing(function (Get $get, string $search): array {
                         $dvrSetting = DvrSetting::find($get('dvr_setting_id'));
 
                         if (! $dvrSetting) {
                             return [];
                         }
 
-                        return Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
+                        // Deduplicate by the label the option will actually show
+                        // (title, or name when title is blank) - the IPTV provider
+                        // may have multiple streams/quality variants for the same
+                        // channel, but channels without a title must not collapse
+                        // into a single "untitled" option.
+                        $results = Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
+                            ->where(fn ($query) => $query->where('title', 'like', "%{$search}%")
+                                ->orWhere('name', 'like', "%{$search}%"))
                             ->orderBy('title')
-                            ->pluck('title', 'id')
-                            ->prepend(__('From Original Source'), 0)
+                            ->limit(50)
+                            ->get(['id', 'title', 'name'])
+                            ->unique(fn (Channel $channel): string => $channel->title ?: $channel->name)
+                            ->mapWithKeys(fn (Channel $channel): array => [
+                                $channel->id => $channel->title ?: $channel->name,
+                            ])
                             ->all();
+
+                        if ($search === '' || str_contains(mb_strtolower(__('From Original Source')), mb_strtolower($search))) {
+                            $results = [0 => __('From Original Source')] + $results;
+                        }
+
+                        return $results;
                     })
+                    ->getOptionLabelUsing(fn (mixed $value): ?string => ((int) $value === 0)
+                        ? __('From Original Source')
+                        : (Channel::find($value)?->title ?: Channel::find($value)?->name))
                     ->disabled(fn (Get $get): bool => ! $get('dvr_setting_id'))
-                    ->searchable()
                     ->nullable()
+                    ->live(onBlur: true)
                     ->helperText(fn (Get $get): ?string => self::isRuleType($get('type'), DvrRuleType::Series)
                         ? __('Series rules only match against channels with EPG data mapped. If a rule never records, confirm this channel has an EPG source assigned.')
                         : null),
@@ -141,6 +168,7 @@ class DvrRecordingRuleResource extends Resource
                     ->label(__('Series Title'))
                     ->placeholder(__('e.g. Breaking Bad'))
                     ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
+                    ->live(onBlur: true)
                     ->requiredIf('type', DvrRuleType::Series->value),
 
                 Select::make('series_mode')
@@ -148,7 +176,17 @@ class DvrRecordingRuleResource extends Resource
                     ->options(DvrSeriesMode::class)
                     ->default(DvrSeriesMode::UniqueSe->value)
                     ->helperText(__('Set per-playlist defaults under Playlists → Edit → DVR Settings.'))
-                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series)),
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
+                    ->live(onBlur: true),
+
+                TextInput::make('sports_dedup_days')
+                    ->label(__('Sports Dedup Window (Days)'))
+                    ->helperText(__('For sports airings without season/episode data: a same-title airing within this many days of a recent game is treated as a replay (skipped); beyond it, a new event is recorded. Blank uses the playlist default (2 days); 0 records every same-title airing.'))
+                    ->numeric()
+                    ->minValue(0)
+                    ->placeholder(__('Playlist default'))
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
+                    ->live(onBlur: true),
 
                 Select::make('enable_comskip')
                     ->label(__('Commercial Detection (Comskip)'))
@@ -186,12 +224,60 @@ class DvrRecordingRuleResource extends Resource
                     ->required(),
 
                 View::make('filament.forms.dvr-matched-airings')
-                    ->viewData(fn (?DvrRecordingRule $record): array => [
-                        'airings' => $record ? static::resolveMatchedAirings($record) : [],
-                    ])
-                    ->visible(fn (?DvrRecordingRule $record, Get $get): bool => $record !== null && self::isRuleType($get('type'), DvrRuleType::Series))
+                    ->viewData(fn (?DvrRecordingRule $record, Get $get, $livewire): array => static::buildMatchedAiringsPreviewProps($record, $get, $livewire))
+                    ->visible(fn (Get $get): bool => self::isRuleType($get('type'), DvrRuleType::Series))
                     ->columnSpanFull(),
             ]);
+    }
+
+    /**
+     * Build the (cheap - no DB queries) props for the deferred matched-airings
+     * preview. Resolving the actual airings can scan every EPG-mapped channel on
+     * a playlist (hundreds of thousands of channels), so that work must never run
+     * synchronously while the create/edit modal is opening - see
+     * App\Filament\Concerns\HasDvrMatchedAiringsPreviewCache, which the hosting
+     * Livewire component runs via wire:init in its own follow-up request.
+     *
+     * The 'cacheKey' identifies the current inputs (series_title, channel,
+     * record-episodes mode, ...): whenever it changes, the blade view's
+     * wire:key forces the preview element to be replaced, re-triggering
+     * wire:init - this is what makes onBlur edits refresh the preview for
+     * both new and edited rules. 'airings' is only populated once the
+     * Livewire component's cached result matches the CURRENT cacheKey -
+     * otherwise the view renders a loading placeholder.
+     */
+    protected static function buildMatchedAiringsPreviewProps(?DvrRecordingRule $record, Get $get, $livewire): array
+    {
+        $type = DvrRuleType::tryFrom($get('type')?->value ?? $get('type'));
+
+        // On the initial mount the form state may not be filled yet, so fall back
+        // to the record's values - the preview must render for existing rules
+        // before any onBlur edit.
+        $seriesTitle = trim((string) ($get('series_title') ?? $record?->series_title ?? ''));
+        $dvrSettingId = $get('dvr_setting_id');
+
+        $ruleAttributes = [
+            'series_title' => $seriesTitle,
+            'series_mode' => is_string($get('series_mode')) ? $get('series_mode') : $get('series_mode')?->value,
+            'dvr_setting_id' => $dvrSettingId,
+            'epg_channel_id' => $get('epg_channel_id') ?? $record?->epg_channel_id,
+            'channel_id' => $get('channel_id') ?? $record?->channel_id,
+            'source_channel_id' => $get('source_channel_id') ?? $record?->source_channel_id,
+            'sports_dedup_days' => $get('sports_dedup_days') ?? $record?->sports_dedup_days,
+        ];
+
+        if ($type !== DvrRuleType::Series || $seriesTitle === '' || ! $dvrSettingId) {
+            $ruleAttributes = [];
+        }
+
+        $cacheKey = md5(json_encode([$record?->id, $ruleAttributes]));
+
+        return [
+            'ruleId' => $record?->id,
+            'ruleAttributes' => $ruleAttributes,
+            'cacheKey' => $cacheKey,
+            'airings' => $livewire->dvrAiringsPreviewKey === $cacheKey ? $livewire->dvrAiringsPreview : null,
+        ];
     }
 
     public static function table(Table $table): Table

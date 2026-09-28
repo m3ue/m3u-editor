@@ -13,6 +13,7 @@ use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
@@ -23,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
@@ -205,6 +207,55 @@ class Channel extends Model
     public function dynamicGroups(): MorphToMany
     {
         return $this->morphToMany(DynamicGroup::class, 'item', 'dynamic_group_items');
+    }
+
+    /**
+     * TMDB/TVDB identity of this movie, used to find a cached copy shared by
+     * another of the same user's playlists. Channels without an external id
+     * get a per-channel key so they never match anything else.
+     */
+    public function cacheFingerprint(): string
+    {
+        $tmdbId = $this->tmdb_id !== null ? (string) $this->tmdb_id : null;
+        $tvdbId = $this->tvdb_id !== null ? (string) $this->tvdb_id : null;
+
+        return CachedContentFile::fingerprintFor([
+            'content_type' => 'movie',
+            'tmdb_id' => $tmdbId,
+            'tvdb_id' => $tvdbId,
+            'local_key' => ($tmdbId === null || $tmdbId === '') && ($tvdbId === null || $tvdbId === '')
+                ? 'ch'.$this->id
+                : null,
+        ]);
+    }
+
+    /**
+     * The cached file downloaded for this channel, if any (any status).
+     */
+    public function cachedContentFile(): MorphOne
+    {
+        return $this->morphOne(CachedContentFile::class, 'cacheable');
+    }
+
+    /**
+     * Provider URL a cache download fetches (honors a custom URL override).
+     */
+    public function cacheSourceUrl(): string
+    {
+        return (string) ($this->url_custom ?: $this->url);
+    }
+
+    /**
+     * Whether a Completed cached file can serve this channel: its own, or
+     * one shared by another of the same user's playlists.
+     */
+    public function isCached(): bool
+    {
+        if (! $this->playlist_id) {
+            return false;
+        }
+
+        return CachedContentFile::query()->servableFor($this)->exists();
     }
 
     public function streamFileSetting(): BelongsTo
@@ -759,7 +810,7 @@ class Channel extends Model
         });
     }
 
-    public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false)
+    public function fetchMetadata($xtream = null, $refresh = false, bool $skipTmdb = false, bool $preferTmdb = false)
     {
         if (! $this->is_vod) {
             return false;
@@ -817,7 +868,14 @@ class Channel extends Model
                 }
                 $update = [
                     'year' => $year,
-                    'info' => $movieData['info'] ?? null,
+                    // Keep TMDB-only enrichment (cast_list/clearlogo/related_tmdb) the
+                    // provider payload never carries, or this refresh would wipe it. With
+                    // $preferTmdb, TMDB-owned fields on an enriched row also win over the provider.
+                    'info' => TmdbEnrichment::preserveOnProviderRefresh(
+                        $this->info,
+                        $movieData['info'] ?? null,
+                        $preferTmdb ? TmdbEnrichment::PREFERRED_VOD_INFO_KEYS : [],
+                    ),
                     'movie_data' => $movieData['movie_data'] ?? null,
                     'last_metadata_fetch' => now(),
                 ];

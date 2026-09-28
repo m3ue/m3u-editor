@@ -20,6 +20,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use Carbon\Carbon;
 use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -922,4 +923,55 @@ test('merged playlist dummy_epg_days controls the number of standard dummy progr
     $xpath = new DOMXPath($document);
 
     expect($xpath->query('//programme[@channel="merged-short-window-channel"]'))->toHaveCount(2);
+});
+
+test('aed pre-event padding stops at the dummy epg window for events far in the future', function () {
+    // Regression test for #1549: pre-event slots were generated all the way to the event,
+    // ignoring dummy_epg_days, so a far-off event produced months of programmes.
+    Carbon::setTestNow(Carbon::create(2026, 9, 28, 10, 0, 0, 'UTC'));
+
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => true,
+        'dummy_epg_days' => 5,
+    ]);
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $user->id,
+        'name' => 'Far Future AED',
+        'time_regex' => '(\d{1,2}:\d{2})',
+        'time_format' => 'H:i',
+        'date_regex' => '\((\d{4}-\d{2}-\d{2})',
+        'date_format' => 'Y-m-d',
+        'source_timezone' => 'UTC',
+        'output_timezone' => 'UTC',
+        'event_duration_minutes' => 1440,
+        'dummy_epg_days' => 2,
+        'pre_event_format' => 'Live in {time_until}: {title}',
+    ])->save();
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'stream_id' => 'aed-far-future-channel',
+        'title' => 'Big Match (2027-09-27 19:00)',
+        'channel' => 1,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk();
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+    $programmes = $xpath->query('//programme[@channel="aed-far-future-channel"]');
+
+    // Two 1-day pre-event slots inside the 2-day window, and no event programme (it starts after the window)
+    expect($programmes)->toHaveCount(2)
+        ->and($programmes->item(1)->getAttribute('stop'))->toStartWith('20260930000000');
+
+    Carbon::setTestNow();
 });

@@ -193,9 +193,9 @@ trait AppliesTmdbSelection
                 $info['cast_list'] = $details['cast_list'];
             }
 
-            if (! empty($details['recommendations'])) {
-                $info['related_tmdb'] = $details['recommendations'];
-            }
+            // Always set, even to an empty array: it doubles as the "TMDB has been
+            // checked" sentinel FetchTmdbIds' on-demand backfill gate relies on.
+            $info['related_tmdb'] = $details['recommendations'] ?? [];
 
             if (! empty($details['director'])) {
                 $info['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];
@@ -361,9 +361,9 @@ trait AppliesTmdbSelection
                 $seriesMetadata['cast_list'] = $details['cast_list'];
             }
 
-            if (! empty($details['recommendations'])) {
-                $seriesMetadata['related_tmdb'] = $details['recommendations'];
-            }
+            // Always set, even to an empty array: it doubles as the "TMDB has been
+            // checked" sentinel FetchTmdbIds' on-demand backfill gate relies on.
+            $seriesMetadata['related_tmdb'] = $details['recommendations'] ?? [];
 
             if (! empty($details['director'])) {
                 $updateData['director'] = is_array($details['director']) ? implode(', ', $details['director']) : $details['director'];

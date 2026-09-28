@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DvrRecordingRules\Pages;
 
+use App\Filament\Concerns\HasDvrMatchedAiringsPreviewCache;
 use App\Filament\Resources\DvrRecordingRules\DvrRecordingRuleResource;
 use App\Jobs\DvrSchedulerTick;
 use Filament\Resources\Pages\CreateRecord;
@@ -9,6 +10,8 @@ use Illuminate\Support\Facades\Auth;
 
 class CreateDvrRecordingRule extends CreateRecord
 {
+    use HasDvrMatchedAiringsPreviewCache;
+
     protected static string $resource = DvrRecordingRuleResource::class;
 
     protected function mutateFormDataBeforeCreate(array $data): array

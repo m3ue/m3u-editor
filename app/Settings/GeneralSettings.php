@@ -87,6 +87,16 @@ class GeneralSettings extends Settings
     // Logo cache and placeholders
     public ?bool $logo_cache_permanent = false;
 
+    // Cached content downloads. `enable_cache` gates both new downloads and
+    // serving already-cached files.
+    public ?bool $enable_cache = false;
+
+    // automatic | never-expire | manual (playlists can override).
+    public ?string $cache_retention_mode = 'automatic';
+
+    // Default for the per-playlist "Share cache across playlists" toggle.
+    public ?bool $default_share_cache_across_playlists = false;
+
     public ?string $logo_placeholder_url = null;
 
     public ?string $episode_placeholder_url = null;
@@ -227,6 +237,8 @@ class GeneralSettings extends Settings
     public ?bool $tmdb_auto_lookup_on_import = false;
 
     public ?string $tmdb_auto_lookup_all_new = 'enabled';
+
+    public ?bool $tmdb_auto_enrich_on_fetch = false;
 
     public ?int $tmdb_rate_limit = 40;
 

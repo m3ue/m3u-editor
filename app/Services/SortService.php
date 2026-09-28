@@ -8,6 +8,7 @@ use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Series;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -569,6 +570,320 @@ class SortService
         }
 
         EpgCacheService::clearForChannelIds($ids);
+    }
+
+    /**
+     * Rank rows in $table by a driver-specific expression via ROW_NUMBER()
+     * on MySQL/Postgres/SQLite, or a PHP-side ORDER BY + persistSortColumn()
+     * pass on any other driver.
+     *
+     * NULL ordering: rows where the driver's "null" expression is NULL sink
+     * to the bottom regardless of $direction, so an unrated/undated row is
+     * never what a "sort by X" user wants at the top of an ASC sort.
+     *
+     * $joinSql lets the ranking subquery read from $table plus a joined
+     * derived table (e.g. per-series episode aggregates). The joined source
+     * must not expose an `id` column, so `id` and $whereSql stay unambiguous.
+     *
+     * @param  array{mysql: string, pgsql: string, sqlite: string}  $isNullExprByDriver  driver => expression to test IS NULL (unrated detection)
+     * @param  array{mysql: string, pgsql: string, sqlite: string}  $valueExprByDriver  driver => expression to order by
+     * @param  array<int, mixed>  $whereBindings  positional bindings for $whereSql, reused verbatim on every branch
+     * @param  \Closure(): Builder  $fallbackQuery  builds the already-scoped (and already-joined) fallback query for drivers with no window-function support
+     * @param  array{mysql: string, pgsql: string, sqlite: string}|null  $joinSqlByDriver  driver => JOIN clause appended to the ranking subquery's FROM
+     * @param  array<int, mixed>  $joinBindings  positional bindings for $joinSqlByDriver, bound before $whereBindings
+     */
+    private function bulkSortByExpression(
+        string $table,
+        string $whereSql,
+        array $whereBindings,
+        array $isNullExprByDriver,
+        array $valueExprByDriver,
+        string $direction,
+        \Closure $fallbackQuery,
+        ?array $joinSqlByDriver = null,
+        array $joinBindings = [],
+    ): void {
+        $driver = DB::getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        $rankBindings = array_merge($joinBindings, $whereBindings);
+
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $orderBy = "{$isNullExprByDriver['mysql']} IS NULL ASC, {$valueExprByDriver['mysql']} {$direction}, id";
+            $join = $joinSqlByDriver['mysql'] ?? '';
+            DB::statement("UPDATE {$table} t1 JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$orderBy}) AS rn FROM {$table} {$join} WHERE {$whereSql}) t2 ON t1.id = t2.id SET t1.sort = t2.rn", $rankBindings);
+
+            return;
+        }
+
+        if ($this->isPostgres($driver)) {
+            $orderBy = "{$isNullExprByDriver['pgsql']} IS NULL ASC, {$valueExprByDriver['pgsql']} {$direction}, id";
+            $join = $joinSqlByDriver['pgsql'] ?? '';
+            DB::statement("UPDATE {$table} SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$orderBy}) AS rn FROM {$table} {$join} WHERE {$whereSql}) t WHERE {$table}.id = t.id", $rankBindings);
+
+            return;
+        }
+
+        if ($driver === 'sqlite') {
+            $orderBy = "{$isNullExprByDriver['sqlite']} IS NULL ASC, {$valueExprByDriver['sqlite']} {$direction}, id";
+            $join = $joinSqlByDriver['sqlite'] ?? '';
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$orderBy}) AS rn FROM {$table} {$join} WHERE {$whereSql}) UPDATE {$table} SET sort = (SELECT rn FROM ranked WHERE ranked.id = {$table}.id) WHERE {$whereSql}", array_merge($rankBindings, $whereBindings));
+
+            return;
+        }
+
+        // Fallback for other drivers: reuse the SQLite-flavored expressions
+        // (no window-function support to lean on either way), sort via the
+        // query builder, and persist with a single CASE update.
+        $ids = $fallbackQuery()
+            ->orderByRaw("{$isNullExprByDriver['sqlite']} IS NULL ASC")
+            ->orderByRaw("{$valueExprByDriver['sqlite']} {$direction}")
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $this->persistSortColumn($table, 'sort', $ids);
+    }
+
+    /**
+     * Rating expressions shared by every channel-rating sort: prefers the
+     * TMDB-enriched `info->rating` JSON (populated by FetchTmdbIds), falling
+     * back to the provider-supplied `channels.rating` column when no TMDB
+     * rating has been fetched yet. Both sides are NULLIF-wrapped so an empty
+     * string on either source is treated the same as a missing value.
+     *
+     * @return array{isNull: array{mysql: string, pgsql: string, sqlite: string}, value: array{mysql: string, pgsql: string, sqlite: string}}
+     */
+    private function channelRatingExprs(): array
+    {
+        $raw = [
+            'mysql' => "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(info, '$.rating')), ''), NULLIF(CAST(rating AS CHAR), ''))",
+            'pgsql' => "COALESCE(NULLIF(info->>'rating', ''), NULLIF(rating::text, ''))",
+            'sqlite' => "COALESCE(NULLIF(json_extract(info, '$.rating'), ''), NULLIF(CAST(rating AS TEXT), ''))",
+        ];
+
+        return [
+            'isNull' => $raw,
+            'value' => [
+                'mysql' => "CAST(COALESCE({$raw['mysql']}, '0') AS DECIMAL(4,2))",
+                'pgsql' => "COALESCE({$raw['pgsql']}, '0')::numeric",
+                'sqlite' => "CAST(COALESCE({$raw['sqlite']}, '0') AS REAL)",
+            ],
+        ];
+    }
+
+    /**
+     * Rating expressions shared by every series-rating sort: `series.rating`
+     * (string column storing decimal text like "7.5"), NULLIF-wrapped so an
+     * empty string is treated as unrated rather than sorting as 0.
+     *
+     * @return array{isNull: array{mysql: string, pgsql: string, sqlite: string}, value: array{mysql: string, pgsql: string, sqlite: string}}
+     */
+    private function seriesRatingExprs(): array
+    {
+        $raw = "NULLIF(rating, '')";
+
+        return [
+            'isNull' => ['mysql' => $raw, 'pgsql' => $raw, 'sqlite' => $raw],
+            'value' => [
+                'mysql' => "CAST(COALESCE({$raw}, '0') AS DECIMAL(4,2))",
+                'pgsql' => "COALESCE({$raw}, '0')::numeric",
+                'sqlite' => "CAST(COALESCE({$raw}, '0') AS REAL)",
+            ],
+        ];
+    }
+
+    /**
+     * Bulk-update VOD channels' sort order within a group by rating.
+     */
+    public function bulkSortGroupChannelsByRating(Group $record, string $order = 'DESC'): void
+    {
+        $exprs = $this->channelRatingExprs();
+
+        $this->bulkSortByExpression(
+            table: 'channels',
+            whereSql: 'group_id = ?',
+            whereBindings: [$record->id],
+            isNullExprByDriver: $exprs['isNull'],
+            valueExprByDriver: $exprs['value'],
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => $record->channels(),
+        );
+    }
+
+    /**
+     * Bulk-update series' sort order within a category by rating.
+     */
+    public function bulkSortCategorySeriesByRating(Category $record, string $order = 'DESC'): void
+    {
+        $exprs = $this->seriesRatingExprs();
+
+        $this->bulkSortByExpression(
+            table: 'series',
+            whereSql: 'category_id = ?',
+            whereBindings: [$record->id],
+            isNullExprByDriver: $exprs['isNull'],
+            valueExprByDriver: $exprs['value'],
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => $record->series(),
+        );
+    }
+
+    /**
+     * Sort ALL VOD channels in a playlist globally by rating.
+     * Assigns unique sort numbers 1..N across all groups so there are no collisions.
+     */
+    public function bulkSortPlaylistVodByRating(Playlist $playlist, string $order = 'DESC'): void
+    {
+        $exprs = $this->channelRatingExprs();
+
+        $this->bulkSortByExpression(
+            table: 'channels',
+            whereSql: 'playlist_id = ? AND is_vod IS TRUE',
+            whereBindings: [$playlist->id],
+            isNullExprByDriver: $exprs['isNull'],
+            valueExprByDriver: $exprs['value'],
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => Channel::where('playlist_id', $playlist->id)->where('is_vod', true),
+        );
+    }
+
+    /**
+     * Sort ALL series in a playlist globally by rating.
+     * Assigns unique sort numbers 1..N across all categories so there are no collisions.
+     */
+    public function bulkSortPlaylistSeriesByRating(Playlist $playlist, string $order = 'DESC'): void
+    {
+        $exprs = $this->seriesRatingExprs();
+
+        $this->bulkSortByExpression(
+            table: 'series',
+            whereSql: 'playlist_id = ?',
+            whereBindings: [$playlist->id],
+            isNullExprByDriver: $exprs['isNull'],
+            valueExprByDriver: $exprs['value'],
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => Series::where('playlist_id', $playlist->id),
+        );
+    }
+
+    /**
+     * Driver-specific pieces for the "most recent activity" series sort: each
+     * series ranks by the air date of its most recently released episode,
+     * falling back to series.release_date when none of its episodes carry a
+     * date (e.g. episodes not fetched yet). Series with neither sink to the
+     * bottom via bulkSortByExpression()'s NULL handling.
+     *
+     * Episode dates come from whichever source populated them: provider or
+     * media-server `info->release_date`, TMDB `info->releasedate`, or the
+     * AIOStreams `aio_air_date` column. Episode and series dates alike are
+     * cut to their YYYY-MM-DD prefix so mixed date/datetime formats rank
+     * consistently, and dates after today are ignored so scheduled (unaired)
+     * episodes or upcoming premieres don't count as activity.
+     *
+     * The joined derived table takes two `?` bindings for today's date
+     * (episode guard, then series guard) followed by $seriesScopeSql's.
+     *
+     * @param  string  $seriesScopeSql  WHERE clause on the `s` (series) alias, with `?` placeholders
+     * @return array{isNull: array{mysql: string, pgsql: string, sqlite: string}, value: array{mysql: string, pgsql: string, sqlite: string}, join: array{mysql: string, pgsql: string, sqlite: string}, activity: array{mysql: string, pgsql: string, sqlite: string}}
+     */
+    private function seriesRecentActivityExprs(string $seriesScopeSql): array
+    {
+        $episodeDate = [
+            // JSON_UNQUOTE() turns a stored JSON null into the string 'null', so filter that out too.
+            'mysql' => "SUBSTR(COALESCE(
+                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.info, '$.release_date')), ''), 'null'),
+                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.info, '$.releasedate')), ''), 'null'),
+                CAST(e.aio_air_date AS CHAR)
+            ), 1, 10)",
+            'pgsql' => "SUBSTR(COALESCE(
+                NULLIF(e.info->>'release_date', ''),
+                NULLIF(e.info->>'releasedate', ''),
+                e.aio_air_date::text
+            ), 1, 10)",
+            'sqlite' => "SUBSTR(COALESCE(
+                NULLIF(json_extract(e.info, '$.release_date'), ''),
+                NULLIF(json_extract(e.info, '$.releasedate'), ''),
+                CAST(e.aio_air_date AS TEXT)
+            ), 1, 10)",
+        ];
+        $seriesDate = "SUBSTR(NULLIF(s.release_date, ''), 1, 10)";
+
+        $activity = [];
+        $join = [];
+        $raw = [];
+        foreach ($episodeDate as $driver => $expr) {
+            $activity[$driver] = "COALESCE(MAX(CASE WHEN {$expr} <= ? THEN {$expr} END), CASE WHEN {$seriesDate} <= ? THEN {$seriesDate} END)";
+            $join[$driver] = "LEFT JOIN (SELECT s.id AS series_id, {$activity[$driver]} AS latest_activity_date FROM series s LEFT JOIN episodes e ON e.series_id = s.id WHERE {$seriesScopeSql} GROUP BY s.id, s.release_date) series_activity ON series_activity.series_id = series.id";
+            $raw[$driver] = 'series_activity.latest_activity_date';
+        }
+
+        return ['isNull' => $raw, 'value' => $raw, 'join' => $join, 'activity' => $activity];
+    }
+
+    /**
+     * Bulk-update series' sort order within a category by most recent
+     * activity (latest released episode). See seriesRecentActivityExprs().
+     */
+    public function bulkSortCategorySeriesByRecentActivity(Category $record, string $order = 'DESC'): void
+    {
+        $this->bulkSortSeriesByRecentActivity(
+            whereSql: 'category_id = ?',
+            whereBindings: [$record->id],
+            seriesScopeSql: 's.category_id = ?',
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => Series::where('category_id', $record->id),
+        );
+    }
+
+    /**
+     * Sort ALL series in a playlist globally by most recent activity (latest
+     * released episode). Assigns unique sort numbers 1..N across all
+     * categories so there are no collisions.
+     */
+    public function bulkSortPlaylistSeriesByRecentActivity(Playlist $playlist, string $order = 'DESC'): void
+    {
+        $this->bulkSortSeriesByRecentActivity(
+            whereSql: 'playlist_id = ?',
+            whereBindings: [$playlist->id],
+            seriesScopeSql: 's.playlist_id = ?',
+            direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
+            fallbackQuery: fn () => Series::where('playlist_id', $playlist->id),
+        );
+    }
+
+    /**
+     * Shared body of the two recent-activity sorts. $seriesScopeSql takes the
+     * same bindings as $whereSql (the category or playlist id).
+     *
+     * @param  array<int, mixed>  $whereBindings
+     * @param  \Closure(): Builder  $fallbackQuery
+     */
+    private function bulkSortSeriesByRecentActivity(string $whereSql, array $whereBindings, string $seriesScopeSql, string $direction, \Closure $fallbackQuery): void
+    {
+        $exprs = $this->seriesRecentActivityExprs($seriesScopeSql);
+        $today = now()->toDateString();
+
+        $this->bulkSortByExpression(
+            table: 'series',
+            whereSql: $whereSql,
+            whereBindings: $whereBindings,
+            isNullExprByDriver: $exprs['isNull'],
+            valueExprByDriver: $exprs['value'],
+            direction: $direction,
+            fallbackQuery: fn () => $fallbackQuery()->leftJoinSub(
+                DB::table('series as s')
+                    ->leftJoin('episodes as e', 'e.series_id', '=', 's.id')
+                    ->selectRaw("s.id AS series_id, {$exprs['activity']['sqlite']} AS latest_activity_date", [$today, $today])
+                    ->whereRaw($seriesScopeSql, $whereBindings)
+                    ->groupBy('s.id', 's.release_date'),
+                'series_activity',
+                'series_activity.series_id',
+                '=',
+                'series.id',
+            ),
+            joinSqlByDriver: $exprs['join'],
+            joinBindings: [$today, $today, ...$whereBindings],
+        );
     }
 
     /**

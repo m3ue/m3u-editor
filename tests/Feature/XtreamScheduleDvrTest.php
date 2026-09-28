@@ -221,6 +221,60 @@ it('rejects scheduling when the guest playlist auth is at its concurrent recordi
     expect(DvrRecordingRule::count())->toBe(0);
 });
 
+it('rejects scheduling the same airing twice with a 409 duplicate response', function () {
+    $start = now()->addHour()->startOfMinute();
+    $end = $start->copy()->addMinutes(45);
+
+    $first = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Evening News',
+        'start_time' => $start->toIso8601String(),
+        'end_time' => $end->toIso8601String(),
+    ]);
+    $first->assertOk();
+    $ruleId = $first->json('rule_id');
+
+    $second = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Evening News',
+        'start_time' => $start->toIso8601String(),
+        'end_time' => $end->toIso8601String(),
+    ]);
+
+    $second->assertStatus(409)
+        ->assertJson([
+            'rule_id' => $ruleId,
+            'duplicate' => true,
+        ]);
+
+    expect(DvrRecordingRule::count())->toBe(1);
+});
+
+it('allows scheduling a non-overlapping airing on the same channel', function () {
+    $firstStart = now()->addHour()->startOfMinute();
+    $firstEnd = $firstStart->copy()->addMinutes(30);
+
+    $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Evening News',
+        'start_time' => $firstStart->toIso8601String(),
+        'end_time' => $firstEnd->toIso8601String(),
+    ])->assertOk();
+
+    $secondStart = $firstEnd->copy()->addMinutes(30);
+    $secondEnd = $secondStart->copy()->addMinutes(30);
+
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Late Show',
+        'start_time' => $secondStart->toIso8601String(),
+        'end_time' => $secondEnd->toIso8601String(),
+    ]);
+
+    $response->assertOk()->assertJson(['success' => true]);
+    expect(DvrRecordingRule::count())->toBe(2);
+});
+
 function createDvrSeriesRuleUrl(string $username, string $password): string
 {
     return route('xtream.api.player').'?'.http_build_query([

@@ -6,8 +6,10 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Filament\Actions\CronHelperAction;
+use App\Filament\Actions\FetchTmdbIdsForGroupsAction;
 use App\Filament\Actions\ModalActionGroup;
 use App\Filament\Actions\RegexTesterAction;
+use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Pages\EasyEditor;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
@@ -55,6 +57,7 @@ use App\Services\ProfileService;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Services\XtreamService;
+use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -70,6 +73,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Component;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\ModalTableSelect;
 use Filament\Forms\Components\Repeater;
@@ -574,15 +578,21 @@ class PlaylistResource extends Resource implements CopilotResource
                     })
                     ->modalSubmitActionLabel(__('Yes, sync now')),
                 Action::make('process_series')
-                    ->label(__('Fetch Provider Metadata'))
+                    ->label(__('Fetch Provider Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'series_progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImportSeries($record, force: true));
+                            ->dispatch(new ProcessM3uImportSeries($record, force: true, overwriteExisting: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -599,15 +609,21 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch Series metadata for this playlist now? Only enabled Series will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 Action::make('process_vod')
-                    ->label(__('Fetch Provider Metadata'))
+                    ->label(__('Fetch Provider VOD Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessVodChannels(playlist: $record));
+                            ->dispatch(new ProcessVodChannels(playlist: $record, force: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -623,6 +639,10 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('series')
+                    ->hidden(fn ($record): bool => ! $record->xtream),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('vod')
+                    ->hidden(fn ($record): bool => ! $record->xtream),
                 Action::make('reset_processing')
                     ->label(__('Reset Processing State'))
                     ->icon('heroicon-o-arrow-path')
@@ -1950,133 +1970,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     Repeater::make('dynamic_groups_config')
                         ->label(__('Dynamic Groups Configuration'))
                         ->columnSpanFull()
-                        ->schema([
-                            Toggle::make('enabled')
-                                ->label(__('Enabled'))
-                                ->default(true)
-                                ->inline(false)
-                                ->columnSpan(1),
-                            Select::make('type')
-                                ->label(__('Content Type'))
-                                ->options([
-                                    'vod' => __('VOD (Movies)'),
-                                    'series' => __('Series'),
-                                ])
-                                ->live()
-                                ->required()
-                                ->afterStateUpdated(function (Set $set): void {
-                                    // Reset source-dependent fields so the user
-                                    // cannot keep a provider/genre/network that
-                                    // is no longer relevant after switching
-                                    // between vod and series.
-                                    $set('source', null);
-                                    $set('tmdb_params', []);
-                                })
-                                ->columnSpan(2),
-                            Select::make('source')
-                                ->label(__('Source'))
-                                ->options(function (Get $get): array {
-                                    $type = $get('type');
-
-                                    if ($type === 'series') {
-                                        return [
-                                            'trending' => __('Trending'),
-                                            'popular' => __('Popular'),
-                                            'top_genre' => __('Top Genre'),
-                                            'tmdb_network' => __('By TV Network'),
-                                            'provider' => __('By Streaming Service'),
-                                        ];
-                                    }
-
-                                    return [
-                                        'trending' => __('Trending'),
-                                        'popular' => __('Popular'),
-                                        'now_playing' => __('In Theatres'),
-                                        'upcoming' => __('Coming Soon'),
-                                        'top_genre' => __('Top Genre'),
-                                        'provider' => __('By Streaming Service'),
-                                    ];
-                                })
-                                ->live()
-                                ->required()
-                                ->columnSpan(3),
-                            Select::make('tmdb_params.genre_id')
-                                ->label(__('Genre'))
-                                ->options(function (Get $get): array {
-                                    $tmdb = app(TmdbService::class);
-                                    if (! $tmdb->isConfigured()) {
-                                        return [];
-                                    }
-                                    $genres = $get('type') === 'series'
-                                        ? $tmdb->getTvGenres()
-                                        : $tmdb->getMovieGenres();
-
-                                    return array_column($genres, 'name', 'id');
-                                })
-                                ->required()
-                                ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.network_id')
-                                ->label(__('TV Network'))
-                                ->options(TmdbService::TV_NETWORKS)
-                                ->required()
-                                ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.provider_id')
-                                ->label(__('Streaming Service'))
-                                ->options(function (Get $get): array {
-                                    $tmdb = app(TmdbService::class);
-                                    if (! $tmdb->isConfigured()) {
-                                        return [];
-                                    }
-                                    $region = $get('tmdb_params.region') ?: 'US';
-                                    $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
-                                    $providers = $tmdb->getWatchProviders($mediaType, $region);
-
-                                    return array_column($providers, 'name', 'id');
-                                })
-                                ->required()
-                                ->live()
-                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                ->columnSpan(4),
-                            TextInput::make('tmdb_params.region')
-                                ->label(__('Region'))
-                                ->placeholder('US')
-                                ->maxLength(2)
-                                ->live()
-                                ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                                ->columnSpan(1),
-                            Select::make('tmdb_params.time_window')
-                                ->label(__('Time Window'))
-                                ->options([
-                                    'day' => __('Today'),
-                                    'week' => __('This Week'),
-                                ])
-                                ->default('week')
-                                ->visible(fn (Get $get): bool => $get('source') === 'trending')
-                                ->columnSpan(5),
-                            Select::make('tmdb_params.pages')
-                                ->label(__('Pages to Fetch'))
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up — they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
-                                )
-                                ->options([
-                                    1 => '1 (~20 items)',
-                                    2 => '2 (~40 items)',
-                                    3 => '3 (~60 items, default)',
-                                    4 => '4 (~80 items)',
-                                    5 => '5 (~100 items, max)',
-                                ])
-                                ->default(3)
-                                ->native(false)
-                                ->columnSpan(3),
-                            TextInput::make('name')
-                                ->label(__('Category Name'))
-                                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
-                                ->required()
-                                ->columnSpan(3),
-                        ])
+                        ->schema(self::getDynamicGroupRuleSchema())
                         ->columns(12)
                         ->reorderable()
                         ->reorderableWithButtons()
@@ -2933,15 +2827,23 @@ class PlaylistResource extends Resource implements CopilotResource
                                     ];
 
                                     return match ($get('target')) {
-                                        'series_categories' => ['release_date' => 'Release Date'],
-                                        'vod_groups' => [...$alphaOptions, 'release_date' => 'Release Date'],
+                                        'series_categories' => [
+                                            'release_date' => 'Release Date',
+                                            'recent_activity' => __('Most Recent Activity'),
+                                            'rating' => __('Rating'),
+                                        ],
+                                        'vod_groups' => [
+                                            ...$alphaOptions,
+                                            'release_date' => 'Release Date',
+                                            'rating' => __('Rating'),
+                                        ],
                                         default => $alphaOptions,
                                     };
                                 })
                                 ->live()
                                 ->default('title')
                                 ->required()
-                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', ($state ?? '') === 'release_date' ? 'DESC' : 'ASC'))
+                                ->afterStateUpdated(fn (Set $set, ?string $state) => $set('sort', in_array(($state ?? ''), ['release_date', 'recent_activity', 'rating'], true) ? 'DESC' : 'ASC'))
                                 ->columnSpan(2),
                             Select::make('sort')
                                 ->label(__('Sort Order'))
@@ -3163,6 +3065,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(3)
                 ->schema([
+                    ...PlaylistFacade::getOutputTogglesSchema(),
                     Toggle::make('sync_logs_enabled')
                         ->label(__('Enable Sync Logs'))
                         ->inline(false)
@@ -3423,6 +3326,28 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ]),
                         ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
                 ]),
+            Section::make(__('Cache'))
+                ->description(__('Options for cached VOD and episode downloads. Caching must be enabled in Settings > Cache.'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(2)
+                ->hidden(fn (): bool => ! (app(GeneralSettings::class)->enable_cache ?? false))
+                ->schema([
+                    Toggle::make('share_cache_across_playlists')
+                        ->label(__('Share cache across playlists'))
+                        ->inline(false)
+                        ->helperText(__('Let your other playlists play this playlist\'s cached files for the same movie or episode instead of downloading their own copy. Only affects playlists you own.'))
+                        ->default(fn (): bool => (bool) (app(GeneralSettings::class)->default_share_cache_across_playlists ?? false)),
+                    Select::make('cache_retention_mode')
+                        ->label(__('Cache retention mode'))
+                        ->options(ManageCacheSettings::cacheRetentionOptions())
+                        ->placeholder(fn (): string => __('Use global default (:mode)', [
+                            'mode' => ManageCacheSettings::cacheRetentionOptions()[app(GeneralSettings::class)->cache_retention_mode ?: 'automatic']
+                                ?? ManageCacheSettings::cacheRetentionOptions()['automatic'],
+                        ]))
+                        ->helperText(__('Overrides the global retention mode for this playlist. Leave empty to use the global setting.')),
+                ]),
             Section::make(__('EPG Output'))
                 ->description(__('EPG output options'))
                 ->columnSpanFull()
@@ -3587,6 +3512,148 @@ class PlaylistResource extends Resource implements CopilotResource
 
         // Return sections and fields
         return $sections;
+    }
+
+    /**
+     * Reusable Dynamic Groups (TMDB) rule schema - the field set used inside
+     * the `dynamic_groups_config` Repeater on the Playlist form, exposed as a
+     * static method so other surfaces (notably the VOD / Series Dynamic
+     * Groups listing pages' CreateAction) can build the same rule shape
+     * without re-declaring each field. Returns only the *rule* fields -
+     * cache_* fields intentionally live on the Playlist form only and are not
+     * ported here as part of the creation-from-listing flow.
+     *
+     * @return array<int, Component>
+     */
+    public static function getDynamicGroupRuleSchema(): array
+    {
+        return [
+            Toggle::make('enabled')
+                ->label(__('Enabled'))
+                ->default(true)
+                ->inline(false)
+                ->columnSpan(1),
+            Select::make('type')
+                ->label(__('Content Type'))
+                ->options([
+                    'vod' => __('VOD (Movies)'),
+                    'series' => __('Series'),
+                ])
+                ->live()
+                ->required()
+                ->afterStateUpdated(function (Set $set): void {
+                    // Reset source-dependent fields so the user
+                    // cannot keep a provider/genre/network that
+                    // is no longer relevant after switching
+                    // between vod and series.
+                    $set('source', null);
+                    $set('tmdb_params', []);
+                })
+                ->columnSpan(2),
+            Select::make('source')
+                ->label(__('Source'))
+                ->options(function (Get $get): array {
+                    $type = $get('type');
+
+                    if ($type === 'series') {
+                        return [
+                            'trending' => __('Trending'),
+                            'popular' => __('Popular'),
+                            'top_genre' => __('Top Genre'),
+                            'tmdb_network' => __('By TV Network'),
+                            'provider' => __('By Streaming Service'),
+                        ];
+                    }
+
+                    return [
+                        'trending' => __('Trending'),
+                        'popular' => __('Popular'),
+                        'now_playing' => __('In Theatres'),
+                        'upcoming' => __('Coming Soon'),
+                        'top_genre' => __('Top Genre'),
+                        'provider' => __('By Streaming Service'),
+                    ];
+                })
+                ->live()
+                ->required()
+                ->columnSpan(3),
+            Select::make('tmdb_params.genre_id')
+                ->label(__('Genre'))
+                ->options(function (Get $get): array {
+                    $tmdb = app(TmdbService::class);
+                    if (! $tmdb->isConfigured()) {
+                        return [];
+                    }
+                    $genres = $get('type') === 'series'
+                        ? $tmdb->getTvGenres()
+                        : $tmdb->getMovieGenres();
+
+                    return array_column($genres, 'name', 'id');
+                })
+                ->required()
+                ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
+                ->columnSpan(5),
+            Select::make('tmdb_params.network_id')
+                ->label(__('TV Network'))
+                ->options(TmdbService::TV_NETWORKS)
+                ->required()
+                ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
+                ->columnSpan(5),
+            Select::make('tmdb_params.provider_id')
+                ->label(__('Streaming Service'))
+                ->options(function (Get $get): array {
+                    $tmdb = app(TmdbService::class);
+                    if (! $tmdb->isConfigured()) {
+                        return [];
+                    }
+                    $region = $get('tmdb_params.region') ?: 'US';
+                    $mediaType = $get('type') === 'series' ? 'tv' : 'movie';
+                    $providers = $tmdb->getWatchProviders($mediaType, $region);
+
+                    return array_column($providers, 'name', 'id');
+                })
+                ->required()
+                ->live()
+                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                ->columnSpan(4),
+            TextInput::make('tmdb_params.region')
+                ->label(__('Region'))
+                ->placeholder('US')
+                ->maxLength(2)
+                ->live()
+                ->visible(fn (Get $get): bool => $get('source') === 'provider')
+                ->columnSpan(1),
+            Select::make('tmdb_params.time_window')
+                ->label(__('Time Window'))
+                ->options([
+                    'day' => __('Today'),
+                    'week' => __('This Week'),
+                ])
+                ->default('week')
+                ->visible(fn (Get $get): bool => $get('source') === 'trending')
+                ->columnSpan(5),
+            Select::make('tmdb_params.pages')
+                ->label(__('Pages to Fetch'))
+                ->hintIcon(
+                    'heroicon-m-question-mark-circle',
+                    tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up - they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
+                )
+                ->options([
+                    1 => '1 (~20 items)',
+                    2 => '2 (~40 items)',
+                    3 => '3 (~60 items, default)',
+                    4 => '4 (~80 items)',
+                    5 => '5 (~100 items, max)',
+                ])
+                ->default(3)
+                ->native(false)
+                ->columnSpan(3),
+            TextInput::make('name')
+                ->label(__('Category Name'))
+                ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
+                ->required()
+                ->columnSpan(3),
+        ];
     }
 
     /**
@@ -3834,6 +3901,7 @@ class PlaylistResource extends Resource implements CopilotResource
             ModalActionGroup::section('Processing', [
                 Action::make('process')
                     ->label(__('Sync and Process'))
+                    ->color('success')
                     ->icon('heroicon-o-arrow-path')
                     ->action(function ($record) {
                         // For media server playlists, dispatch the media server sync job
@@ -3920,17 +3988,24 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->body(__('The playlist is no longer processing. You can now run new syncs.'))
                             ->send();
                     })
-                    ->visible(fn (Playlist $record) => $record->isProcessing() && ! ($record->is_network_playlist || $record->isMediaServerPlaylist())),
+                    ->visible(fn (Playlist $record) => ! ($record->is_network_playlist || $record->isMediaServerPlaylist()))
+                    ->disabled(fn (Playlist $record) => ! $record->isProcessing()),
                 Action::make('process_series')
-                    ->label(__('Fetch Provider Metadata'))
+                    ->label(__('Fetch Provider Series Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? Episodes and seasons will always be fetched/updated.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'series_progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessM3uImportSeries($record, force: true));
+                            ->dispatch(new ProcessM3uImportSeries($record, force: true, overwriteExisting: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -3947,15 +4022,21 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('Fetch Series metadata for this playlist now? Only enabled Series will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
                 Action::make('process_vod')
-                    ->label(__('Fetch Provider Metadata'))
+                    ->label(__('Fetch Provider VOD Metadata'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->action(function ($record) {
+                    ->schema([
+                        Toggle::make('overwrite_existing')
+                            ->label(__('Overwrite Existing Metadata'))
+                            ->helperText(__('Overwrite existing metadata? If disabled, it will only fetch and process metadata if it does not already exist.'))
+                            ->default(false),
+                    ])
+                    ->action(function ($record, array $data) {
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
                         ]);
                         app('Illuminate\Contracts\Bus\Dispatcher')
-                            ->dispatch(new ProcessVodChannels(playlist: $record));
+                            ->dispatch(new ProcessVodChannels(playlist: $record, force: (bool) ($data['overwrite_existing'] ?? false)));
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -3971,6 +4052,10 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-arrow-down-tray')
                     ->modalDescription(__('Fetch VOD metadata for this playlist now? Only enabled VOD channels will be included.'))
                     ->modalSubmitActionLabel(__('Yes, process now')),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('series')
+                    ->hidden(fn ($record): bool => ! $record->xtream || $record->is_network_playlist),
+                FetchTmdbIdsForGroupsAction::makeForPlaylist('vod')
+                    ->hidden(fn ($record): bool => ! $record->xtream || $record->is_network_playlist),
             ]),
 
             // -- Downloads & Links --

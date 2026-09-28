@@ -19,6 +19,27 @@ class RunPlaylistSortAlpha implements ShouldQueue
     public int $timeout = 900;
 
     /**
+     * column => [playlist-wide SortFacade method, per-group SortFacade method].
+     * Drives both the vod_groups and series_categories dispatch branches so a
+     * future sortable column is one new entry instead of a new if/elseif arm.
+     *
+     * @var array<string, array{playlist: string, scoped: string}>
+     */
+    private const VOD_SORT_METHODS = [
+        'release_date' => ['playlist' => 'bulkSortPlaylistVodByReleaseDate', 'scoped' => 'bulkSortGroupChannelsByReleaseDate'],
+        'rating' => ['playlist' => 'bulkSortPlaylistVodByRating', 'scoped' => 'bulkSortGroupChannelsByRating'],
+    ];
+
+    /**
+     * @var array<string, array{playlist: string, scoped: string}>
+     */
+    private const SERIES_SORT_METHODS = [
+        'release_date' => ['playlist' => 'bulkSortPlaylistSeriesByReleaseDate', 'scoped' => 'bulkSortCategorySeriesByReleaseDate'],
+        'rating' => ['playlist' => 'bulkSortPlaylistSeriesByRating', 'scoped' => 'bulkSortCategorySeriesByRating'],
+        'recent_activity' => ['playlist' => 'bulkSortPlaylistSeriesByRecentActivity', 'scoped' => 'bulkSortCategorySeriesByRecentActivity'],
+    ];
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -52,6 +73,17 @@ class RunPlaylistSortAlpha implements ShouldQueue
             $isAll = empty($selectedGroups) || in_array('all', $selectedGroups);
 
             if ($target === 'live_groups') {
+                // Defensive guard: live channels aren't VOD/series entries, so
+                // they never carry a meaningful rating value (channels.rating
+                // is only populated during VOD import). The Sort By dropdown
+                // prevents users from selecting this combo, but a hand-edited
+                // sort_alpha_config or a future UI change could route rating
+                // here - fail loudly so the bad rule is visible instead of
+                // silently no-op'ing deep inside SortService.
+                if ($column === 'rating') {
+                    throw new \InvalidArgumentException("Column 'rating' is not supported for target 'live_groups' (no rating source on live channels).");
+                }
+
                 $query = $this->playlist->liveGroups();
                 if (! $isAll) {
                     $query = $query->whereIn('name_internal', $selectedGroups);
@@ -61,35 +93,34 @@ class RunPlaylistSortAlpha implements ShouldQueue
                 });
                 $liveRulesRun++;
             } elseif ($target === 'vod_groups') {
-                if ($column === 'release_date' && $isAll) {
-                    SortFacade::bulkSortPlaylistVodByReleaseDate($this->playlist, $order);
-                    $vodRulesRun++;
+                if (isset(self::VOD_SORT_METHODS[$column])) {
+                    $methods = self::VOD_SORT_METHODS[$column];
 
-                    continue;
-                }
-
-                $query = $this->playlist->vodGroups();
-                if (! $isAll) {
-                    $query = $query->whereIn('name_internal', $selectedGroups);
-                }
-                $query->each(function ($group) use ($column, $order): void {
-                    if ($column === 'release_date') {
-                        SortFacade::bulkSortGroupChannelsByReleaseDate($group, $order);
+                    if ($isAll) {
+                        SortFacade::{$methods['playlist']}($this->playlist, $order);
                     } else {
-                        SortFacade::bulkSortGroupChannels($group, $order, $column);
+                        $this->playlist->vodGroups()
+                            ->whereIn('name_internal', $selectedGroups)
+                            ->each(fn ($group) => SortFacade::{$methods['scoped']}($group, $order));
                     }
-                });
+                } else {
+                    $query = $this->playlist->vodGroups();
+                    if (! $isAll) {
+                        $query = $query->whereIn('name_internal', $selectedGroups);
+                    }
+                    $query->each(fn ($group) => SortFacade::bulkSortGroupChannels($group, $order, $column));
+                }
                 $vodRulesRun++;
             } elseif ($target === 'series_categories') {
-                if ($column === 'release_date') {
+                if (isset(self::SERIES_SORT_METHODS[$column])) {
+                    $methods = self::SERIES_SORT_METHODS[$column];
+
                     if ($isAll) {
-                        SortFacade::bulkSortPlaylistSeriesByReleaseDate($this->playlist, $order);
+                        SortFacade::{$methods['playlist']}($this->playlist, $order);
                     } else {
                         $this->playlist->categories()
                             ->whereIn('name_internal', $selectedGroups)
-                            ->each(function ($category) use ($order): void {
-                                SortFacade::bulkSortCategorySeriesByReleaseDate($category, $order);
-                            });
+                            ->each(fn ($category) => SortFacade::{$methods['scoped']}($category, $order));
                     }
                 }
                 $seriesRulesRun++;

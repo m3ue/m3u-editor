@@ -4,6 +4,7 @@ namespace App\Filament\Resources\VodGroups\RelationManagers;
 
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\VodResource;
+use App\Traits\AppliesTmdbSelection;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
@@ -11,6 +12,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class VodRelationManager extends RelationManager
 {
+    use AppliesTmdbSelection;
+
     protected static string $relationship = 'vod_channels';
 
     /** A merged group owns no channels directly; it manages child groups instead. */

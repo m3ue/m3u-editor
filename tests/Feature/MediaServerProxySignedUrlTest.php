@@ -260,3 +260,39 @@ it('still validates the aiostreams live signature when proxy=true is appended', 
     // the streamed body / upstream curl is never exercised by assertStatus.
     $this->assertNotEquals(403, $response->getStatusCode());
 });
+
+// ── The in-app floating/popout players append `&client_id=...` to these signed
+// URLs; ValidateSignature must ignore that param too.
+
+it('still validates the aiostreams channel signature when client_id is appended', function () {
+    $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+    $channel = makeAioStreamsChannel($integration, resolvedUrl: null);
+
+    $url = MediaServerProxyController::generateAioStreamsChannelProxyUrl($integration->id, $channel->id).'&client_id=floating-player-123';
+
+    $response = $this->get($url);
+
+    // Signature passes (not 403); controller then 404s on the missing resolved URL.
+    $response->assertStatus(404);
+});
+
+it('still validates the aiostreams episode signature when client_id is appended', function () {
+    $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+    $episode = makeAioStreamsEpisode($integration, resolvedUrl: null);
+
+    $url = MediaServerProxyController::generateAioStreamsEpisodeProxyUrl($integration->id, $episode->id).'&client_id=floating-player-123';
+
+    $response = $this->get($url);
+
+    $response->assertStatus(404);
+});
+
+it('still validates the aiostreams live signature when client_id is appended', function () {
+    $integration = MediaServerIntegration::factory()->create(['type' => 'aiostreams']);
+
+    $url = MediaServerProxyController::generateAioStreamsLiveProxyUrl($integration->id, 'https://cdn.test/movie.mkv').'&client_id=floating-player-123';
+
+    $response = $this->get($url);
+
+    $this->assertNotEquals(403, $response->getStatusCode());
+});

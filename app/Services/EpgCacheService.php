@@ -6,7 +6,6 @@ use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
-use App\Models\DvrSetting;
 use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
@@ -54,6 +53,13 @@ class EpgCacheService
      * @see EpgProgrammeStore
      */
     private const PROGRAMMES_DB_FILE = 'programmes.sqlite';
+
+    /**
+     * cache_progress value at which XML parsing hands off to the DVR epg_programmes
+     * population, for EPGs consumed by a DVR-enabled playlist. Parsing reports
+     * 0-60%, the DVR phase 60-99%, and 100% only once both are done.
+     */
+    private const DVR_PROGRESS_START = 60;
 
     /**
      * Per-instance memo of opened {@see EpgProgrammeStore} read handles, keyed
@@ -181,6 +187,12 @@ class EpgCacheService
             $totalChannels = $epg->channel_count ?? $epg->channels()->count();
             $totalProgrammes = $epg->programme_count ?? 150000; // Default estimate
 
+            // When DVR is enabled on a consuming playlist, the epg_programmes
+            // population runs after parsing, so reserve part of the progress bar
+            // for it instead of reporting 100% before the job is actually done.
+            $hasDvr = $epg->hasDvrEnabled();
+            $parseProgressCeiling = $hasDvr ? self::DVR_PROGRESS_START : 99;
+
             // Start by clearing existing cache
             $this->clearCache($epg);
             $cacheDir = $this->getCacheDir($epg);
@@ -188,7 +200,7 @@ class EpgCacheService
 
             // Parse and save channels and programmes in a single pass
             Log::debug("Parsing EPG data for {$epg->name}");
-            $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes);
+            $stats = $this->parseAndSaveEpgDataSinglePass($epg, $filePath, $totalChannels, $totalProgrammes, $parseProgressCeiling);
             Log::debug("Processed {$stats['channels']} channels and {$stats['programmes']} programmes across {$stats['date_count']} dates");
 
             // Drop any read handle memoized before this rebuild so the freshly
@@ -215,7 +227,7 @@ class EpgCacheService
             // Flag EPG as cached
             $epg->update([
                 'is_cached' => true,
-                'cache_progress' => 100,
+                'cache_progress' => $hasDvr ? self::DVR_PROGRESS_START : 100,
                 'cache_meta' => $metadata,
                 // Update counts
                 'channel_count' => $stats['channels'],
@@ -225,7 +237,10 @@ class EpgCacheService
             Log::debug('EPG cache generated successfully', $metadata);
 
             // Populate epg_programmes DB table for DVR-enabled playlists
-            $this->populateDvrProgrammes($epg);
+            if ($hasDvr) {
+                $this->writeDvrProgrammes($epg, trackProgress: true, estimatedTotal: $stats['programmes']);
+                $epg->update(['cache_progress' => 100]);
+            }
 
             // Release the read handle opened while populating DVR so a long-lived
             // service instance (a command caching several EPGs) does not hold one
@@ -346,7 +361,7 @@ class EpgCacheService
      * This method parses both channels and programmes in one pass through the file,
      * reducing processing time by ~50% compared to double parsing.
      */
-    private function parseAndSaveEpgDataSinglePass(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes): array
+    private function parseAndSaveEpgDataSinglePass(Epg $epg, string $filePath, int $totalChannels, int $totalProgrammes, int $progressCeiling = 99): array
     {
         $reader = new XMLReader;
         $reader->open('compress.zlib://'.$filePath);
@@ -474,8 +489,8 @@ class EpgCacheService
                     if ($totalProcessed - $lastProgressUpdate >= $progressUpdateInterval) {
                         $estimatedTotal = $totalChannels + $totalProgrammes;
                         $progress = $estimatedTotal > 0
-                            ? min(99, round(($totalProcessed / $estimatedTotal) * 99))
-                            : 99;
+                            ? min($progressCeiling, round(($totalProcessed / $estimatedTotal) * $progressCeiling))
+                            : $progressCeiling;
                         $epg->update(['cache_progress' => $progress]);
                         $lastProgressUpdate = $totalProcessed;
 
@@ -1343,41 +1358,22 @@ class EpgCacheService
      */
     public function populateDvrProgrammes(Epg $epg): void
     {
-        // Resolve every Playlist/CustomPlaylist/MergedPlaylist that has channels
-        // mapped to this EPG, then check whether any of them has an enabled DVR
-        // setting. Covers all three DvrSetting owner types (a plain playlist_id
-        // lookup would miss DVR settings owned by a CustomPlaylist or MergedPlaylist).
-        $playlistIds = [];
-        $customPlaylistIds = [];
-        $mergedPlaylistIds = [];
-
-        foreach ($epg->getAllPlaylists() as $consumer) {
-            match (true) {
-                $consumer instanceof Playlist => $playlistIds[] = $consumer->id,
-                $consumer instanceof CustomPlaylist => $customPlaylistIds[] = $consumer->id,
-                $consumer instanceof MergedPlaylist => $mergedPlaylistIds[] = $consumer->id,
-                default => null,
-            };
-        }
-
-        $hasDvrSetting = DvrSetting::where('enabled', true)
-            ->where(function ($query) use ($playlistIds, $customPlaylistIds, $mergedPlaylistIds): void {
-                if (! empty($playlistIds)) {
-                    $query->orWhereIn('playlist_id', $playlistIds);
-                }
-                if (! empty($customPlaylistIds)) {
-                    $query->orWhereIn('custom_playlist_id', $customPlaylistIds);
-                }
-                if (! empty($mergedPlaylistIds)) {
-                    $query->orWhereIn('merged_playlist_id', $mergedPlaylistIds);
-                }
-            })
-            ->exists();
-
-        if (! $hasDvrSetting) {
+        if (! $epg->hasDvrEnabled()) {
             return;
         }
 
+        $this->writeDvrProgrammes($epg);
+    }
+
+    /**
+     * Refresh the epg_programmes rows for an EPG within the DVR lookahead window.
+     *
+     * When $trackProgress is set, cache_progress is advanced from DVR_PROGRESS_START
+     * towards 99 as rows are written, using $estimatedTotal (the cached programme
+     * count, an upper bound for the window) as the denominator.
+     */
+    private function writeDvrProgrammes(Epg $epg, bool $trackProgress = false, int $estimatedTotal = 0): void
+    {
         Log::debug("Populating epg_programmes for EPG {$epg->name} (id={$epg->id})");
 
         // Delete stale rows for this EPG so we do a clean refresh
@@ -1391,10 +1387,25 @@ class EpgCacheService
         $inserted = 0;
         $skipped = 0;
 
+        $processed = 0;
+        $lastProgressUpdate = 0;
+        $progressRange = 99 - self::DVR_PROGRESS_START;
+        $advanceProgress = function () use ($epg, $trackProgress, $estimatedTotal, $progressRange, &$processed, &$lastProgressUpdate): void {
+            $processed++;
+            if (! $trackProgress || $estimatedTotal <= 0 || $processed - $lastProgressUpdate < 5000) {
+                return;
+            }
+            $lastProgressUpdate = $processed;
+            $epg->update([
+                'cache_progress' => min(99, self::DVR_PROGRESS_START + round(($processed / $estimatedTotal) * $progressRange)),
+            ]);
+        };
+
         $store = $this->programmeStore($epg);
         if ($store !== null) {
             foreach ($store->readForDvr($from->format('Y-m-d'), $to->format('Y-m-d')) as [$channelId, $programme]) {
                 $this->bufferDvrProgramme($epg, $channelId, $programme, $batch, $inserted, $skipped);
+                $advanceProgress();
             }
         } else {
             // Legacy JSONL scan: v1 caches, or v2 caches written before the SQLite switch.
@@ -1428,6 +1439,7 @@ class EpgCacheService
                     }
 
                     $this->bufferDvrProgramme($epg, (string) $record['channel'], $record['programme'], $batch, $inserted, $skipped);
+                    $advanceProgress();
                 }
 
                 fclose($handle);
@@ -1455,7 +1467,7 @@ class EpgCacheService
     /**
      * Normalize one cached programme into an `epg_programmes` row and append it
      * to $batch, flushing to the DB every 500 rows. Shared by the SQLite and
-     * legacy-JSONL code paths in {@see populateDvrProgrammes()}.
+     * legacy-JSONL code paths in {@see writeDvrProgrammes()}.
      *
      * @param  array<string, mixed>  $p  programme payload (canonical shape)
      * @param  list<array<string, mixed>>  $batch
