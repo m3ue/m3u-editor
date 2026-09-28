@@ -106,9 +106,9 @@ it('applies the same date cleanup to the series release date fallback', function
 
     $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'DESC');
 
-    expect($datetime->refresh()->sort)->toBe(1)
-        ->and($dateOnly->refresh()->sort)->toBe(2)
-        ->and($upcoming->refresh()->sort)->toBe(3);
+    expect((int) $datetime->refresh()->sort)->toBe(1)
+        ->and((int) $dateOnly->refresh()->sort)->toBe(2)
+        ->and((int) $upcoming->refresh()->sort)->toBe(3);
 });
 
 it('only re-sorts series in the given category', function () {
