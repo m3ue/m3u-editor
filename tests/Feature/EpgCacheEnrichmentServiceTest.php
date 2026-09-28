@@ -22,7 +22,6 @@ beforeEach(function () {
     Storage::fake('local');
     Bus::fake();
     Http::preventStrayRequests();
-    config(['dev.allowed_playlist_domains' => null]);
 
     $this->user = User::factory()->create();
     $this->epg = Epg::factory()->for($this->user)->create(['url' => 'https://example.com/enrich.xml']);
@@ -242,25 +241,62 @@ it('reports busy while another connection holds the write lock', function () {
     expect(($this->cachedTitles)())->toBe(['One']);
 });
 
-it('rejects malformed patches', function (array $patch) {
+it('rejects malformed patches, naming the offending patch and field', function (array $patch, string $field) {
     ($this->rebuild)(['One']);
     $context = ($this->context)();
     $row = ($this->service)()->snapshot($context, $this->epg)['programmes'][0];
+    $valid = ['id' => $row['id'], 'hash' => $row['hash'], 'changes' => ['title' => 'Fine']];
 
     expect(($this->service)()->apply($context, $this->epg, [
-        array_merge(['id' => $row['id'], 'hash' => $row['hash']], $patch),
-    ])['status'])->toBe('invalid_request')
+        $valid,
+        array_merge(['id' => $row['id'] + 1, 'hash' => $row['hash']], $patch),
+    ]))->toBe(['status' => 'invalid_request', 'index' => 1, 'field' => $field])
         ->and(($this->cachedTitles)())->toBe(['One']);
 })->with([
-    'non-whitelisted field' => [['changes' => ['channel' => 'other']]],
-    'empty changes' => [['changes' => []]],
-    'wrong type' => [['changes' => ['new' => 'yes']]],
-    'oversized string' => [['changes' => ['desc' => str_repeat('a', 10001)]]],
-    'invalid icon url' => [['changes' => ['icon' => 'not a url']]],
-    'invalid image' => [['changes' => ['images' => [['url' => 'https://example.com/a.jpg', 'bogus' => 1]]]]],
-    'non-canonical episode_nums' => [['changes' => ['episode_nums' => [['value' => '1.2.0/1']]]]],
-    'missing hash' => [['hash' => null, 'changes' => ['title' => 'x']]],
+    'non-whitelisted field' => [['changes' => ['channel' => 'other']], 'channel'],
+    'empty changes' => [['changes' => []], 'changes'],
+    'wrong type' => [['changes' => ['new' => 'yes']], 'new'],
+    'oversized string' => [['changes' => ['desc' => str_repeat('a', 10001)]], 'desc'],
+    'invalid icon url' => [['changes' => ['icon' => 'not a url']], 'icon'],
+    'file scheme icon' => [['changes' => ['icon' => 'file:///etc/passwd']], 'icon'],
+    'gopher scheme url' => [['changes' => ['urls' => [['system' => 'imdb', 'value' => 'gopher://127.0.0.1:6379/_x']]]], 'urls'],
+    'url entry with extra key' => [['changes' => ['urls' => [['system' => 'imdb', 'value' => 'https://imdb.com/t', 'x' => 1]]]], 'urls'],
+    'image with unknown key' => [['changes' => ['images' => [['url' => 'https://example.com/a.jpg', 'bogus' => 1]]]], 'images'],
+    'url-only image' => [['changes' => ['images' => [['url' => 'https://image.tmdb.org/t/p/w500/a.jpg']]]], 'images'],
+    'image with array width' => [['changes' => ['images' => [[
+        'url' => 'https://image.tmdb.org/a.jpg', 'type' => 'poster', 'width' => [1], 'height' => 0, 'orient' => 'P', 'size' => 1,
+    ]]]], 'images'],
+    'non-canonical episode_nums' => [['changes' => ['episode_nums' => [['value' => '1.2.0/1']]]], 'episode_nums'],
+    'missing hash' => [['hash' => null, 'changes' => ['title' => 'x']], 'hash'],
 ]);
+
+it('accepts full-shape artwork from hosts outside the playlist domain allowlist, and serves it as XMLTV', function () {
+    config(['dev.allowed_playlist_domains' => 'https://my-provider.example/*']);
+    ($this->rebuild)(['One']);
+    $playlist = Playlist::factory()->for($this->user)->create(['dummy_epg' => false]);
+    $epgChannel = EpgChannel::factory()->for($this->user)->for($this->epg)->create(['channel_id' => 'enrich.a']);
+    Channel::factory()->for($this->user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'channel' => 1,
+        'epg_channel_id' => $epgChannel->id,
+    ]);
+
+    $context = ($this->context)();
+    $row = ($this->service)()->snapshot($context, $this->epg)['programmes'][0];
+    $image = ['url' => 'https://image.tmdb.org/t/p/w500/a.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P', 'size' => 2];
+
+    expect(($this->service)()->apply($context, $this->epg, [
+        ['id' => $row['id'], 'hash' => $row['hash'], 'changes' => ['title' => 'Enriched', 'icon' => 'https://image.tmdb.org/icon.png', 'images' => [$image]]],
+    ])['status'])->toBe('applied');
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+    $response->assertOk();
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect((new DOMXPath($document))->query('//programme[title="Enriched"]/icon[@type="poster" and @width="500" and @height="750" and @orient="P" and @size="2"]'))->toHaveCount(1);
+});
 
 it('rejects duplicate ids and oversized batches', function () {
     ($this->rebuild)(['One']);

@@ -91,8 +91,16 @@ class EpgCacheEnrichmentService
      * `['id' => int, 'hash' => string, 'changes' => [field => value]]` with `id`
      * and `hash` taken from {@see snapshot()}.
      *
+     * An `invalid_request` names the first offending patch (`index`) and key
+     * (`field`) so a plugin can fix one entry instead of bisecting the batch.
+     *
+     * The context's dry-run flag is deliberately not consulted: hooks such as
+     * `epg.cache.generated` always dispatch as dry runs, which would make the
+     * natural re-enrich trigger a no-op. A plugin that wants a dry run simply
+     * does not call apply().
+     *
      * @param  list<array{id: int, hash: string, changes: array<string, mixed>}>  $patches
-     * @return array{status: string}
+     * @return array{status: string, index?: int, field?: string}
      */
     public function apply(PluginExecutionContext $context, Epg $epg, array $patches): array
     {
@@ -105,13 +113,18 @@ class EpgCacheEnrichmentService
 
         $expectedHashes = [];
         $changes = [];
-        foreach ($patches as $patch) {
+        foreach (array_values($patches) as $index => $patch) {
             $id = $patch['id'] ?? null;
             $hash = $patch['hash'] ?? null;
             $fields = $patch['changes'] ?? null;
-            if (! is_int($id) || $id < 1 || isset($expectedHashes[$id]) || ! is_string($hash)
-                || ! is_array($fields) || ! $this->isValidChangeSet($fields)) {
-                return ['status' => 'invalid_request'];
+            $invalidField = match (true) {
+                ! is_int($id) || $id < 1 || isset($expectedHashes[$id]) => 'id',
+                ! is_string($hash) => 'hash',
+                ! is_array($fields) || $fields === [] => 'changes',
+                default => $this->firstInvalidField($fields),
+            };
+            if ($invalidField !== null) {
+                return ['status' => 'invalid_request', 'index' => $index, 'field' => $invalidField];
             }
 
             $expectedHashes[$id] = $hash;
@@ -184,36 +197,59 @@ class EpgCacheEnrichmentService
         }
     }
 
-    /** @param array<string, mixed> $fields */
-    private function isValidChangeSet(array $fields): bool
+    /**
+     * The first field whose value the host would not have produced itself, or
+     * null when every field is valid. Values must match the exact shape the
+     * XMLTV parser stores, because the XMLTV writer reads them unguarded.
+     *
+     * @param  array<string, mixed>  $fields
+     */
+    private function firstInvalidField(array $fields): ?string
     {
-        if ($fields === []) {
-            return false;
-        }
-
         foreach ($fields as $field => $value) {
             $valid = match (true) {
-                in_array($field, self::STRING_FIELDS, true) => is_string($value)
-                    && mb_strlen($value) <= self::MAX_STRING_LENGTH
-                    && ($field !== 'icon' || $value === '' || $this->isAllowedUrl($value)),
+                in_array($field, self::STRING_FIELDS, true) => $this->isBoundedString($value)
+                    && ($field !== 'icon' || $value === '' || $this->isHttpUrl($value)),
                 in_array($field, self::BOOLEAN_FIELDS, true) => is_bool($value),
                 $field === 'production_year' => $value === null || is_int($value),
                 // Only the canonical shape the XMLTV parser itself stores.
                 $field === 'episode_nums' => is_array($value) && EpisodeNumberNormalizer::normalize($value) === $value,
-                $field === 'urls' => $this->isListOf($value, fn (mixed $entry): bool => is_array($entry)
-                    && is_string($entry['system'] ?? null) && $this->isAllowedUrl($entry['value'] ?? null)),
-                $field === 'images' => $this->isListOf($value, fn (mixed $image): bool => is_array($image)
-                    && array_diff(array_keys($image), self::IMAGE_KEYS) === []
-                    && $this->isAllowedUrl($image['url'] ?? null)),
+                $field === 'urls' => $this->isListOf($value, fn (mixed $entry): bool => $this->hasExactKeys($entry, ['system', 'value'])
+                    && $this->isBoundedString($entry['system'])
+                    && $this->isHttpUrl($entry['value'])),
+                $field === 'images' => $this->isListOf($value, fn (mixed $image): bool => $this->hasExactKeys($image, self::IMAGE_KEYS)
+                    && $this->isHttpUrl($image['url'])
+                    && $this->isBoundedString($image['type'])
+                    && $this->isBoundedString($image['orient'])
+                    && is_int($image['width']) && is_int($image['height']) && is_int($image['size'])),
                 default => false,
             };
 
             if (! $valid) {
-                return false;
+                return (string) $field;
             }
         }
 
-        return true;
+        return null;
+    }
+
+    /** @param list<string> $keys */
+    private function hasExactKeys(mixed $value, array $keys): bool
+    {
+        if (! is_array($value)) {
+            return false;
+        }
+
+        $actual = array_keys($value);
+        sort($actual);
+        sort($keys);
+
+        return $actual === $keys;
+    }
+
+    private function isBoundedString(mixed $value): bool
+    {
+        return is_string($value) && mb_strlen($value) <= self::MAX_STRING_LENGTH;
     }
 
     private function isListOf(mixed $value, callable $isValidEntry): bool
@@ -231,18 +267,15 @@ class EpgCacheEnrichmentService
         return true;
     }
 
-    /** Same allowed-domain policy every other URL-accepting surface in the app enforces. */
-    private function isAllowedUrl(mixed $url): bool
+    /**
+     * An absolute http(s) URL. Artwork hosts (TMDB etc.) are not provider
+     * domains, so the playlist-source allowlist ({@see UrlIsAllowed})
+     * does not apply here, but other schemes (file://, gopher://) are refused.
+     */
+    private function isHttpUrl(mixed $url): bool
     {
-        if (! is_string($url) || filter_var($url, FILTER_VALIDATE_URL) === false) {
-            return false;
-        }
-
-        $denied = false;
-        app(UrlIsAllowed::class)->validate('url', $url, function () use (&$denied): void {
-            $denied = true;
-        });
-
-        return ! $denied;
+        return $this->isBoundedString($url)
+            && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
+            && filter_var($url, FILTER_VALIDATE_URL) !== false;
     }
 }
