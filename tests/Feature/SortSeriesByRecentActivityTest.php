@@ -96,6 +96,21 @@ it('falls back to the series release date and sinks undated series in both direc
         ->and((int) $undated->refresh()->sort)->toBe(3);
 });
 
+it('applies the same date cleanup to the series release date fallback', function () {
+    // Emby/Jellyfin store PremiereDate as a full date-time; it should compare
+    // on its date alone, and ties fall back to id order.
+    $datetime = ($this->makeSeries)('2024-05-01T00:00:00.0000000Z');
+    $dateOnly = ($this->makeSeries)('2024-05-01');
+    // A future premiere with no aired episodes has no activity yet.
+    $upcoming = ($this->makeSeries)('2027-01-01');
+
+    $this->service->bulkSortPlaylistSeriesByRecentActivity($this->playlist, 'DESC');
+
+    expect($datetime->refresh()->sort)->toBe(1)
+        ->and($dateOnly->refresh()->sort)->toBe(2)
+        ->and($upcoming->refresh()->sort)->toBe(3);
+});
+
 it('only re-sorts series in the given category', function () {
     $other = Category::factory()->for($this->user)->for($this->playlist)->create();
     $old = ($this->makeSeries)('2000-01-01');

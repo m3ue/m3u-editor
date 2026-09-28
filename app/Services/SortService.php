@@ -775,45 +775,49 @@ class SortService
      *
      * Episode dates come from whichever source populated them: provider or
      * media-server `info->release_date`, TMDB `info->releasedate`, or the
-     * AIOStreams `aio_air_date` column. Only the YYYY-MM-DD prefix is compared
-     * so mixed date/datetime formats rank consistently, and dates after
-     * $today are ignored so scheduled (unaired) episodes don't count as
-     * activity.
+     * AIOStreams `aio_air_date` column. Episode and series dates alike are
+     * cut to their YYYY-MM-DD prefix so mixed date/datetime formats rank
+     * consistently, and dates after today are ignored so scheduled (unaired)
+     * episodes or upcoming premieres don't count as activity.
      *
-     * @param  string  $episodeScopeSql  WHERE clause (with `?` placeholders) limiting which episodes are aggregated
-     * @return array{isNull: array{mysql: string, pgsql: string, sqlite: string}, value: array{mysql: string, pgsql: string, sqlite: string}, join: array{mysql: string, pgsql: string, sqlite: string}, latest: array{mysql: string, pgsql: string, sqlite: string}}
+     * The joined derived table takes two `?` bindings for today's date
+     * (episode guard, then series guard) followed by $seriesScopeSql's.
+     *
+     * @param  string  $seriesScopeSql  WHERE clause on the `s` (series) alias, with `?` placeholders
+     * @return array{isNull: array{mysql: string, pgsql: string, sqlite: string}, value: array{mysql: string, pgsql: string, sqlite: string}, join: array{mysql: string, pgsql: string, sqlite: string}, activity: array{mysql: string, pgsql: string, sqlite: string}}
      */
-    private function seriesRecentActivityExprs(string $episodeScopeSql): array
+    private function seriesRecentActivityExprs(string $seriesScopeSql): array
     {
         $episodeDate = [
             // JSON_UNQUOTE() turns a stored JSON null into the string 'null', so filter that out too.
             'mysql' => "SUBSTR(COALESCE(
-                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(info, '$.release_date')), ''), 'null'),
-                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(info, '$.releasedate')), ''), 'null'),
-                CAST(aio_air_date AS CHAR)
+                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.info, '$.release_date')), ''), 'null'),
+                NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.info, '$.releasedate')), ''), 'null'),
+                CAST(e.aio_air_date AS CHAR)
             ), 1, 10)",
             'pgsql' => "SUBSTR(COALESCE(
-                NULLIF(info->>'release_date', ''),
-                NULLIF(info->>'releasedate', ''),
-                aio_air_date::text
+                NULLIF(e.info->>'release_date', ''),
+                NULLIF(e.info->>'releasedate', ''),
+                e.aio_air_date::text
             ), 1, 10)",
             'sqlite' => "SUBSTR(COALESCE(
-                NULLIF(json_extract(info, '$.release_date'), ''),
-                NULLIF(json_extract(info, '$.releasedate'), ''),
-                CAST(aio_air_date AS TEXT)
+                NULLIF(json_extract(e.info, '$.release_date'), ''),
+                NULLIF(json_extract(e.info, '$.releasedate'), ''),
+                CAST(e.aio_air_date AS TEXT)
             ), 1, 10)",
         ];
+        $seriesDate = "SUBSTR(NULLIF(s.release_date, ''), 1, 10)";
 
-        $latest = [];
+        $activity = [];
         $join = [];
         $raw = [];
         foreach ($episodeDate as $driver => $expr) {
-            $latest[$driver] = "MAX(CASE WHEN {$expr} <= ? THEN {$expr} END)";
-            $join[$driver] = "LEFT JOIN (SELECT series_id, {$latest[$driver]} AS latest_episode_date FROM episodes WHERE {$episodeScopeSql} GROUP BY series_id) latest_episodes ON latest_episodes.series_id = series.id";
-            $raw[$driver] = "COALESCE(latest_episodes.latest_episode_date, NULLIF(series.release_date, ''))";
+            $activity[$driver] = "COALESCE(MAX(CASE WHEN {$expr} <= ? THEN {$expr} END), CASE WHEN {$seriesDate} <= ? THEN {$seriesDate} END)";
+            $join[$driver] = "LEFT JOIN (SELECT s.id AS series_id, {$activity[$driver]} AS latest_activity_date FROM series s LEFT JOIN episodes e ON e.series_id = s.id WHERE {$seriesScopeSql} GROUP BY s.id, s.release_date) series_activity ON series_activity.series_id = series.id";
+            $raw[$driver] = 'series_activity.latest_activity_date';
         }
 
-        return ['isNull' => $raw, 'value' => $raw, 'join' => $join, 'latest' => $latest];
+        return ['isNull' => $raw, 'value' => $raw, 'join' => $join, 'activity' => $activity];
     }
 
     /**
@@ -825,7 +829,7 @@ class SortService
         $this->bulkSortSeriesByRecentActivity(
             whereSql: 'category_id = ?',
             whereBindings: [$record->id],
-            episodeScopeSql: 'series_id IN (SELECT id FROM series WHERE category_id = ?)',
+            seriesScopeSql: 's.category_id = ?',
             direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
             fallbackQuery: fn () => Series::where('category_id', $record->id),
         );
@@ -841,22 +845,22 @@ class SortService
         $this->bulkSortSeriesByRecentActivity(
             whereSql: 'playlist_id = ?',
             whereBindings: [$playlist->id],
-            episodeScopeSql: 'playlist_id = ?',
+            seriesScopeSql: 's.playlist_id = ?',
             direction: strtoupper($order) === 'DESC' ? 'DESC' : 'ASC',
             fallbackQuery: fn () => Series::where('playlist_id', $playlist->id),
         );
     }
 
     /**
-     * Shared body of the two recent-activity sorts. $episodeScopeSql takes the
+     * Shared body of the two recent-activity sorts. $seriesScopeSql takes the
      * same bindings as $whereSql (the category or playlist id).
      *
      * @param  array<int, mixed>  $whereBindings
      * @param  \Closure(): Builder  $fallbackQuery
      */
-    private function bulkSortSeriesByRecentActivity(string $whereSql, array $whereBindings, string $episodeScopeSql, string $direction, \Closure $fallbackQuery): void
+    private function bulkSortSeriesByRecentActivity(string $whereSql, array $whereBindings, string $seriesScopeSql, string $direction, \Closure $fallbackQuery): void
     {
-        $exprs = $this->seriesRecentActivityExprs($episodeScopeSql);
+        $exprs = $this->seriesRecentActivityExprs($seriesScopeSql);
         $today = now()->toDateString();
 
         $this->bulkSortByExpression(
@@ -867,17 +871,18 @@ class SortService
             valueExprByDriver: $exprs['value'],
             direction: $direction,
             fallbackQuery: fn () => $fallbackQuery()->leftJoinSub(
-                DB::table('episodes')
-                    ->selectRaw("series_id, {$exprs['latest']['sqlite']} AS latest_episode_date", [$today])
-                    ->whereRaw($episodeScopeSql, $whereBindings)
-                    ->groupBy('series_id'),
-                'latest_episodes',
-                'latest_episodes.series_id',
+                DB::table('series as s')
+                    ->leftJoin('episodes as e', 'e.series_id', '=', 's.id')
+                    ->selectRaw("s.id AS series_id, {$exprs['activity']['sqlite']} AS latest_activity_date", [$today, $today])
+                    ->whereRaw($seriesScopeSql, $whereBindings)
+                    ->groupBy('s.id', 's.release_date'),
+                'series_activity',
+                'series_activity.series_id',
                 '=',
                 'series.id',
             ),
             joinSqlByDriver: $exprs['join'],
-            joinBindings: [$today, ...$whereBindings],
+            joinBindings: [$today, $today, ...$whereBindings],
         );
     }
 

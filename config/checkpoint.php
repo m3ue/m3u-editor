@@ -290,7 +290,7 @@ return [
         // selectRaw(), which interpolates the same literal expression.
         'e6ca20c46d15',
         'ca85fe8662a8',
-        'aadeb861b896',
+        '47a7230258a5',
 
         // SortService natural-sort rewrite (issue #1369): same guarantees as the
         // original SortService entries above, just on new lines/hashes.
