@@ -52,17 +52,17 @@ beforeEach(function () {
     $this->dvrSetting = DvrSetting::factory()->enabled()->for($this->user)->for($this->playlist)->create();
 });
 
-function dvrApiToken(array $abilities = ['view', 'create', 'update', 'delete']): string
+function dispatcharrDvrApiToken(array $abilities = ['view', 'create', 'update', 'delete']): string
 {
     return test()->user->createToken('dvr', $abilities)->plainTextToken;
 }
 
-function dvrApiHeaders(): array
+function dispatcharrDvrApiHeaders(): array
 {
-    return ['X-API-Key' => dvrApiToken()];
+    return ['X-API-Key' => dispatcharrDvrApiToken()];
 }
 
-function makeDvrRecording(array $attributes = [], ?string $state = null): DvrRecording
+function makeDispatcharrDvrRecording(array $attributes = [], ?string $state = null): DvrRecording
 {
     $factory = DvrRecording::factory();
     if ($state) {
@@ -109,12 +109,12 @@ it('rejects a mock Dispatcharr JWT', function () {
 it('forbids a token whose owner has no enabled DVR', function () {
     $this->dvrSetting->update(['enabled' => false]);
 
-    $this->getJson('/recordings/', dvrApiHeaders())->assertStatus(403);
+    $this->getJson('/recordings/', dispatcharrDvrApiHeaders())->assertStatus(403);
 });
 
 it('accepts a Sanctum token as Bearer, X-API-Key, ApiKey scheme, and query token', function () {
-    makeDvrRecording();
-    $token = dvrApiToken(['view']);
+    makeDispatcharrDvrRecording();
+    $token = dispatcharrDvrApiToken(['view']);
 
     $this->getJson('/recordings/', ['Authorization' => "Bearer {$token}"])
         ->assertOk()->assertJsonCount(1);
@@ -127,7 +127,7 @@ it('accepts a Sanctum token as Bearer, X-API-Key, ApiKey scheme, and query token
 });
 
 it('enforces Sanctum token abilities', function () {
-    $token = dvrApiToken(['view']);
+    $token = dispatcharrDvrApiToken(['view']);
 
     $this->postJson('/recordings/', [
         'channel' => $this->channel->id,
@@ -147,10 +147,10 @@ it('rejects an expired Sanctum token', function () {
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('lists recordings in the Dispatcharr shape, hiding cancelled ones', function () {
-    $mine = makeDvrRecording(['title' => 'Evening News'], 'completed');
-    makeDvrRecording(['status' => DvrRecordingStatus::Cancelled]);
+    $mine = makeDispatcharrDvrRecording(['title' => 'Evening News'], 'completed');
+    makeDispatcharrDvrRecording(['status' => DvrRecordingStatus::Cancelled]);
 
-    $response = $this->getJson('/recordings/', dvrApiHeaders())->assertOk();
+    $response = $this->getJson('/recordings/', dispatcharrDvrApiHeaders())->assertOk();
 
     $response->assertJsonCount(1)
         ->assertJsonPath('0.id', $mine->id)
@@ -162,7 +162,7 @@ it('lists recordings in the Dispatcharr shape, hiding cancelled ones', function 
 });
 
 it('does not expose another user\'s recordings to a Sanctum token', function () {
-    makeDvrRecording();
+    makeDispatcharrDvrRecording();
     $otherUser = User::factory()->create();
     DvrSetting::factory()->enabled()->for($otherUser)
         ->for(Playlist::factory()->for($otherUser)->create())
@@ -175,9 +175,9 @@ it('does not expose another user\'s recordings to a Sanctum token', function () 
 it('routes poster_url through the logo proxy when the DVR playlist has it enabled', function (bool $logoProxyEnabled) {
     $this->playlist->update(['enable_logo_proxy' => $logoProxyEnabled]);
     $rawPoster = 'https://image.tmdb.org/t/p/w500/poster.jpg';
-    makeDvrRecording(['metadata' => ['tmdb' => ['poster_url' => $rawPoster]]], 'completed');
+    makeDispatcharrDvrRecording(['metadata' => ['tmdb' => ['poster_url' => $rawPoster]]], 'completed');
 
-    $posterUrl = $this->getJson('/recordings/', dvrApiHeaders())->assertOk()->json('0.custom_properties.poster_url');
+    $posterUrl = $this->getJson('/recordings/', dispatcharrDvrApiHeaders())->assertOk()->json('0.custom_properties.poster_url');
 
     if ($logoProxyEnabled) {
         expect($posterUrl)->not->toBe($rawPoster)->toStartWith(url('/'));
@@ -195,7 +195,7 @@ it('schedules a recording from a Dispatcharr create payload', function () {
         'start_time' => $start->toIso8601String(),
         'end_time' => $end->toIso8601String(),
         'custom_properties' => ['program' => ['title' => 'Evening News']],
-    ], dvrApiHeaders());
+    ], dispatcharrDvrApiHeaders());
 
     $response->assertCreated()
         ->assertJsonPath('channel', $this->channel->id)
@@ -217,7 +217,7 @@ it('refuses to record a channel whose playlist has DVR disabled instead of borro
         'channel' => $this->channel->id,
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
-    ], dvrApiHeaders())
+    ], dispatcharrDvrApiHeaders())
         ->assertStatus(400)
         ->assertJsonPath('non_field_errors.0', 'DVR is not enabled for this channel.');
 
@@ -237,7 +237,7 @@ it('records a channel through a custom playlist DVR setting that contains it', f
         'channel' => $this->channel->id,
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
-    ], dvrApiHeaders())->assertCreated();
+    ], dispatcharrDvrApiHeaders())->assertCreated();
 
     expect(DvrRecordingRule::sole()->dvr_setting_id)->toBe($customSetting->id);
 });
@@ -252,7 +252,7 @@ it('refuses to record a channel from a playlist that has no DVR setting', functi
         'channel' => $otherChannel->id,
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
-    ], dvrApiHeaders())->assertStatus(400);
+    ], dispatcharrDvrApiHeaders())->assertStatus(400);
 
     expect(DvrRecordingRule::count())->toBe(0);
 });
@@ -263,14 +263,14 @@ it('returns 409 when the same window is scheduled twice', function () {
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
     ];
-    $headers = dvrApiHeaders();
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson('/recordings/', $payload, $headers)->assertCreated();
     $this->postJson('/recordings/', $payload, $headers)->assertStatus(409);
 });
 
 it('returns DRF-style validation errors on create', function () {
-    $this->postJson('/recordings/', ['channel' => 999999], dvrApiHeaders())
+    $this->postJson('/recordings/', ['channel' => 999999], dispatcharrDvrApiHeaders())
         ->assertStatus(400)
         ->assertJsonStructure(['start_time', 'end_time']);
 
@@ -278,13 +278,13 @@ it('returns DRF-style validation errors on create', function () {
         'channel' => 999999,
         'start_time' => now()->addHour()->toIso8601String(),
         'end_time' => now()->addHours(2)->toIso8601String(),
-    ], dvrApiHeaders())->assertStatus(400)->assertJsonStructure(['channel']);
+    ], dispatcharrDvrApiHeaders())->assertStatus(400)->assertJsonStructure(['channel']);
 });
 
 it('stops a scheduled recording and reports 409 on a finished one', function () {
-    $scheduled = makeDvrRecording();
-    $completed = makeDvrRecording([], 'completed');
-    $headers = dvrApiHeaders();
+    $scheduled = makeDispatcharrDvrRecording();
+    $completed = makeDispatcharrDvrRecording([], 'completed');
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson("/recordings/{$scheduled->id}/stop/", [], $headers)
         ->assertOk()
@@ -295,9 +295,9 @@ it('stops a scheduled recording and reports 409 on a finished one', function () 
 });
 
 it('deletes a recording', function () {
-    $recording = makeDvrRecording();
+    $recording = makeDispatcharrDvrRecording();
 
-    $this->deleteJson("/recordings/{$recording->id}/", [], dvrApiHeaders())->assertNoContent();
+    $this->deleteJson("/recordings/{$recording->id}/", [], dispatcharrDvrApiHeaders())->assertNoContent();
 
     expect(DvrRecording::find($recording->id))->toBeNull();
 });
@@ -305,8 +305,8 @@ it('deletes a recording', function () {
 it('streams a completed recording file with a query-string token', function () {
     Storage::fake('dvr');
     Storage::disk('dvr')->put('recordings/show/episode.ts', str_repeat('x', 1024));
-    $recording = makeDvrRecording(['file_path' => 'recordings/show/episode.ts'], 'completed');
-    $token = urlencode(dvrApiToken(['view']));
+    $recording = makeDispatcharrDvrRecording(['file_path' => 'recordings/show/episode.ts'], 'completed');
+    $token = urlencode(dispatcharrDvrApiToken(['view']));
 
     $response = $this->get("/recordings/{$recording->id}/file/?token={$token}");
 
@@ -315,7 +315,7 @@ it('streams a completed recording file with a query-string token', function () {
 });
 
 it('404s when a token touches another user\'s recording', function () {
-    $recording = makeDvrRecording();
+    $recording = makeDispatcharrDvrRecording();
     $otherUser = User::factory()->create();
     DvrSetting::factory()->enabled()->for($otherUser)
         ->for(Playlist::factory()->for($otherUser)->create())
@@ -328,11 +328,11 @@ it('404s when a token touches another user\'s recording', function () {
 });
 
 it('bulk-cancels upcoming scheduled recordings', function () {
-    makeDvrRecording(['scheduled_start' => now()->addHour(), 'scheduled_end' => now()->addHours(2)]);
-    makeDvrRecording(['scheduled_start' => now()->addDay(), 'scheduled_end' => now()->addDay()->addHour()]);
-    $completed = makeDvrRecording([], 'completed');
+    makeDispatcharrDvrRecording(['scheduled_start' => now()->addHour(), 'scheduled_end' => now()->addHours(2)]);
+    makeDispatcharrDvrRecording(['scheduled_start' => now()->addDay(), 'scheduled_end' => now()->addDay()->addHour()]);
+    $completed = makeDispatcharrDvrRecording([], 'completed');
 
-    $this->postJson('/recordings/bulk-delete-upcoming/', [], dvrApiHeaders())
+    $this->postJson('/recordings/bulk-delete-upcoming/', [], dispatcharrDvrApiHeaders())
         ->assertOk()
         ->assertJson(['success' => true, 'removed' => 2]);
 
@@ -340,10 +340,10 @@ it('bulk-cancels upcoming scheduled recordings', function () {
 });
 
 it('extends a scheduled recording but not one already in progress', function () {
-    $scheduled = makeDvrRecording();
+    $scheduled = makeDispatcharrDvrRecording();
     $originalEnd = $scheduled->scheduled_end->copy();
-    $inProgress = makeDvrRecording([], 'recording');
-    $headers = dvrApiHeaders();
+    $inProgress = makeDispatcharrDvrRecording([], 'recording');
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson("/recordings/{$scheduled->id}/extend/", ['extra_minutes' => 30], $headers)
         ->assertOk()
@@ -355,8 +355,8 @@ it('extends a scheduled recording but not one already in progress', function () 
 });
 
 it('updates recording metadata and re-integrates a completed recording', function () {
-    $recording = makeDvrRecording(['title' => 'Old Title', 'file_path' => 'recordings/show/episode.ts'], 'completed');
-    $headers = dvrApiHeaders();
+    $recording = makeDispatcharrDvrRecording(['title' => 'Old Title', 'file_path' => 'recordings/show/episode.ts'], 'completed');
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson("/recordings/{$recording->id}/update-metadata/", ['title' => 'New Title', 'description' => ''], $headers)
         ->assertOk()
@@ -370,9 +370,9 @@ it('updates recording metadata and re-integrates a completed recording', functio
 
 it('queues artwork refresh only for completed recordings with enrichment enabled', function () {
     $this->dvrSetting->update(['enable_metadata_enrichment' => true]);
-    $completed = makeDvrRecording([], 'completed');
-    $scheduled = makeDvrRecording();
-    $headers = dvrApiHeaders();
+    $completed = makeDispatcharrDvrRecording([], 'completed');
+    $scheduled = makeDispatcharrDvrRecording();
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson("/recordings/{$completed->id}/refresh-artwork/", [], $headers)
         ->assertOk()
@@ -383,9 +383,9 @@ it('queues artwork refresh only for completed recordings with enrichment enabled
 });
 
 it('queues comskip for a recording with a file', function () {
-    $completed = makeDvrRecording([], 'completed');
-    $scheduled = makeDvrRecording();
-    $headers = dvrApiHeaders();
+    $completed = makeDispatcharrDvrRecording([], 'completed');
+    $scheduled = makeDispatcharrDvrRecording();
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson("/recordings/{$completed->id}/comskip/", [], $headers)
         ->assertOk()
@@ -409,7 +409,7 @@ it('registers every DVR endpoint at the root alongside the other API routes, not
 // ──────────────────────────────────────────────────────────────────────────────
 
 it('creates a series rule from tvg_id + title and upserts on repeat', function () {
-    $headers = dvrApiHeaders();
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson('/series-rules/', [
         'tvg_id' => 'news.us',
@@ -435,7 +435,7 @@ it('creates a series rule from tvg_id + title and upserts on repeat', function (
 });
 
 it('rejects series rule options the native DVR cannot honour', function () {
-    $headers = dvrApiHeaders();
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson('/series-rules/', ['title' => 'News', 'title_mode' => 'regex'], $headers)
         ->assertStatus(400);
@@ -452,10 +452,10 @@ it('deletes a series rule and cancels only its upcoming scheduled recordings', f
         'series_title' => 'Evening News',
         'enabled' => false,
     ]);
-    $upcoming = makeDvrRecording(['dvr_recording_rule_id' => $rule->id]);
-    $kept = makeDvrRecording(['dvr_recording_rule_id' => $rule->id], 'completed');
+    $upcoming = makeDispatcharrDvrRecording(['dvr_recording_rule_id' => $rule->id]);
+    $kept = makeDispatcharrDvrRecording(['dvr_recording_rule_id' => $rule->id], 'completed');
 
-    $this->deleteJson('/series-rules/?'.http_build_query(['tvg_id' => '', 'title' => 'Evening News']), [], dvrApiHeaders())
+    $this->deleteJson('/series-rules/?'.http_build_query(['tvg_id' => '', 'title' => 'Evening News']), [], dispatcharrDvrApiHeaders())
         ->assertOk()
         ->assertJson(['success' => true, 'rules' => [], 'removed' => 1]);
 
@@ -478,7 +478,7 @@ it('previews series rule matches without saving a rule', function () {
         'tvg_id' => 'news.us',
         'title' => 'Evening News',
         'mode' => 'all',
-    ], dvrApiHeaders())
+    ], dispatcharrDvrApiHeaders())
         ->assertOk()
         ->assertJson(['total' => 1, 'limit' => 25, 'epg_found' => true, 'warn' => false])
         ->assertJsonPath('matches.0.id', $programme->id)
@@ -502,7 +502,7 @@ it('evaluates series rules and schedules newly matching airings', function () {
         'epg_channel_id' => 'news.us',
     ]);
 
-    $this->postJson('/series-rules/evaluate/', ['tvg_id' => 'news.us'], dvrApiHeaders())
+    $this->postJson('/series-rules/evaluate/', ['tvg_id' => 'news.us'], dispatcharrDvrApiHeaders())
         ->assertOk()
         ->assertJson(['success' => true, 'scheduled' => 1])
         ->assertJsonPath('details.0.title', 'Evening News')
@@ -520,15 +520,15 @@ it('refuses to delete series rules without a title or tvg_id', function () {
         'enabled' => false,
     ]);
 
-    $this->deleteJson('/series-rules/', [], dvrApiHeaders())->assertStatus(400);
-    $this->deleteJson('/series-rules/?'.http_build_query(['tvg_id' => '', 'title' => ' ']), [], dvrApiHeaders())->assertStatus(400);
+    $this->deleteJson('/series-rules/', [], dispatcharrDvrApiHeaders())->assertStatus(400);
+    $this->deleteJson('/series-rules/?'.http_build_query(['tvg_id' => '', 'title' => ' ']), [], dispatcharrDvrApiHeaders())->assertStatus(400);
 
     expect(DvrRecordingRule::find($rule->id))->not->toBeNull();
 });
 
 it('requires tvg_id for a channel-scoped bulk remove', function () {
-    $recording = makeDvrRecording(['title' => 'Evening News', 'normalized_title' => 'evening news']);
-    $headers = dvrApiHeaders();
+    $recording = makeDispatcharrDvrRecording(['title' => 'Evening News', 'normalized_title' => 'evening news']);
+    $headers = dispatcharrDvrApiHeaders();
 
     $this->postJson('/series-rules/bulk-remove/', ['title' => 'Evening News', 'scope' => 'channel'], $headers)
         ->assertStatus(400);
@@ -539,12 +539,12 @@ it('requires tvg_id for a channel-scoped bulk remove', function () {
 });
 
 it('bulk-removes upcoming recordings for a series title', function () {
-    makeDvrRecording(['title' => 'Evening News', 'normalized_title' => 'evening news']);
-    makeDvrRecording(['title' => 'Other Show', 'normalized_title' => 'other show']);
+    makeDispatcharrDvrRecording(['title' => 'Evening News', 'normalized_title' => 'evening news']);
+    makeDispatcharrDvrRecording(['title' => 'Other Show', 'normalized_title' => 'other show']);
 
     $this->postJson('/series-rules/bulk-remove/', [
         'tvg_id' => 'news.us',
         'title' => 'Evening News',
         'scope' => 'title',
-    ], dvrApiHeaders())->assertOk()->assertJson(['success' => true, 'removed' => 1]);
+    ], dispatcharrDvrApiHeaders())->assertOk()->assertJson(['success' => true, 'removed' => 1]);
 });
