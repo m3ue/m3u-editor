@@ -102,3 +102,4 @@ Here’s how you can join the party:
 - **SA**: Share alike if you remix.  
 
 For full license details, see [LICENSE](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+<!-- CI rerun -->

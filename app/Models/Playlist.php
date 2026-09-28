@@ -98,8 +98,37 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
+        'provider_auth_passthrough' => 'boolean',
+        'provider_auth_passthrough_live' => 'boolean',
+        'provider_auth_passthrough_vod' => 'boolean',
+        'provider_auth_passthrough_series' => 'boolean',
         'share_cache_across_playlists' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Playlist $playlist): void {
+            if (
+                $playlist->provider_auth_passthrough
+                && ! $playlist->xtream
+            ) {
+                $playlist->provider_auth_passthrough = false;
+            }
+        });
+
+        static::saved(function (Playlist $playlist): void {
+            if (! $playlist->provider_auth_passthrough) {
+                return;
+            }
+
+            Playlist::query()
+                ->whereKeyNot($playlist->getKey())
+                ->where('provider_auth_passthrough', true)
+                ->update([
+                    'provider_auth_passthrough' => false,
+                ]);
+        });
+    }
 
     public function getFolderPathAttribute(): string
     {

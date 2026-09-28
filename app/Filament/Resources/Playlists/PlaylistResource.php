@@ -3056,6 +3056,39 @@ class PlaylistResource extends Resource implements CopilotResource
                 ]),
         ];
 
+        $passthroughFields = [
+            Toggle::make('provider_auth_passthrough')
+                ->label(__('Provider Authentication Passthrough'))
+                ->helperText(__('Allow clients to authenticate directly against the original Xtream provider without creating local authentication accounts.'))
+                ->live()
+                ->inline(false)
+                ->default(false)
+                ->hidden(fn (Get $get): bool => ! $get('xtream')),
+
+            Fieldset::make(__('Proxy Routing'))
+                ->columns(3)
+                ->schema([
+                    Toggle::make('provider_auth_passthrough_live')
+                        ->label(__('Live'))
+                        ->helperText(__('Route Live streams through the proxy.'))
+                        ->inline(false)
+                        ->default(true),
+
+                    Toggle::make('provider_auth_passthrough_vod')
+                        ->label(__('VOD'))
+                        ->helperText(__('Route VOD streams through the proxy.'))
+                        ->inline(false)
+                        ->default(false),
+
+                    Toggle::make('provider_auth_passthrough_series')
+                        ->label(__('Series'))
+                        ->helperText(__('Route Series streams through the proxy.'))
+                        ->inline(false)
+                        ->default(false),
+                ])
+                ->visible(fn (Get $get): bool => (bool) $get('xtream') && (bool) $get('provider_auth_passthrough')),
+        ];
+
         $outputFields = [
             Section::make(__('Playlist Output'))
                 ->description(__('Determines how the playlist is output'))
@@ -3507,6 +3540,11 @@ class PlaylistResource extends Resource implements CopilotResource
         $sections['Type'] = $typeFields;
         $sections['Scheduling'] = $schedulingFields;
         $sections['Processing'] = $processingFields;
+
+        if (auth()->user()?->canUseProviderAuthPassthrough()) {
+            $sections['Passthrough'] = $passthroughFields;
+        }
+
         $sections['Output'] = $outputFields;
 
         // Return sections and fields
@@ -3742,6 +3780,10 @@ class PlaylistResource extends Resource implements CopilotResource
                 $section = 'General';
             }
 
+            $sectionLabel = $section === 'Passthrough'
+                ? __('Passthrough')
+                : $section;
+
             // Determine icon for section
             $icon = match (strtolower($section)) {
                 'general' => 'heroicon-m-cog',
@@ -3749,6 +3791,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 'type' => 'heroicon-m-document-text',
                 'scheduling' => 'heroicon-m-calendar',
                 'processing' => 'heroicon-m-arrow-path',
+                'passthrough' => 'heroicon-m-shield-check',
                 'output' => 'heroicon-m-arrow-up-right',
                 default => null,
             };
@@ -3756,13 +3799,13 @@ class PlaylistResource extends Resource implements CopilotResource
             if (! in_array($section, ['Processing', 'Output'])) {
                 // Wrap the fields in a section
                 $fields = [
-                    Section::make($section)
+                    Section::make($sectionLabel)
                         ->icon($icon)
                         ->schema($fields),
                 ];
             }
 
-            $tabs[] = Tab::make($section)
+            $tabs[] = Tab::make($sectionLabel)
                 ->icon($icon)
                 ->schema($fields);
         }
@@ -3798,6 +3841,9 @@ class PlaylistResource extends Resource implements CopilotResource
     {
         $wizard = [];
         foreach (self::getFormSections(creating: true) as $step => $fields) {
+            $stepLabel = $step === 'Passthrough'
+                ? __('Passthrough')
+                : $step;
             if (! in_array($step, ['Processing', 'Output'])) {
                 // Wrap the fields in a section
                 $fields = [
@@ -3805,7 +3851,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->schema($fields),
                 ];
             }
-            $wizard[] = Step::make($step)
+            $wizard[] = Step::make($stepLabel)
                 ->schema($fields);
 
             // Add auth after type step

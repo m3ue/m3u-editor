@@ -93,7 +93,20 @@ class EditPlaylist extends EditRecord
      */
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        return $this->stripDvrAndRequestFormData($data);
+        $data = $this->stripDvrAndRequestFormData($data);
+
+        if (! auth()->user()?->canUseProviderAuthPassthrough()) {
+            unset(
+                $data['provider_auth_passthrough'],
+                $data['provider_auth_passthrough_live'],
+                $data['provider_auth_passthrough_vod'],
+                $data['provider_auth_passthrough_series']
+            );
+        } elseif (! ($data['xtream'] ?? false)) {
+            $data['provider_auth_passthrough'] = false;
+        }
+
+        return $data;
     }
 
     /**
@@ -101,7 +114,6 @@ class EditPlaylist extends EditRecord
      */
     protected function afterSave(): void
     {
-        /** @var Playlist $record */
         $record = $this->getRecord();
 
         $this->saveDvrAndRequestFormData($record, $this->form->getRawState());

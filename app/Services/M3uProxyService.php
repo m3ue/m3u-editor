@@ -145,6 +145,13 @@ class M3uProxyService
                 ];
             }
 
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Proxy resolver URL test failed', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
+
             return [
                 'success' => false,
                 'message' => 'Proxy returned status '.$response->status(),
@@ -182,7 +189,17 @@ class M3uProxyService
                 return $response->json();
             }
 
-            return ['valid' => false, 'message' => 'Proxy returned an unexpected response.'];
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Proxy cookies file validation failed', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
+
+            return [
+                'valid' => false,
+                'message' => 'Proxy returned an unexpected response.',
+            ];
         } catch (Exception $e) {
             return ['valid' => false, 'message' => 'Unable to reach proxy: '.$e->getMessage()];
         }
@@ -221,7 +238,13 @@ class M3uProxyService
                 return $data['total_matching'] ?? 0;
             }
 
-            Log::warning('Failed to fetch playlist streams from m3u-proxy: HTTP '.$response->status());
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to fetch playlist streams from m3u-proxy', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'playlist_uuid' => $playlist->uuid,
+            ]);
 
             return 0;
         } catch (Exception $e) {
@@ -270,7 +293,11 @@ class M3uProxyService
                     return $data['matching_streams'] ?? [];
                 }
 
-                Log::warning('Failed to fetch playlist streams from m3u-proxy: HTTP '.$response->status(), [
+                $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+                Log::warning('Failed to fetch playlist streams from m3u-proxy', [
+                    'status_code' => $response->status(),
+                    'response_body' => $errorBody,
                     'attempt' => $attempt + 1,
                     'max_attempts' => $retries,
                 ]);
@@ -341,7 +368,17 @@ class M3uProxyService
                         return true;
                     }
                 }
+
+                return false;
             }
+
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to check channel active status', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'channel_id' => $channel->id,
+            ]);
 
             return false;
         } catch (Exception $e) {
@@ -382,11 +419,18 @@ class M3uProxyService
             if ($response->successful()) {
                 $data = $response->json();
 
-                // Use total_matching (stream count = provider connections), not
-                // total_clients (which counts all proxy-level client connections
-                // and over-reports when streams are pooled across multiple clients).
                 return $data['total_matching'] ?? 0;
             }
+
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to get active streams count by metadata', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'metadata_field' => $field,
+            ]);
+
+            return 0;
 
             return 0;
         } catch (Exception $e) {
@@ -433,6 +477,15 @@ class M3uProxyService
                     ]);
 
                 if (! $response->successful()) {
+                    $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+                    Log::warning('Failed to fetch active channel streams by metadata', [
+                        'status_code' => $response->status(),
+                        'response_body' => $errorBody,
+                        'metadata_field' => $field,
+                        'playlist_uuid' => $playlistUuid,
+                    ]);
+
                     continue;
                 }
 
@@ -485,6 +538,15 @@ class M3uProxyService
                     ]);
 
                 if (! $response->successful()) {
+                    $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+                    Log::warning('Failed to fetch active episode streams by metadata', [
+                        'status_code' => $response->status(),
+                        'response_body' => $errorBody,
+                        'metadata_field' => $field,
+                        'playlist_uuid' => $playlistUuid,
+                    ]);
+
                     continue;
                 }
 
@@ -528,6 +590,13 @@ class M3uProxyService
                 ->get($this->apiBaseUrl.'/streams');
 
             if (! $response->successful()) {
+                $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+                Log::warning('Failed to fetch active live streams', [
+                    'status_code' => $response->status(),
+                    'response_body' => $errorBody,
+                ]);
+
                 return [];
             }
 
@@ -590,7 +659,6 @@ class M3uProxyService
             if ($response->successful()) {
                 $counts = $response->json('counts', []);
 
-                // Ensure every requested value has an entry (default 0 for missing)
                 foreach ($values as $value) {
                     if (! array_key_exists($value, $counts)) {
                         $counts[$value] = 0;
@@ -599,6 +667,15 @@ class M3uProxyService
 
                 return $counts;
             }
+
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to get batch stream counts', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'metadata_field' => $field,
+                'value_count' => count($values),
+            ]);
 
             return array_fill_keys($values, 0);
         } catch (Exception $e) {
@@ -728,7 +805,14 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to stop streams by metadata: HTTP '.$response->status());
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to stop streams by metadata', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'metadata_field' => $field,
+                'exclude_channel_id' => $excludeChannelId,
+            ]);
 
             return [
                 'success' => false,
@@ -856,7 +940,14 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to stop oldest stream: HTTP '.$response->status());
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to stop oldest stream', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'playlist_uuid' => $playlistUuid,
+                'exclude_channel_id' => $excludeChannelId,
+            ]);
 
             return [
                 'success' => false,
@@ -924,6 +1015,15 @@ class M3uProxyService
                     'stream_age_seconds' => $data['stream_age_seconds'] ?? null,
                 ];
             }
+
+            $errorBody = $service->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to stop oldest stream by metadata', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'metadata_field' => $field,
+                'exclude_channel_id' => $excludeChannelId,
+            ]);
 
             return [
                 'success' => false,
@@ -2181,9 +2281,12 @@ class M3uProxyService
                 return true;
             }
 
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
             Log::warning('Failed to trigger failover', [
                 'stream_id' => $streamId,
                 'status_code' => $response->status(),
+                'response_body' => $errorBody,
             ]);
 
             return false;
@@ -2226,7 +2329,21 @@ class M3uProxyService
                 ->get($endpoint, $params);
 
             if (! $response->successful()) {
-                return ['success' => false, 'triggered_count' => 0, 'stream_ids' => [], 'error' => 'Failed to fetch streams from proxy'];
+                $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+                Log::warning('Failed to fetch streams from proxy for failover', [
+                    'status_code' => $response->status(),
+                    'response_body' => $errorBody,
+                    'channel_id' => $channelId,
+                    'active_only' => $activeOnly,
+                ]);
+
+                return [
+                    'success' => false,
+                    'triggered_count' => 0,
+                    'stream_ids' => [],
+                    'error' => 'Failed to fetch streams from proxy',
+                ];
             }
 
             $data = $response->json();
@@ -2292,9 +2409,12 @@ class M3uProxyService
                 return true;
             }
 
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
             Log::warning('Failed to stop stream', [
                 'stream_id' => $streamId,
                 'status_code' => $response->status(),
+                'response_body' => $errorBody,
             ]);
 
             return false;
@@ -2349,7 +2469,12 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to fetch active streams from m3u-proxy: HTTP '.$response->status());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to fetch active streams from m3u-proxy', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return [
                 'success' => false,
@@ -2419,7 +2544,12 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to fetch active clients from m3u-proxy: HTTP '.$response->status());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to fetch active clients from m3u-proxy', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return [
                 'success' => false,
@@ -2496,7 +2626,12 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to fetch broadcasts from m3u-proxy: HTTP '.$response->status());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to fetch broadcasts from m3u-proxy', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return [
                 'success' => false,
@@ -2580,9 +2715,12 @@ class M3uProxyService
                 return true;
             }
 
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
             Log::warning('Failed to stop broadcast', [
                 'network_id' => $networkId,
                 'status_code' => $response->status(),
+                'response_body' => $errorBody,
             ]);
 
             return false;
@@ -2595,6 +2733,100 @@ class M3uProxyService
 
             return false;
         }
+    }
+
+    private function sanitizeProxyErrorBody(string $body): string
+    {
+        $body = trim($body);
+
+        if ($body === '') {
+            return 'empty response body';
+        }
+
+        $sensitiveTerms = [
+            'authorization',
+            'cookie',
+            'credential',
+            'headers',
+            'password',
+            'secret',
+            'session',
+            'source',
+            'token',
+            'url',
+        ];
+
+        $sanitizeText = static function (string $text): string {
+            $text = preg_replace(
+                '#(?:https?|rtmps?|ftps?|hls)://[^\s"\'<>\[\]{}\|\\\\^`]+#i',
+                '[REDACTED]',
+                $text
+            ) ?? $text;
+
+            $text = preg_replace(
+                '/\b(authorization|cookie|credential|password|secret|session|token|api[_-]?key)\s*[:=]\s*[^\s,;}\]]+/i',
+                '$1=[REDACTED]',
+                $text
+            ) ?? $text;
+
+            return $text;
+        };
+
+        $sanitizeValue = function ($value) use (&$sanitizeValue, $sensitiveTerms, $sanitizeText) {
+            if (is_array($value)) {
+                foreach ($value as $key => $item) {
+                    $normalizedKey = (string) preg_replace(
+                        '/[^a-z0-9]/',
+                        '',
+                        strtolower((string) $key)
+                    );
+
+                    $sensitive = str_ends_with($normalizedKey, 'key');
+
+                    foreach ($sensitiveTerms as $term) {
+                        if (str_contains($normalizedKey, $term)) {
+                            $sensitive = true;
+                            break;
+                        }
+                    }
+
+                    if ($sensitive) {
+                        unset($value[$key]);
+
+                        continue;
+                    }
+
+                    $value[$key] = $sanitizeValue($item);
+                }
+
+                return $value;
+            }
+
+            if (is_string($value)) {
+                return $sanitizeText($value);
+            }
+
+            return $value;
+        };
+
+        $decoded = json_decode($body, true);
+
+        if (is_array($decoded)) {
+            $decoded = $sanitizeValue($decoded);
+
+            $encoded = json_encode(
+                $decoded,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            );
+
+            if ($encoded !== false) {
+                $body = $encoded;
+            }
+        } else {
+            $body = $sanitizeText($body);
+        }
+
+        return mb_substr($body, 0, 1000);
     }
 
     /**
@@ -2708,7 +2940,22 @@ class M3uProxyService
                 throw new Exception('Stream ID not found in API response');
             }
 
-            throw new Exception('Failed to create stream: '.$response->body());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('m3u-proxy rejected stream creation', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'channel_id' => $metadata['channel_id'] ?? $metadata['id'] ?? null,
+                'episode_id' => $metadata['episode_id'] ?? null,
+                'playlist_uuid' => $metadata['playlist_uuid'] ?? null,
+            ]);
+
+            throw new Exception(
+                'Failed to create stream: HTTP '
+                .$response->status()
+                .' - '
+                .$errorBody
+            );
         } catch (Exception $e) {
             Log::error('Error creating/updating stream on m3u-proxy', [
                 'channel_id' => $metadata['channel_id'] ?? $metadata['id'] ?? null,
@@ -2738,10 +2985,21 @@ class M3uProxyService
         ?string $userAgent = null,
         string $format = 'raw',
         array $metadata = [],
+        ?string $username = null,
     ): string {
-        $streamId = $this->createStream($url, false, $userAgent, $headers, $metadata);
+        $streamId = $this->createStream(
+            $url,
+            false,
+            $userAgent,
+            $headers,
+            $metadata
+        );
 
-        return $this->buildProxyUrl($streamId, $format);
+        return $this->buildProxyUrl(
+            $streamId,
+            $format,
+            $username
+        );
     }
 
     /**
@@ -2878,7 +3136,23 @@ class M3uProxyService
                 throw new Exception('Stream ID not found in transcoding API response');
             }
 
-            throw new Exception('Failed to create transcoded stream: '.$response->body());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('m3u-proxy rejected transcoded stream creation', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'channel_id' => $metadata['channel_id'] ?? $metadata['id'] ?? null,
+                'episode_id' => $metadata['episode_id'] ?? null,
+                'playlist_uuid' => $metadata['playlist_uuid'] ?? null,
+                'profile_id' => $profile->id,
+            ]);
+
+            throw new Exception(
+                'Failed to create transcoded stream: HTTP '
+                .$response->status()
+                .' - '
+                .$errorBody
+            );
         } catch (Exception $e) {
             Log::error('Error creating transcoded stream on m3u-proxy', [
                 'channel_id' => $metadata['channel_id'] ?? $metadata['id'] ?? null,
@@ -3193,6 +3467,16 @@ class M3uProxyService
                 ]);
 
             if (! $response->successful()) {
+                $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+                Log::warning('Failed to find existing pooled stream', [
+                    'status_code' => $response->status(),
+                    'response_body' => $errorBody,
+                    'model_id' => $modelId,
+                    'playlist_uuid' => $playlistUuid,
+                    'type' => $type,
+                ]);
+
                 return null;
             }
 
@@ -3271,6 +3555,15 @@ class M3uProxyService
                 ]);
 
             if (! $response->successful()) {
+                $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+                Log::warning('Failed to find active stream for channel', [
+                    'status_code' => $response->status(),
+                    'response_body' => $errorBody,
+                    'channel_id' => $channelId,
+                    'playlist_uuid' => $playlistUuid,
+                ]);
+
                 return null;
             }
 
@@ -3345,7 +3638,12 @@ class M3uProxyService
                 ];
             }
 
-            Log::warning('Failed to fetch proxy info from m3u-proxy: HTTP '.$response->status());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to fetch proxy info from m3u-proxy', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return [
                 'success' => false,
@@ -3903,7 +4201,20 @@ class M3uProxyService
             ->post($endpoint, $payload);
 
         if (! $response->successful()) {
-            throw new Exception("Proxy returned HTTP {$response->status()} starting DVR broadcast: ".$response->body());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('m3u-proxy rejected DVR broadcast start', [
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+                'network_id' => $networkId,
+            ]);
+
+            throw new Exception(
+                'Proxy returned HTTP '
+                .$response->status()
+                .' starting DVR broadcast: '
+                .$errorBody
+            );
         }
 
         return $networkId;
@@ -3933,7 +4244,13 @@ class M3uProxyService
                 return true;
             }
 
-            Log::warning("Failed to stop DVR broadcast {$networkId}: ".$response->body());
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to stop DVR broadcast', [
+                'network_id' => $networkId,
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return false;
         } catch (Exception $e) {
@@ -4009,7 +4326,13 @@ class M3uProxyService
                 return true;
             }
 
-            Log::warning("Failed to cleanup DVR broadcast {$networkId} on proxy: HTTP {$response->status()}");
+            $errorBody = $this->sanitizeProxyErrorBody($response->body());
+
+            Log::warning('Failed to cleanup DVR broadcast on proxy', [
+                'network_id' => $networkId,
+                'status_code' => $response->status(),
+                'response_body' => $errorBody,
+            ]);
 
             return false;
         } catch (Exception $e) {
