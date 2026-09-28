@@ -5445,6 +5445,7 @@
     "YouTube trailer URL or ID.": "YouTube 预告片 URL 或 ID。",
     "Your API key for the selected provider. Stored in the database.": "您所选提供商的 API 密钥。存储在数据库中。",
     "Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.": "您的 TMDB API 密钥 (v3 认证)。您可以从 themoviedb.org 免费获取。",
+    "Your Unsloth Studio API key (starts with sk-unsloth-), created in Studio under Settings > API. Leave blank if keyless API access is enabled in Studio.": "您的 Unsloth Studio API 密钥 (以 sk-unsloth- 开头)，在 Studio 的 设置 > API 中创建。如果 Studio 中已启用免密钥 API 访问，请留空。",
     "Your m3u proxy API key": "您的 M3U 代理 API 密钥",
     "Your preferences have been saved successfully.": "您的首选项已成功保存。",
     "Z to A or 9 to 0": "Z 到 A 或 9 到 0",

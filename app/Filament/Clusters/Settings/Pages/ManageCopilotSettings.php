@@ -99,9 +99,9 @@ class ManageCopilotSettings extends BaseSettingsPage
                             ->revealable()
                             ->dehydrated(fn ($state): bool => filled($state))
                             ->visible(fn (Get $get): bool => $get('copilot_provider') !== 'ollama')
-                            ->required(fn (Get $get): bool => (bool) $get('copilot_enabled') && ! in_array($get('copilot_provider'), ['ollama', 'unsloth_studio'], true))
+                            ->required(fn (Get $get): bool => (bool) $get('copilot_enabled') && CopilotProvider::requiresApiKey($get('copilot_provider')))
                             ->helperText(fn (Get $get): string => $get('copilot_provider') === 'unsloth_studio'
-                                ? __('Your Unsloth Studio API token (sk-unsloth-…), shown in the Studio UI. Leave blank if you run Studio with UNSLOTH_STUDIO_NO_AUTH.')
+                                ? __('Your Unsloth Studio API key (starts with sk-unsloth-), created in Studio under Settings > API. Leave blank if keyless API access is enabled in Studio.')
                                 : __('Your API key for the selected provider. Stored in the database.')),
                         TextInput::make('copilot_url')
                             ->label(__('Base URL'))

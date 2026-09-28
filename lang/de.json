@@ -5448,6 +5448,7 @@
     "YouTube trailer URL or ID.": "URL oder ID des YouTube-Trailers.",
     "Your API key for the selected provider. Stored in the database.": "Ihr API-Schlüssel für den ausgewählten Anbieter. In der Datenbank gespeichert.",
     "Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.": "Ihr TMDB-API-Schlüssel (v3-Authentifizierung). Sie können eines kostenlos bei themoviedb.org erhalten.",
+    "Your Unsloth Studio API key (starts with sk-unsloth-), created in Studio under Settings > API. Leave blank if keyless API access is enabled in Studio.": "Ihr Unsloth Studio API-Schlüssel (beginnt mit sk-unsloth-), erstellt in Studio unter Einstellungen > API. Leer lassen, wenn der schlüssellose API-Zugriff in Studio aktiviert ist.",
     "Your m3u proxy API key": "Ihr m3u-Proxy-API-Schlüssel",
     "Your preferences have been saved successfully.": "Ihre Einstellungen wurden erfolgreich gespeichert.",
     "Z to A or 9 to 0": "Z bis A oder 9 bis 0",

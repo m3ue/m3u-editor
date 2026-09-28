@@ -39,3 +39,10 @@ it('registers Unsloth Studio in Laravel AI config as an OpenAI-compatible endpoi
     expect(config('ai.providers.unsloth_studio.driver'))->toBe('openai')
         ->and(config('ai.providers.unsloth_studio.url'))->toBe(CopilotProvider::UNSLOTH_URL);
 });
+
+it('only requires an API key for providers that cannot run keyless', function (): void {
+    expect(CopilotProvider::requiresApiKey('ollama'))->toBeFalse()
+        ->and(CopilotProvider::requiresApiKey('unsloth_studio'))->toBeFalse()
+        ->and(CopilotProvider::requiresApiKey('openai'))->toBeTrue()
+        ->and(CopilotProvider::requiresApiKey(null))->toBeTrue();
+});

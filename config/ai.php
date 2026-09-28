@@ -138,7 +138,7 @@ return [
 
         'unsloth_studio' => [
             'driver' => 'openai',
-            'key' => env('UNSLOTH_STUDIO_API_KEY'),
+            'key' => env('UNSLOTH_STUDIO_API_KEY', ''),
             'url' => env('UNSLOTH_STUDIO_URL', CopilotProvider::UNSLOTH_URL),
         ],
 

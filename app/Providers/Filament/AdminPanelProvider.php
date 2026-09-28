@@ -292,7 +292,7 @@ class AdminPanelProvider extends PanelProvider
         try {
             $isConfigured = $s['copilot_enabled']
                 && ! empty($s['copilot_provider'])
-                && (! empty($s['copilot_api_key']) || in_array($s['copilot_provider'], ['ollama', 'unsloth_studio'], true));
+                && (! empty($s['copilot_api_key']) || ! CopilotProvider::requiresApiKey($s['copilot_provider']));
 
             if (! $isConfigured) {
                 return null;

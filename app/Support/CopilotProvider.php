@@ -65,4 +65,13 @@ final class CopilotProvider
     {
         return in_array($provider, ['openai', 'opencode_zen', 'opencode_go', 'ollama', 'minimax', 'unsloth_studio'], true);
     }
+
+    /**
+     * Local providers can run without an API key (Ollama never needs one, Unsloth Studio
+     * only when keyless API access is enabled in its settings).
+     */
+    public static function requiresApiKey(?string $provider): bool
+    {
+        return ! in_array($provider, ['ollama', 'unsloth_studio'], true);
+    }
 }
