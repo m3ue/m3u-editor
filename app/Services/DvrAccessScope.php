@@ -92,25 +92,34 @@ class DvrAccessScope
 
     /**
      * Resolve the DvrSetting a new recording/rule should be written against.
+     *
+     * With a channel, only an enabled setting that actually covers that channel
+     * qualifies: its own playlist's setting first, then a custom/merged playlist
+     * setting whose channels include it. Returns null otherwise, so turning DVR off
+     * for a playlist stops the API from recording its channels, and a recording is
+     * never filed under an unrelated playlist's storage, capacity and proxy rules.
+     * Without a channel (an "any channel" series rule), the first enabled setting.
      */
     public function settingForWrite(?int $channelId = null): ?DvrSetting
     {
-        if ($channelId) {
-            $channel = $this->findChannel($channelId);
-            if ($channel?->playlist_id) {
-                $setting = DvrSetting::whereIn('id', $this->dvrSettingIds)
-                    ->where('playlist_id', $channel->playlist_id)
-                    ->first();
-                if ($setting?->enabled) {
-                    return $setting;
-                }
-            }
-        }
-
-        return DvrSetting::whereIn('id', $this->dvrSettingIds)
+        $enabledSettings = DvrSetting::whereIn('id', $this->dvrSettingIds)
             ->where('enabled', true)
             ->orderBy('id')
-            ->first();
+            ->get();
+
+        if ($channelId === null) {
+            return $enabledSettings->first();
+        }
+
+        $channel = $this->findChannel($channelId);
+
+        if (! $channel) {
+            return null;
+        }
+
+        return $enabledSettings->first(fn (DvrSetting $setting) => $channel->playlist_id !== null && $setting->playlist_id === $channel->playlist_id)
+            ?? $enabledSettings->first(fn (DvrSetting $setting) => $setting->playlist_id === null
+                && (bool) $setting->ownerChannels()?->where('channels.id', $channel->id)->exists());
     }
 
     /**

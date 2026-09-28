@@ -458,17 +458,20 @@ class DispatcharrDvrController extends Controller
      * Deletes the matching rule(s) and cancels their upcoming scheduled recordings.
      * Recordings that already captured footage are kept.
      */
-    #[QueryParameter('title', 'Series title of the rule to delete. Takes precedence over tvg_id.', type: 'string')]
-    #[QueryParameter('tvg_id', 'Delete the rules pinned to channels mapped to this EPG channel id.', type: 'string')]
+    #[QueryParameter('title', 'Series title of the rule to delete. Takes precedence over tvg_id. Either title or tvg_id is required.', type: 'string')]
+    #[QueryParameter('tvg_id', 'Delete the rules pinned to channels mapped to this EPG channel id. Either title or tvg_id is required.', type: 'string')]
     public function destroySeriesRule(Request $request): JsonResponse
     {
         $scope = $this->scope($request);
+        $tvgId = trim((string) $request->query('tvg_id', ''));
+        $title = trim((string) $request->query('title', ''));
 
-        $rules = $this->matchingSeriesRules(
-            $scope,
-            trim((string) $request->query('tvg_id', '')),
-            $request->query('title')
-        )->get();
+        // Without an identity the rule query is unfiltered and would delete every rule.
+        if ($tvgId === '' && $title === '') {
+            return response()->json(['error' => 'tvg_id or title is required'], 400);
+        }
+
+        $rules = $this->matchingSeriesRules($scope, $tvgId, $title)->get();
 
         $removed = 0;
         foreach ($rules as $rule) {
@@ -588,7 +591,7 @@ class DispatcharrDvrController extends Controller
      */
     #[BodyParameter('tvg_id', 'EPG channel id. Either tvg_id or title is required.', type: 'string')]
     #[BodyParameter('title', 'Series title. Either tvg_id or title is required.', type: 'string')]
-    #[BodyParameter('scope', 'title limits removal to the series title, channel removes every upcoming recording on the tvg_id channels.', type: 'string', default: 'title')]
+    #[BodyParameter('scope', 'title limits removal to the series title, channel removes every upcoming recording on the tvg_id channels (tvg_id required).', type: 'string', default: 'title')]
     public function bulkRemoveSeriesRecordings(Request $request): JsonResponse
     {
         $scope = $this->scope($request);
@@ -598,6 +601,15 @@ class DispatcharrDvrController extends Controller
 
         if ($tvgId === '' && $title === '') {
             return response()->json(['error' => 'tvg_id or title is required'], 400);
+        }
+
+        if (! in_array($removeScope, ['title', 'channel'], true)) {
+            return response()->json(['error' => "scope must be 'title' or 'channel'"], 400);
+        }
+
+        // scope=channel ignores the title, so without a tvg_id nothing would narrow the query.
+        if ($removeScope === 'channel' && $tvgId === '') {
+            return response()->json(['error' => 'tvg_id is required when scope is channel'], 400);
         }
 
         $query = $scope->recordings()->where('scheduled_start', '>', now());

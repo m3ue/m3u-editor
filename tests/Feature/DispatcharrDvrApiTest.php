@@ -15,6 +15,7 @@ use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Jobs\ProcessComskipOnRecording;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
@@ -205,6 +206,55 @@ it('schedules a recording from a Dispatcharr create payload', function () {
     expect($rule->type)->toBe(DvrRuleType::Manual)
         ->and($rule->user_id)->toBe($this->user->id)
         ->and(DvrRecording::find($response->json('id'))->dvr_recording_rule_id)->toBe($rule->id);
+});
+
+it('refuses to record a channel whose playlist has DVR disabled instead of borrowing another playlist\'s setting', function () {
+    $this->dvrSetting->update(['enabled' => false]);
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    DvrSetting::factory()->enabled()->for($this->user)->for($otherPlaylist)->create();
+
+    $this->postJson('/recordings/', [
+        'channel' => $this->channel->id,
+        'start_time' => now()->addHour()->toIso8601String(),
+        'end_time' => now()->addHours(2)->toIso8601String(),
+    ], dvrApiHeaders())
+        ->assertStatus(400)
+        ->assertJsonPath('non_field_errors.0', 'DVR is not enabled for this channel.');
+
+    expect(DvrRecordingRule::count())->toBe(0);
+});
+
+it('records a channel through a custom playlist DVR setting that contains it', function () {
+    $this->dvrSetting->delete();
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $customPlaylist->channels()->attach($this->channel);
+    $customSetting = DvrSetting::factory()->enabled()->for($this->user)->create([
+        'playlist_id' => null,
+        'custom_playlist_id' => $customPlaylist->id,
+    ]);
+
+    $this->postJson('/recordings/', [
+        'channel' => $this->channel->id,
+        'start_time' => now()->addHour()->toIso8601String(),
+        'end_time' => now()->addHours(2)->toIso8601String(),
+    ], dvrApiHeaders())->assertCreated();
+
+    expect(DvrRecordingRule::sole()->dvr_setting_id)->toBe($customSetting->id);
+});
+
+it('refuses to record a channel from a playlist that has no DVR setting', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $otherChannel = Channel::factory()->for($this->user)->for($otherPlaylist)
+        ->for(Group::factory()->for($this->user)->create())
+        ->create(['enabled' => true]);
+
+    $this->postJson('/recordings/', [
+        'channel' => $otherChannel->id,
+        'start_time' => now()->addHour()->toIso8601String(),
+        'end_time' => now()->addHours(2)->toIso8601String(),
+    ], dvrApiHeaders())->assertStatus(400);
+
+    expect(DvrRecordingRule::count())->toBe(0);
 });
 
 it('returns 409 when the same window is scheduled twice', function () {
@@ -460,6 +510,32 @@ it('evaluates series rules and schedules newly matching airings', function () {
         ->assertJsonPath('details.0.created', 1);
 
     expect($rule->recordings()->count())->toBe(1);
+});
+
+it('refuses to delete series rules without a title or tvg_id', function () {
+    $rule = DvrRecordingRule::factory()->series()->create([
+        'user_id' => $this->user->id,
+        'dvr_setting_id' => $this->dvrSetting->id,
+        'series_title' => 'Evening News',
+        'enabled' => false,
+    ]);
+
+    $this->deleteJson('/series-rules/', [], dvrApiHeaders())->assertStatus(400);
+    $this->deleteJson('/series-rules/?'.http_build_query(['tvg_id' => '', 'title' => ' ']), [], dvrApiHeaders())->assertStatus(400);
+
+    expect(DvrRecordingRule::find($rule->id))->not->toBeNull();
+});
+
+it('requires tvg_id for a channel-scoped bulk remove', function () {
+    $recording = makeDvrRecording(['title' => 'Evening News', 'normalized_title' => 'evening news']);
+    $headers = dvrApiHeaders();
+
+    $this->postJson('/series-rules/bulk-remove/', ['title' => 'Evening News', 'scope' => 'channel'], $headers)
+        ->assertStatus(400);
+    $this->postJson('/series-rules/bulk-remove/', ['title' => 'Evening News', 'scope' => 'everything'], $headers)
+        ->assertStatus(400);
+
+    expect($recording->fresh()->status)->toBe(DvrRecordingStatus::Scheduled);
 });
 
 it('bulk-removes upcoming recordings for a series title', function () {
