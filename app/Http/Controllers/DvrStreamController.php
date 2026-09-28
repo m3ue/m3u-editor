@@ -52,6 +52,16 @@ class DvrStreamController extends Controller
             abort(404, 'Recording not found');
         }
 
+        return $this->serveRecording($request, $recording);
+    }
+
+    /**
+     * Serve an already-authorized recording: the live HLS playlist while it is
+     * still recording, otherwise the finished file with HTTP range support.
+     * Callers are responsible for authentication and ownership checks.
+     */
+    public function serveRecording(Request $request, DvrRecording $recording): Response|StreamedResponse|RedirectResponse
+    {
         // In-progress recording — serve through the editor so segment URLs resolve correctly.
         // The proxy's HLS playlist uses relative segment filenames (live000001.ts) which the
         // browser resolves relative to the playlist URL. If we redirect to the proxy directly,
@@ -109,7 +119,7 @@ class DvrStreamController extends Controller
      * This means only the small playlist file (~1 KB) passes through the editor on
      * each reload; all TS segment traffic goes straight from the proxy to the client.
      */
-    protected function serveLivePlaylist(Request $request, DvrRecording $recording): Response
+    public function serveLivePlaylist(Request $request, DvrRecording $recording): Response
     {
         $networkId = $recording->proxy_network_id;
         // Use the internal API URL for the editor→proxy fetch (within Docker).

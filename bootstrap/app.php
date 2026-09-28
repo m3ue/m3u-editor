@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AutoLoginMiddleware;
 use App\Http\Middleware\DispatcharrAuthMiddleware;
+use App\Http\Middleware\DispatcharrDvrAuthMiddleware;
 use App\Http\Middleware\ProxyRateLimitMiddleware;
 use App\Http\Middleware\VerifyM3uProxyCallback;
 use Illuminate\Foundation\Application;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ])
             ->alias([
                 'dispatcharr.auth' => DispatcharrAuthMiddleware::class,
+                'dispatcharr.dvr' => DispatcharrDvrAuthMiddleware::class,
                 'proxy.throttle' => ProxyRateLimitMiddleware::class,
                 'm3u-proxy.callback' => VerifyM3uProxyCallback::class,
             ])
@@ -36,7 +38,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 'group',
                 'group/*',
                 'playlist/*',
+                'custom-playlist',
                 'custom-playlist/*',
+                'recordings',
+                'recordings/*',
+                'series-rules',
+                'series-rules/*',
                 'player_api.php',
                 'get.php',
             ])

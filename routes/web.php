@@ -3,6 +3,7 @@
 use App\Filament\Clusters\Devices\Pages\PairDevice;
 use App\Http\Controllers\AIOStreamsProxyController;
 use App\Http\Controllers\Api\DispatcharrController;
+use App\Http\Controllers\Api\DispatcharrDvrController;
 use App\Http\Controllers\AssetPreviewController;
 use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\BackupDownloadController;
@@ -370,6 +371,84 @@ Route::group(['middleware' => ['auth:sanctum']], function () {
         Route::get('proxy/streams/active', [ProxyController::class, 'streams'])
             ->name('api.proxy.streams');
     }
+});
+
+/*
+ * Dispatcharr-style DVR API routes (Dispatcharr's shapes at /recordings and
+ * /series-rules). Authenticated with a Sanctum API token sent as Bearer, X-API-Key,
+ * `Authorization: ApiKey`, or `?token=` for media requests. The middleware
+ * parameter is the Sanctum token ability required. Must stay above the Xtream
+ * `/{username}/{password}/{streamId}` catch-all, which would otherwise swallow
+ * three-segment paths like /recordings/{id}/stop.
+ */
+Route::prefix('recordings')->group(function () {
+    Route::get('/', [DispatcharrDvrController::class, 'index'])
+        ->middleware('dispatcharr.dvr:view')
+        ->name('dispatcharr.dvr.recordings.index');
+    Route::post('/', [DispatcharrDvrController::class, 'store'])
+        ->middleware('dispatcharr.dvr:create')
+        ->name('dispatcharr.dvr.recordings.store');
+    Route::post('bulk-delete-upcoming', [DispatcharrDvrController::class, 'bulkDeleteUpcoming'])
+        ->middleware('dispatcharr.dvr:delete')
+        ->name('dispatcharr.dvr.recordings.bulk-delete-upcoming');
+    Route::get('{id}', [DispatcharrDvrController::class, 'show'])
+        ->middleware('dispatcharr.dvr:view')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.show');
+    Route::delete('{id}', [DispatcharrDvrController::class, 'destroy'])
+        ->middleware('dispatcharr.dvr:delete')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.destroy');
+    Route::post('{id}/stop', [DispatcharrDvrController::class, 'stop'])
+        ->middleware('dispatcharr.dvr:update')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.stop');
+    Route::post('{id}/extend', [DispatcharrDvrController::class, 'extend'])
+        ->middleware('dispatcharr.dvr:update')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.extend');
+    Route::post('{id}/update-metadata', [DispatcharrDvrController::class, 'updateMetadata'])
+        ->middleware('dispatcharr.dvr:update')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.update-metadata');
+    Route::post('{id}/refresh-artwork', [DispatcharrDvrController::class, 'refreshArtwork'])
+        ->middleware('dispatcharr.dvr:update')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.refresh-artwork');
+    Route::post('{id}/comskip', [DispatcharrDvrController::class, 'comskip'])
+        ->middleware('dispatcharr.dvr:update')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.comskip');
+    Route::get('{id}/file', [DispatcharrDvrController::class, 'file'])
+        ->middleware('dispatcharr.dvr:view')
+        ->whereNumber('id')
+        ->name('dispatcharr.dvr.recordings.file');
+    Route::get('{id}/hls/{path}', [DispatcharrDvrController::class, 'hls'])
+        ->middleware('dispatcharr.dvr:view')
+        ->whereNumber('id')
+        ->where('path', '.+')
+        ->name('dispatcharr.dvr.recordings.hls');
+});
+
+Route::prefix('series-rules')->group(function () {
+    Route::get('/', [DispatcharrDvrController::class, 'seriesRules'])
+        ->middleware('dispatcharr.dvr:view')
+        ->name('dispatcharr.dvr.series-rules.index');
+    Route::post('/', [DispatcharrDvrController::class, 'storeSeriesRule'])
+        ->middleware('dispatcharr.dvr:create')
+        ->name('dispatcharr.dvr.series-rules.store');
+    Route::delete('/', [DispatcharrDvrController::class, 'destroySeriesRule'])
+        ->middleware('dispatcharr.dvr:delete')
+        ->name('dispatcharr.dvr.series-rules.destroy');
+    Route::post('preview', [DispatcharrDvrController::class, 'previewSeriesRule'])
+        ->middleware('dispatcharr.dvr:view')
+        ->name('dispatcharr.dvr.series-rules.preview');
+    Route::post('evaluate', [DispatcharrDvrController::class, 'evaluateSeriesRules'])
+        ->middleware('dispatcharr.dvr:update')
+        ->name('dispatcharr.dvr.series-rules.evaluate');
+    Route::post('bulk-remove', [DispatcharrDvrController::class, 'bulkRemoveSeriesRecordings'])
+        ->middleware('dispatcharr.dvr:delete')
+        ->name('dispatcharr.dvr.series-rules.bulk-remove');
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)

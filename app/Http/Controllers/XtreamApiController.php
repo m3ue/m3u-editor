@@ -42,7 +42,7 @@ use App\Models\ViewerWatchProgress;
 use App\Providers\VersionServiceProvider;
 use App\Services\AIOStreamsAuthorizationService;
 use App\Services\ContentRequestService;
-use App\Services\DvrCapabilityGate;
+use App\Services\DvrAccessScope;
 use App\Services\DvrRecorderService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
@@ -3516,7 +3516,7 @@ class XtreamApiController extends Controller
      * Role-based downscale widths baked into proxied artwork URLs so clients
      * pull a right-sized file. Null (resize disabled) leaves URLs unchanged.
      */
-    private static function posterProxyWidth(): ?int
+    public static function posterProxyWidth(): ?int
     {
         return config('proxy.image_resize_enabled', true)
             ? (int) config('proxy.image_resize_poster_width', 600)
@@ -3537,7 +3537,7 @@ class XtreamApiController extends Controller
             : null;
     }
 
-    private function proxyImageUrl(?string $url, ?int $width = null): ?string
+    public static function proxyImageUrl(?string $url, ?int $width = null): ?string
     {
         if (! $url || ! filter_var($url, FILTER_VALIDATE_URL) || str_starts_with($url, url('/'))) {
             return $url;
@@ -4137,16 +4137,8 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * Single source of truth for whether DVR is usable at all: global config,
-     * the effective playlist's DvrSetting, and (for guest credentials) the
-     * PlaylistAuth's own dvr_enabled flag. Both feature advertisement and every
-     * direct DVR action must agree with this result.
-     *
-     * For a CustomPlaylist/MergedPlaylist wrapper, capability is granted if
-     * EITHER the wrapper's own DvrSetting is enabled OR any source Playlist
-     * behind it has DVR enabled - mirrors resolveDvrSettingIds() so a wrapper
-     * whose channels come from a DVR-enabled source isn't gated out before its
-     * recordings are even looked up.
+     * Single source of truth for whether DVR is usable at all - see
+     * DvrAccessScope::grantedForSettingIds().
      */
     private function dvrCapabilityGranted(
         Playlist|CustomPlaylist|MergedPlaylist|null $dvrPlaylist,
@@ -4157,14 +4149,10 @@ class XtreamApiController extends Controller
             return false;
         }
 
-        $settingIds = $this->resolveDvrSettingIds($dvrPlaylist);
-
-        if ($settingIds === []) {
-            return false;
-        }
-
-        return DvrSetting::whereIn('id', $settingIds)->get()->contains(
-            fn (DvrSetting $setting) => DvrCapabilityGate::granted($setting, $playlistAuth, $authMethod === 'playlist_auth')
+        return DvrAccessScope::grantedForSettingIds(
+            DvrAccessScope::settingIdsForPlaylist($dvrPlaylist),
+            $playlistAuth,
+            $authMethod === 'playlist_auth'
         );
     }
 
@@ -4174,80 +4162,16 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * Resolve every DVR setting id a playlist's recordings could be filed under: its own
-     * dvrSetting (if configured directly on it), plus the dvrSettings of the source
-     * Playlists behind it when it's a CustomPlaylist or MergedPlaylist wrapper. Used by the
-     * DVR list/get/cancel/delete endpoints so a recording remains visible and manageable no
-     * matter which of those it was scheduled against.
-     *
      * @return array<int, int>
      */
     private function resolveDvrSettingIds($playlist): array
     {
-        if ($playlist instanceof Playlist) {
-            return $playlist->dvrSetting ? [$playlist->dvrSetting->id] : [];
-        }
-
-        $sourcePlaylistIds = $playlist instanceof MergedPlaylist
-            ? DB::table('merged_playlist_playlist')
-                ->where('merged_playlist_id', $playlist->id)
-                ->where(function ($query) {
-                    // Skip sources fully excluded from the merge (all content-type
-                    // toggles off) — their DVR settings shouldn't be reachable
-                    // through this wrapper either.
-                    $query->where('include_live', true)
-                        ->orWhere('include_vod', true)
-                        ->orWhere('include_series', true);
-                })
-                ->pluck('playlist_id')
-            : $playlist->channels()
-                ->whereNotNull('channels.playlist_id')
-                ->groupBy('channels.playlist_id')
-                ->distinct()
-                ->pluck('channels.playlist_id');
-
-        $settingIds = DvrSetting::whereIn('playlist_id', $sourcePlaylistIds)
-            ->pluck('id')
-            ->toArray();
-
-        // Include the wrapper's own setting too, in case a recording was ever
-        // scheduled against it directly.
-        if ($playlist->dvrSetting) {
-            $settingIds[] = $playlist->dvrSetting->id;
-        }
-
-        return array_values(array_unique($settingIds));
+        return DvrAccessScope::settingIdsForPlaylist($playlist);
     }
 
-    /**
-     * Resolve the single DvrSetting a new recording/rule should be written against,
-     * when accessed through a CustomPlaylist/MergedPlaylist wrapper. Mirrors
-     * resolveDvrSettingIds()'s read-side resolution, but a write needs exactly one
-     * target: prefers the given channel's own source Playlist's DvrSetting (so
-     * scheduling a specific channel through a wrapper always lands on the right
-     * source, even when the wrapper spans multiple DVR-enabled sources), then falls
-     * back to the wrapper's own DvrSetting, then the first DVR-enabled source
-     * resolved via resolveDvrSettingIds() (covers the "any channel" series-rule case).
-     */
     private function resolveDvrSettingForWrite($playlist, ?int $channelId = null): ?DvrSetting
     {
-        if ($channelId) {
-            $channel = $playlist->channels()->where('channels.id', $channelId)->first();
-            if ($channel?->playlist_id) {
-                $setting = DvrSetting::where('playlist_id', $channel->playlist_id)->first();
-                if ($setting?->enabled) {
-                    return $setting;
-                }
-            }
-        }
-
-        if ($playlist->dvrSetting) {
-            return $playlist->dvrSetting;
-        }
-
-        $settingIds = $this->resolveDvrSettingIds($playlist);
-
-        return $settingIds === [] ? null : DvrSetting::find($settingIds[0]);
+        return DvrAccessScope::settingForWriteOnPlaylist($playlist, $channelId);
     }
 
     /**
