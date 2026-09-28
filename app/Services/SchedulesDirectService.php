@@ -681,16 +681,44 @@ class SchedulesDirectService
     }
 
     /**
-     * Remove the lineup that is currently configured on the EPG from the SD account.
-     * No-op if no lineup is configured.
+     * Remove the lineups configured on the EPG from the SD account, skipping any
+     * lineup another EPG on the same SD account still uses.
      */
-    public function removeConfiguredLineup(Epg $epg): void
+    public function removeConfiguredLineups(Epg $epg): void
     {
-        if (! $epg->hasSchedulesDirectLineup()) {
-            return;
-        }
+        $lineupsInUse = Epg::query()
+            ->schedulesDirectAccount((string) $epg->sd_username, $epg->user_id)
+            ->whereKeyNot($epg->getKey())
+            ->pluck('sd_lineup_ids')
+            ->flatten()
+            ->all();
 
-        $this->removeLineupFromEpg($epg, $epg->sd_lineup_id);
+        foreach (array_diff($epg->sd_lineup_ids ?? [], $lineupsInUse) as $lineupId) {
+            $this->removeLineupFromEpg($epg, $lineupId);
+        }
+    }
+
+    /**
+     * Get a lineup's stations, adding the lineup to the SD account first if it isn't subscribed yet.
+     */
+    private function getOrAddLineup(Epg $epg, string $lineupId): array
+    {
+        try {
+            return $this->getLineup($epg->sd_token, $lineupId);
+        } catch (Exception $e) {
+            // 4003/4004 = lineup not found/not subscribed
+            if ($e->getCode() !== self::LINEUP_NOT_IN_ACCOUNT_CODE
+                && ! str_contains($e->getMessage(), 'not in account')
+                && ! str_contains($e->getMessage(), 'not subscribed')
+            ) {
+                throw $e;
+            }
+
+            Log::debug("Adding lineup {$lineupId} to SchedulesDirect account", ['epg_id' => $epg->id]);
+            $this->addLineup($epg->sd_token, $lineupId);
+
+            return $this->getLineup($epg->sd_token, $lineupId);
+        }
     }
 
     /**
@@ -1145,24 +1173,20 @@ class SchedulesDirectService
                 'sd_progress' => 0,
             ]);
 
-            // Check if lineup is already in account; add it if not
-            try {
-                $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
-            } catch (Exception $e) {
-                // 4003/4004 = lineup not found/not subscribed
-                if ($e->getCode() === self::LINEUP_NOT_IN_ACCOUNT_CODE
-                    || str_contains($e->getMessage(), 'not in account')
-                    || str_contains($e->getMessage(), 'not subscribed')
-                ) {
-                    Log::debug("Adding lineup {$epg->sd_lineup_id} to SchedulesDirect account", ['epg_id' => $epg->id]);
-                    $this->addLineup($epg->sd_token, $epg->sd_lineup_id);
-                    $lineupData = $this->getLineup($epg->sd_token, $epg->sd_lineup_id);
-                } else {
-                    throw $e;
+            // Merge every selected lineup; a station carried by more than one lineup is kept once
+            $map = $stations = [];
+            foreach ($epg->sd_lineup_ids as $lineupId) {
+                $lineup = $this->getOrAddLineup($epg, $lineupId);
+                foreach ($lineup['map'] ?? [] as $mapping) {
+                    $map[$mapping['stationID']] ??= $mapping;
+                }
+                foreach ($lineup['stations'] ?? [] as $station) {
+                    $stations[$station['stationID']] ??= $station;
                 }
             }
+            $lineupData = ['map' => array_values($map), 'stations' => array_values($stations)];
 
-            // Refresh station IDs from the current lineup on every sync so stations
+            // Refresh station IDs from the current lineups on every sync so stations
             // Schedules Direct removes/remaps server-side don't linger and get
             // requested after they're no longer valid (causes SD to block the app).
             $stationIds = array_column($lineupData['map'], 'stationID');

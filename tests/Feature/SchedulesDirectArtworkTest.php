@@ -18,7 +18,7 @@ it('fetches station artwork and includes in XMLTV', function () {
         'sd_password' => 'password',
         'sd_token' => 'valid-token',
         'sd_token_expires_at' => now()->addHour(),
-        'sd_lineup_id' => 'USA-NY12345-X',
+        'sd_lineup_ids' => ['USA-NY12345-X'],
         'sd_station_ids' => ['12345', '67890'],
         'sd_days_to_import' => 1,
     ]);
@@ -127,7 +127,7 @@ it('handles missing artwork gracefully', function () {
         'sd_password' => 'password',
         'sd_token' => 'valid-token',
         'sd_token_expires_at' => now()->addHour(),
-        'sd_lineup_id' => 'USA-NY12345-X',
+        'sd_lineup_ids' => ['USA-NY12345-X'],
         'sd_station_ids' => ['12345'],
         'sd_days_to_import' => 1,
     ]);

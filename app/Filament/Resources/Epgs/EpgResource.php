@@ -486,9 +486,10 @@ class EpgResource extends Resource implements CopilotResource
                     Grid::make()
                         ->columns(2)
                         ->schema([
-                            Select::make('sd_lineup_id')
-                                ->label(__('Lineup'))
-                                ->helperText(__('Select your SchedulesDirect lineup'))
+                            Select::make('sd_lineup_ids')
+                                ->label(__('Lineups'))
+                                ->helperText(__('Select one or more SchedulesDirect lineups. Lineups not yet on your SchedulesDirect account are added on the next sync.'))
+                                ->multiple()
                                 ->searchable()
                                 ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
                                     $country = $get('sd_country');
@@ -529,7 +530,7 @@ class EpgResource extends Resource implements CopilotResource
                                                 if (stripos($lineup['name'], $search) !== false) {
                                                     // Don't duplicate if already in account
                                                     if (! isset($options[$lineup['lineup']])) {
-                                                        $options[$lineup['lineup']] = "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
+                                                        $options[$lineup['lineup']] = "{$lineup['name']} - {$lineup['lineup']} ({$headend['transport']})";
                                                     }
                                                 }
                                             }
@@ -540,7 +541,9 @@ class EpgResource extends Resource implements CopilotResource
                                         return [];
                                     }
                                 })
-                                ->getOptionLabelUsing(function ($value, Get $get, SchedulesDirectService $service) {
+                                ->getOptionLabelsUsing(function (array $values, Get $get, SchedulesDirectService $service): array {
+                                    $labels = array_combine($values, $values);
+
                                     try {
                                         $country = $get('sd_country');
                                         $postalCode = $get('sd_postal_code');
@@ -548,7 +551,7 @@ class EpgResource extends Resource implements CopilotResource
                                         $password = $get('sd_password');
 
                                         if (! $country || ! $postalCode || ! $username || ! $password) {
-                                            return $value;
+                                            return $labels;
                                         }
 
                                         // Authenticate to get fresh token
@@ -558,15 +561,15 @@ class EpgResource extends Resource implements CopilotResource
                                         $headends = $service->getHeadends($authData['token'], $country, $postalCode);
                                         foreach ($headends as $headend) {
                                             foreach ($headend['lineups'] as $lineup) {
-                                                if ($lineup['lineup'] === $value) {
-                                                    return "{$lineup['name']} — {$lineup['lineup']} ({$headend['transport']})";
+                                                if (isset($labels[$lineup['lineup']])) {
+                                                    $labels[$lineup['lineup']] = "{$lineup['name']} - {$lineup['lineup']} ({$headend['transport']})";
                                                 }
                                             }
                                         }
 
-                                        return $value;
+                                        return $labels;
                                     } catch (Exception $e) {
-                                        return $value;
+                                        return $labels;
                                     }
                                 }),
                             TextInput::make('sd_days_to_import')
@@ -960,22 +963,22 @@ class EpgResource extends Resource implements CopilotResource
     {
         return DeleteAction::make()
             ->modalDescription(fn (Epg $record) => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup()
-                ? __('Delete this EPG? You can optionally also remove the associated lineup from your SchedulesDirect account to free up a lineup slot.')
+                ? __('Delete this EPG? You can optionally also remove its lineups from your SchedulesDirect account to free up lineup slots. Lineups used by another EPG are kept.')
                 : null)
             ->schema(fn (Epg $record): array => $record->isSchedulesDirect() && $record->hasSchedulesDirectLineup() ? [
                 Toggle::make('delete_sd_lineup')
-                    ->label(__('Also delete lineup from SchedulesDirect account'))
+                    ->label(__('Also delete lineups from SchedulesDirect account'))
                     ->helperText(__('Removing unused lineups from your SchedulesDirect account frees up slots for new ones.'))
                     ->default(true),
             ] : [])
             ->before(function (array $data, Epg $record): void {
                 if ($record->isSchedulesDirect() && ($data['delete_sd_lineup'] ?? false) && $record->hasSchedulesDirectLineup()) {
                     try {
-                        app(SchedulesDirectService::class)->removeConfiguredLineup($record);
+                        app(SchedulesDirectService::class)->removeConfiguredLineups($record);
                     } catch (Exception $e) {
-                        Log::warning('Failed to remove SchedulesDirect lineup on EPG delete', [
+                        Log::warning('Failed to remove SchedulesDirect lineups on EPG delete', [
                             'epg_id' => $record->id,
-                            'lineup_id' => $record->sd_lineup_id,
+                            'lineup_ids' => $record->sd_lineup_ids,
                             'error' => $e->getMessage(),
                         ]);
                     }

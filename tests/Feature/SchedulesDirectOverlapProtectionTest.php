@@ -21,7 +21,7 @@ it('routes SchedulesDirect EPG syncs onto the dedicated single-worker queue', fu
         'sd_password' => 'password',
         'sd_token' => 'valid-token',
         'sd_token_expires_at' => now()->addHour(),
-        'sd_lineup_id' => 'USA-NY12345-X',
+        'sd_lineup_ids' => ['USA-NY12345-X'],
     ]);
 
     dispatch(new ProcessEpgImport($epg, force: true));

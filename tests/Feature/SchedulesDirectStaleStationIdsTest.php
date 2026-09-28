@@ -20,7 +20,7 @@ it('refreshes sd_station_ids from the current lineup on every sync instead of ca
         'sd_password' => 'password',
         'sd_token' => 'valid-token',
         'sd_token_expires_at' => now()->addHour(),
-        'sd_lineup_id' => 'USA-NY12345-X',
+        'sd_lineup_ids' => ['USA-NY12345-X'],
         'sd_station_ids' => ['12345', '99999'], // 99999 is stale/no longer in the lineup
         'sd_days_to_import' => 1,
     ]);

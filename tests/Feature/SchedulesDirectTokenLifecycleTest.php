@@ -21,7 +21,7 @@ function sdEpg(array $overrides = []): Epg
         'source_type' => EpgSourceType::SCHEDULES_DIRECT,
         'sd_username' => 'person@example.com',
         'sd_password' => 'super-secret-password',
-        'sd_lineup_id' => 'USA-NY12345-X',
+        'sd_lineup_ids' => ['USA-NY12345-X'],
         'sd_days_to_import' => 1,
     ], $overrides));
 }
@@ -222,7 +222,7 @@ it('clears the stored token and raises a typed exception on 4006', function () {
     $service = new SchedulesDirectService;
     $service->setCurrentEpg($epg);
 
-    expect(fn () => $service->getLineup($epg->sd_token, $epg->sd_lineup_id))
+    expect(fn () => $service->getLineup($epg->sd_token, $epg->sd_lineup_ids[0]))
         ->toThrow(SchedulesDirectTokenExpiredException::class);
 
     expect($epg->fresh()->sd_token)->toBeNull();

@@ -40,6 +40,7 @@ class Epg extends Model
         'sd_login_cooldown_until' => 'datetime',
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
+        'sd_lineup_ids' => 'array',
         'sd_errors' => 'array',
         'sd_days_to_import' => 'integer',
         'sd_metadata' => 'array',
@@ -173,7 +174,7 @@ class Epg extends Model
 
     public function hasSchedulesDirectLineup(): bool
     {
-        return ! empty($this->sd_lineup_id);
+        return ! empty($this->sd_lineup_ids);
     }
 
     public function isMerged(): bool
