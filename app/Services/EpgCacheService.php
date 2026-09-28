@@ -560,6 +560,24 @@ class EpgCacheService
     }
 
     /**
+     * Absolute path of the current-version SQLite programme store, or null when
+     * the EPG has no complete current cache (never cached, mid-rebuild, or still
+     * on a legacy layout). Used by {@see EpgCacheEnrichmentService} so it never
+     * touches anything but a finished current-version store.
+     */
+    public function getProgrammeStorePath(Epg $epg): ?string
+    {
+        $disk = Storage::disk('local');
+        $path = $this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE);
+
+        if (! $disk->exists($this->getCacheFilePath($epg, self::METADATA_FILE)) || ! $disk->exists($path)) {
+            return null;
+        }
+
+        return $disk->path($path);
+    }
+
+    /**
      * Open (once per request) the SQLite programme store for an EPG, or null
      * when the active cache predates the SQLite switch (v1 caches, or v2 caches
      * still holding `programmes-{date}.jsonl`) so callers use the JSONL scan.

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Generator;
 use PDO;
+use Pdo\Sqlite;
 
 /**
  * Single-file SQLite store for an EPG's cached programmes.
@@ -64,6 +65,9 @@ class EpgProgrammeStore
     private string $buildingPath = '';
 
     private string $finalPath = '';
+
+    /** Inode of the file {@see openExisting()} opened, to detect a rebuild swapping it out. */
+    private int|false $openedInode = false;
 
     /**
      * Strip `channel` / `start` / `stop` (stored as columns) and any key still
@@ -232,10 +236,149 @@ class EpgProgrammeStore
         return $store;
     }
 
+    /**
+     * Open an existing store for the enrichment API (paged reads and in-place
+     * row updates).
+     *
+     * Opened read-write WITHOUT the create flag, so a store that vanished
+     * (a rebuild's clearCache() ran after the caller's existence check) fails to
+     * open instead of leaving an empty database file behind. The build's
+     * `journal_mode=OFF` is not persisted, so updates use SQLite's default
+     * rollback journal: no -wal/-shm sidecars, and the journal only exists for
+     * the length of a commit.
+     *
+     * @throws \PDOException when the store does not exist or cannot be opened
+     */
+    public static function openExisting(string $sqlitePath, int $busyTimeoutMs = 5000): self
+    {
+        $store = new self;
+        $store->finalPath = $sqlitePath;
+        $store->pdo = new PDO('sqlite:'.$sqlitePath, null, null, [
+            Sqlite::ATTR_OPEN_FLAGS => Sqlite::OPEN_READWRITE,
+        ]);
+        $store->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $store->pdo->exec('PRAGMA busy_timeout='.(int) $busyTimeoutMs);
+        clearstatcache(true, $sqlitePath);
+        $store->openedInode = @fileinode($sqlitePath);
+
+        return $store;
+    }
+
     public function close(): void
     {
         $this->insertStatement = null;
         $this->pdo = null;
+    }
+
+    /**
+     * Content hash of one stored row, used for optimistic concurrency by the
+     * enrichment API. Covers the columns and the raw blob, so any change to the
+     * row (another enrichment, or a rebuild reusing the rowid for a different
+     * programme) changes the hash.
+     *
+     * @param  array{channel_id: string, start_ts: int|string|null, stop_ts: int|string|null, data: string}  $row
+     */
+    public static function rowHash(array $row): string
+    {
+        return hash('sha256', json_encode([
+            $row['channel_id'],
+            $row['start_ts'] !== null ? (int) $row['start_ts'] : null,
+            $row['stop_ts'] !== null ? (int) $row['stop_ts'] : null,
+            $row['data'],
+        ]));
+    }
+
+    /**
+     * One page of programmes ordered by rowid, as `rowid => [hash, programme]`.
+     *
+     * @return array<int, array{hash: string, programme: array<string, mixed>}>
+     */
+    public function readPage(int $afterRowid, int $limit): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT rowid, channel_id, start_ts, stop_ts, data FROM programmes WHERE rowid > ? ORDER BY rowid LIMIT ?'
+        );
+        $statement->execute([$afterRowid, $limit]);
+
+        $page = [];
+        while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $page[(int) $row['rowid']] = ['hash' => self::rowHash($row), 'programme' => self::hydrateRow($row)];
+        }
+
+        return $page;
+    }
+
+    /**
+     * Apply programme changes to specific rows, all-or-nothing.
+     *
+     * Runs in one `BEGIN IMMEDIATE` transaction: every targeted row is re-read
+     * and its hash compared with `$expectedHashes` before the first write, so a
+     * row changed since the caller read it aborts the whole batch.
+     *
+     * @param  array<int, string>  $expectedHashes  rowid => hash from {@see readPage()}
+     * @param  array<int, array<string, mixed>>  $changes  rowid => fields to overlay on the programme
+     * @return array<int, bool>|null rowid => whether that row actually changed, or null on a hash mismatch
+     */
+    public function updateRows(array $expectedHashes, array $changes): ?array
+    {
+        $this->pdo->exec('BEGIN IMMEDIATE');
+
+        try {
+            // A rebuild renames a new store over this path. Writing to the
+            // replaced file would be lost, so treat it like a changed row.
+            clearstatcache(true, $this->finalPath);
+            if ($this->openedInode === false || @fileinode($this->finalPath) !== $this->openedInode) {
+                $this->pdo->exec('ROLLBACK');
+
+                return null;
+            }
+
+            $rowids = array_keys($expectedHashes);
+            $select = $this->pdo->prepare(
+                'SELECT rowid, channel_id, start_ts, stop_ts, data FROM programmes WHERE rowid IN ('
+                .implode(',', array_fill(0, count($rowids), '?')).')'
+            );
+            $select->execute($rowids);
+
+            $current = [];
+            while (($row = $select->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $current[(int) $row['rowid']] = $row;
+            }
+
+            foreach ($expectedHashes as $rowid => $hash) {
+                if (! isset($current[$rowid]) || ! hash_equals($hash, self::rowHash($current[$rowid]))) {
+                    $this->pdo->exec('ROLLBACK');
+
+                    return null;
+                }
+            }
+
+            $update = $this->pdo->prepare('UPDATE programmes SET data = ? WHERE rowid = ?');
+            $changed = [];
+            foreach ($changes as $rowid => $fields) {
+                $programme = self::hydrateRow($current[$rowid]);
+                $patched = array_replace($programme, $fields);
+                $changed[$rowid] = $patched !== $programme;
+                if ($changed[$rowid]) {
+                    $update->execute([
+                        json_encode(self::dehydrate($patched), JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+                        $rowid,
+                    ]);
+                }
+            }
+
+            $this->pdo->exec('COMMIT');
+
+            return $changed;
+        } catch (\Throwable $e) {
+            try {
+                $this->pdo->exec('ROLLBACK');
+            } catch (\Throwable) {
+                // SQLite already rolled the transaction back.
+            }
+
+            throw $e;
+        }
     }
 
     /**
