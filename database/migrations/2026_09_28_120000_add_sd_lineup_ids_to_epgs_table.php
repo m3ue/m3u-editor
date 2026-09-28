@@ -14,7 +14,7 @@ return new class extends Migration
         });
 
         // Carry each existing single lineup over so current SchedulesDirect EPGs keep syncing.
-        // The legacy sd_lineup_id column is left in place (unused) so a rollback stays lossless.
+        // The legacy sd_lineup_id column is left in place (unused); down() refreshes it.
         DB::table('epgs')
             ->whereNotNull('sd_lineup_id')
             ->where('sd_lineup_id', '!=', '')
@@ -26,6 +26,15 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Restore the first selected lineup as the single lineup, since edits made after
+        // up() only wrote sd_lineup_ids. Extra lineups can't be kept by the old schema.
+        DB::table('epgs')
+            ->whereNotNull('sd_lineup_ids')
+            ->lazyById()
+            ->each(fn (object $epg) => DB::table('epgs')
+                ->where('id', $epg->id)
+                ->update(['sd_lineup_id' => json_decode($epg->sd_lineup_ids, true)[0] ?? null]));
+
         Schema::table('epgs', function (Blueprint $table) {
             $table->dropColumn('sd_lineup_ids');
         });

@@ -605,7 +605,7 @@ class SchedulesDirectService
             return $response->json();
         } catch (Exception $e) {
             match ($e->getCode()) {
-                self::LINEUP_ALREADY_IN_ACCOUNT_CODE => null, // idempotent — already added
+                self::LINEUP_ALREADY_IN_ACCOUNT_CODE => null, // idempotent - already added
                 self::MAX_LINEUPS_CODE => throw new Exception(
                     'Your SchedulesDirect account has reached the maximum number of allowed lineups. Remove an existing lineup before adding a new one.',
                     self::MAX_LINEUPS_CODE,
@@ -634,7 +634,7 @@ class SchedulesDirectService
             return $response->json();
         } catch (Exception $e) {
             match ($e->getCode()) {
-                self::LINEUP_NOT_IN_ACCOUNT_CODE => null, // idempotent — already removed
+                self::LINEUP_NOT_IN_ACCOUNT_CODE => null, // idempotent - already removed
                 self::TOO_MANY_LINEUP_CHANGES_CODE => throw new Exception(
                     'You have exceeded the daily limit of 6 lineup changes on your SchedulesDirect account. Please try again tomorrow.',
                     self::TOO_MANY_LINEUP_CHANGES_CODE,
@@ -663,7 +663,7 @@ class SchedulesDirectService
         $userLineups = $this->getUserLineups($epg->sd_token);
 
         return collect($userLineups['lineups'] ?? [])
-            ->mapWithKeys(fn ($lineup) => [$lineup['lineup'] => "{$lineup['name']} — {$lineup['lineup']} ({$lineup['transport']})"])
+            ->mapWithKeys(fn ($lineup) => [$lineup['lineup'] => "{$lineup['name']} - {$lineup['lineup']} ({$lineup['transport']})"])
             ->all();
     }
 
@@ -1173,16 +1173,39 @@ class SchedulesDirectService
                 'sd_progress' => 0,
             ]);
 
-            // Merge every selected lineup; a station carried by more than one lineup is kept once
-            $map = $stations = [];
+            // Merge every selected lineup; a station carried by more than one lineup is kept once.
+            // A failing lineup is recorded and skipped so the others still import; the sync
+            // only fails when no lineup could be loaded.
+            $map = $stations = $lineupErrors = [];
+            $lastLineupException = null;
             foreach ($epg->sd_lineup_ids as $lineupId) {
-                $lineup = $this->getOrAddLineup($epg, $lineupId);
+                try {
+                    $lineup = $this->getOrAddLineup($epg, $lineupId);
+                } catch (SchedulesDirectTokenExpiredException|SchedulesDirectRateLimitException $e) {
+                    throw $e;
+                } catch (Exception $e) {
+                    $lastLineupException = $e;
+                    $lineupErrors[] = [
+                        'timestamp' => now()->toISOString(),
+                        'message' => "Lineup {$lineupId}: {$e->getMessage()}",
+                    ];
+                    Log::warning('Skipping SchedulesDirect lineup that failed to load', [
+                        'epg_id' => $epg->id,
+                        'lineup_id' => $lineupId,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    continue;
+                }
                 foreach ($lineup['map'] ?? [] as $mapping) {
                     $map[$mapping['stationID']] ??= $mapping;
                 }
                 foreach ($lineup['stations'] ?? [] as $station) {
                     $stations[$station['stationID']] ??= $station;
                 }
+            }
+            if (count($lineupErrors) === count($epg->sd_lineup_ids)) {
+                throw $lastLineupException;
             }
             $lineupData = ['map' => array_values($map), 'stations' => array_values($stations)];
 
@@ -1215,7 +1238,7 @@ class SchedulesDirectService
             // Update EPG record
             $epg->update([
                 'sd_last_sync' => now(),
-                'sd_errors' => null,
+                'sd_errors' => $lineupErrors ?: null,
                 'sd_progress' => 100,
             ]);
             Log::debug('Successfully completed SchedulesDirect sync', [

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
@@ -112,4 +113,47 @@ it('backfills the lineup list from the legacy single lineup column', function ()
 
     expect(Epg::find($epgId)->sd_lineup_ids)->toBe(['USA-LEGACY'])
         ->and(Epg::find($unconfiguredId)->sd_lineup_ids)->toBeNull();
+});
+
+it('imports the remaining lineups and records an error when one lineup fails', function () {
+    $epg = ($this->makeEpg)(['USA-BAD', 'USA-GOOD']);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-BAD' => Http::response(['code' => 2107, 'message' => 'Lineup deleted'], 400),
+        'json.schedulesdirect.org/20141201/lineups/USA-GOOD' => Http::response(sdLineupResponse(['7'])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([['stationID' => '7', 'programs' => []]]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    $epg->refresh();
+    expect($epg->sd_station_ids)->toBe(['7'])
+        ->and($epg->sd_last_sync)->not->toBeNull()
+        ->and($epg->sd_errors)->toHaveCount(1)
+        ->and($epg->sd_errors[0]['message'])->toStartWith('Lineup USA-BAD:');
+});
+
+it('fails the sync when every selected lineup fails', function () {
+    $epg = ($this->makeEpg)(['USA-BAD-1', 'USA-BAD-2']);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/*' => Http::response(['code' => 2107, 'message' => 'Lineup deleted'], 400),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))->toThrow(Exception::class);
+    expect($epg->fresh()->sd_last_sync)->toBeNull();
+});
+
+it('restores the first selected lineup to the legacy column on rollback', function () {
+    $migration = require database_path('migrations/2026_09_28_120000_add_sd_lineup_ids_to_epgs_table.php');
+    $epgId = ($this->makeEpg)(['USA-FIRST', 'USA-SECOND'], ['sd_lineup_id' => 'USA-STALE'])->id;
+    $clearedId = ($this->makeEpg)([], ['sd_lineup_id' => 'USA-STALE'])->id;
+
+    $migration->down();
+
+    expect(DB::table('epgs')->where('id', $epgId)->value('sd_lineup_id'))->toBe('USA-FIRST')
+        ->and(DB::table('epgs')->where('id', $clearedId)->value('sd_lineup_id'))->toBeNull();
+
+    $migration->up();
 });
