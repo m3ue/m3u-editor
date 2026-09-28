@@ -1174,22 +1174,23 @@ class SchedulesDirectService
             ]);
 
             // Merge every selected lineup; a station carried by more than one lineup is kept once.
-            // A failing lineup is recorded and skipped so the others still import; the sync
-            // only fails when no lineup could be loaded.
+            // A lineup that can't be added to the account (slot or daily change limit) is recorded
+            // and skipped so the others still import. It was never imported, so skipping it loses
+            // no channel mappings. Any other failure fails the sync, because an import missing a
+            // previously imported lineup would delete its EPG channels and their mappings.
             $map = $stations = $lineupErrors = [];
-            $lastLineupException = null;
             foreach ($epg->sd_lineup_ids as $lineupId) {
                 try {
                     $lineup = $this->getOrAddLineup($epg, $lineupId);
-                } catch (SchedulesDirectTokenExpiredException|SchedulesDirectRateLimitException $e) {
-                    throw $e;
                 } catch (Exception $e) {
-                    $lastLineupException = $e;
+                    if (! in_array($e->getCode(), [self::MAX_LINEUPS_CODE, self::TOO_MANY_LINEUP_CHANGES_CODE], true)) {
+                        throw $e;
+                    }
                     $lineupErrors[] = [
                         'timestamp' => now()->toISOString(),
                         'message' => "Lineup {$lineupId}: {$e->getMessage()}",
                     ];
-                    Log::warning('Skipping SchedulesDirect lineup that failed to load', [
+                    Log::warning('Skipping SchedulesDirect lineup that could not be added to the account', [
                         'epg_id' => $epg->id,
                         'lineup_id' => $lineupId,
                         'error' => $e->getMessage(),
@@ -1205,7 +1206,7 @@ class SchedulesDirectService
                 }
             }
             if (count($lineupErrors) === count($epg->sd_lineup_ids)) {
-                throw $lastLineupException;
+                throw new Exception(implode(' ', array_column($lineupErrors, 'message')));
             }
             $lineupData = ['map' => array_values($map), 'stations' => array_values($stations)];
 
@@ -1760,7 +1761,9 @@ class SchedulesDirectService
 
         $request = Http::withHeaders($headers)
             ->timeout($timeout)
-            ->retry(2, 1000) // Basic retry with 1 second delay
+            // Basic retry with 1 second delay. A failed response is returned (not thrown) so the
+            // SD error code in its body reaches the error handling below instead of being lost.
+            ->retry(2, 1000, throw: false)
             ->withOptions([
                 'verify' => true,
                 'stream' => false, // Disable streaming to prevent memory issues
@@ -1822,7 +1825,7 @@ class SchedulesDirectService
             $headers = $this->buildHeaders($token);
             $request = Http::withHeaders($headers)
                 ->timeout($timeout)
-                ->retry(2, 1000)
+                ->retry(2, 1000, throw: false)
                 ->withOptions([
                     'verify' => true,
                     'stream' => false,

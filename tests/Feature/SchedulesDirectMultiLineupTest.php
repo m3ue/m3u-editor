@@ -115,34 +115,70 @@ it('backfills the lineup list from the legacy single lineup column', function ()
         ->and(Epg::find($unconfiguredId)->sd_lineup_ids)->toBeNull();
 });
 
-it('imports the remaining lineups and records an error when one lineup fails', function () {
-    $epg = ($this->makeEpg)(['USA-BAD', 'USA-GOOD']);
+/**
+ * Fake SD where lineups listed in $unaddable aren't on the account and can't be added (slots full),
+ * lineups in $failing return a server error, and every other lineup returns one station named after it.
+ */
+function sdFakeLineups(array $unaddable = [], array $failing = []): void
+{
+    Http::fake(function (Request $request) use ($unaddable, $failing) {
+        $url = $request->url();
 
-    Http::fake([
-        'json.schedulesdirect.org/20141201/lineups/USA-BAD' => Http::response(['code' => 2107, 'message' => 'Lineup deleted'], 400),
-        'json.schedulesdirect.org/20141201/lineups/USA-GOOD' => Http::response(sdLineupResponse(['7'])),
-        'json.schedulesdirect.org/20141201/schedules' => Http::response([['stationID' => '7', 'programs' => []]]),
-        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
-    ]);
+        if (str_contains($url, '/lineups/')) {
+            $lineupId = basename($url);
+            if (in_array($lineupId, $failing, true)) {
+                return Http::response(['message' => 'Internal server error'], 500);
+            }
+            if (in_array($lineupId, $unaddable, true)) {
+                return $request->method() === 'PUT'
+                    ? Http::response(['code' => 2102, 'message' => 'Maximum number of lineups reached'], 400)
+                    : Http::response(['code' => 2104, 'message' => 'Lineup not in account'], 400);
+            }
+
+            return Http::response(sdLineupResponse([$lineupId]));
+        }
+        if (str_ends_with($url, '/schedules')) {
+            return Http::response([['stationID' => 'USA-GOOD', 'programs' => []]]);
+        }
+
+        return Http::response([]);
+    });
+}
+
+it('imports the remaining lineups and records an error when a lineup cannot be added', function () {
+    $epg = ($this->makeEpg)(['USA-FULL', 'USA-GOOD']);
+    sdFakeLineups(unaddable: ['USA-FULL']);
 
     app(SchedulesDirectService::class)->syncEpgData($epg);
 
     $epg->refresh();
-    expect($epg->sd_station_ids)->toBe(['7'])
+    expect($epg->sd_station_ids)->toBe(['USA-GOOD'])
         ->and($epg->sd_last_sync)->not->toBeNull()
         ->and($epg->sd_errors)->toHaveCount(1)
-        ->and($epg->sd_errors[0]['message'])->toStartWith('Lineup USA-BAD:');
+        ->and($epg->sd_errors[0]['message'])->toStartWith('Lineup USA-FULL:');
 });
 
-it('fails the sync when every selected lineup fails', function () {
-    $epg = ($this->makeEpg)(['USA-BAD-1', 'USA-BAD-2']);
-
-    Http::fake([
-        'json.schedulesdirect.org/20141201/lineups/*' => Http::response(['code' => 2107, 'message' => 'Lineup deleted'], 400),
-    ]);
+it('fails the whole sync on a transient lineup error so existing channel mappings are kept', function () {
+    $epg = ($this->makeEpg)(['USA-GOOD', 'USA-DOWN'], ['sd_station_ids' => ['USA-GOOD', 'USA-DOWN']]);
+    sdFakeLineups(failing: ['USA-DOWN']);
 
     expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))->toThrow(Exception::class);
-    expect($epg->fresh()->sd_last_sync)->toBeNull();
+
+    $epg->refresh();
+    expect($epg->sd_last_sync)->toBeNull()
+        ->and($epg->sd_station_ids)->toBe(['USA-GOOD', 'USA-DOWN']);
+    Http::assertNotSent(fn (Request $request) => $request->method() === 'PUT');
+});
+
+it('fails the sync and records every lineup when none can be added', function () {
+    $epg = ($this->makeEpg)(['USA-FULL-1', 'USA-FULL-2']);
+    sdFakeLineups(unaddable: ['USA-FULL-1', 'USA-FULL-2']);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))->toThrow(Exception::class);
+
+    $epg->refresh();
+    expect($epg->sd_last_sync)->toBeNull()
+        ->and($epg->sd_errors[0]['message'])->toContain('Lineup USA-FULL-1:')->toContain('Lineup USA-FULL-2:');
 });
 
 it('restores the first selected lineup to the legacy column on rollback', function () {
