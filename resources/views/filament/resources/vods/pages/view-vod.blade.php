@@ -20,6 +20,7 @@
             // Get metadata - check all possible locations
             $title = $record->title_custom ?? ($record->title ?? ($record->name ?? 'Unknown'));
             $contentRating = $record->getContentRating();
+            $studioNames = collect($info['studios'] ?? [])->pluck('name')->filter()->values();
             $plot =
                 $info['plot'] ?? ($info['description'] ?? ($movieInfo['plot'] ?? ($movieInfo['description'] ?? null)));
             $genre = $info['genre'] ?? ($movieInfo['genre'] ?? null);
@@ -88,6 +89,7 @@
             $clearLogo = null;
             $castList = [];
             $contentRating = null;
+            $studioNames = collect();
         }
     @endphp
 
@@ -164,10 +166,18 @@
                         </span>
                     </div>
 
-                    {{-- Content rating (provider's, else TMDB's certification) --}}
-                    @if ($contentRating)
+                    {{-- Content rating (provider's, else TMDB's certification) and TMDB studios --}}
+                    @if ($contentRating || $studioNames->isNotEmpty())
                         <div class="flex flex-wrap items-center gap-2">
-                            <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @if ($contentRating)
+                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @endif
+                            @foreach ($studioNames as $studioName)
+                                <x-filament::badge
+                                    color="gray"
+                                    icon="heroicon-m-film"
+                                >{{ $studioName }}</x-filament::badge>
+                            @endforeach
                         </div>
                     @endif
 
@@ -294,10 +304,18 @@
                         </span>
                     </div>
 
-                    {{-- Content rating (provider's, else TMDB's certification) --}}
-                    @if ($contentRating)
+                    {{-- Content rating (provider's, else TMDB's certification) and TMDB studios --}}
+                    @if ($contentRating || $studioNames->isNotEmpty())
                         <div class="flex flex-wrap items-center gap-2">
-                            <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @if ($contentRating)
+                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @endif
+                            @foreach ($studioNames as $studioName)
+                                <x-filament::badge
+                                    color="gray"
+                                    icon="heroicon-m-film"
+                                >{{ $studioName }}</x-filament::badge>
+                            @endforeach
                         </div>
                     @endif
 

@@ -83,3 +83,25 @@ it('shows the movie certification as a badge on the VOD view page', function (ar
     'hero backdrop' => ['https://example.com/backdrop.jpg'],
     'no backdrop' => [null],
 ]);
+
+it('shows TMDB studios as badges on the VOD view page', function (?string $backdrop) {
+    $channel = Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'info' => array_filter([
+            'backdrop_path' => $backdrop,
+            'studios' => [
+                ['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null],
+                ['id' => 372, 'name' => 'Groucho II Film Partnership', 'logo' => null],
+            ],
+        ]),
+    ]);
+
+    Livewire::test(ViewVod::class, ['record' => $channel->getRouteKey()])
+        ->assertOk()
+        ->assertSee('Village Roadshow Pictures')
+        ->assertSee('Groucho II Film Partnership');
+})->with([
+    'hero backdrop' => ['https://example.com/backdrop.jpg'],
+    'no backdrop' => [null],
+]);

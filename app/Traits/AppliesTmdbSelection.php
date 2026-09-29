@@ -211,6 +211,7 @@ trait AppliesTmdbSelection
 
             // Always set, even to null: the on-demand backfill sentinel.
             $info['tmdb_certification'] = $details['certification'] ?? null;
+            $info['studios'] = $details['studios'] ?? [];
 
             if (! empty($details['runtime']) && (empty($info['duration_secs']) || ($info['duration_secs'] ?? 0) === 0)) {
                 $runtimeMinutes = (int) $details['runtime'];

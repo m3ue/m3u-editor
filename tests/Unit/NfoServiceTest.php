@@ -373,6 +373,29 @@ describe('NfoService content ratings and networks', function () {
         rmdir($path);
     });
 
+    it('writes TMDB studios to the movie nfo', function () {
+        $path = sys_get_temp_dir().'/nfo-service-'.bin2hex(random_bytes(6));
+        mkdir($path);
+        $strmPath = $path.'/movie.strm';
+
+        $channel = (new Channel)->forceFill([
+            'title' => 'The Matrix',
+            'info' => ['studios' => [
+                ['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null],
+                ['id' => 372, 'name' => 'Groucho II Film Partnership', 'logo' => null],
+            ]],
+        ]);
+
+        expect((new NfoService)->generateMovieNfo($channel, $strmPath))->toBeTrue();
+
+        expect(file_get_contents($path.'/movie.nfo'))
+            ->toContain('<studio>Village Roadshow Pictures</studio>')
+            ->toContain('<studio>Groucho II Film Partnership</studio>');
+
+        unlink($path.'/movie.nfo');
+        rmdir($path);
+    });
+
     it('falls back to the TMDB certification when the provider rating is blank', function () {
         $path = sys_get_temp_dir().'/nfo-service-'.bin2hex(random_bytes(6));
         mkdir($path);

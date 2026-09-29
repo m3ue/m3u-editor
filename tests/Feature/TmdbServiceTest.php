@@ -1107,3 +1107,30 @@ it('picks the US content rating and reshapes networks from series details', func
     ], null, []],
     'no content ratings or networks' => [[], null, []],
 ]);
+
+it('reshapes movie production companies into studios', function (array $companies, array $expected) {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'production_companies' => $companies,
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetails(603);
+
+    expect($details['studios'])->toBe($expected);
+})->with([
+    'companies with and without logos' => [[
+        ['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo_path' => '/vr.png', 'origin_country' => 'US'],
+        ['id' => 372, 'name' => 'Groucho II Film Partnership', 'logo_path' => null, 'origin_country' => ''],
+    ], [
+        ['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => 'https://image.tmdb.org/t/p/w300/vr.png'],
+        ['id' => 372, 'name' => 'Groucho II Film Partnership', 'logo' => null],
+    ]],
+    'skips entries without an id or name' => [[
+        ['id' => 0, 'name' => 'No Id'],
+        ['id' => 5, 'name' => ''],
+    ], []],
+    'no production companies' => [[], []],
+]);

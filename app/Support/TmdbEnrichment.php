@@ -17,7 +17,7 @@ class TmdbEnrichment
      * can't live here without mis-marking provider-only rows - TMDB's VOD value is
      * mirrored to tmdb_certification instead, and series use content_rating.
      */
-    public const PROVIDER_ABSENT_KEYS = ['cast_list', 'clearlogo', 'related_tmdb', 'content_rating', 'networks', 'tmdb_certification'];
+    public const PROVIDER_ABSENT_KEYS = ['cast_list', 'clearlogo', 'related_tmdb', 'content_rating', 'networks', 'tmdb_certification', 'studios'];
 
     /**
      * VOD `info` keys TMDB enrichment overwrites with its own value (as opposed to

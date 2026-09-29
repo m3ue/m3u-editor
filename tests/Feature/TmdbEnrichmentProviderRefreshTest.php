@@ -153,13 +153,18 @@ it('keeps null TMDB sentinels on a VOD channel through a provider refresh and se
         'is_vod' => true,
         'source_id' => 'vod-1',
         'last_metadata_fetch' => now(),
-        'info' => ['mpaa_rating' => 'R', 'tmdb_certification' => 'R', 'related_tmdb' => []],
+        'info' => [
+            'mpaa_rating' => 'R',
+            'tmdb_certification' => 'R',
+            'studios' => [['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]],
+            'related_tmdb' => [],
+        ],
     ]);
     $unrated = Channel::factory()->for($playlist)->for($this->user)->create([
         'is_vod' => true,
         'source_id' => 'vod-2',
         'last_metadata_fetch' => now(),
-        'info' => ['tmdb_certification' => null, 'related_tmdb' => []],
+        'info' => ['tmdb_certification' => null, 'studios' => [], 'related_tmdb' => []],
     ]);
 
     $channel->fetchMetadata(providerVodInfoXtream(), refresh: true, skipTmdb: true);
@@ -168,7 +173,8 @@ it('keeps null TMDB sentinels on a VOD channel through a provider refresh and se
     // The provider's blank mpaa_rating wins the raw key, but TMDB's value is kept alongside it.
     expect($channel->refresh()->info['mpaa_rating'])->toBe('')
         ->and($channel->info['tmdb_certification'])->toBe('R')
-        ->and($unrated->refresh()->info)->toHaveKey('tmdb_certification');
+        ->and($channel->info['studios'])->toEqual([['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]])
+        ->and($unrated->refresh()->info)->toHaveKeys(['tmdb_certification', 'studios']);
 });
 
 it('keeps null/empty TMDB series sentinels through a provider refresh', function () {

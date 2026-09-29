@@ -243,6 +243,7 @@ class NfoService
             }
 
             $this->appendXml($xml, 'mpaa', $channel->getContentRating());
+            $this->appendNamedList($xml, 'studio', $info['studios'] ?? null);
 
             $this->appendGenres($xml, $info['genres'] ?? $movieData['genre'] ?? null);
             $this->appendXml($xml, 'director', $info['director'] ?? $movieData['director'] ?? null);

@@ -516,9 +516,9 @@ class FetchTmdbIds implements ShouldQueue
      * so repeat calls after the first successful enrichment are cheap no-ops.
      *
      * $backfillEnrichment (on-demand Xtream path) also requires the related_tmdb
-     * and tmdb_certification sentinels, so a title whose provider already supplied
+     * and tmdb_certification/studios sentinels, so a title whose provider already supplied
      * tmdb_id/plot/cover - or one enriched before cast_list/clearlogo/related_tmdb/
-     * mpaa_rating existed - still gets those fields filled once.
+     * mpaa_rating/studios existed - still gets those fields filled once.
      */
     public function processVodChannel(TmdbService $tmdb, Channel $channel, bool $backfillEnrichment = false): void
     {
@@ -535,11 +535,12 @@ class FetchTmdbIds implements ShouldQueue
             $hasMetadata = array_key_exists('related_tmdb', $info);
         }
 
-        // The on-demand path also backfills the US certification once on titles
-        // enriched before it existed. mpaa_rating can't be the sentinel (providers
-        // send it, often blank), so the TMDB-only tmdb_certification key is.
+        // The on-demand path also backfills the US certification and studios once on
+        // titles enriched before they existed. mpaa_rating can't be the sentinel (providers
+        // send it, often blank), so the TMDB-only tmdb_certification/studios pair is.
         if ($hasMetadata && $backfillEnrichment) {
-            $hasMetadata = array_key_exists('tmdb_certification', $info);
+            $hasMetadata = array_key_exists('tmdb_certification', $info)
+                && array_key_exists('studios', $info);
         }
 
         // Determine the best existing TMDB ID we have
@@ -775,6 +776,11 @@ class FetchTmdbIds implements ShouldQueue
                 // Always set, even to null: TMDB's own certification doubles as the
                 // "certification checked" sentinel for the on-demand backfill gate.
                 $info['tmdb_certification'] = $details['certification'] ?? null;
+
+                // Populate production companies (id/name/logo) - written to the movie .nfo
+                // as <studio>. Always set, even to [], alongside tmdb_certification: the
+                // pair is the on-demand backfill sentinel.
+                $info['studios'] = $details['studios'] ?? [];
 
                 // Populate duration from TMDB runtime (in minutes)
                 if (! empty($details['runtime']) && (empty($info['duration_secs']) || ($info['duration_secs'] ?? 0) === 0)) {

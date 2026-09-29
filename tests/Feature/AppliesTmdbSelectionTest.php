@@ -39,6 +39,7 @@ it('persists tmdb vote_count when manually applying a movie match to a VOD', fun
             'vote_average' => 6.5,
             'vote_count' => 3,
             'certification' => 'R',
+            'studios' => [['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]],
             'logo_url' => 'https://image.tmdb.org/t/p/w500/matrix-logo.png',
             'cast_list' => [
                 ['id' => 6384, 'name' => 'Keanu Reeves', 'character' => 'Neo', 'photo' => null],
@@ -56,6 +57,7 @@ it('persists tmdb vote_count when manually applying a movie match to a VOD', fun
         ->and($vod->fresh()->info['mpaa_rating'])->toBe('R')
         // The generic age field is provider-owned: only filled when blank.
         ->and($vod->fresh()->info['age'])->toBe('16+')
+        ->and($vod->fresh()->info['studios'])->toEqual([['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]])
         ->and($vod->fresh()->info['clearlogo'])->toBe('https://image.tmdb.org/t/p/w500/matrix-logo.png')
         ->and($vod->fresh()->info['cast_list'])->toEqual([
             ['id' => 6384, 'name' => 'Keanu Reeves', 'character' => 'Neo', 'photo' => null],
