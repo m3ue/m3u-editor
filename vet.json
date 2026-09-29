@@ -206,8 +206,8 @@
             "hash": "tree-v2:4f7e7cd4c94bbf3d64edf7c0674de01cf142aabd315cc8e0f8bf77833c462e8a"
         },
         "laravel/framework": {
-            "version": "v13.24.0",
-            "hash": "tree-v2:2282dd9c92984f7f88f677f5bde992249d672b43d50bbb55606ad0eb71444c4b"
+            "version": "v13.34.0",
+            "hash": "tree-v2:dd40bf79f1cde41e1107ae364ffbcd14879ac783109e2849c644868450705bc5"
         },
         "laravel/horizon": {
             "version": "v5.47.2",
@@ -258,12 +258,12 @@
             "hash": "tree-v2:022dd2aeb418b65c3d1264b236609f8ddc4a35321757bf55c502eef40c01f416"
         },
         "league/flysystem": {
-            "version": "3.35.2",
-            "hash": "tree-v2:f364d905e3e117374de4d7f33457814de080d05236cc75826261f7afb9875962"
+            "version": "3.36.0",
+            "hash": "tree-v2:420e48fea76c143b41f4a8c1516031dc09ebb7e6367321af317e0a48fa998320"
         },
         "league/flysystem-local": {
-            "version": "3.31.0",
-            "hash": "tree-v2:afe53c4f0ec0d1d9df0408abc9a2956e5ec5c23ee7565f0fd6d897df65af2ed5"
+            "version": "3.35.3",
+            "hash": "tree-v2:7dba7c9670489313d3604b6a2801a152cf455b5e0d428bf721efda7ea37a5000"
         },
         "league/mime-type-detection": {
             "version": "1.17.0",
