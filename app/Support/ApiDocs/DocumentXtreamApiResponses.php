@@ -24,7 +24,7 @@ use Dedoc\Scramble\Support\Generator\Types\Type;
  * One URL returns a completely different shape per `action`, which Scramble can't infer
  * from XtreamApiController::handle(). Each shape is registered as a named schema built
  * from a representative example (captured from real responses), and the 200 response
- * is documented as any one of them.
+ * is documented as any one of them. Error responses are left to Scramble's inference.
  */
 class DocumentXtreamApiResponses implements DocumentTransformer
 {
@@ -47,23 +47,14 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             $actionSchemas[] = $document->components->addSchema($schemaName, Schema::fromType($type));
         }
 
+        // Only the 200 is replaced: Scramble infers the error responses (both the plain
+        // `{error}` shape and the `{api_version, error: {code, message}}` request-error
+        // shape) correctly from the controller.
         $operation->responses = collect($operation->responses)
-            ->reject(fn (mixed $response) => $response instanceof Response && in_array($response->code, [200, 400, 401, 404], true))
+            ->reject(fn (mixed $response) => $response instanceof Response && $response->code === 200)
             ->prepend(Response::make(200)
                 ->setDescription('The response shape depends on `action`.')
                 ->setContent('application/json', Schema::fromType((new AnyOf)->setItems($actionSchemas))))
-            ->push($this->errorResponse(400, 'Unknown `action`, or a parameter the action requires is missing.', [
-                'Invalid action parameter',
-                'series_id parameter is required for get_series_info action',
-                'vod_id parameter is required for get_vod_info action',
-                'stream_id parameter is required for get_short_epg action',
-            ]))
-            ->push($this->errorResponse(401, 'The username and password do not match a playlist.', ['Unauthorized']))
-            ->push($this->errorResponse(404, 'The requested item does not exist or is disabled.', [
-                'Series not found or not enabled',
-                'VOD not found',
-                'Channel not found',
-            ]))
             ->values()
             ->all();
     }
@@ -81,7 +72,8 @@ class DocumentXtreamApiResponses implements DocumentTransformer
 
     /**
      * Build a schema type mirroring an example value. Objects whose keys are all numeric
-     * (e.g. episodes grouped by season number) are documented as maps.
+     * (e.g. episodes grouped by season number) are documented as maps. Example values
+     * decide the types, so give every field a representative non-null, non-empty value.
      */
     private function typeFromExample(mixed $example): Type
     {
@@ -112,20 +104,6 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             is_null($example) => new NullType,
             default => new StringType,
         };
-    }
-
-    /**
-     * @param  array<int, string>  $messages
-     */
-    private function errorResponse(int $status, string $description, array $messages): Response
-    {
-        $body = (new ObjectType)
-            ->addProperty('error', (new StringType)->examples($messages))
-            ->setRequired(['error']);
-
-        return Response::make($status)
-            ->setDescription($description)
-            ->setContent('application/json', Schema::fromType($body));
     }
 
     /**
@@ -234,7 +212,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                         'last_modified' => '1640995200',
                         'rating' => '9.5',
                         'rating_5based' => 4.75,
-                        'backdrop_path' => [],
+                        'backdrop_path' => ['https://example.com/backdrops/breaking_bad.jpg'],
                         'tmdb' => '1396',
                         'tmdb_id' => 1396,
                         'youtube_trailer' => 'HhesaQXLuRY',
@@ -299,7 +277,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'overview' => '',
                             'air_date' => '2008-01-20',
                             'cover' => 'https://example.com/covers/breaking_bad_s01.jpg',
-                            'cover_tmdb' => null,
+                            'cover_tmdb' => 'https://example.com/covers/breaking_bad_s01_tmdb.jpg',
                             'season_number' => 1,
                             'cover_big' => 'https://example.com/covers/breaking_bad_s01.jpg',
                             'releaseDate' => '2008-01-20',

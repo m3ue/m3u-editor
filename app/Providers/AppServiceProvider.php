@@ -49,6 +49,7 @@ use App\Services\TagRenamePropagationService;
 use App\Settings\GeneralSettings;
 use App\Support\ApiDocs\DocumentDvrAuthenticationErrors;
 use App\Support\ApiDocs\DocumentXtreamApiResponses;
+use App\Support\ApiDocs\MergeSameStatusResponses;
 use App\Support\ApiDocs\PruneUnreferencedSchemas;
 use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\Events\LocaleChanged;
@@ -1061,7 +1062,8 @@ class AppServiceProvider extends ServiceProvider
             })
             ->withDocumentTransformers(DocumentXtreamApiResponses::class)
             ->withDocumentTransformers(PruneUnreferencedSchemas::class)
-            ->withOperationTransformers(DocumentDvrAuthenticationErrors::class);
+            ->withOperationTransformers(DocumentDvrAuthenticationErrors::class)
+            ->withOperationTransformers(MergeSameStatusResponses::class);
     }
 
     /**

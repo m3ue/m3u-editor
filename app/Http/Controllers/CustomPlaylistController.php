@@ -63,7 +63,7 @@ class CustomPlaylistController extends Controller
      * semantics. `channel_number` is only accepted when attaching a single channel, and is
      * applied synchronously since it requires the pivot row to exist immediately.
      *
-     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[], group: string|null, channel_number_applied: int|null}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
+     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[], group: string|null, channel_number_applied: int|null}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
     #[BodyParameter('ids', 'The channel IDs to attach.', required: true, type: 'int[]', example: [123, 456])]
     #[BodyParameter('group', 'The custom group tag to assign (created if it doesn\'t exist).', type: 'string', example: 'Sports')]
@@ -169,7 +169,7 @@ class CustomPlaylistController extends Controller
      * columns and the detach action's tag handling). The channel must already be attached to
      * the custom playlist.
      *
-     * @response JsonResponse<array{success: true, message: string, data: array{id: int, group: string|null, channel_number: int|null, sort: float|null}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
+     * @response JsonResponse<array{success: true, message: string, data: array{id: int, group: string|null, channel_number: int|null, sort: float|null}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
     #[BodyParameter('group', 'The custom group tag to assign, or null to remove the channel\'s group tag.', type: 'string', example: 'Sports')]
     #[BodyParameter('channel_number', 'The per-playlist channel number. Can be set to null to clear it.', type: 'int', example: 101)]
@@ -292,7 +292,7 @@ class CustomPlaylistController extends Controller
     /**
      * Rename or reorder a Custom Playlist group tag.
      *
-     * @response JsonResponse<array{success: true, message: string, data: CustomPlaylistGroupResource}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
+     * @response JsonResponse<array{success: true, message: string, data: CustomPlaylistGroupResource}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
     #[BodyParameter('name', 'The new group name.', type: 'string', example: 'Sports HD')]
     #[BodyParameter('order_column', 'The new sort position, matching the UI\'s drag-to-reorder.', type: 'int', example: 2)]

@@ -15,6 +15,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
 #[SchemaName('SeriesRuleMatch')]
 class SeriesRuleMatchResource extends JsonResource
 {
+    /**
+     * Needs `willRecord`, so `::collection()` and `::make()` can't build it; map the
+     * programmes into instances instead (see DispatcharrDvrController::previewSeriesRule()).
+     */
     public function __construct(EpgProgramme $programme, private readonly bool $willRecord)
     {
         parent::__construct($programme);

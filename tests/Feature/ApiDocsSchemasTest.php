@@ -78,6 +78,20 @@ it('documents the dvr token errors on dvr routes', function () {
         ->and($responses['401']['content']['application/json']['schema']['required'])->toBe(['detail']);
 });
 
+it('keeps hand-written responses that share a status with a shared response', function () {
+    $schema = generatedApiDocument()['paths']['/custom-playlist/{uuid}/groups/{id}']['patch']['responses']['422']['content']['application/json']['schema'];
+    $bodyKeys = collect($schema['anyOf'])->map(fn (array $body) => array_keys($body['properties']))->all();
+
+    expect($bodyKeys)->toContain(['success', 'message'], ['message', 'errors']);
+});
+
+it('keeps the inferred player_api error responses, including the request-error shape', function () {
+    $responses = generatedApiDocument()['paths']['/player_api.php']['get']['responses'];
+
+    expect(json_encode($responses['401']))->toContain('authentication_failed')
+        ->and(json_encode($responses['404']))->toContain('integration_not_found');
+});
+
 it('defaults the api version to the app version', function () {
     config(['scramble.info.version' => '']);
 
