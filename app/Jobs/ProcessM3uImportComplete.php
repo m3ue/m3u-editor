@@ -16,10 +16,12 @@ use App\Models\PlaylistSyncStatusLog;
 use App\Models\Series;
 use App\Models\SyncRun;
 use App\Models\User;
+use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -528,7 +530,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         Job::where('batch_no', $this->batchNo)->delete();
 
         // Only notify when a backoff cycle starts or runs out, not on every retry in between
-        if ($retry['count'] === 1 || $retry['exhausted']) {
+        if ($retry['notify']) {
             Notification::make()
                 ->danger()
                 ->title('Playlist Sync Invalidated')
@@ -544,12 +546,23 @@ class ProcessM3uImportComplete implements ShouldQueue
      * Walks the configured backoff ladder one step per invalidation. A step never waits
      * longer than the playlist's regular schedule would. Once the ladder is exhausted the
      * retry lands on the next regular scheduled sync, and if that one is invalidated too
-     * the ladder starts over.
+     * the ladder starts over. Playlists without auto sync are never retried by the
+     * scheduler, so nothing is scheduled for them.
      *
-     * @return array{count: int, after: ?Carbon, exhausted: bool, message: string}
+     * @return array{count: int, after: ?CarbonInterface, notify: bool, message: string}
      */
     private function nextInvalidationRetry(Playlist $playlist): array
     {
+        if (! $playlist->auto_sync) {
+            return [
+                'count' => 0,
+                'after' => null,
+                'notify' => true,
+                'message' => 'Automatic sync is disabled, sync manually to retry.',
+            ];
+        }
+
+        $dates = app(DateFormatService::class);
         $steps = $this->invalidateImportRetryBackoff->steps();
         $previousCount = (int) ($playlist->sync_retry_count ?? 0);
         $count = $previousCount > count($steps) ? 1 : $previousCount + 1;
@@ -560,13 +573,13 @@ class ProcessM3uImportComplete implements ShouldQueue
         if ($count > count($steps)) {
             $retryAt = $nextScheduled ?? $now->copy()->addMinutes((int) config('dev.failed_retry_cooldown_minutes', 15));
             $retryText = count($steps) > 0
-                ? "All {$previousCount} automatic retries were invalidated, waiting for the next scheduled sync at {$retryAt->format('Y-m-d H:i')}."
-                : "Waiting for the next scheduled sync at {$retryAt->format('Y-m-d H:i')}.";
+                ? "All {$previousCount} automatic retries were invalidated, waiting for the next scheduled sync at {$dates->format($retryAt)}."
+                : "Waiting for the next scheduled sync at {$dates->format($retryAt)}.";
 
             return [
                 'count' => $count,
                 'after' => $retryAt,
-                'exhausted' => true,
+                'notify' => true,
                 'message' => $retryText,
             ];
         }
@@ -579,8 +592,8 @@ class ProcessM3uImportComplete implements ShouldQueue
         return [
             'count' => $count,
             'after' => $retryAt,
-            'exhausted' => false,
-            'message' => 'Retry '.$count.' of '.count($steps)." scheduled for {$retryAt->format('Y-m-d H:i')}.",
+            'notify' => $count === 1,
+            'message' => 'Retry '.$count.' of '.count($steps)." scheduled for {$dates->format($retryAt)}.",
         ];
     }
 

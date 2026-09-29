@@ -100,8 +100,8 @@ class RefreshPlaylist extends Command
                         return;
                     }
 
-                    // Clear the gate (keeping the attempt count) so a non-invalidation failure on
-                    // this attempt falls back to the regular failed-retry cooldown below.
+                    // Clear the gate now (ProcessM3uImport clears it again when it starts) so this
+                    // playlist isn't re-dispatched on every tick while the retry waits in the queue.
                     $playlist->update(['sync_retry_after' => null]);
 
                     $count++;

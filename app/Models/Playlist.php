@@ -115,7 +115,7 @@ class Playlist extends Model
      */
     public function syncCronExpression(): CronExpression
     {
-        return new CronExpression($this->sync_interval === '24hr' ? '0 0 * * *' : $this->sync_interval);
+        return new CronExpression(self::normalizeSyncInterval($this->sync_interval));
     }
 
     /**
@@ -124,13 +124,31 @@ class Playlist extends Model
      */
     public function nextScheduledSyncAfter(CarbonInterface $from): ?CarbonInterface
     {
-        try {
-            return $from->copy()->setTimestamp(
-                $this->syncCronExpression()->getNextRunDate($from->toDateTimeImmutable())->getTimestamp()
-            );
-        } catch (\Throwable) {
+        return self::nextSyncForInterval($this->sync_interval, $from);
+    }
+
+    /**
+     * Next run of a sync interval after the given moment (defaults to now), or null
+     * when the interval is missing or not a valid cron expression. Static so forms can
+     * preview an unsaved interval.
+     */
+    public static function nextSyncForInterval(?string $interval, ?CarbonInterface $from = null): ?CarbonInterface
+    {
+        $from ??= now();
+        $expression = self::normalizeSyncInterval($interval);
+
+        if ($expression === '' || ! CronExpression::isValidExpression($expression)) {
             return null;
         }
+
+        return $from->copy()->setTimestamp(
+            (new CronExpression($expression))->getNextRunDate($from->toDateTimeImmutable())->getTimestamp()
+        );
+    }
+
+    private static function normalizeSyncInterval(?string $interval): string
+    {
+        return $interval === '24hr' ? '0 0 * * *' : (string) $interval;
     }
 
     /**

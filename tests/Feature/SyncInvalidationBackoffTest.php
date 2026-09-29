@@ -20,6 +20,7 @@ use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Filament\Notifications\DatabaseNotification;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Queue;
@@ -151,6 +152,19 @@ describe('ProcessM3uImportComplete retry ladder', function () {
         NotificationFacade::assertSentToTimes($this->user, DatabaseNotification::class, 1);
     });
 
+    it('schedules nothing when auto sync is disabled', function () {
+        $this->playlist->update(['auto_sync' => false, 'sync_retry_count' => 2]);
+
+        seedBackoffInvalidatingBatch($this->playlist, $this->user, 'batch-manual');
+        runBackoffImportComplete($this->playlist, $this->user, 'batch-manual');
+
+        $playlist = $this->playlist->fresh();
+        expect($playlist->sync_retry_count)->toBe(0)
+            ->and($playlist->sync_retry_after)->toBeNull()
+            ->and($playlist->errors)->toContain('Automatic sync is disabled, sync manually to retry.');
+        NotificationFacade::assertSentToTimes($this->user, DatabaseNotification::class, 1);
+    });
+
     it('resets the ladder after a successful sync', function () {
         config(['dev.invalidate_import' => false]);
         $this->playlist->update([
@@ -212,5 +226,58 @@ describe('RefreshPlaylist scheduler gate', function () {
 
         $this->artisan('app:refresh-playlist')->assertSuccessful();
         Queue::assertPushed(ProcessM3uImport::class);
+    });
+});
+
+describe('ProcessM3uImport start', function () {
+    beforeEach(function () {
+        $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+        touch($this->tempJobsDb);
+        config(['database.connections.jobs.database' => $this->tempJobsDb]);
+        DB::purge('jobs');
+        (require database_path('migrations/2025_02_13_215803_create_jobs_table.php'))->up();
+
+        $this->tempM3uPath = sys_get_temp_dir().'/playlist_import_'.uniqid('', true).'.m3u';
+        file_put_contents($this->tempM3uPath, implode("\n", [
+            '#EXTM3U',
+            '#EXTINF:-1 tvg-id="demo-1" tvg-name="Demo One" group-title="News",Demo One',
+            'http://example.test/stream/1',
+        ]));
+    });
+
+    afterEach(function () {
+        DB::purge('jobs');
+        config(['database.connections.jobs.database' => database_path('jobs.sqlite')]);
+        @unlink($this->tempJobsDb);
+        @unlink($this->tempM3uPath);
+    });
+
+    it('clears a pending invalidation retry but keeps the attempt count', function () {
+        $this->playlist->update([
+            'status' => Status::Failed,
+            'url' => $this->tempM3uPath,
+            'xtream' => false,
+            'import_prefs' => [],
+            'sync_retry_count' => 2,
+            'sync_retry_after' => now()->addMinutes(30),
+        ]);
+
+        Bus::fake();
+        (new ProcessM3uImport($this->playlist->fresh(), force: true, isNew: false))->handle();
+
+        $playlist = $this->playlist->fresh();
+        expect($playlist->sync_retry_after)->toBeNull()
+            ->and($playlist->sync_retry_count)->toBe(2);
+    });
+});
+
+describe('Playlist::nextSyncForInterval', function () {
+    it('treats the legacy 24hr interval as midnight', function () {
+        expect(Playlist::nextSyncForInterval('24hr')->toDateTimeString())->toBe('2026-09-30 00:00:00');
+    });
+
+    it('returns null for a missing or invalid interval', function () {
+        expect(Playlist::nextSyncForInterval(null))->toBeNull()
+            ->and(Playlist::nextSyncForInterval('not a cron'))->toBeNull();
     });
 });

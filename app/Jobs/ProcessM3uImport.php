@@ -253,11 +253,13 @@ class ProcessM3uImport implements ShouldQueue
             }
         }
 
-        // Update the playlist status to processing
+        // Update the playlist status to processing. Any pending invalidation retry is
+        // superseded by this sync (the attempt count is kept for the backoff ladder).
         $this->playlist->update([
             'status' => Status::Processing,
             'synced' => now(),
             'errors' => null,
+            'sync_retry_after' => null,
             'progress' => 0,
             'vod_progress' => 0,
             'series_progress' => 0,

@@ -61,7 +61,6 @@ use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
-use Cron\CronExpression;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Exception;
 use Filament\Actions\Action;
@@ -368,11 +367,9 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->label(__('Next Sync'))
                     ->toggleable()
                     ->formatStateUsing(function ($state, $record) {
-                        if ($record->auto_sync && $record->sync_interval && CronExpression::isValidExpression($record->sync_interval)) {
-                            return (new CronExpression($record->sync_interval))->getNextRunDate()->format(app(DateFormatService::class)->getFormat());
-                        }
+                        $nextSync = $record->auto_sync ? $record->nextScheduledSyncAfter(now()) : null;
 
-                        return 'N/A';
+                        return $nextSync ? app(DateFormatService::class)->format($nextSync) : 'N/A';
                     })
                     ->sortable(),
                 TextColumn::make('sync_time')
@@ -1602,8 +1599,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->hintAction(
                             CronHelperAction::make(name: 'playlist-sync-cron', cronField: 'sync_interval')
                         )
-                        ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                            ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
+                        ->helperText(fn ($get) => ($nextSync = Playlist::nextSyncForInterval($get('sync_interval')))
+                            ? 'Next scheduled sync: '.app(DateFormatService::class)->format($nextSync)
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 3 * * *".')
                         ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
 
