@@ -871,14 +871,15 @@ class PlaylistGenerateController extends Controller
         // Optional flat channel number ordering, ahead of any group ordering. Channels
         // without a number (NULL or 0, matching the output's "no number" check) go last
         // on every driver, then fall through to the standard ordering below. A custom
-        // playlist's pivot number wins when set, as it does for tvg-chno.
+        // playlist's pivot number wins when set, as it does for tvg-chno. 0 is folded
+        // into NULL so unnumbered channels tie here regardless of driver NULL ordering.
         if ($playlist->sort_by_channel_number) {
             if ($isCustomContext) {
-                $query->orderByRaw('CASE WHEN COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), channels.channel, 0) = 0 THEN 1 ELSE 0 END')
-                    ->orderByRaw('COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), channels.channel)');
+                $query->orderByRaw('CASE WHEN COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), NULLIF(channels.channel, 0)) IS NULL THEN 1 ELSE 0 END')
+                    ->orderByRaw('COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), NULLIF(channels.channel, 0))');
             } else {
-                $query->orderByRaw('CASE WHEN COALESCE(channels.channel, 0) = 0 THEN 1 ELSE 0 END')
-                    ->orderBy('channels.channel');
+                $query->orderByRaw('CASE WHEN NULLIF(channels.channel, 0) IS NULL THEN 1 ELSE 0 END')
+                    ->orderByRaw('NULLIF(channels.channel, 0)');
             }
         }
 
