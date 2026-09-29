@@ -9,6 +9,8 @@ use App\Enums\Status;
 use App\Jobs\UpdateXtreamStats;
 use App\Settings\GeneralSettings;
 use App\Traits\ShortUrlTrait;
+use Carbon\CarbonInterface;
+use Cron\CronExpression;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -98,12 +100,37 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
+        'sync_retry_count' => 'integer',
+        'sync_retry_after' => 'datetime',
         'share_cache_across_playlists' => 'boolean',
     ];
 
     public function getFolderPathAttribute(): string
     {
         return "playlist/{$this->uuid}";
+    }
+
+    /**
+     * The playlist's sync schedule as a cron expression ("24hr" is stored as a legacy alias).
+     */
+    public function syncCronExpression(): CronExpression
+    {
+        return new CronExpression($this->sync_interval === '24hr' ? '0 0 * * *' : $this->sync_interval);
+    }
+
+    /**
+     * Next time a regular scheduled sync would run after the given moment, or null
+     * when the stored interval is missing or not a valid cron expression.
+     */
+    public function nextScheduledSyncAfter(CarbonInterface $from): ?CarbonInterface
+    {
+        try {
+            return $from->copy()->setTimestamp(
+                $this->syncCronExpression()->getNextRunDate($from->toDateTimeImmutable())->getTimestamp()
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

@@ -24,6 +24,7 @@ return [
     'invalidate_import_threshold' => env('INVALIDATE_IMPORT_THRESHOLD', null), // Threshold for invalidating import
     'invalidate_import_series_threshold' => env('INVALIDATE_IMPORT_SERIES_THRESHOLD', null), // Threshold for invalidating import based on series removal count
     'invalidate_import_group_threshold' => env('INVALIDATE_IMPORT_GROUP_THRESHOLD', null), // Threshold for invalidating import based on group/category removal count
+    'invalidate_import_retry_backoff' => env('INVALIDATE_IMPORT_RETRY_BACKOFF', null), // Retry backoff after an invalidated sync: aggressive, balanced, conservative or none
     'default_epg_days' => env('DEFAULT_EPG_DAYS', 7), // Default number of days to fetch for EPG generation
     'default_epg_catchup_days' => env('DEFAULT_EPG_CATCHUP_DAYS', 7), // Fallback tv_archive_duration (days) reported when catchup is enabled but no duration is known; 0 disables the fallback (reports no retention)
     'show_wan_details' => env('SHOW_WAN_DETAILS', null), // Show WAN details in admin panel
