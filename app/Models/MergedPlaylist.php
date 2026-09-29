@@ -38,6 +38,7 @@ class MergedPlaylist extends Model
         'include_series_in_m3u' => 'boolean',
         'include_networks_in_m3u' => 'boolean',
         'include_vod_in_m3u' => 'boolean',
+        'sort_by_channel_number' => 'boolean',
         'custom_headers' => 'array',
         'strict_live_ts' => 'boolean',
         'use_sticky_session' => 'boolean',

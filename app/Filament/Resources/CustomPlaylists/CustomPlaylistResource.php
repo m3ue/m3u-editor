@@ -399,6 +399,16 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                 ->type('number')
                                 ->hidden(fn (Get $get): bool => ! $get('auto_channel_increment'))
                                 ->required(),
+                            Toggle::make('sort_by_channel_number')
+                                ->label(__('Sort by channel number'))
+                                ->columnSpan(1)
+                                ->inline(false)
+                                ->default(false)
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Channels without a number are output last, in the standard group order.')
+                                )
+                                ->helperText(__('Output channels ordered by channel number instead of by group.')),
                         ]),
                 ]),
             Section::make(__('EPG Output'))

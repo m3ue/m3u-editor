@@ -61,6 +61,7 @@ class Playlist extends Model
         'sync_logs_enabled' => 'boolean',
         'include_series_in_m3u' => 'boolean',
         'include_vod_in_m3u' => 'boolean',
+        'sort_by_channel_number' => 'boolean',
         'auto_fetch_series_metadata' => 'boolean',
         'auto_sync_series_stream_files' => 'boolean',
         'auto_merge_channels_enabled' => 'boolean',

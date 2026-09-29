@@ -867,6 +867,21 @@ class PlaylistGenerateController extends Controller
         // rows for channels that belong to more than one tag in this playlist.
         $isCustomContext = $playlist instanceof CustomPlaylist
             || ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
+
+        // Optional flat channel number ordering, ahead of any group ordering. Channels
+        // without a number (NULL or 0, matching the output's "no number" check) go last
+        // on every driver, then fall through to the standard ordering below. A custom
+        // playlist's pivot number wins when set, as it does for tvg-chno.
+        if ($playlist->sort_by_channel_number) {
+            if ($isCustomContext) {
+                $query->orderByRaw('CASE WHEN COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), channels.channel, 0) = 0 THEN 1 ELSE 0 END')
+                    ->orderByRaw('COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), channels.channel)');
+            } else {
+                $query->orderByRaw('CASE WHEN COALESCE(channels.channel, 0) = 0 THEN 1 ELSE 0 END')
+                    ->orderBy('channels.channel');
+            }
+        }
+
         if ($isCustomContext) {
             $orderSubquery = '(SELECT MIN(t.order_column) FROM taggables tb INNER JOIN tags t ON t.id = tb.tag_id WHERE tb.taggable_id = channels.id AND tb.taggable_type = ? AND t.type = ?)';
 

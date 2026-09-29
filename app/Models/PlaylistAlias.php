@@ -571,6 +571,13 @@ class PlaylistAlias extends Model
         return $effectivePlaylist ? (bool) $effectivePlaylist->force_channel_numbering : false;
     }
 
+    public function getSortByChannelNumberAttribute(): bool
+    {
+        $effectivePlaylist = $this->getEffectivePlaylist();
+
+        return $effectivePlaylist ? (bool) $effectivePlaylist->sort_by_channel_number : false;
+    }
+
     public function getDummyEpgAttribute(): bool
     {
         $effectivePlaylist = $this->getEffectivePlaylist();
