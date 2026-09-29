@@ -9,8 +9,10 @@ use App\Models\Playlist;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use Carbon\Carbon;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 
+#[Group('Proxy', 'm3u-proxy status and active streams. Only available when the proxy integration is enabled.', weight: 70)]
 class ProxyController extends Controller
 {
     /**

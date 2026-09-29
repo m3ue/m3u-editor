@@ -56,6 +56,7 @@ use App\Settings\GeneralSettings;
 use App\Support\SeriesKey;
 use App\Support\TmdbRating;
 use Carbon\Carbon;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -71,6 +72,7 @@ use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
+#[ApiGroup('Xtream API', 'Xtream Codes compatible player API, for IPTV players that speak the Xtream protocol.', weight: 90)]
 class XtreamApiController extends Controller
 {
     private const REQUEST_ACTIONS = [
@@ -147,7 +149,8 @@ class XtreamApiController extends Controller
      * Returns a JSON array of series objects. Only enabled series are included.
      * Supports optional category filtering via `category_id` parameter.
      * Each object contains: `num`, `name`, `series_id`, `cover`, `plot`, `cast`, `director`, `genre`, `releaseDate`,
-     * `last_modified`, `rating`, `rating_5based`, `backdrop_path`, `youtube_trailer`, `episode_run_time`, `category_id`.
+     * `last_modified`, `rating`, `rating_5based`, `backdrop_path`, `tmdb`, `tmdb_id`, `youtube_trailer`, `episode_run_time`,
+     * `category_id`, `category_ids`.
      *
      * ### get_live_categories
      * Returns a JSON array of live stream categories/groups. Only groups with enabled, non-VOD channels are included.
@@ -199,10 +202,7 @@ class XtreamApiController extends Controller
      * ### get_user_info
      * ### get_account_info
      * ### get_server_info
-     * Returns account and server information including user details and allowed output formats.
-     * This provides the same user information as the panel.
-     * Contains: `username`, `password`, `message`, `auth`, `status`, `exp_date`, `is_trial`,
-     * `active_cons`, `created_at`, `max_connections`, `allowed_output_formats`.
+     * Aliases of `panel`: return the same `user_info`, `server_info` and `m3u_editor` objects.
      *
      * ### create_dvr_series_rule
      * Creates a Series-type DVR recording rule for a show title. Query parameters:
@@ -263,264 +263,23 @@ class XtreamApiController extends Controller
      * `recent_episodes` (up to MAX_RECENT_EPISODES airings, upcoming first soonest, then
      * most-recent-past). Entry shape for `airing_now[]` and `recent_episodes[]` is identical.
      *
-     *
      * @param  string  $uuid  The UUID of the playlist (required path parameter)
      * @param  Request  $request  The HTTP request containing query parameters:
      *                            - username (string, required): User's Xtream API username
      *                            - password (string, required): User's Xtream API password
      *                            - action (string, optional): Defaults to 'panel'. Determines the API action
-     *                            - category_id (string, optional): Filter results by category ID (required for get_series, optional for get_live_streams and get_vod_streams)
+     *                            - category_id (string, optional): Filter results by category ID (optional for get_live_streams, get_vod_streams and get_series)
      *                            - series_id (int, optional): Series ID (required for get_series_info action)
      *                            - vod_id (int, optional): VOD/Movie ID (required for get_vod_info action)
      *                            - stream_id (int, optional): Channel/Stream ID (required for get_short_epg and get_simple_data_table actions)
      *                            - limit (int, optional): Number of EPG programmes to return for get_short_epg (default=4)
-     *
-     * @response 200 scenario="Panel action response" {
-     *   "user_info": {
-     *     "username": "test_user",
-     *     "password": "test_pass",
-     *     "message": "",
-     *     "auth": 1,
-     *     "status": "Active",
-     *     "exp_date": "1767225600",
-     *     "is_trial": "0",
-     *     "active_cons": 1,
-     *     "created_at": "1640995200",
-     *     "max_connections": "2",
-     *     "allowed_output_formats": ["m3u8", "ts"]
-     *   },
-     *   "server_info": {
-     *     "url": "https://example.com",
-     *     "port": "443",
-     *     "https_port": "443",
-     *     "server_protocol": "https",
-     *     "timezone": "UTC",
-     *     "server_software": "M3U Proxy Editor Xtream API",
-     *     "timestamp_now": "1719187200",
-     *     "time_now": "2025-06-20 12:00:00"
-     *   }
-     * }
-     * @response 200 scenario="Live streams response" [
-     *   {
-     *     "num": 1,
-     *     "name": "CNN HD",
-     *     "stream_type": "live",
-     *     "stream_id": "12345",
-     *     "stream_icon": "https://example.com/logos/cnn.png",
-     *     "epg_channel_id": "cnn.us",
-     *     "added": "1640995200",
-     *     "category_id": "1",
-     *     "category_ids": [1],
-     *     "tv_archive": 1,
-     *     "tv_archive_duration": 7,
-     *     "custom_sid": "cnn-hd",
-     *     "thumbnail": "https://example.com/logos/cnn.png",
-     *     "direct_source": ""
-     *   }
-     * ]
-     * @response 200 scenario="VOD streams response" [
-     *   {
-     *     "num": 1,
-     *     "name": "The Matrix",
-     *     "title": "The Matrix",
-     *     "year": "1999",
-     *     "stream_type": "movie",
-     *     "stream_id": "67890",
-     *     "stream_icon": "https://example.com/covers/matrix.jpg",
-     *     "rating": "8.7",
-     *     "rating_5based": 4.35,
-     *     "added": "1640995200",
-     *     "category_id": "3",
-     *     "category_ids": [3],
-     *     "tmdb": "603",
-     *     "tmdb_id": 603,
-     *     "container_extension": "mkv",
-     *     "custom_sid": "the-matrix",
-     *     "direct_source": ""
-     *   }
-     * ]
-     * @response 200 scenario="Series response" [
-     *   {
-     *     "num": 1,
-     *     "name": "Breaking Bad",
-     *     "series_id": 101,
-     *     "cover": "https://example.com/covers/breaking_bad.jpg",
-     *     "plot": "A high school chemistry teacher turned meth cook...",
-     *     "cast": "Bryan Cranston, Aaron Paul",
-     *     "director": "Vince Gilligan",
-     *     "genre": "Crime, Drama",
-     *     "releaseDate": "2008-01-20",
-     *     "last_modified": "1640995200",
-     *     "rating": "9.5",
-     *     "rating_5based": 4.75,
-     *     "backdrop_path": [],
-     *     "youtube_trailer": "HhesaQXLuRY",
-     *     "episode_run_time": "47",
-     *     "category_id": "2"
-     *   }
-     * ]
-     * @response 200 scenario="Series info response" {
-     *   "info": {
-     *     "name": "Breaking Bad",
-     *     "cover": "https://example.com/covers/breaking_bad.jpg",
-     *     "plot": "A high school chemistry teacher turned meth cook...",
-     *     "cast": "Bryan Cranston, Aaron Paul",
-     *     "director": "Vince Gilligan",
-     *     "genre": "Crime, Drama",
-     *     "releaseDate": "2008-01-20",
-     *     "last_modified": "1640995200",
-     *     "rating": "9.5",
-     *     "rating_5based": 4.75,
-     *     "backdrop_path": [],
-     *     "youtube_trailer": "HhesaQXLuRY",
-     *     "episode_run_time": "47",
-     *     "category_id": "2"
-     *   },
-     *   "episodes": {
-     *     "1": [
-     *       {
-     *         "id": "1001",
-     *         "episode_num": 1,
-     *         "title": "Pilot",
-     *         "container_extension": "mp4",
-     *         "info": {
-     *             "release_date" => "2024-06-29"
-     *             "plot" => "Kafka's final fate is determined as the monster within him tries to take control."
-     *             "duration_secs" => 1440
-     *             "duration" => "00:24:00"
-     *             "movie_image" => "http://23.227.147.172:80/images/e11236b82442615bc6e44d3555dce478.jpg"
-     *             "bitrate" => 0
-     *             "rating" => "7.3"
-     *             "season" => "1"
-     *             "tmdb_id" => "5188924"
-     *             "cover_big" => "http://23.227.147.172:80/images/e11236b82442615bc6e44d3555dce478.jpg"
-     *         },
-     *         "added": "1640995200",
-     *         "season": 1,
-     *         "stream_id": "1001",
-     *         "direct_source": ""
-     *       }
-     *     ]
-     *   },
-     *   "seasons": {
-     *     "1": []
-     *   }
-     * }
-     * @response 200 scenario="Live categories response" [
-     *   {
-     *     "category_id": "1",
-     *     "category_name": "News",
-     *     "parent_id": 0
-     *   },
-     *   {
-     *     "category_id": "2",
-     *     "category_name": "Sports",
-     *     "parent_id": 0
-     *   }
-     * ]
-     * @response 200 scenario="VOD categories response" [
-     *   {
-     *     "category_id": "1",
-     *     "category_name": "Action Movies",
-     *     "parent_id": 0
-     *   },
-     *   {
-     *     "category_id": "2",
-     *     "category_name": "Comedy Movies",
-     *     "parent_id": 0
-     *   }
-     * ]
-     * @response 200 scenario="Series categories response" [
-     *   {
-     *     "category_id": "1",
-     *     "category_name": "Drama Series",
-     *     "parent_id": 0
-     *   },
-     *   {
-     *     "category_id": "2",
-     *     "category_name": "Comedy Series",
-     *     "parent_id": 0
-     *   }
-     * ]
-     * @response 200 scenario="Short EPG response" {
-     *   "epg_listings": [
-     *     {
-     *       "id": "8037716",
-     *       "epg_id": "8",
-     *       "title": "Morning News",
-     *       "lang": "en",
-     *       "start": "2025-08-14 07:00:00",
-     *       "end": "2025-08-14 07:15:00",
-     *       "description": "Latest morning news and updates",
-     *       "channel_id": "cnn.us",
-     *       "start_timestamp": "1755154800",
-     *       "stop_timestamp": "1755155700",
-     *       "now_playing": 1,
-     *       "has_archive": 0
-     *     },
-     *     {
-     *       "id": "8037717",
-     *       "epg_id": "8",
-     *       "title": "Business Report",
-     *       "lang": "en",
-     *       "start": "2025-08-14 07:15:00",
-     *       "end": "2025-08-14 07:30:00",
-     *       "description": "Financial market updates",
-     *       "channel_id": "cnn.us",
-     *       "start_timestamp": "1755155700",
-     *       "stop_timestamp": "1755156600",
-     *       "now_playing": 0,
-     *       "has_archive": 0
-     *     }
-     *   ]
-     * }
-     * @response 200 scenario="Simple date table response" {
-     *   "epg_listings": [
-     *     {
-     *       "id": "8037716",
-     *       "epg_id": "8",
-     *       "title": "Morning News",
-     *       "lang": "en",
-     *       "start": "2025-08-14 07:00:00",
-     *       "end": "2025-08-14 07:15:00",
-     *       "description": "Latest morning news and updates",
-     *       "channel_id": "cnn.us",
-     *       "start_timestamp": "1755154800",
-     *       "stop_timestamp": "1755155700",
-     *       "now_playing": 1,
-     *       "has_archive": 0
-     *     }
-     *   ]
-     * }
-     * @response 200 scenario="Account info response" {
-     *   "username": "test_user",
-     *   "password": "test_pass",
-     *   "message": "",
-     *   "auth": 1,
-     *   "status": "Active",
-     *   "exp_date": "1767225600",
-     *   "is_trial": "0",
-     *   "active_cons": 1,
-     *   "created_at": "1640995200",
-     *   "max_connections": "2",
-     *   "allowed_output_formats": ["m3u8", "ts"]
-     * }
-     * @response 400 scenario="Bad Request" {"error": "Invalid action"}
-     * @response 400 scenario="Missing category_id for get_series" {"error": "category_id parameter is required for get_series action"}
-     * @response 400 scenario="Missing series_id for get_series_info" {"error": "series_id parameter is required for get_series_info action"}
-     * @response 400 scenario="Missing stream_id for get_short_epg" {"error": "stream_id parameter is required for get_short_epg action"}
-     * @response 400 scenario="Missing stream_id for get_simple_data_table" {"error": "stream_id parameter is required for get_simple_data_table action"}
-     * @response 401 scenario="Unauthorized - Missing Credentials" {"error": "Unauthorized - Missing credentials"}
-     * @response 401 scenario="Unauthorized - Invalid Credentials" {"error": "Unauthorized"}
-     * @response 404 scenario="Not Found (e.g., playlist not found)" {"error": "Playlist not found"}
-     * @response 404 scenario="Series not found" {"error": "Series not found or not enabled"}
      *
      * @unauthenticated
      */
     #[QueryParameter('username', 'Your m3u editor login username (default is "admin").', required: true, type: 'string', example: 'admin')]
     #[QueryParameter('password', 'The unique identifier (UUID) of the playlist you want to access via the Xtream API.', required: true, type: 'string', example: '00000000-0000-0000-0000-000000000000')]
     #[QueryParameter('action', 'Determines the API action to perform. Defaults to "panel" when omitted. Common values: panel, get_live_streams, get_vod_streams, get_series, get_live_categories, get_vod_categories, get_series_categories, get_series_info, get_vod_info, get_short_epg, get_simple_data_table.', required: false, type: 'string', default: 'panel', example: 'get_live_streams')]
-    #[QueryParameter('category_id', 'Filter results by category ID. Required for get_series; optional for get_live_streams and get_vod_streams.', required: false, type: 'string', example: '1')]
+    #[QueryParameter('category_id', 'Filter results by category ID. Optional for get_live_streams, get_vod_streams and get_series.', required: false, type: 'string', example: '1')]
     #[QueryParameter('series_id', 'Series ID. Required for the get_series_info action.', required: false, type: 'integer', example: 101)]
     #[QueryParameter('vod_id', 'VOD/Movie ID. Required for the get_vod_info action.', required: false, type: 'integer', example: 202)]
     #[QueryParameter('stream_id', 'Channel/Stream ID. Required for the get_short_epg and get_simple_data_table actions.', required: false, type: 'integer', example: 303)]

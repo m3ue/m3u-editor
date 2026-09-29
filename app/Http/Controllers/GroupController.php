@@ -3,15 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Facades\PlaylistFacade;
+use App\Http\Resources\Group\GroupResource;
+use App\Http\Resources\Group\GroupSummaryResource;
 use App\Models\Group;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
+use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
-/**
- * @tags Groups
- */
+#[ApiGroup('Groups', 'Create, edit, reorder and delete channel groups.', weight: 30)]
 class GroupController extends Controller
 {
     /**
@@ -19,36 +21,9 @@ class GroupController extends Controller
      *
      * Retrieve a list of channel groups for the authenticated user.
      * Supports filtering by playlist and includes channel counts.
-     *
-     *
-     * @queryParam playlist_uuid string Filter groups by playlist UUID. Example: abc-123-def
-     * @queryParam with_channels boolean Include channel count statistics. Defaults to true. Example: true
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "data": [
-     *     {
-     *       "id": 1,
-     *       "name": "Sports",
-     *       "sort_order": 1,
-     *       "type": "live",
-     *       "total_channels": 50,
-     *       "enabled_channels": 45,
-     *       "playlist": {
-     *         "id": 1,
-     *         "name": "My Provider",
-     *         "uuid": "abc-123-def"
-     *       }
-     *     }
-     *   ],
-     *   "meta": {
-     *     "total": 25
-     *   }
-     * }
-     * @response 401 {
-     *   "message": "Unauthenticated."
-     * }
      */
+    #[QueryParameter('playlist_uuid', 'Filter groups by playlist UUID.', type: 'string', example: 'abc-123-def')]
+    #[QueryParameter('with_channels', 'Include channel count statistics. Defaults to true.', type: 'bool', example: true)]
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -85,33 +60,9 @@ class GroupController extends Controller
         // Get groups ordered by sort_order
         $groups = $query->orderBy('sort_order')->orderBy('name')->get();
 
-        $data = $groups->map(function ($group) use ($withChannels) {
-            $result = [
-                'id' => $group->id,
-                'name' => $group->name,
-                'sort_order' => $group->sort_order,
-                'type' => $group->type ?? 'live',
-            ];
-
-            if ($withChannels) {
-                $result['total_channels'] = $group->channels_count ?? 0;
-                $result['enabled_channels'] = $group->enabled_channels_count ?? 0;
-            }
-
-            if ($group->playlist) {
-                $result['playlist'] = [
-                    'id' => $group->playlist->id,
-                    'name' => $group->playlist->name,
-                    'uuid' => $group->playlist->uuid,
-                ];
-            }
-
-            return $result;
-        });
-
         return response()->json([
             'success' => true,
-            'data' => $data,
+            'data' => GroupSummaryResource::collection($groups),
             'meta' => [
                 'total' => $groups->count(),
             ],
@@ -122,34 +73,6 @@ class GroupController extends Controller
      * Get a single group
      *
      * Retrieve detailed information about a specific group by ID.
-     *
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "data": {
-     *     "id": 1,
-     *     "name": "Sports",
-     *     "sort_order": 1,
-     *     "type": "live",
-     *     "total_channels": 50,
-     *     "enabled_channels": 45,
-     *     "live_channels": 45,
-     *     "vod_channels": 5,
-     *     "playlist": {
-     *       "id": 1,
-     *       "name": "My Provider",
-     *       "uuid": "abc-123-def"
-     *     }
-     *   }
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Group not found"
-     * }
-     * @response 403 {
-     *   "success": false,
-     *   "message": "You do not have permission to access this group"
-     * }
      */
     public function show(Request $request, int $id): JsonResponse
     {
@@ -175,7 +98,7 @@ class GroupController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $this->serializeGroup($group),
+            'data' => new GroupResource($group),
         ]);
     }
 
@@ -230,7 +153,7 @@ class GroupController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Group created successfully',
-            'data' => $this->serializeGroup($group),
+            'data' => new GroupResource($group),
         ], 201);
     }
 
@@ -293,7 +216,7 @@ class GroupController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Group updated successfully',
-            'data' => $this->serializeGroup($group),
+            'data' => new GroupResource($group),
         ]);
     }
 
@@ -523,28 +446,5 @@ class GroupController extends Controller
     {
         return $group->load('playlist')
             ->loadCount($this->groupCountRelations());
-    }
-
-    private function serializeGroup(Group $group): array
-    {
-        $data = [
-            'id' => $group->id,
-            'name' => $group->name_internal ?? $group->name,
-            'sort_order' => $group->sort_order,
-            'type' => $group->type ?? 'live',
-            'enabled' => (bool) $group->enabled,
-            'custom' => (bool) $group->custom,
-            'total_channels' => $group->channels_count ?? 0,
-            'enabled_channels' => $group->enabled_channels_count ?? 0,
-            'live_channels' => $group->live_channels_count ?? 0,
-            'vod_channels' => $group->vod_channels_count ?? 0,
-            'playlist' => $group->playlist ? [
-                'id' => $group->playlist->id,
-                'name' => $group->playlist->name,
-                'uuid' => $group->playlist->uuid,
-            ] : null,
-        ];
-
-        return $data;
     }
 }
