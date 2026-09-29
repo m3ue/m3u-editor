@@ -210,7 +210,7 @@ class DispatcharrController extends Controller
      * @unauthenticated
      */
     #[ApiResponse(200, 'The stream, when the playlist has the proxy enabled.', mediaType: 'video/mp2t', type: 'string', format: 'binary')]
-    #[ApiResponse(302, 'Redirect to the channel stream URL, when the playlist does not use the proxy.')]
+    #[ApiResponse(302, 'Redirect to the channel stream URL, when the playlist does not use the proxy.', mediaType: 'text/html')]
     public function proxyStream(Request $request, string $uuid): RedirectResponse|JsonResponse
     {
         $channel = Channel::where('uuid', $uuid)->first();
