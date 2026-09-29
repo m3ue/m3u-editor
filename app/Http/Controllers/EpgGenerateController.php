@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChannelLogoType;
-use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Models\AedProfile;
 use App\Models\CustomPlaylist;
@@ -13,6 +12,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\AedExtractorService;
+use App\Services\ChannelNumberSequence;
 use App\Services\EpgCacheService;
 use App\Services\EpisodeNumberNormalizer;
 use App\Services\NetworkEpgService;
@@ -136,7 +136,7 @@ class EpgGenerateController extends Controller
             ->all();
 
         // Get playlist settings
-        $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
+        $numberSequence = new ChannelNumberSequence($playlist);
         $idChannelBy = $playlist->id_channel_by;
         $dummyEpgEnabled = $playlist->dummy_epg;
         $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120); // Default to 120 minutes if not set
@@ -166,9 +166,7 @@ class EpgGenerateController extends Controller
             $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
                 ? (int) $channel->pivot->channel_number
                 : $channel->channel;
-            if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
-                $channelNo = ++$channelNumber;
-            }
+            $channelNo = $numberSequence->next($channelNo);
 
             // Get the `tvg-id` based on the playlist setting
             $tvgId = $channel->resolveTvgId($idChannelBy, $channelNo);

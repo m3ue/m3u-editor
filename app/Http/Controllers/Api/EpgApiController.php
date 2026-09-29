@@ -3,16 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ChannelLogoType;
-use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\LogoProxyController;
 use App\Http\Controllers\PlaylistGenerateController;
 use App\Models\AedProfile;
+use App\Models\CustomPlaylist;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Services\AedExtractorService;
+use App\Services\ChannelNumberSequence;
 use App\Services\EpgCacheService;
 use Carbon\Carbon;
 use Exception;
@@ -308,7 +310,7 @@ class EpgApiController extends Controller
         ]);
         try {
             // Get enabled channels from the playlist
-            $playlistChannels = PlaylistGenerateController::getChannelQuery($playlist)
+            $pageQuery = PlaylistGenerateController::getChannelQuery($playlist)
                 ->when($search, function ($queryBuilder) use ($search) {
                     $search = Str::lower($search);
 
@@ -323,14 +325,22 @@ class EpgApiController extends Controller
                     return $queryBuilder->whereRaw('LOWER(COALESCE("channels"."group", "channels"."group_internal")) = LOWER(?)', [$group]);
                 })
                 ->limit($perPage)
-                ->offset($skip)
-                ->cursor();
+                ->offset($skip);
+
+            // Number each page as it is numbered in the full output, rather than
+            // restarting the sequence from the start number on every page.
+            $isCustomContext = ($playlist instanceof CustomPlaylist)
+                || ($playlist instanceof PlaylistAlias && ! empty($playlist->custom_playlist_id));
+            $numberSequence = new ChannelNumberSequence($playlist);
+            $pageNumbers = ($numberSequence->isPositional() && ($skip > 0 || $search || $group))
+                ? ChannelNumberSequence::numbersFor($playlist, PlaylistGenerateController::getChannelQuery($playlist), $pageQuery, $isCustomContext)
+                : null;
+
+            $playlistChannels = $pageQuery->cursor();
 
             // Check the proxy format
             $logoProxyEnabled = $playlist->enable_logo_proxy;
 
-            // If auto channel increment is enabled, set the starting channel number
-            $channelNumber = $playlist->auto_channel_increment ? $playlist->channel_start - 1 : 0;
             $idChannelBy = $playlist->id_channel_by;
             $dummyEpgEnabled = $playlist->dummy_epg;
             $dummyEpgLength = (int) ($playlist->dummy_epg_length ?? 120); // Default to 120 minutes if not set
@@ -356,10 +366,12 @@ class EpgApiController extends Controller
             $channelSortIndex = $skip;
             foreach ($playlistChannels as $channel) {
                 $epgId = $channel->epg_id ?? null;
-                $channelNo = $channel->channel;
-                if (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number)) {
-                    $channelNo = ++$channelNumber;
-                }
+                $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
+                    ? (int) $channel->pivot->channel_number
+                    : $channel->channel;
+                $channelNo = $pageNumbers !== null
+                    ? ($pageNumbers[$channel->id] ?? $channelNo)
+                    : $numberSequence->next($channelNo);
 
                 // Always use the database primary key as the array key to guarantee uniqueness.
                 // Duplicate channel numbers would otherwise overwrite earlier entries.

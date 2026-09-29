@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\EpgSourceType;
+use App\Enums\PlaylistChannelId;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
@@ -1080,6 +1081,41 @@ class EpgCacheService
         }
 
         return false;
+    }
+
+    /**
+     * Clear the cached EPG of a just-saved playlist, and of the aliases inheriting
+     * its output settings, when the save renumbered its channels in a way that
+     * changes their tvg-ids. Otherwise the cached XML would put a channel's
+     * programmes on another channel. Numbering changes that leave the tvg-ids
+     * alone keep the cache.
+     */
+    public static function clearIfTvgIdsRenumbered(Playlist|CustomPlaylist|MergedPlaylist $playlist): void
+    {
+        // Only number-based tvg-ids follow the output numbering.
+        if ($playlist->id_channel_by !== PlaylistChannelId::Number) {
+            return;
+        }
+
+        // Forced numbering renumbers every channel in output order, so toggling it
+        // (or reordering while it's on) changes the ids. Without it, sorting by
+        // number leaves the ids alone: only unnumbered channels take sequence
+        // numbers, and those keep their relative order either way.
+        $renumbered = $playlist->wasChanged('force_channel_numbering')
+            || ($playlist->force_channel_numbering && $playlist->wasChanged('sort_by_channel_number'));
+        if (! $renumbered) {
+            return;
+        }
+
+        self::clearPlaylistEpgCacheFile($playlist);
+
+        $aliasForeignKey = match (true) {
+            $playlist instanceof CustomPlaylist => 'custom_playlist_id',
+            $playlist instanceof MergedPlaylist => 'merged_playlist_id',
+            default => 'playlist_id',
+        };
+        PlaylistAlias::where($aliasForeignKey, $playlist->id)
+            ->each(fn (PlaylistAlias $alias) => self::clearPlaylistEpgCacheFile($alias));
     }
 
     /**

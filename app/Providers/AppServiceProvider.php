@@ -508,6 +508,7 @@ class AppServiceProvider extends ServiceProvider
                 if ($playlist->isDirty($fields)) {
                     EpgCacheService::clearPlaylistEpgCacheFile($playlist);
                 }
+                EpgCacheService::clearIfTvgIdsRenumbered($playlist);
 
                 // Keep auto-generated EPG map names in sync when the playlist is renamed
                 if ($playlist->wasChanged('name')) {
@@ -676,6 +677,7 @@ class AppServiceProvider extends ServiceProvider
 
                 return $mergedPlaylist;
             });
+            MergedPlaylist::updated(fn (MergedPlaylist $mergedPlaylist) => EpgCacheService::clearIfTvgIdsRenumbered($mergedPlaylist));
             MergedPlaylist::deleting(function (MergedPlaylist $mergedPlaylist) {
                 // Remove short URLs
                 $mergedPlaylist->removeShortUrls();
@@ -726,6 +728,7 @@ class AppServiceProvider extends ServiceProvider
 
                 return $customPlaylist;
             });
+            CustomPlaylist::updated(fn (CustomPlaylist $customPlaylist) => EpgCacheService::clearIfTvgIdsRenumbered($customPlaylist));
             CustomPlaylist::deleting(function (CustomPlaylist $customPlaylist) {
                 // Remove short URLs
                 $customPlaylist->removeShortUrls();

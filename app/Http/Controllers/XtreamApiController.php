@@ -8,7 +8,6 @@ use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
-use App\Enums\PlaylistChannelId;
 use App\Events\ViewerFavoriteEvent;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
@@ -41,6 +40,7 @@ use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
 use App\Providers\VersionServiceProvider;
 use App\Services\AIOStreamsAuthorizationService;
+use App\Services\ChannelNumberSequence;
 use App\Services\ContentRequestService;
 use App\Services\DvrAccessScope;
 use App\Services\DvrRecorderService;
@@ -589,11 +589,17 @@ class XtreamApiController extends Controller
                 }
             }
 
+            // A single category is numbered as it is in the full listing, rather than
+            // restarting the sequence from the start number.
+            $numberSequence = new ChannelNumberSequence($playlist);
+            $categoryNumbers = ($categoryId && $categoryId !== 'all' && $numberSequence->isPositional())
+                ? ChannelNumberSequence::numbersFor($playlist, PlaylistGenerateController::getChannelQuery($playlist, isVod: false), $channelsQuery, $isCustomPlaylist)
+                : null;
+
             $cursor = $channelsQuery->cursor();
 
-            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $disableCatchup) {
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $disableCatchup, $numberSequence, $categoryNumbers) {
                 $idChannelBy = $playlist->id_channel_by;
-                $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
 
                 echo '[';
                 $first = true;
@@ -630,9 +636,9 @@ class XtreamApiController extends Controller
                     $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
                         : $channel->channel;
-                    if ($playlist->force_channel_numbering || (! $channelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number))) {
-                        $channelNo = ++$channelNumber;
-                    }
+                    $channelNo = $categoryNumbers !== null
+                        ? ($categoryNumbers[$channel->id] ?? $channelNo)
+                        : $numberSequence->next($channelNo);
 
                     $tvgId = $channel->resolveTvgId($idChannelBy, $channelNo);
 
@@ -734,6 +740,13 @@ class XtreamApiController extends Controller
                 }
             }
 
+            // A single category is numbered as it is in the full listing, rather than
+            // restarting the sequence from the start number.
+            $numberSequence = new ChannelNumberSequence($playlist);
+            $categoryNumbers = ($categoryId && $categoryId !== 'all' && $numberSequence->isPositional())
+                ? ChannelNumberSequence::numbersFor($playlist, PlaylistGenerateController::getChannelQuery($playlist, isVod: true), $channelsQuery, $isCustomPlaylist)
+                : null;
+
             $cursor = $channelsQuery->cursor();
             $vodFileNameService = app(VodFileNameService::class);
 
@@ -747,10 +760,8 @@ class XtreamApiController extends Controller
                 $dynamicCategoryIdsByChannel = XtreamCategoryService::dynamicCategoryIdsByItem($sourcePlaylist, isVod: true);
             }
 
-            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService, $categoryId, $dynamicGroupId, $dynamicCategoryIdsByChannel) {
+            return response()->stream(function () use ($cursor, $playlist, $baseUrl, $isCustomPlaylist, $vodFileNameService, $categoryId, $dynamicGroupId, $dynamicCategoryIdsByChannel, $numberSequence, $categoryNumbers) {
                 $num = 0;
-                $idChannelBy = $playlist->id_channel_by;
-                $channelNumber = ($playlist->auto_channel_increment || $playlist->force_channel_numbering) ? $playlist->channel_start - 1 : 0;
                 echo '[';
                 $first = true;
                 foreach ($cursor as $channel) {
@@ -793,9 +804,9 @@ class XtreamApiController extends Controller
                     $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
                         ? (int) $channel->ccp_channel_number
                         : $channel->channel;
-                    if ($playlist->force_channel_numbering || (! $vodChannelNo && ($playlist->auto_channel_increment || $idChannelBy === PlaylistChannelId::Number))) {
-                        $vodChannelNo = ++$channelNumber;
-                    }
+                    $vodChannelNo = $categoryNumbers !== null
+                        ? ($categoryNumbers[$channel->id] ?? $vodChannelNo)
+                        : $numberSequence->next($vodChannelNo);
 
                     echo json_encode([
                         'num' => $vodChannelNo,
