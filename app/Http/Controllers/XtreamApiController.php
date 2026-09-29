@@ -967,11 +967,6 @@ class XtreamApiController extends Controller
 
                     if ($dynamicGroupId !== null) {
                         XtreamCategoryService::applyDynamicGroupFilter($channelsQuery, $dynamicGroupId, isVod: true);
-                        // Dynamic groups serve their members newest-first. The outer
-                        // PlaylistGenerateController orderbys (group/sort/channel/title)
-                        // would otherwise shuffle results unpredictably across groups,
-                        // so we reorder explicitly inside this branch only.
-                        $channelsQuery->reorder('channels.created_at', 'desc');
                     } else {
                         // A merged group's category_id also matches every child folded into it.
                         $channelsQuery->whereIn('group_id', XtreamCategoryService::resolveGroupFilterIds($categoryId));
@@ -1123,11 +1118,6 @@ class XtreamApiController extends Controller
 
                     if ($dynamicGroupId !== null) {
                         XtreamCategoryService::applyDynamicGroupFilter($seriesQuery, $dynamicGroupId, isVod: false);
-                        // Dynamic groups serve their members newest-first. The outer
-                        // series.sort orderby would otherwise shuffle results by the
-                        // user's series sort key, so we reorder explicitly inside this
-                        // branch only — same convention as the VOD branch above.
-                        $seriesQuery->reorder('series.created_at', 'desc');
                     } else {
                         // For regular Playlist and MergedPlaylist, filter by category_id.
                         // A merged category's id also matches every child folded into it.
@@ -1138,7 +1128,11 @@ class XtreamApiController extends Controller
 
             // Keyset pagination: compound (sort, id) cursor avoids the O(n²) offset
             // degradation of lazy() while still delivering correct sort order.
-            $seriesIterable = PlaylistGenerateController::seriesKeysetLazy($seriesQuery, 500);
+            // Dynamic groups are ordered by TMDB rank instead (a subquery the
+            // keyset cursor can't page on), and are small enough for lazy().
+            $seriesIterable = $dynamicGroupId !== null
+                ? $seriesQuery->lazy(500)
+                : PlaylistGenerateController::seriesKeysetLazy($seriesQuery, 500);
 
             // Custom playlists need tag-based ordering — materialise to sort, then stream.
             if ($isCustomPlaylist) {

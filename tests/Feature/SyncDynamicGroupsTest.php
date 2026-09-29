@@ -16,6 +16,7 @@ use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -180,6 +181,45 @@ it('drops stale membership rows when faked results change on a re-run', function
     // Re-running the same config must not create a duplicate group row —
     // unique (playlist_id, type, source, name) constraint is the safety net.
     expect(DynamicGroup::where('playlist_id', $this->playlist->id)->count())->toBe(1);
+});
+
+it('stores each member\'s TMDB rank and re-ranks surviving members on a re-run', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/trending/movie/week*' => Http::sequence()
+            ->push(['results' => [
+                ['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie'],
+                ['id' => 200, 'title' => 'Cold Movie', 'media_type' => 'movie'],
+            ]], 200)
+            ->push(['results' => [
+                ['id' => 200, 'title' => 'Cold Movie', 'media_type' => 'movie'],
+                ['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie'],
+            ]], 200),
+    ]);
+
+    $chan100 = Channel::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'is_vod' => true, 'enabled' => true, 'tmdb_id' => '100',
+    ]);
+    $chan200 = Channel::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'is_vod' => true, 'enabled' => true, 'tmdb_id' => '200',
+    ]);
+
+    $this->playlist->update([
+        'dynamic_groups_config' => [[
+            'enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+            'tmdb_params' => ['time_window' => 'week', 'pages' => 1],
+        ]],
+    ]);
+
+    $positions = fn (): array => DB::table('dynamic_group_items')->pluck('position', 'item_id')->all();
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+    expect($positions())->toBe([$chan100->id => 0, $chan200->id => 1]);
+
+    Cache::flush();
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+    expect($positions())->toBe([$chan100->id => 1, $chan200->id => 0]);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

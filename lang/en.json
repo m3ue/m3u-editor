@@ -2180,6 +2180,7 @@
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name installed",
     ":name updated": ":name updated",
+    ":pages (~:items items)": ":pages (~:items items)",
     ":percent% of :total channels": ":percent% of :total channels",
     ":plugin updated": ":plugin updated",
     ":probed of :total episodes probed. Mixed values mean episodes differ.": ":probed of :total episodes probed. Mixed values mean episodes differ.",

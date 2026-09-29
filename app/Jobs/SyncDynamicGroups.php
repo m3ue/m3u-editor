@@ -249,10 +249,17 @@ class SyncDynamicGroups implements ShouldQueue
     private function syncMembership(DynamicGroup $group, string $type, int $playlistId, array $tmdbIds, ?int $syncRunId = null): void
     {
         $morphClass = $type === 'vod' ? Channel::class : Series::class;
-        $itemIds = DynamicGroup::itemsMatchingTmdbIds($type, $playlistId, $tmdbIds)
-            ->pluck('id')
-            ->map(fn ($id): int => (int) $id)
+        // TMDB returns ids best-first; keep each id's first rank so members
+        // list in TMDB order (trending rank, popularity, ...).
+        $rankByTmdbId = [];
+        foreach ($tmdbIds as $rank => $tmdbId) {
+            $rankByTmdbId[$tmdbId] ??= $rank;
+        }
+
+        $tmdbIdByItemId = DynamicGroup::itemsMatchingTmdbIds($type, $playlistId, $tmdbIds)
+            ->pluck('tmdb_id', 'id')
             ->all();
+        $itemIds = array_map('intval', array_keys($tmdbIdByItemId));
 
         // Remove stale membership — anything not in the freshly-computed set.
         DB::table('dynamic_group_items')
@@ -277,13 +284,17 @@ class SyncDynamicGroups implements ShouldQueue
             return;
         }
 
+        // Upsert (not insertOrIgnore) so surviving members pick up their new rank.
         foreach (array_chunk($itemIds, self::MEMBERSHIP_CHUNK_SIZE) as $chunk) {
-            DB::table('dynamic_group_items')->insertOrIgnore(
+            DB::table('dynamic_group_items')->upsert(
                 array_map(fn (int $id): array => [
                     'dynamic_group_id' => $group->id,
                     'item_type' => $morphClass,
                     'item_id' => $id,
+                    'position' => $rankByTmdbId[(string) $tmdbIdByItemId[$id]] ?? 0,
                 ], $chunk),
+                ['dynamic_group_id', 'item_type', 'item_id'],
+                ['position'],
             );
         }
 

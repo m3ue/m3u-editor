@@ -3596,18 +3596,9 @@ class PlaylistResource extends Resource implements CopilotResource
                     'heroicon-m-question-mark-circle',
                     tooltip: __('TMDB paginates results ~20 per page. Increase this if items you expect (e.g. a recent theatrical release) aren\'t showing up - they may simply be on a later page than the default covers. Applies to all paginated sources (Trending, Popular, Now Playing, Upcoming, Top Genre).')
                 )
-                ->options([
-                    1 => '1 (~20 items)',
-                    2 => '2 (~40 items)',
-                    3 => '3 (~60 items, default)',
-                    4 => '4 (~80 items)',
-                    5 => '5 (~100 items)',
-                    6 => '6 (~120 items)',
-                    7 => '7 (~140 items)',
-                    8 => '8 (~160 items)',
-                    9 => '9 (~180 items)',
-                    10 => '10 (~200 items, max)',
-                ])
+                ->options(collect(range(1, TmdbService::MAX_DYNAMIC_GROUP_PAGES))->mapWithKeys(fn (int $pages): array => [
+                    $pages => __(':pages (~:items items)', ['pages' => $pages, 'items' => $pages * 20]),
+                ])->all())
                 ->default(3)
                 ->native(false)
                 ->columnSpan(3),

@@ -1161,6 +1161,7 @@
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name 已安装",
     ":name updated": ":name 已更新",
+    ":pages (~:items items)": ":pages（约 :items 项）",
     ":percent% of :total channels": "占 :total 个频道的 :percent%",
     ":plugin updated": ":plugin已更新",
     ":probed of :total episodes probed. Mixed values mean episodes differ.": "已调查 :probed 集（共 :total 集）。混合值意味着情节不同。",

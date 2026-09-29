@@ -1161,6 +1161,7 @@
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name installiert",
     ":name updated": ":name aktualisiert",
+    ":pages (~:items items)": ":pages (~:items Einträge)",
     ":percent% of :total channels": ":percent % von :total Kanälen",
     ":plugin updated": ":plugin aktualisiert",
     ":probed of :total episodes probed. Mixed values mean episodes differ.": ":probed von :total Episoden untersucht. Gemischte Werte bedeuten, dass sich die Episoden unterscheiden.",

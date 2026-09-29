@@ -207,15 +207,10 @@ it('returns only the member channels when filtering VOD streams by a dynamic cat
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// get_vod_streams ordering: dynamic-group members serve newest-first by created_at
+// get_vod_streams ordering: dynamic-group members serve in TMDB rank order
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('orders dynamic-group VOD streams by created_at desc', function () {
-    // Three enabled VOD channels under one regular group with spread
-    // created_at values. All three belong to a single dynamic group. When
-    // the Xtream client requests get_vod_streams?category_id=<dyn-id>, the
-    // response must list them newest-first — not in the playlist's
-    // natural group/sort/title order.
+it('orders dynamic-group VOD streams by TMDB rank', function () {
     $group = Group::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
@@ -223,32 +218,18 @@ it('orders dynamic-group VOD streams by created_at desc', function () {
         'name' => 'Group',
     ]);
 
-    $oldest = Channel::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'group_id' => $group->id,
-        'is_vod' => true,
-        'enabled' => true,
-        'title' => 'Oldest Movie',
-        'created_at' => now()->subDays(3),
-    ]);
-    $middle = Channel::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'group_id' => $group->id,
-        'is_vod' => true,
-        'enabled' => true,
-        'title' => 'Middle Movie',
-        'created_at' => now()->subDays(2),
-    ]);
-    $newest = Channel::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'group_id' => $group->id,
-        'is_vod' => true,
-        'enabled' => true,
-        'title' => 'Newest Movie',
-        'created_at' => now()->subDay(),
+    // Titles sort Z-A against rank, and ids ascend against rank, so neither
+    // the playlist's natural order nor an id sort can pass by accident.
+    $members = collect(['Zulu' => 0, 'Mike' => 1, 'Alpha' => 2])->reverse()->map(fn (int $position, string $title): array => [
+        'channel' => Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $group->id,
+            'is_vod' => true,
+            'enabled' => true,
+            'title' => $title,
+        ]),
+        'position' => $position,
     ]);
 
     $dynGroup = DynamicGroup::create([
@@ -260,11 +241,12 @@ it('orders dynamic-group VOD streams by created_at desc', function () {
         'sort_order' => 0,
         'enabled' => true,
     ]);
-    DB::table('dynamic_group_items')->insert([
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Channel::class, 'item_id' => $oldest->id],
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Channel::class, 'item_id' => $middle->id],
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Channel::class, 'item_id' => $newest->id],
-    ]);
+    DB::table('dynamic_group_items')->insert($members->map(fn (array $member): array => [
+        'dynamic_group_id' => $dynGroup->id,
+        'item_type' => Channel::class,
+        'item_id' => $member['channel']->id,
+        'position' => $member['position'],
+    ])->values()->all());
 
     $response = $this->get(dynCatXtreamUrl(
         $this->username,
@@ -274,12 +256,8 @@ it('orders dynamic-group VOD streams by created_at desc', function () {
     ));
     $response->assertOk();
 
-    $body = $response->streamedContent();
-    $decoded = json_decode($body, true);
-
-    expect($decoded)->toBeArray()
-        ->and(count($decoded))->toBe(3)
-        ->and(array_column($decoded, 'title'))->toBe(['Newest Movie', 'Middle Movie', 'Oldest Movie']);
+    expect(array_column(json_decode($response->streamedContent(), true), 'title'))
+        ->toBe(['Zulu', 'Mike', 'Alpha']);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -348,43 +326,26 @@ it('handles dynamic categories for series end-to-end', function () {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// get_series ordering: dynamic-group members serve newest-first by created_at
+// get_series ordering: dynamic-group members serve in TMDB rank order
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('orders dynamic-group series by created_at desc', function () {
-    // Three series in one category with spread created_at values, all members
-    // of a single dynamic group. When the Xtream client requests
-    // get_series?category_id=<dyn-id>, the response must list them newest-first
-    // — not in the playlist's natural series.sort/title order.
+it('orders dynamic-group series by TMDB rank', function () {
     $regularCat = Category::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
         'name' => 'Drama',
     ]);
 
-    $oldest = Series::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'category_id' => $regularCat->id,
-        'enabled' => true,
-        'name' => 'Oldest Show',
-        'created_at' => now()->subDays(3),
-    ]);
-    $middle = Series::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'category_id' => $regularCat->id,
-        'enabled' => true,
-        'name' => 'Middle Show',
-        'created_at' => now()->subDays(2),
-    ]);
-    $newest = Series::factory()->create([
-        'user_id' => $this->user->id,
-        'playlist_id' => $this->playlist->id,
-        'category_id' => $regularCat->id,
-        'enabled' => true,
-        'name' => 'Newest Show',
-        'created_at' => now()->subDay(),
+    // Rank runs against both name and id order (see the VOD test above).
+    $members = collect(['Zulu' => 0, 'Mike' => 1, 'Alpha' => 2])->reverse()->map(fn (int $position, string $name): array => [
+        'series' => Series::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $regularCat->id,
+            'enabled' => true,
+            'name' => $name,
+        ]),
+        'position' => $position,
     ]);
 
     $dynGroup = DynamicGroup::create([
@@ -396,11 +357,12 @@ it('orders dynamic-group series by created_at desc', function () {
         'sort_order' => 0,
         'enabled' => true,
     ]);
-    DB::table('dynamic_group_items')->insert([
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Series::class, 'item_id' => $oldest->id],
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Series::class, 'item_id' => $middle->id],
-        ['dynamic_group_id' => $dynGroup->id, 'item_type' => Series::class, 'item_id' => $newest->id],
-    ]);
+    DB::table('dynamic_group_items')->insert($members->map(fn (array $member): array => [
+        'dynamic_group_id' => $dynGroup->id,
+        'item_type' => Series::class,
+        'item_id' => $member['series']->id,
+        'position' => $member['position'],
+    ])->values()->all());
 
     $response = $this->get(dynCatXtreamUrl(
         $this->username,
@@ -410,12 +372,8 @@ it('orders dynamic-group series by created_at desc', function () {
     ));
     $response->assertOk();
 
-    $body = $response->streamedContent();
-    $decoded = json_decode($body, true);
-
-    expect($decoded)->toBeArray()
-        ->and(count($decoded))->toBe(3)
-        ->and(array_column($decoded, 'name'))->toBe(['Newest Show', 'Middle Show', 'Oldest Show']);
+    expect(array_column(json_decode($response->streamedContent(), true), 'name'))
+        ->toBe(['Zulu', 'Mike', 'Alpha']);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
