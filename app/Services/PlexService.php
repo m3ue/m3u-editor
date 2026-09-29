@@ -276,6 +276,8 @@ class PlexService implements MediaServer
             'IndexNumber' => $item['index'] ?? null,
             'ParentIndexNumber' => $item['parentIndex'] ?? null,
             'Genres' => array_map(fn ($g) => $g['tag'], $item['Genre'] ?? []),
+            // Plex has a single studio string (the network for shows); Emby/Jellyfin shape.
+            'Studios' => ! empty($item['studio']) ? [['Name' => $item['studio']]] : [],
             'People' => array_map(fn ($p) => [
                 'Name' => $p['tag'] ?? $p['name'] ?? null,
                 'Type' => 'Actor',

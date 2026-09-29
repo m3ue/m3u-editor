@@ -99,20 +99,8 @@
                         </span>
                     </div>
 
-                    {{-- TMDB content rating and networks --}}
-                    @if ($contentRating || $networkNames->isNotEmpty())
-                        <div class="flex flex-wrap items-center gap-2">
-                            @if ($contentRating)
-                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
-                            @endif
-                            @foreach ($networkNames as $networkName)
-                                <x-filament::badge
-                                    color="gray"
-                                    icon="heroicon-m-tv"
-                                >{{ $networkName }}</x-filament::badge>
-                            @endforeach
-                        </div>
-                    @endif
+                    {{-- Content rating (TMDB's, else the media server's) and networks --}}
+                    <x-content-rating-badges :rating="$contentRating" :names="$networkNames" icon="heroicon-m-tv" />
 
                     {{-- Plot --}}
                     @if ($record->plot)
@@ -229,20 +217,8 @@
                         </span>
                     </div>
 
-                    {{-- TMDB content rating and networks --}}
-                    @if ($contentRating || $networkNames->isNotEmpty())
-                        <div class="flex flex-wrap items-center gap-2">
-                            @if ($contentRating)
-                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
-                            @endif
-                            @foreach ($networkNames as $networkName)
-                                <x-filament::badge
-                                    color="gray"
-                                    icon="heroicon-m-tv"
-                                >{{ $networkName }}</x-filament::badge>
-                            @endforeach
-                        </div>
-                    @endif
+                    {{-- Content rating (TMDB's, else the media server's) and networks --}}
+                    <x-content-rating-badges :rating="$contentRating" :names="$networkNames" icon="heroicon-m-tv" />
 
                     @if ($record->plot)
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($record->plot, 300) }}</p>

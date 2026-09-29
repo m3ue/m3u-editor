@@ -268,3 +268,98 @@ it('still refreshes server values on a series TMDB has not enriched', function (
 
     expect(Series::where('playlist_id', $this->playlist->id)->firstOrFail()->plot)->toBe('Second plot');
 });
+
+it('maps a movie OfficialRating to mpaa_rating and Studios to a null-id studios list', function () {
+    invokeSync($this->job, 'syncMovie', [
+        $this->integration,
+        $this->playlist,
+        fakeMediaServer(),
+        [
+            'Id' => 'm3',
+            'Name' => 'The Matrix',
+            'OfficialRating' => 'R',
+            'Studios' => [['Name' => 'Warner Bros. Pictures', 'Id' => 'st1'], ['Name' => '']],
+        ],
+    ]);
+
+    $channel = Channel::where('playlist_id', $this->playlist->id)->firstOrFail();
+
+    expect($channel->info['mpaa_rating'])->toBe('R')
+        ->and($channel->getContentRating())->toBe('R')
+        ->and($channel->info['studios'])->toEqual([['id' => null, 'name' => 'Warner Bros. Pictures', 'logo' => null]]);
+});
+
+it('omits studios when the movie has none', function () {
+    invokeSync($this->job, 'syncMovie', [
+        $this->integration,
+        $this->playlist,
+        fakeMediaServer(),
+        ['Id' => 'm4', 'Name' => 'Indie Movie', 'Studios' => []],
+    ]);
+
+    expect(Channel::where('playlist_id', $this->playlist->id)->firstOrFail()->info)->not->toHaveKey('studios');
+});
+
+it('keeps TMDB studios and certification on a TMDB-checked movie, and fills blank TMDB studios from the server', function () {
+    $movie = [
+        'Id' => 'm5',
+        'Name' => 'The Matrix',
+        'OfficialRating' => 'R',
+        'Studios' => [['Name' => 'Server Studio']],
+    ];
+    $tmdbStudios = [['id' => 174, 'name' => 'Warner Bros. Pictures', 'logo' => null]];
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie]);
+
+    $channel = Channel::where('playlist_id', $this->playlist->id)->firstOrFail();
+    $channel->update(['info' => array_merge($channel->info, [
+        'related_tmdb' => [],
+        'tmdb_certification' => 'R',
+        'studios' => $tmdbStudios,
+    ])]);
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie]);
+
+    $info = $channel->fresh()->info;
+
+    expect($info['studios'])->toEqual($tmdbStudios)
+        ->and($info['tmdb_certification'])->toBe('R');
+
+    // TMDB had no studios: the server's fill in.
+    $channel->update(['info' => array_merge($info, ['studios' => []])]);
+
+    invokeSync($this->job, 'syncMovie', [$this->integration, $this->playlist, fakeMediaServer(), $movie]);
+
+    expect($channel->fresh()->info['studios'])->toEqual([['id' => null, 'name' => 'Server Studio', 'logo' => null]]);
+});
+
+it('maps series Studios to networks and keeps TMDB networks and content_rating on a TMDB-checked series', function () {
+    $seriesData = [
+        'Id' => 's4',
+        'Name' => 'Andor',
+        'OfficialRating' => 'TV-14',
+        'Studios' => [['Name' => 'Disney+']],
+    ];
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $series = Series::where('playlist_id', $this->playlist->id)->firstOrFail();
+
+    expect($series->metadata['networks'])->toEqual([['id' => null, 'name' => 'Disney+', 'logo' => null]])
+        ->and($series->getContentRating())->toBe('TV-14');
+
+    $tmdbNetworks = [['id' => 2739, 'name' => 'Disney+', 'logo' => 'https://image.tmdb.org/t/p/w300/d.png']];
+    $series->update(['metadata' => array_merge($series->metadata, [
+        'related_tmdb' => [],
+        'content_rating' => 'TV-MA',
+        'networks' => $tmdbNetworks,
+    ])]);
+
+    invokeSync($this->job, 'syncOneSeries', [$this->integration, $this->playlist, fakeMediaServer(), $seriesData]);
+
+    $series = $series->fresh();
+
+    expect($series->metadata['networks'])->toEqual($tmdbNetworks)
+        ->and($series->metadata['content_rating'])->toBe('TV-MA')
+        ->and($series->getContentRating())->toBe('TV-MA');
+});

@@ -779,8 +779,9 @@ class FetchTmdbIds implements ShouldQueue
 
                 // Populate production companies (id/name/logo) - written to the movie .nfo
                 // as <studio>. Always set, even to [], alongside tmdb_certification: the
-                // pair is the on-demand backfill sentinel.
-                $info['studios'] = $details['studios'] ?? [];
+                // pair is the on-demand backfill sentinel. When TMDB has none, a media
+                // server's studios are kept.
+                $info['studios'] = ($details['studios'] ?? []) ?: ($info['studios'] ?? []);
 
                 // Populate duration from TMDB runtime (in minutes)
                 if (! empty($details['runtime']) && (empty($info['duration_secs']) || ($info['duration_secs'] ?? 0) === 0)) {
@@ -1151,8 +1152,9 @@ class FetchTmdbIds implements ShouldQueue
                 // pair doubles as the on-demand backfill sentinel.
                 $metadata['content_rating'] = $details['certification'] ?? null;
 
-                // Populate networks (id/name/logo) - written to tvshow.nfo as <studio>
-                $metadata['networks'] = $details['networks'] ?? [];
+                // Populate networks (id/name/logo) - written to tvshow.nfo as <studio>.
+                // When TMDB has none, a media server's networks are kept.
+                $metadata['networks'] = ($details['networks'] ?? []) ?: ($metadata['networks'] ?? []);
 
                 // Populate "more like this" candidates (Xtream get_series_info resolves
                 // these against the playlist's own library at request time). Always

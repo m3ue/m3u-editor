@@ -380,6 +380,27 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * Build the studios/networks wire shape ({id, name, logo}) TMDB enrichment uses,
+     * from a media server Studios array. Like cast_list, `id` is always null (media
+     * servers only expose internal ids), and there is no logo.
+     *
+     * @param  array<int, array<string, mixed>>  $studios
+     * @return list<array{id: null, name: string, logo: null}>
+     */
+    protected function buildStudioList(array $studios): array
+    {
+        return collect($studios)
+            ->filter(fn ($studio) => ! empty($studio['Name']))
+            ->map(fn ($studio) => [
+                'id' => null,
+                'name' => $studio['Name'],
+                'logo' => null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Sync a single movie as a VOD channel.
      */
     protected function syncMovie(
@@ -421,6 +442,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         // Rich cast list (id null - media servers only expose internal person ids) + clearlogo
         $castList = $this->buildCastList($movie['People'] ?? [], $service);
         $clearLogo = $this->resolveClearLogo($movie, $itemId, $service);
+        $studios = $this->buildStudioList($movie['Studios'] ?? []);
 
         // Handle ProductionLocations - might be array or string
         $locations = $movie['ProductionLocations'] ?? [];
@@ -447,6 +469,9 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'backdrop_path' => $backdropUrl ? [$backdropUrl] : [],
             'youtube_trailer' => null,
             'country' => $country,
+            // Provider-owned, like an Xtream provider's mpaa_rating: TMDB's certification
+            // stays in tmdb_certification as the fallback.
+            'mpaa_rating' => $movie['OfficialRating'] ?? null,
         ];
 
         if (! empty($castList)) {
@@ -454,6 +479,9 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         }
         if (! empty($clearLogo)) {
             $syncInfo['clearlogo'] = $clearLogo;
+        }
+        if (! empty($studios)) {
+            $syncInfo['studios'] = $studios;
         }
 
         // Find or create the channel
@@ -712,9 +740,13 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         if (! empty($clearLogo)) {
             $seriesMetadata['clearlogo'] = $clearLogo;
         }
+        $networks = $this->buildStudioList($seriesData['Studios'] ?? []);
+        if (! empty($networks)) {
+            $seriesMetadata['networks'] = $networks;
+        }
 
         // Keep prior TMDB enrichment this sync pass would otherwise wipe: related_tmdb /
-        // vote_count always, cast_list / clearlogo when the server sent none (local
+        // vote_count always, cast_list / clearlogo / networks when the server sent none (local
         // libraries return no People / Logo), and on a TMDB-checked series every
         // TMDB-owned field, so a TMDB fetch isn't rolled back by the next sync.
         $isTmdbChecked = TmdbEnrichment::isTmdbChecked($series->metadata);

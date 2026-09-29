@@ -166,20 +166,8 @@
                         </span>
                     </div>
 
-                    {{-- Content rating (provider's, else TMDB's certification) and TMDB studios --}}
-                    @if ($contentRating || $studioNames->isNotEmpty())
-                        <div class="flex flex-wrap items-center gap-2">
-                            @if ($contentRating)
-                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
-                            @endif
-                            @foreach ($studioNames as $studioName)
-                                <x-filament::badge
-                                    color="gray"
-                                    icon="heroicon-m-film"
-                                >{{ $studioName }}</x-filament::badge>
-                            @endforeach
-                        </div>
-                    @endif
+                    {{-- Content rating (provider's, else TMDB's certification) and studios --}}
+                    <x-content-rating-badges :rating="$contentRating" :names="$studioNames" icon="heroicon-m-film" />
 
                     {{-- Plot --}}
                     @if ($plot)
@@ -304,20 +292,8 @@
                         </span>
                     </div>
 
-                    {{-- Content rating (provider's, else TMDB's certification) and TMDB studios --}}
-                    @if ($contentRating || $studioNames->isNotEmpty())
-                        <div class="flex flex-wrap items-center gap-2">
-                            @if ($contentRating)
-                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
-                            @endif
-                            @foreach ($studioNames as $studioName)
-                                <x-filament::badge
-                                    color="gray"
-                                    icon="heroicon-m-film"
-                                >{{ $studioName }}</x-filament::badge>
-                            @endforeach
-                        </div>
-                    @endif
+                    {{-- Content rating (provider's, else TMDB's certification) and studios --}}
+                    <x-content-rating-badges :rating="$contentRating" :names="$studioNames" icon="heroicon-m-film" />
 
                     @if ($plot)
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($plot, 300) }}</p>

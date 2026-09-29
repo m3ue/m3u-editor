@@ -4676,7 +4676,6 @@
     "Owner": "Owner",
     "P:": "P:",
     "PG, PG-13, R, NC-17": "PG, PG-13, R, NC-17",
-    "PG-13, R, etc.": "PG-13, R, etc.",
     "PHP Date Formats": "PHP Date Formats",
     "PHP date format(s) to parse the extracted date. Separate multiple with |": "PHP date format(s) to parse the extracted date. Separate multiple with |",
     "PHP date format(s) to parse the extracted time. Separate multiple with |": "PHP date format(s) to parse the extracted time. Separate multiple with |",

@@ -358,7 +358,7 @@ class EmbyJellyfinService implements MediaServer
             $params = [
                 'IncludeItemTypes' => 'Movie',
                 'Recursive' => 'true',
-                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations',
+                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations,Studios',
                 'EnableImages' => 'true',
                 'ImageTypeLimit' => 1,
             ];
@@ -475,7 +475,7 @@ class EmbyJellyfinService implements MediaServer
     {
         try {
             $response = $this->client()->get("/Users/{$this->getUserId()}/Items/{$seriesId}", [
-                'Fields' => 'Genres,Overview,CommunityRating,OfficialRating,ProductionYear,People,ProviderIds,ExternalUrls',
+                'Fields' => 'Genres,Overview,CommunityRating,OfficialRating,ProductionYear,People,ProviderIds,ExternalUrls,Studios',
             ]);
 
             if ($response->successful()) {
