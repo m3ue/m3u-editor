@@ -61,7 +61,7 @@ afterEach(function () {
  * Seed 5 channels from a previous batch and 1 from the new batch, so the new batch
  * would drop the channel count well past the threshold of 2.
  */
-function seedInvalidatingBatch(Playlist $playlist, User $user, string $newBatch): void
+function seedBackoffInvalidatingBatch(Playlist $playlist, User $user, string $newBatch): void
 {
     $group = Group::factory()->for($playlist)->for($user)->create([
         'type' => 'live',
@@ -82,7 +82,7 @@ function seedInvalidatingBatch(Playlist $playlist, User $user, string $newBatch)
     ]);
 }
 
-function runImportComplete(Playlist $playlist, User $user, string $batchNo): void
+function runBackoffImportComplete(Playlist $playlist, User $user, string $batchNo): void
 {
     (new ProcessM3uImportComplete(
         userId: $user->id,
@@ -107,8 +107,8 @@ describe('ProcessM3uImportComplete retry ladder', function () {
 
         foreach ($expected as $attempt => [$count, $after]) {
             $batch = "batch-{$attempt}";
-            seedInvalidatingBatch($this->playlist, $this->user, $batch);
-            runImportComplete($this->playlist, $this->user, $batch);
+            seedBackoffInvalidatingBatch($this->playlist, $this->user, $batch);
+            runBackoffImportComplete($this->playlist, $this->user, $batch);
 
             $playlist = $this->playlist->fresh();
             expect($playlist->status)->toBe(Status::Failed)
@@ -121,8 +121,8 @@ describe('ProcessM3uImportComplete retry ladder', function () {
 
     it('only notifies when a cycle starts or the ladder is exhausted', function () {
         foreach (range(0, 3) as $attempt) {
-            seedInvalidatingBatch($this->playlist, $this->user, "batch-{$attempt}");
-            runImportComplete($this->playlist, $this->user, "batch-{$attempt}");
+            seedBackoffInvalidatingBatch($this->playlist, $this->user, "batch-{$attempt}");
+            runBackoffImportComplete($this->playlist, $this->user, "batch-{$attempt}");
         }
 
         NotificationFacade::assertSentToTimes($this->user, DatabaseNotification::class, 2);
@@ -133,8 +133,8 @@ describe('ProcessM3uImportComplete retry ladder', function () {
         $this->playlist->update(['sync_interval' => '0 * * * *']);
         $this->playlist->update(['sync_retry_count' => 2]); // next step would be 2h
 
-        seedInvalidatingBatch($this->playlist, $this->user, 'batch-hourly');
-        runImportComplete($this->playlist, $this->user, 'batch-hourly');
+        seedBackoffInvalidatingBatch($this->playlist, $this->user, 'batch-hourly');
+        runBackoffImportComplete($this->playlist, $this->user, 'batch-hourly');
 
         expect($this->playlist->fresh()->sync_retry_after->toDateTimeString())->toBe('2026-09-29 11:00:00');
     });
@@ -142,8 +142,8 @@ describe('ProcessM3uImportComplete retry ladder', function () {
     it('waits for the next scheduled sync when auto-retry is disabled', function () {
         config(['dev.invalidate_import_retry_backoff' => 'none']);
 
-        seedInvalidatingBatch($this->playlist, $this->user, 'batch-none');
-        runImportComplete($this->playlist, $this->user, 'batch-none');
+        seedBackoffInvalidatingBatch($this->playlist, $this->user, 'batch-none');
+        runBackoffImportComplete($this->playlist, $this->user, 'batch-none');
 
         $playlist = $this->playlist->fresh();
         expect($playlist->sync_retry_after->toDateTimeString())->toBe('2026-09-30 00:00:00')
@@ -158,8 +158,8 @@ describe('ProcessM3uImportComplete retry ladder', function () {
             'sync_retry_after' => now()->subMinute(),
         ]);
 
-        seedInvalidatingBatch($this->playlist, $this->user, 'batch-ok');
-        runImportComplete($this->playlist, $this->user, 'batch-ok');
+        seedBackoffInvalidatingBatch($this->playlist, $this->user, 'batch-ok');
+        runBackoffImportComplete($this->playlist, $this->user, 'batch-ok');
 
         $playlist = $this->playlist->fresh();
         expect($playlist->sync_retry_count)->toBe(0)
