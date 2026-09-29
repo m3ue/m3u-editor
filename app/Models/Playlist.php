@@ -9,6 +9,8 @@ use App\Enums\Status;
 use App\Jobs\UpdateXtreamStats;
 use App\Settings\GeneralSettings;
 use App\Traits\ShortUrlTrait;
+use Carbon\CarbonInterface;
+use Cron\CronExpression;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -98,12 +100,55 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
+        'sync_retry_count' => 'integer',
+        'sync_retry_after' => 'datetime',
         'share_cache_across_playlists' => 'boolean',
     ];
 
     public function getFolderPathAttribute(): string
     {
         return "playlist/{$this->uuid}";
+    }
+
+    /**
+     * The playlist's sync schedule as a cron expression ("24hr" is stored as a legacy alias).
+     */
+    public function syncCronExpression(): CronExpression
+    {
+        return new CronExpression(self::normalizeSyncInterval($this->sync_interval));
+    }
+
+    /**
+     * Next time a regular scheduled sync would run after the given moment, or null
+     * when the stored interval is missing or not a valid cron expression.
+     */
+    public function nextScheduledSyncAfter(CarbonInterface $from): ?CarbonInterface
+    {
+        return self::nextSyncForInterval($this->sync_interval, $from);
+    }
+
+    /**
+     * Next run of a sync interval after the given moment (defaults to now), or null
+     * when the interval is missing or not a valid cron expression. Static so forms can
+     * preview an unsaved interval.
+     */
+    public static function nextSyncForInterval(?string $interval, ?CarbonInterface $from = null): ?CarbonInterface
+    {
+        $from ??= now();
+        $expression = self::normalizeSyncInterval($interval);
+
+        if ($expression === '' || ! CronExpression::isValidExpression($expression)) {
+            return null;
+        }
+
+        return $from->copy()->setTimestamp(
+            (new CronExpression($expression))->getNextRunDate($from->toDateTimeImmutable())->getTimestamp()
+        );
+    }
+
+    private static function normalizeSyncInterval(?string $interval): string
+    {
+        return $interval === '24hr' ? '0 0 * * *' : (string) $interval;
     }
 
     /**

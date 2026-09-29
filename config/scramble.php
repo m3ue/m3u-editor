@@ -22,9 +22,9 @@ return [
 
     'info' => [
         /*
-         * API version.
+         * API version. When empty, the app version (`dev.version`) is used, see AppServiceProvider.
          */
-        'version' => env('API_VERSION', '0.0.1'),
+        'version' => env('API_VERSION', ''),
 
         /*
          * Description rendered on the home page of the API documentation (`/docs/api`).

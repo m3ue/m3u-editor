@@ -50,6 +50,7 @@ class SeriesRelationManager extends RelationManager
         // strictly read-only, see class docblock).
         return SeriesResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('name')
+            ->defaultSort('dynamic_group_items.position')
             ->recordActions([])
             ->toolbarActions([]);
     }

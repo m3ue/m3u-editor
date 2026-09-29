@@ -11,6 +11,7 @@ use App\Models\MediaServerIntegration;
 use App\Services\EmbyManagedSetupService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\MediaServerService;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -540,7 +541,10 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                 CreateAction::make()
                     ->label(__('Publish to Emby'))
                     ->modalSubmitActionLabel(__('Publish to Emby'))
-                    ->using(fn (array $data): Model => $this->publish($data))
+                    ->using(fn (array $data, CreateAction $action): Model => $this->surfaceValidationErrors(
+                        $action,
+                        fn (): EmbyLibraryMapping => $this->publish($data),
+                    ))
                     ->slideOver(),
             ])
             ->recordActions([
@@ -552,7 +556,10 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
-                    ->mutateDataUsing(fn (array $data, EmbyLibraryMapping $record): array => $this->prepareMappingData($data, $record))
+                    ->mutateDataUsing(fn (array $data, EmbyLibraryMapping $record, EditAction $action): array => $this->surfaceValidationErrors(
+                        $action,
+                        fn (): array => $this->prepareMappingData($data, $record),
+                    ))
                     ->slideOver(),
                 Action::make('reconcile')
                     ->label(__('Reconcile'))
@@ -595,6 +602,41 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    /**
+     * Filament renders field errors under the mounted action's schema state path, so the bare
+     * field keys thrown by publish() and prepareMappingData() would never show in the open
+     * slide-over. Re-key them to that path and also send the first message as a notification,
+     * which covers errors whose field is hidden.
+     *
+     * @template TReturn
+     *
+     * @param  Closure(): TReturn  $callback
+     * @return TReturn
+     */
+    private function surfaceValidationErrors(Action $action, Closure $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (ValidationException $exception) {
+            $messages = $exception->errors();
+
+            Notification::make()
+                ->danger()
+                ->title((string) collect($messages)->flatten()->first())
+                ->send();
+
+            $statePath = "mountedActions.{$action->getNestingIndex()}.data";
+
+            throw ValidationException::withMessages(
+                collect($messages)
+                    ->mapWithKeys(fn (array $fieldMessages, string $field): array => [
+                        "{$statePath}.{$field}" => $fieldMessages,
+                    ])
+                    ->all(),
+            );
+        }
     }
 
     /**
@@ -793,7 +835,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         };
         if ($record === null) {
             throw ValidationException::withMessages([
-                'source' => __('Choose an available source.'),
+                'sources' => __('Choose an available source.'),
             ]);
         }
 

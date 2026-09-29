@@ -9,10 +9,12 @@ use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\M3uProxyService;
 use App\Services\SyncPipelineService;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
+#[Group('Playlists', 'Sync a playlist, update its source, view its statistics and merge its channels.', weight: 40)]
 class PlaylistController extends Controller
 {
     /**
@@ -20,7 +22,6 @@ class PlaylistController extends Controller
      *
      * Use the `uuid` parameter to select the playlist to refresh.
      * You can find the playlist UUID by using the `User > Get your Playlists` endpoint.
-     *
      *
      * @return JsonResponse
      *
@@ -59,31 +60,6 @@ class PlaylistController extends Controller
      * is updated, and `username`/`password` may be provided to rotate credentials.
      *
      * Pass `resync=true` to dispatch an immediate import job after saving the changes.
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "message": "Playlist updated successfully",
-     *   "data": {
-     *     "uuid": "abc-123-def",
-     *     "name": "My Provider",
-     *     "url": "https://provider.com:8080",
-     *     "resync_dispatched": true
-     *   }
-     * }
-     * @response 403 {
-     *   "success": false,
-     *   "message": "You do not have permission to update this playlist"
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Playlist not found"
-     * }
-     * @response 422 {
-     *   "message": "The given data was invalid.",
-     *   "errors": {
-     *     "url": ["The url must be a valid URL."]
-     *   }
-     * }
      */
     public function update(Request $request, string $uuid): JsonResponse
     {
@@ -182,52 +158,6 @@ class PlaylistController extends Controller
      *
      * Retrieve comprehensive statistics for a specific playlist including channel counts,
      * group information, sync status, and proxy details.
-     *
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "data": {
-     *     "uuid": "abc-123-def",
-     *     "name": "My Provider",
-     *     "channels": {
-     *       "total": 500,
-     *       "enabled": 450,
-     *       "disabled": 50,
-     *       "live": 400,
-     *       "live_enabled": 380,
-     *       "vod": 100,
-     *       "vod_enabled": 70
-     *     },
-     *     "groups": {
-     *       "total": 25,
-     *       "live": 20,
-     *       "vod": 5
-     *     },
-     *     "series": {
-     *       "total": 50,
-     *       "enabled": 45
-     *     },
-     *     "sync": {
-     *       "last_sync": "2026-01-14T10:00:00+00:00",
-     *       "sync_time_seconds": 45.5,
-     *       "is_processing": false,
-     *       "status": "Active"
-     *     },
-     *     "proxy": {
-     *       "enabled": true,
-     *       "active_streams": 3,
-     *       "max_connections": 5
-     *     },
-     *     "source": {
-     *       "type": "xtream",
-     *       "url": "https://provider.com"
-     *     }
-     *   }
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Playlist not found"
-     * }
      */
     public function stats(Request $request, string $uuid): JsonResponse
     {

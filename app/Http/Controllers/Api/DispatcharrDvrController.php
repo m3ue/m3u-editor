@@ -9,7 +9,9 @@ use App\Enums\DvrRuleType;
 use App\Enums\DvrSeriesMode;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\DvrStreamController;
-use App\Http\Controllers\XtreamApiController;
+use App\Http\Resources\Dvr\RecordingResource;
+use App\Http\Resources\Dvr\SeriesRuleMatchResource;
+use App\Http\Resources\Dvr\SeriesRuleResource;
 use App\Jobs\EnrichDvrMetadata;
 use App\Jobs\IntegrateDvrRecordingToVod;
 use App\Jobs\ProcessComskipOnRecording;
@@ -24,10 +26,12 @@ use Carbon\Carbon;
 use Dedoc\Scramble\Attributes\BodyParameter;
 use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\QueryParameter;
+use Dedoc\Scramble\Attributes\Response as ApiResponse;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -44,7 +48,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * Authentication (Sanctum API token) and scoping are handled by
  * DispatcharrDvrAuthMiddleware, which puts a DvrAccessScope on the request.
  */
-#[Group('DVR', 'Dispatcharr-style DVR endpoints for scheduling, managing, and playing recordings.')]
+#[Group('DVR', 'Dispatcharr-style DVR endpoints for scheduling, managing, and playing recordings. Authenticate with an API token sent as `Authorization: Bearer <token>`, `X-API-Key: <token>`, `Authorization: ApiKey <token>`, or `?token=<token>` (media requests). The token needs the `view`, `create`, `update` or `delete` ability the endpoint requires.', weight: 80)]
 class DispatcharrDvrController extends Controller
 {
     /**
@@ -70,7 +74,7 @@ class DispatcharrDvrController extends Controller
             ->orderBy('scheduled_start')
             ->get();
 
-        return response()->json($recordings->map(fn (DvrRecording $recording) => $this->formatRecording($recording))->values());
+        return response()->json(RecordingResource::collection($recordings));
     }
 
     /**
@@ -84,7 +88,7 @@ class DispatcharrDvrController extends Controller
             return $this->notFound();
         }
 
-        return response()->json($this->formatRecording($recording));
+        return response()->json(new RecordingResource($recording));
     }
 
     /**
@@ -106,7 +110,7 @@ class DispatcharrDvrController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json($validator->errors(), 400);
+            return response()->json($validator->errors()->toArray(), 400);
         }
 
         $channelId = (int) $request->input('channel');
@@ -177,7 +181,7 @@ class DispatcharrDvrController extends Controller
             return $this->nonFieldError('The recording could not be scheduled. It may already be scheduled, or the DVR is at capacity.');
         }
 
-        return response()->json($this->formatRecording($recording), 201);
+        return response()->json(new RecordingResource($recording), 201);
     }
 
     /**
@@ -220,7 +224,7 @@ class DispatcharrDvrController extends Controller
         if (! in_array($recording->status, [DvrRecordingStatus::Scheduled, DvrRecordingStatus::Recording], true)) {
             return response()->json([
                 'success' => false,
-                'error' => 'Recording is already '.$this->dispatcharrStatus($recording),
+                'error' => 'Recording is already '.RecordingResource::dispatcharrStatus($recording),
             ], 409);
         }
 
@@ -368,8 +372,12 @@ class DispatcharrDvrController extends Controller
      * Stream a recording
      *
      * Streams the finished file (with range support), or the live HLS playlist
-     * while the recording is still in progress.
+     * while the recording is still in progress. Completed recordings are usually
+     * MPEG-TS, but can be MP4 or Matroska depending on the DVR's output settings.
+     *
+     * @response JsonResponse<array{detail: 'Not found.'}, 404>
      */
+    #[ApiResponse(200, 'The recording file.', mediaType: 'video/mp2t', type: 'string', format: 'binary')]
     public function file(Request $request, int $id): Response|StreamedResponse|RedirectResponse|JsonResponse
     {
         $recording = $this->findRecording($request, $id);
@@ -387,7 +395,10 @@ class DispatcharrDvrController extends Controller
      * Live HLS playlist for an in-progress recording. Segment URLs point straight at
      * the proxy, so only the playlist itself is served here. Once the recording has
      * finished, redirects to the file endpoint like Dispatcharr does.
+     *
+     * @response JsonResponse<array{detail: 'Not found.'}, 404>
      */
+    #[ApiResponse(200, 'The live HLS playlist.', mediaType: 'application/vnd.apple.mpegurl', type: 'string')]
     public function hls(Request $request, int $id, string $path): Response|RedirectResponse|JsonResponse
     {
         $recording = $this->findRecording($request, $id);
@@ -403,7 +414,7 @@ class DispatcharrDvrController extends Controller
         if ($recording->status === DvrRecordingStatus::Completed && $recording->hasFilePath()) {
             $query = $request->query('token') ? '?'.http_build_query(['token' => $request->query('token')]) : '';
 
-            return redirect()->to($this->recordingFilePath($recording).$query);
+            return redirect()->to(RecordingResource::filePath($recording).$query);
         }
 
         return $this->notFound();
@@ -422,6 +433,8 @@ class DispatcharrDvrController extends Controller
      *
      * Creates the rule, or updates the existing rule for the same show (Dispatcharr
      * upserts by tvg_id + title; m3u-editor keeps one series rule per show).
+     *
+     * @response array{success: true, rules: SeriesRuleResource[]}
      */
     #[BodyParameter('title', 'Series title to match.', required: true, type: 'string', example: 'Evening News')]
     #[BodyParameter('tvg_id', 'EPG channel id. Pins the rule to the lowest-numbered channel mapped to it; omit to match on any channel.', type: 'string', example: 'news.us')]
@@ -495,6 +508,8 @@ class DispatcharrDvrController extends Controller
      * 100). Returns the upcoming airings in the next 7 days the rule would match,
      * without saving anything. `will_record` is false for airings the rule would
      * skip because that episode is already recorded or scheduled.
+     *
+     * @response array{matches: SeriesRuleMatchResource[], total: int, limit: int, epg_found: true, warn: bool}
      */
     #[BodyParameter('title', 'Series title to match.', required: true, type: 'string', example: 'Evening News')]
     #[BodyParameter('tvg_id', 'EPG channel id. Pins the rule to the lowest-numbered channel mapped to it; omit to match on any channel.', type: 'string', example: 'news.us')]
@@ -522,19 +537,10 @@ class DispatcharrDvrController extends Controller
             ->get();
 
         return response()->json([
-            'matches' => $programmes->map(fn (EpgProgramme $programme) => [
-                'id' => $programme->id,
-                'tvg_id' => $programme->epg_channel_id,
-                'title' => $programme->title,
-                'sub_title' => $programme->subtitle,
-                'description' => $programme->description,
-                'start_time' => $programme->start_time?->toIso8601String(),
-                'end_time' => $programme->end_time?->toIso8601String(),
-                'season' => $programme->season,
-                'episode' => $programme->episode,
-                'is_new' => (bool) $programme->is_new,
-                'will_record' => isset($willRecordIds[$programme->id]),
-            ])->values(),
+            'matches' => $programmes->map(fn (EpgProgramme $programme) => new SeriesRuleMatchResource(
+                $programme,
+                willRecord: isset($willRecordIds[$programme->id]),
+            ))->values(),
             'total' => count($matchedIds),
             'limit' => $limit,
             'epg_found' => true,
@@ -763,128 +769,15 @@ class DispatcharrDvrController extends Controller
         return $cancelled;
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function formattedSeriesRules(DvrAccessScope $scope): array
+    private function formattedSeriesRules(DvrAccessScope $scope): AnonymousResourceCollection
     {
-        return $scope->rules()
-            ->where('type', DvrRuleType::Series)
-            ->with('channel.epgChannel')
-            ->orderBy('created_at')
-            ->get()
-            ->map(fn (DvrRecordingRule $rule) => $this->formatSeriesRule($rule))
-            ->all();
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function formatSeriesRule(DvrRecordingRule $rule): array
-    {
-        return array_filter([
-            'id' => $rule->id,
-            'tvg_id' => $rule->channel?->epgChannel?->channel_id ?? '',
-            'mode' => $rule->series_mode === DvrSeriesMode::NewFlag ? 'new' : 'all',
-            'title' => $rule->series_title,
-            'title_mode' => $rule->match_mode === DvrMatchMode::Exact ? 'exact' : 'contains',
-            'description' => '',
-            'description_mode' => 'contains',
-            'channel_id' => $rule->channel_id,
-            'enabled' => (bool) $rule->enabled,
-        ], fn ($value) => $value !== null);
-    }
-
-    /**
-     * Shape a recording like Dispatcharr's RecordingSerializer: a thin row with
-     * everything descriptive nested in custom_properties.
-     *
-     * @return array<string, mixed>
-     */
-    private function formatRecording(DvrRecording $recording): array
-    {
-        $programmeData = $recording->epg_programme_data ?? [];
-        $isCompleted = $recording->status === DvrRecordingStatus::Completed;
-        $isLive = $recording->status === DvrRecordingStatus::Recording && $recording->proxy_network_id;
-
-        $fileUrl = match (true) {
-            $isLive => route('dispatcharr.dvr.recordings.hls', ['id' => $recording->id, 'path' => 'index.m3u8'], false),
-            $isCompleted && $recording->hasFilePath() => $this->recordingFilePath($recording),
-            default => null,
-        };
-
-        return [
-            'id' => $recording->id,
-            'channel' => $recording->channel_id,
-            'start_time' => $recording->scheduled_start?->toIso8601String(),
-            'end_time' => $recording->scheduled_end?->toIso8601String(),
-            'task_id' => null,
-            'custom_properties' => [
-                'status' => $this->dispatcharrStatus($recording),
-                'program' => [
-                    'id' => null,
-                    'tvg_id' => $programmeData['epg_channel_id'] ?? $recording->channel?->epgChannel?->channel_id,
-                    'title' => $recording->title,
-                    'sub_title' => $recording->subtitle,
-                    'description' => $recording->description,
-                    'start_time' => ($recording->programme_start ?? $recording->scheduled_start)?->toIso8601String(),
-                    'end_time' => ($recording->programme_end ?? $recording->scheduled_end)?->toIso8601String(),
-                    'season' => $recording->season,
-                    'episode' => $recording->episode,
-                ],
-                'season' => $recording->season,
-                'episode' => $recording->episode,
-                'rating' => $programmeData['rating'] ?? null,
-                'poster_url' => $this->posterUrl($recording),
-                'file_url' => $fileUrl,
-                'output_file_url' => $isCompleted ? $fileUrl : null,
-                'file_name' => $recording->file_path ? basename($recording->file_path) : null,
-                'bytes_written' => $recording->file_size_bytes,
-                'started_at' => $recording->actual_start?->toIso8601String(),
-                'ended_at' => $recording->actual_end?->toIso8601String(),
-                'interrupted_reason' => $recording->status === DvrRecordingStatus::Failed ? $recording->error_message : null,
-                'uuid' => $recording->uuid,
-            ],
-        ];
-    }
-
-    /**
-     * Best available artwork, routed through the logo proxy when the playlist that
-     * owns the recording's DVR setting has it enabled (same as the Xtream API).
-     */
-    private function posterUrl(DvrRecording $recording): ?string
-    {
-        $metadata = $recording->metadata ?? [];
-        $posterUrl = $metadata['tmdb']['poster_url']
-            ?? $metadata['tvmaze']['poster_url']
-            ?? $recording->epg_programme_icon
-            ?? $recording->channel_icon;
-
-        if (! $recording->dvrSetting?->owner()?->enable_logo_proxy) {
-            return $posterUrl;
-        }
-
-        return XtreamApiController::proxyImageUrl($posterUrl, XtreamApiController::posterProxyWidth());
-    }
-
-    /**
-     * Map a native status onto Dispatcharr's vocabulary
-     * (scheduled / recording / completed / stopped / interrupted).
-     */
-    private function dispatcharrStatus(DvrRecording $recording): string
-    {
-        return match ($recording->status) {
-            DvrRecordingStatus::Scheduled => 'scheduled',
-            DvrRecordingStatus::Recording, DvrRecordingStatus::PostProcessing => 'recording',
-            DvrRecordingStatus::Completed, DvrRecordingStatus::Purged => $recording->user_cancelled ? 'stopped' : 'completed',
-            DvrRecordingStatus::Cancelled => 'stopped',
-            DvrRecordingStatus::Failed => 'interrupted',
-        };
-    }
-
-    private function recordingFilePath(DvrRecording $recording): string
-    {
-        return route('dispatcharr.dvr.recordings.file', ['id' => $recording->id], false).'/';
+        return SeriesRuleResource::collection(
+            $scope->rules()
+                ->where('type', DvrRuleType::Series)
+                ->with('channel.epgChannel')
+                ->orderBy('created_at')
+                ->get()
+        );
     }
 
     private function notFound(): JsonResponse

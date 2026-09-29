@@ -207,6 +207,60 @@ it('returns only the member channels when filtering VOD streams by a dynamic cat
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// get_vod_streams ordering: dynamic-group members serve in TMDB rank order
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('orders dynamic-group VOD streams by TMDB rank', function () {
+    $group = Group::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod',
+        'name' => 'Group',
+    ]);
+
+    // Titles sort Z-A against rank, and ids ascend against rank, so neither
+    // the playlist's natural order nor an id sort can pass by accident.
+    $members = collect(['Zulu' => 0, 'Mike' => 1, 'Alpha' => 2])->reverse()->map(fn (int $position, string $title): array => [
+        'channel' => Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $group->id,
+            'is_vod' => true,
+            'enabled' => true,
+            'title' => $title,
+        ]),
+        'position' => $position,
+    ]);
+
+    $dynGroup = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending',
+        'sort_order' => 0,
+        'enabled' => true,
+    ]);
+    DB::table('dynamic_group_items')->insert($members->map(fn (array $member): array => [
+        'dynamic_group_id' => $dynGroup->id,
+        'item_type' => Channel::class,
+        'item_id' => $member['channel']->id,
+        'position' => $member['position'],
+    ])->values()->all());
+
+    $response = $this->get(dynCatXtreamUrl(
+        $this->username,
+        $this->password,
+        'get_vod_streams',
+        ['category_id' => (string) $dynGroup->xtreamCategoryId()],
+    ));
+    $response->assertOk();
+
+    expect(array_column(json_decode($response->streamedContent(), true), 'title'))
+        ->toBe(['Zulu', 'Mike', 'Alpha']);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // get_series_categories: dynamic category prepended + get_series filter
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -269,6 +323,57 @@ it('handles dynamic categories for series end-to-end', function () {
         ->and(count($decoded))->toBe(1)
         ->and($decoded[0]['name'])->toBe('Show B')
         ->and((string) $decoded[0]['category_id'])->toBe($dynamicCategoryId);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// get_series ordering: dynamic-group members serve in TMDB rank order
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('orders dynamic-group series by TMDB rank', function () {
+    $regularCat = Category::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Drama',
+    ]);
+
+    // Rank runs against both name and id order (see the VOD test above).
+    $members = collect(['Zulu' => 0, 'Mike' => 1, 'Alpha' => 2])->reverse()->map(fn (int $position, string $name): array => [
+        'series' => Series::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $regularCat->id,
+            'enabled' => true,
+            'name' => $name,
+        ]),
+        'position' => $position,
+    ]);
+
+    $dynGroup = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'series',
+        'source' => 'tmdb_network',
+        'name' => 'Trending Series',
+        'sort_order' => 0,
+        'enabled' => true,
+    ]);
+    DB::table('dynamic_group_items')->insert($members->map(fn (array $member): array => [
+        'dynamic_group_id' => $dynGroup->id,
+        'item_type' => Series::class,
+        'item_id' => $member['series']->id,
+        'position' => $member['position'],
+    ])->values()->all());
+
+    $response = $this->get(dynCatXtreamUrl(
+        $this->username,
+        $this->password,
+        'get_series',
+        ['category_id' => (string) $dynGroup->xtreamCategoryId()],
+    ));
+    $response->assertOk();
+
+    expect(array_column(json_decode($response->streamedContent(), true), 'name'))
+        ->toBe(['Zulu', 'Mike', 'Alpha']);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

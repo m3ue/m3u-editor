@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+#[Group('EPG', 'Trigger an EPG sync.', weight: 60)]
 class EpgController extends Controller
 {
     /**

@@ -447,3 +447,56 @@ it('titles the View page "View Dynamic Group" for vod-type and "View Dynamic Cat
     expect(Livewire::test(ViewDynamicGroup::class, ['record' => $seriesGroup->id])->instance()->getTitle())
         ->toBe('View Dynamic Group');
 });
+
+it('defaults the Movies relation manager sort to TMDB rank', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Trending Now',
+    ]);
+
+    // Created in reverse rank order so an id/created_at sort can't pass by accident.
+    $third = Channel::factory()->for($this->user)->for($this->playlist)->create(['is_vod' => true, 'enabled' => true]);
+    $second = Channel::factory()->for($this->user)->for($this->playlist)->create(['is_vod' => true, 'enabled' => true]);
+    $first = Channel::factory()->for($this->user)->for($this->playlist)->create(['is_vod' => true, 'enabled' => true]);
+
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $third->id, 'position' => 2],
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $second->id, 'position' => 1],
+        ['dynamic_group_id' => $group->id, 'item_type' => Channel::class, 'item_id' => $first->id, 'position' => 0],
+    ]);
+
+    Livewire::test(ChannelsRelationManager::class, [
+        'ownerRecord' => $group,
+        'pageClass' => ViewDynamicGroup::class,
+    ])
+        ->assertOk()
+        ->loadTable()
+        ->assertCanSeeTableRecords([$first, $second, $third], inOrder: true);
+});
+
+it('defaults the Series relation manager sort to TMDB rank', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'series', 'source' => 'trending', 'name' => 'Trending Series',
+    ]);
+
+    $third = Series::factory()->for($this->user)->for($this->playlist)->create(['enabled' => true]);
+    $second = Series::factory()->for($this->user)->for($this->playlist)->create(['enabled' => true]);
+    $first = Series::factory()->for($this->user)->for($this->playlist)->create(['enabled' => true]);
+
+    DB::table('dynamic_group_items')->insert([
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $third->id, 'position' => 2],
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $second->id, 'position' => 1],
+        ['dynamic_group_id' => $group->id, 'item_type' => Series::class, 'item_id' => $first->id, 'position' => 0],
+    ]);
+
+    Livewire::test(SeriesRelationManager::class, [
+        'ownerRecord' => $group,
+        'pageClass' => ViewDynamicGroup::class,
+    ])
+        ->assertOk()
+        ->loadTable()
+        ->assertCanSeeTableRecords([$first, $second, $third], inOrder: true);
+});

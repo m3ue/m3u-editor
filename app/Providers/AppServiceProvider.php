@@ -47,6 +47,10 @@ use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Services\TagRenamePropagationService;
 use App\Settings\GeneralSettings;
+use App\Support\ApiDocs\DocumentDvrAuthenticationErrors;
+use App\Support\ApiDocs\DocumentXtreamApiResponses;
+use App\Support\ApiDocs\MergeSameStatusResponses;
+use App\Support\ApiDocs\PruneUnreferencedSchemas;
 use App\Support\CopilotProvider;
 use CraftForge\FilamentLanguageSwitcher\Events\LocaleChanged;
 use Dedoc\Scramble\Scramble;
@@ -1051,7 +1055,15 @@ class AppServiceProvider extends ServiceProvider
                 $openApi->secure(
                     SecurityScheme::http('bearer')
                 );
-            });
+
+                if (blank(config('scramble.info.version'))) {
+                    $openApi->info->setVersion((string) config('dev.version'));
+                }
+            })
+            ->withDocumentTransformers(DocumentXtreamApiResponses::class)
+            ->withDocumentTransformers(PruneUnreferencedSchemas::class)
+            ->withOperationTransformers(DocumentDvrAuthenticationErrors::class)
+            ->withOperationTransformers(MergeSameStatusResponses::class);
     }
 
     /**

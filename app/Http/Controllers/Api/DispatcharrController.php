@@ -11,6 +11,8 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\PlaylistUrlService;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
+use Dedoc\Scramble\Attributes\Response as ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,6 +24,7 @@ use Illuminate\Support\Facades\Redirect;
  * Implements the subset of Dispatcharr API endpoints that emby-xtream
  * expects, using the existing PlaylistAuth credentials for authentication.
  */
+#[ApiGroup('Dispatcharr', 'Dispatcharr-compatible endpoints for clients built against Dispatcharr, such as the emby-xtream plugin.', weight: 100)]
 class DispatcharrController extends Controller
 {
     /**
@@ -195,12 +198,19 @@ class DispatcharrController extends Controller
     }
 
     /**
-     * GET /proxy/ts/stream/{uuid}
+     * Stream a channel
      *
-     * Stream proxy endpoint. Looks up the channel by its stable uuid,
-     * resolves the playlist from the authenticated bearer token, then redirects
-     * to the actual stream URL or proxies through m3u-proxy.
+     * Dispatcharr-compatible stream endpoint used by the emby-xtream plugin. Looks up the
+     * channel by its stable UUID and resolves the playlist from the optional Dispatcharr
+     * bearer token (falling back to the channel's own playlist), then streams through
+     * m3u-proxy when the playlist has the proxy enabled, or redirects to the stream URL.
+     *
+     * @response JsonResponse<array{error: 'Channel not found'|'Playlist not found'}, 404>
+     *
+     * @unauthenticated
      */
+    #[ApiResponse(200, 'The stream, when the playlist has the proxy enabled.', mediaType: 'video/mp2t', type: 'string', format: 'binary')]
+    #[ApiResponse(302, 'Redirect to the channel stream URL, when the playlist does not use the proxy.', mediaType: 'text/html')]
     public function proxyStream(Request $request, string $uuid): RedirectResponse|JsonResponse
     {
         $channel = Channel::where('uuid', $uuid)->first();

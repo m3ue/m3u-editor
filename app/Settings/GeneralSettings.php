@@ -215,6 +215,8 @@ class GeneralSettings extends Settings
 
     public ?int $invalidate_import_series_threshold = 100;
 
+    public ?string $invalidate_import_retry_backoff = 'balanced';
+
     // Backup options
     public ?bool $auto_backup_database = false;
 

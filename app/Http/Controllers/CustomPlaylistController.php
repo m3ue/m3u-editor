@@ -3,18 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Facades\PlaylistFacade;
+use App\Http\Resources\CustomPlaylist\CustomPlaylistChannelResource;
+use App\Http\Resources\CustomPlaylist\CustomPlaylistGroupResource;
 use App\Jobs\AddItemsToCustomPlaylist;
 use App\Jobs\DetachItemsFromCustomPlaylist;
 use App\Models\CustomPlaylist;
 use App\Services\PlaylistService;
+use Dedoc\Scramble\Attributes\BodyParameter;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Spatie\Tags\Tag;
 
-/**
- * @tags Custom Playlists
- */
+#[Group('Custom Playlists', 'Manage the channels and group tags of a Custom Playlist.', weight: 50)]
 class CustomPlaylistController extends Controller
 {
     /**
@@ -23,25 +25,7 @@ class CustomPlaylistController extends Controller
      * Returns the channels currently attached, including their per-playlist
      * `channel_number`/`sort` pivot values and their custom group tag, if any.
      *
-     * @response 200 {
-     *   "success": true,
-     *   "data": [
-     *     {
-     *       "id": 123,
-     *       "title": "ESPN HD",
-     *       "enabled": true,
-     *       "is_vod": false,
-     *       "group": "Sports",
-     *       "channel_number": 101,
-     *       "sort": 1
-     *     }
-     *   ],
-     *   "meta": {"current_page": 1, "per_page": 50, "total": 1, "last_page": 1}
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Custom playlist not found"
-     * }
+     * @response JsonResponse<array{success: true, data: CustomPlaylistChannelResource[], meta: array{current_page: int, per_page: int, total: int, last_page: int}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
      */
     public function channels(Request $request, string $uuid): JsonResponse
     {
@@ -60,15 +44,7 @@ class CustomPlaylistController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $channels->getCollection()->map(fn ($channel) => [
-                'id' => $channel->id,
-                'title' => $channel->title_custom ?: $channel->title,
-                'enabled' => (bool) $channel->enabled,
-                'is_vod' => (bool) $channel->is_vod,
-                'group' => $channel->tags->first()?->getAttributeValue('name'),
-                'channel_number' => $channel->pivot->channel_number,
-                'sort' => $channel->pivot->sort,
-            ])->values(),
+            'data' => CustomPlaylistChannelResource::collection($channels->getCollection()),
             'meta' => [
                 'current_page' => $channels->currentPage(),
                 'per_page' => $channels->perPage(),
@@ -87,29 +63,11 @@ class CustomPlaylistController extends Controller
      * semantics. `channel_number` is only accepted when attaching a single channel, and is
      * applied synchronously since it requires the pivot row to exist immediately.
      *
-     * @bodyParam ids integer[] required The channel IDs to attach. Example: [123, 456]
-     * @bodyParam group string The custom group tag to assign (created if it doesn't exist). Example: Sports
-     * @bodyParam channel_number integer The per-playlist channel number. Only valid with a single id. Example: 101
-     *
-     * @response 202 {
-     *   "success": true,
-     *   "message": "Attach job for 2 channel(s) has been queued",
-     *   "data": {
-     *     "custom_playlist_uuid": "0eff7923-cbd1-4868-9fed-2e3748ac1100",
-     *     "queued_channel_ids": [123, 456],
-     *     "group": "Sports",
-     *     "channel_number_applied": null
-     *   }
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Custom playlist not found"
-     * }
-     * @response 422 {
-     *   "success": false,
-     *   "message": "channel_number can only be set when attaching a single channel"
-     * }
+     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[], group: string|null, channel_number_applied: int|null}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
+    #[BodyParameter('ids', 'The channel IDs to attach.', required: true, type: 'int[]', example: [123, 456])]
+    #[BodyParameter('group', 'The custom group tag to assign (created if it doesn\'t exist).', type: 'string', example: 'Sports')]
+    #[BodyParameter('channel_number', 'The per-playlist channel number. Only valid with a single id.', type: 'int', example: 101)]
     public function attachChannels(Request $request, string $uuid): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -170,21 +128,9 @@ class CustomPlaylistController extends Controller
      * Queues the same background job the UI's Detach Selected bulk action uses: removes the
      * pivot row and strips the custom group tag for every given channel.
      *
-     * @bodyParam ids integer[] required The channel IDs to detach. Example: [123, 456]
-     *
-     * @response 202 {
-     *   "success": true,
-     *   "message": "Detach job for 2 channel(s) has been queued",
-     *   "data": {
-     *     "custom_playlist_uuid": "0eff7923-cbd1-4868-9fed-2e3748ac1100",
-     *     "queued_channel_ids": [123, 456]
-     *   }
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Custom playlist not found"
-     * }
+     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[]}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
      */
+    #[BodyParameter('ids', 'The channel IDs to detach.', required: true, type: 'int[]', example: [123, 456])]
     public function detachChannels(Request $request, string $uuid): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -223,25 +169,11 @@ class CustomPlaylistController extends Controller
      * columns and the detach action's tag handling). The channel must already be attached to
      * the custom playlist.
      *
-     * @bodyParam group string The custom group tag to assign, or null to remove the channel's group tag. Example: Sports
-     * @bodyParam channel_number integer The per-playlist channel number. Can be set to null to clear it. Example: 101
-     * @bodyParam sort number The per-playlist sort order. Can be set to null to clear it. Example: 1
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "message": "Channel updated successfully",
-     *   "data": {
-     *     "id": 123,
-     *     "group": "Sports",
-     *     "channel_number": 101,
-     *     "sort": 1
-     *   }
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Channel is not attached to this custom playlist"
-     * }
+     * @response JsonResponse<array{success: true, message: string, data: array{id: int, group: string|null, channel_number: int|null, sort: float|null}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
+    #[BodyParameter('group', 'The custom group tag to assign, or null to remove the channel\'s group tag.', type: 'string', example: 'Sports')]
+    #[BodyParameter('channel_number', 'The per-playlist channel number. Can be set to null to clear it.', type: 'int', example: 101)]
+    #[BodyParameter('sort', 'The per-playlist sort order. Can be set to null to clear it.', type: 'float', example: 1)]
     public function updateChannelPivot(Request $request, string $uuid, int $id): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -315,12 +247,7 @@ class CustomPlaylistController extends Controller
     /**
      * List the group tags for a Custom Playlist.
      *
-     * @response 200 {
-     *   "success": true,
-     *   "data": [
-     *     {"id": 1, "name": "Sports", "order_column": 1}
-     *   ]
-     * }
+     * @response JsonResponse<array{success: true, data: CustomPlaylistGroupResource[]}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
      */
     public function groups(Request $request, string $uuid): JsonResponse
     {
@@ -329,33 +256,18 @@ class CustomPlaylistController extends Controller
             return $error;
         }
 
-        $groups = $playlist->groupTags()
-            ->orderBy('order_column')
-            ->get()
-            ->map(fn ($tag) => [
-                'id' => $tag->id,
-                'name' => $tag->getAttributeValue('name'),
-                'order_column' => $tag->order_column,
-            ])
-            ->values();
-
         return response()->json([
             'success' => true,
-            'data' => $groups,
+            'data' => CustomPlaylistGroupResource::collection($playlist->groupTags()->orderBy('order_column')->get()),
         ]);
     }
 
     /**
      * Create a group tag for a Custom Playlist.
      *
-     * @bodyParam name string required The group name. Example: Sports
-     *
-     * @response 201 {
-     *   "success": true,
-     *   "message": "Group created successfully",
-     *   "data": {"id": 1, "name": "Sports", "order_column": 1}
-     * }
+     * @response JsonResponse<array{success: true, message: string, data: CustomPlaylistGroupResource}, 201>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>
      */
+    #[BodyParameter('name', 'The group name.', required: true, type: 'string', example: 'Sports')]
     public function createGroup(Request $request, string $uuid): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -373,30 +285,17 @@ class CustomPlaylistController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Group created successfully',
-            'data' => [
-                'id' => $tag->id,
-                'name' => $tag->getAttributeValue('name'),
-                'order_column' => $tag->order_column,
-            ],
+            'data' => new CustomPlaylistGroupResource($tag),
         ], 201);
     }
 
     /**
      * Rename or reorder a Custom Playlist group tag.
      *
-     * @bodyParam name string The new group name. Example: Sports HD
-     * @bodyParam order_column integer The new sort position, matching the UI's drag-to-reorder. Example: 2
-     *
-     * @response 200 {
-     *   "success": true,
-     *   "message": "Group updated successfully",
-     *   "data": {"id": 1, "name": "Sports", "order_column": 2}
-     * }
-     * @response 404 {
-     *   "success": false,
-     *   "message": "Group not found"
-     * }
+     * @response JsonResponse<array{success: true, message: string, data: CustomPlaylistGroupResource}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
+    #[BodyParameter('name', 'The new group name.', type: 'string', example: 'Sports HD')]
+    #[BodyParameter('order_column', 'The new sort position, matching the UI\'s drag-to-reorder.', type: 'int', example: 2)]
     public function updateGroup(Request $request, string $uuid, int $id): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -437,11 +336,7 @@ class CustomPlaylistController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Group updated successfully',
-            'data' => [
-                'id' => $tag->id,
-                'name' => $tag->getAttributeValue('name'),
-                'order_column' => $tag->order_column,
-            ],
+            'data' => new CustomPlaylistGroupResource($tag),
         ]);
     }
 

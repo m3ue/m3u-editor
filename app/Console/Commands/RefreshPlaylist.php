@@ -7,7 +7,6 @@ use App\Enums\SyncRunStatus;
 use App\Jobs\ProcessM3uImport;
 use App\Models\Playlist;
 use App\Services\SyncPipelineService;
-use Cron\CronExpression;
 use Illuminate\Console\Command;
 
 class RefreshPlaylist extends Command
@@ -92,11 +91,27 @@ class RefreshPlaylist extends Command
             $failedRetryCooldown = (int) config('dev.failed_retry_cooldown_minutes', 30);
             $pipeline = app(SyncPipelineService::class);
             $playlists->get()->each(function (Playlist $playlist) use (&$count, $failedRetryCooldown, $pipeline) {
-                $interval = $playlist->sync_interval === '24hr' ? '0 0 * * *' : $playlist->sync_interval;
-                $cronExpression = new CronExpression($interval);
+                $cronExpression = $playlist->syncCronExpression();
+                $isFailed = $playlist->status === Status::Failed;
+
+                // Invalidated syncs follow their own backoff ladder (see ProcessM3uImportComplete)
+                if ($isFailed && $playlist->sync_retry_after) {
+                    if (now()->lt($playlist->sync_retry_after)) {
+                        return;
+                    }
+
+                    // Clear the gate now (ProcessM3uImport clears it again when it starts) so this
+                    // playlist isn't re-dispatched on every tick while the retry waits in the queue.
+                    $playlist->update(['sync_retry_after' => null]);
+
+                    $count++;
+                    $syncRun = $pipeline->startImport($playlist, trigger: 'scheduled_refresh');
+                    dispatch(new ProcessM3uImport($playlist, true, syncRunId: $syncRun->id));
+
+                    return;
+                }
 
                 // Gate failed retries behind a cooldown to prevent CPU runaway
-                $isFailed = $playlist->status === Status::Failed;
                 $cooldownPassed = $playlist->updated_at->diffInMinutes(now()) >= $failedRetryCooldown;
 
                 if ($isFailed && ! $cooldownPassed) {

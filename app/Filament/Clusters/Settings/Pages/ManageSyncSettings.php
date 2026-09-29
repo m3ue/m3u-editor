@@ -2,6 +2,7 @@
 
 namespace App\Filament\Clusters\Settings\Pages;
 
+use App\Enums\SyncRetryBackoff;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Models\StreamFileSetting;
 use BackedEnum;
@@ -141,6 +142,27 @@ class ManageSyncSettings extends BaseSettingsPage
                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
                             ->numeric()
                             ->helperText(__('If sync will remove more than this number of groups/categories, the sync will be canceled.')),
+                        Select::make('invalidate_import_retry_backoff')
+                            ->label(__('Retry backoff'))
+                            ->columnSpanFull()
+                            ->options(SyncRetryBackoff::options())
+                            ->hintIcon(
+                                'heroicon-m-question-mark-circle',
+                                tooltip: __('Each invalidated retry waits longer than the last, and never longer than the playlist\'s own sync schedule. If every retry is invalidated, the playlist waits for its next scheduled sync and the backoff starts over. A successful sync resets the backoff.')
+                            )
+                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_retry_backoff')) ? 'heroicon-m-lock-closed' : null)
+                            ->disabled(fn () => ! empty(config('dev.invalidate_import_retry_backoff')))
+                            ->hint(fn () => ! empty(config('dev.invalidate_import_retry_backoff')) ? __('Already set by environment variable!') : null)
+                            ->dehydrated(fn () => empty(config('dev.invalidate_import_retry_backoff')))
+                            ->afterStateHydrated(function (Select $component) {
+                                if (! empty(config('dev.invalidate_import_retry_backoff'))) {
+                                    $component->state(config('dev.invalidate_import_retry_backoff'));
+                                }
+                            })
+                            ->default(SyncRetryBackoff::Balanced->value)
+                            ->selectablePlaceholder(false)
+                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
+                            ->helperText(__('How long to wait before automatically retrying an invalidated sync.')),
                     ]),
                 Section::make(__('Series stream file settings'))
                     ->description(__('Select a Stream File Setting for series .strm file generation.'))

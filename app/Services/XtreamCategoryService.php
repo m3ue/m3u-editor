@@ -216,6 +216,10 @@ class XtreamCategoryService
      * The `enabled` cut is left to the caller's base query, which already
      * filters `enabled = true` on both the channels and series paths.
      *
+     * Also replaces the caller's ordering with the members' TMDB rank
+     * (`dynamic_group_items.position`, written by SyncDynamicGroups), with
+     * id as a stable tie-breaker.
+     *
      * @param  \Illuminate\Contracts\Database\Query\Builder|Builder|Relation  $query
      */
     public static function applyDynamicGroupFilter($query, int $dynamicGroupId, bool $isVod): void
@@ -223,12 +227,14 @@ class XtreamCategoryService
         $table = $isVod ? 'channels' : 'series';
         $itemType = $isVod ? Channel::class : Series::class;
 
-        $query->whereIn("{$table}.id", function ($sub) use ($dynamicGroupId, $itemType): void {
-            $sub->select('item_id')
-                ->from('dynamic_group_items')
-                ->where('dynamic_group_id', $dynamicGroupId)
-                ->where('item_type', $itemType);
-        });
+        $members = DB::table('dynamic_group_items')
+            ->where('dynamic_group_id', $dynamicGroupId)
+            ->where('item_type', $itemType);
+
+        $query->whereIn("{$table}.id", (clone $members)->select('item_id'))
+            ->reorder()
+            ->orderBy((clone $members)->select('position')->whereColumn('item_id', "{$table}.id"))
+            ->orderBy("{$table}.id");
     }
 
     /**

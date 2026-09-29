@@ -841,6 +841,12 @@ it('keeps confirmed setup while rolling back mapping state when Emby rejects lib
         'sources' => ['vod:'.$group->id],
         'destination' => '__new__',
         'new_library_name' => 'Managed Movies',
+    ])->assertNotified();
+
+    $component->assertMountedActionModalSee('Emby could not create the managed library. Retry after checking the companion version and administrator credential.');
+
+    expect($component->instance()->getErrorBag()->keys())->toBe([
+        'mountedActions.0.data.destination',
     ]);
 
     $errors = $component->instance()->getErrorBag()->all();
@@ -857,6 +863,8 @@ it('keeps confirmed setup while rolling back mapping state when Emby rejects lib
         ->emby_publisher_writable_paths->toBeNull()
         ->and($integration->getEmbyPublisherWritablePaths())
         ->toBe(['/config/plugins/m3u-editor/managed-publishing']);
+
+    $component->assertMountedActionModalSee('Publish to Emby');
 });
 
 it('creates an owned mapping from eligible unified source and destination choices', function () {
@@ -1707,7 +1715,7 @@ it('does not silently replace a missing saved path when editing an existing targ
         'is_managed' => false,
     ]);
 
-    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
     ])->callAction(TestAction::make('edit')->table($mapping), [
@@ -1719,9 +1727,13 @@ it('does not silently replace a missing saved path when editing an existing targ
         'target_library_id' => 'library-1',
         'output_path' => '/srv/emby/managed/old-path',
         'options' => $mapping->options,
-    ])->assertHasActionErrors();
+    ])->assertHasActionErrors(['output_path'])
+        // The single compatible path hides the picker, so the notification is the visible feedback.
+        ->assertNotified('Choose an available compatible library path.');
 
-    expect($mapping->refresh()->output_path)->toBe('/srv/emby/managed/old-path');
+    expect($component->instance()->getErrorBag()->keys())->toBe([
+        'mountedActions.0.data.output_path',
+    ])->and($mapping->refresh()->output_path)->toBe('/srv/emby/managed/old-path');
 });
 
 it('returns no Mapped group options for a live-only custom playlist, for either library type', function () {
