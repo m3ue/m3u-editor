@@ -191,6 +191,11 @@ return [
         // not a secret.
         '2a3eaf0a6403',
 
+        // DocumentXtreamApiResponses: 'password' => 'test_pass' is example data
+        // in the API docs, mirroring the Xtream panel `user_info` shape. Not a
+        // credential.
+        '81cff0596bab',
+
         // public/js/saade/filament-laravel-log — published vendor assets that
         // embed tiny base64 PNG sprites inline in CSS. Not credentials.
         'db4f9de8969c',
