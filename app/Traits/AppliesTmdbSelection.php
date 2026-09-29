@@ -209,11 +209,6 @@ trait AppliesTmdbSelection
                 $info['mpaa_rating'] = $details['certification'];
             }
 
-            // The generic age field is provider-owned; only fill it when blank.
-            if (! empty($details['certification']) && empty($info['age'])) {
-                $info['age'] = $details['certification'];
-            }
-
             // Always set, even to null: the on-demand backfill sentinel.
             $info['tmdb_certification'] = $details['certification'] ?? null;
 

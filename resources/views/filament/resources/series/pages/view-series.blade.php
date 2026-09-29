@@ -23,6 +23,8 @@
         $seriesRatingSuppressed = \App\Support\TmdbRating::isVoteCountBelowThreshold($record->metadata['vote_count'] ?? null);
         $clearLogo = $record->metadata['clearlogo'] ?? null;
         $castList = $record->metadata['cast_list'] ?? [];
+        $contentRating = $record->getContentRating();
+        $networkNames = collect($record->metadata['networks'] ?? [])->pluck('name')->filter()->values();
     @endphp
 
     @if ($backdropUrl)
@@ -96,6 +98,21 @@
                             {{ $record->enabled ? 'Enabled' : 'Disabled' }}
                         </span>
                     </div>
+
+                    {{-- TMDB content rating and networks --}}
+                    @if ($contentRating || $networkNames->isNotEmpty())
+                        <div class="flex flex-wrap items-center gap-2">
+                            @if ($contentRating)
+                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @endif
+                            @foreach ($networkNames as $networkName)
+                                <x-filament::badge
+                                    color="gray"
+                                    icon="heroicon-m-tv"
+                                >{{ $networkName }}</x-filament::badge>
+                            @endforeach
+                        </div>
+                    @endif
 
                     {{-- Plot --}}
                     @if ($record->plot)
@@ -211,6 +228,21 @@
                             {{ $record->enabled ? 'Enabled' : 'Disabled' }}
                         </span>
                     </div>
+
+                    {{-- TMDB content rating and networks --}}
+                    @if ($contentRating || $networkNames->isNotEmpty())
+                        <div class="flex flex-wrap items-center gap-2">
+                            @if ($contentRating)
+                                <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                            @endif
+                            @foreach ($networkNames as $networkName)
+                                <x-filament::badge
+                                    color="gray"
+                                    icon="heroicon-m-tv"
+                                >{{ $networkName }}</x-filament::badge>
+                            @endforeach
+                        </div>
+                    @endif
 
                     @if ($record->plot)
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($record->plot, 300) }}</p>

@@ -24,7 +24,7 @@ class TmdbEnrichment
      * only filling when empty, like plot/cover_big), so on an enriched row the
      * persisted value is TMDB's. Kept over the provider's value when TMDB is preferred.
      */
-    public const PREFERRED_VOD_INFO_KEYS = ['backdrop_path', 'cast', 'director', 'youtube_trailer', 'rating', 'vote_count', 'mpaa_rating'];
+    public const PREFERRED_VOD_INFO_KEYS = ['backdrop_path', 'cast', 'director', 'youtube_trailer', 'rating', 'vote_count'];
 
     /** Series `metadata` keys kept over the provider's value when TMDB is preferred. */
     public const PREFERRED_SERIES_METADATA_KEYS = ['vote_count'];

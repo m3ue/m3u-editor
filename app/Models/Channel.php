@@ -908,6 +908,18 @@ class Channel extends Model
         return false;
     }
 
+    /**
+     * The US certification (e.g. "PG-13"): the provider's mpaa_rating first, then
+     * TMDB's persisted certification. Shared by get_vod_info, the movie .nfo and the view page.
+     */
+    public function getContentRating(): ?string
+    {
+        $info = is_array($this->info) ? $this->info : [];
+        $rating = ($info['mpaa_rating'] ?? null) ?: ($info['tmdb_certification'] ?? null);
+
+        return filled($rating) ? (string) $rating : null;
+    }
+
     public function getTmdbId(): ?int
     {
         $id = $this->tmdb_id

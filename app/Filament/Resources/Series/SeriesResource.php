@@ -50,7 +50,6 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
@@ -1165,37 +1164,6 @@ class SeriesResource extends Resource implements CopilotResource
                                     TextInput::make('youtube_trailer')
                                         ->label(__('YouTube Trailer ID'))
                                         ->maxLength(255),
-                                ]),
-                        ]),
-                    Section::make(__('TMDB Details'))
-                        ->columnSpan(2)
-                        ->icon('heroicon-o-film')
-                        ->description(__('Read-only details saved from TMDB. They are refreshed on each TMDB fetch.'))
-                        ->collapsible()
-                        ->collapsed()
-                        ->visible(fn (?Series $record): bool => filled($record?->metadata['content_rating'] ?? null)
-                            || filled($record?->metadata['official_rating'] ?? null)
-                            || filled($record?->metadata['networks'] ?? null))
-                        ->schema([
-                            Grid::make(2)
-                                ->schema([
-                                    // Same precedence get_series_info / tvshow.nfo use.
-                                    TextEntry::make('content_rating')
-                                        ->label(__('Content Rating'))
-                                        ->badge()
-                                        ->placeholder('-')
-                                        ->state(fn (?Series $record): ?string => $record?->metadata['content_rating']
-                                            ?? $record?->metadata['official_rating']
-                                            ?? null),
-                                    TextEntry::make('networks')
-                                        ->label(__('Networks'))
-                                        ->badge()
-                                        ->placeholder('-')
-                                        ->state(fn (?Series $record): array => collect($record?->metadata['networks'] ?? [])
-                                            ->pluck('name')
-                                            ->filter()
-                                            ->values()
-                                            ->all()),
                                 ]),
                         ]),
                     Section::make(__('Stream file settings'))

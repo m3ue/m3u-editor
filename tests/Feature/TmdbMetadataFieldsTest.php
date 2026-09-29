@@ -109,7 +109,9 @@ it('fetches cast, director, and trailer for VOD movies', function () {
         ->and($channel->info['director'])->toBe('Lana Wachowski, Lilly Wachowski')
         ->and($channel->info['youtube_trailer'])->toBe('https://www.youtube.com/watch?v=vKQi3bBA1wc')
         ->and($channel->info['mpaa_rating'])->toBe('R')
-        ->and($channel->info['age'])->toBe('R')
+        ->and($channel->info['tmdb_certification'])->toBe('R')
+        // The generic age field is provider-owned: get_vod_info falls back at read time instead.
+        ->and($channel->info)->not->toHaveKey('age')
         // info is a Postgres jsonb column, which does not preserve object key
         // order - toEqual (loose ==) checks values while ignoring key order.
         ->and($channel->info['cast_list'])->toEqual([
@@ -190,7 +192,8 @@ it('fetches cast, director, and trailer for TV series', function () {
         'user_id' => $this->user->id,
         'name' => 'Breaking Bad',
         'release_date' => '2008-01-20',
-        'metadata' => [],
+        // A stale rating from an earlier fetch - only TMDB writes it, so it's refreshed.
+        'metadata' => ['content_rating' => 'TV-14'],
     ]);
 
     $job = new FetchTmdbIds(

@@ -1143,9 +1143,8 @@ class XtreamApiController extends Controller
                     $seriesItem->metadata['vote_count'] ?? null,
                     0
                 ),
-                // TMDB's US rating first, then the rating a media server sync stored -
-                // same wire key get_vod_info uses for movies.
-                'mpaa_rating' => $seriesItem->metadata['content_rating'] ?? $seriesItem->metadata['official_rating'] ?? '',
+                // Same wire key get_vod_info uses for movies.
+                'mpaa_rating' => $seriesItem->getContentRating() ?? '',
                 'backdrop_path' => $backdropPaths,
                 'tmdb' => (string) $tmdb,
                 'tmdb_id' => (int) ($tmdb ?: 0),
@@ -1673,7 +1672,7 @@ class XtreamApiController extends Controller
                 // Same blank-provider fallback as mpaa_rating, for clients that only read `age`.
                 'age' => ($info['age'] ?? '') ?: ($info['tmdb_certification'] ?? ''),
                 // A blank provider value falls back to TMDB's persisted certification.
-                'mpaa_rating' => ($info['mpaa_rating'] ?? '') ?: ($info['tmdb_certification'] ?? ''),
+                'mpaa_rating' => $channel->getContentRating() ?? '',
                 'rating_count_kinopoisk' => $info['rating_count_kinopoisk'] ?? 0,
                 'country' => $info['country'] ?? '',
                 'genre' => $info['genre'] ?? '',

@@ -19,6 +19,7 @@
 
             // Get metadata - check all possible locations
             $title = $record->title_custom ?? ($record->title ?? ($record->name ?? 'Unknown'));
+            $contentRating = $record->getContentRating();
             $plot =
                 $info['plot'] ?? ($info['description'] ?? ($movieInfo['plot'] ?? ($movieInfo['description'] ?? null)));
             $genre = $info['genre'] ?? ($movieInfo['genre'] ?? null);
@@ -86,6 +87,7 @@
             $tmdbId = $imdbId = $youtubeTrailer = null;
             $clearLogo = null;
             $castList = [];
+            $contentRating = null;
         }
     @endphp
 
@@ -161,6 +163,13 @@
                             {{ $record->enabled ? 'Enabled' : 'Disabled' }}
                         </span>
                     </div>
+
+                    {{-- Content rating (provider's, else TMDB's certification) --}}
+                    @if ($contentRating)
+                        <div class="flex flex-wrap items-center gap-2">
+                            <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                        </div>
+                    @endif
 
                     {{-- Plot --}}
                     @if ($plot)
@@ -284,6 +293,13 @@
                             {{ $record->enabled ? 'Enabled' : 'Disabled' }}
                         </span>
                     </div>
+
+                    {{-- Content rating (provider's, else TMDB's certification) --}}
+                    @if ($contentRating)
+                        <div class="flex flex-wrap items-center gap-2">
+                            <x-filament::badge color="gray">{{ $contentRating }}</x-filament::badge>
+                        </div>
+                    @endif
 
                     @if ($plot)
                         <p class="text-gray-600 dark:text-gray-300">{{ Str::limit($plot, 300) }}</p>

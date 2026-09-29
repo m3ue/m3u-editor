@@ -272,6 +272,7 @@ it('keeps TMDB-owned VOD fields over the provider refresh when TMDB is preferred
             'rating' => 8.7,
             'vote_count' => 25000,
             'mpaa_rating' => 'R',
+            'tmdb_certification' => 'R',
             'cast' => 'Keanu Reeves',
             'backdrop_path' => ['https://image.tmdb.org/t/p/original/backdrop.jpg'],
         ], tmdbEnrichmentFixture()),
@@ -282,8 +283,10 @@ it('keeps TMDB-owned VOD fields over the provider refresh when TMDB is preferred
     $info = $channel->refresh()->info;
     expect($info['rating'])->toBe(8.7)
         ->and($info['vote_count'])->toBe(25000)
-        // Providers commonly send a blank mpaa_rating, which must not wipe TMDB's certification.
-        ->and($info['mpaa_rating'])->toBe('R')
+        // mpaa_rating stays provider-owned (TMDB only fills it when blank), so the provider's
+        // value wins; TMDB's certification survives in tmdb_certification for the read fallback.
+        ->and($info['mpaa_rating'])->toBe('')
+        ->and($info['tmdb_certification'])->toBe('R')
         ->and($info['cast'])->toBe('Keanu Reeves')
         ->and($info['backdrop_path'])->toBe(['https://image.tmdb.org/t/p/original/backdrop.jpg'])
         // Fields TMDB only fills when empty stay provider-owned.

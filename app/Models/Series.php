@@ -170,6 +170,17 @@ class Series extends Model
         ];
     }
 
+    /**
+     * The US content rating (e.g. "TV-MA"): TMDB's first, then the rating a
+     * media server sync stored. Shared by get_series_info, tvshow.nfo and the view page.
+     */
+    public function getContentRating(): ?string
+    {
+        $rating = $this->metadata['content_rating'] ?? $this->metadata['official_rating'] ?? null;
+
+        return filled($rating) ? (string) $rating : null;
+    }
+
     public function scopeHasSeriesId(Builder $query): Builder
     {
         $isPgsql = config('database.connections.'.config('database.default').'.driver') === 'pgsql';

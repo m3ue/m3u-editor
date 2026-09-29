@@ -772,11 +772,6 @@ class FetchTmdbIds implements ShouldQueue
                     $info['mpaa_rating'] = $details['certification'];
                 }
 
-                // Mirror it into the generic age field only when the provider left that blank
-                if (! empty($details['certification']) && empty($info['age'])) {
-                    $info['age'] = $details['certification'];
-                }
-
                 // Always set, even to null: TMDB's own certification doubles as the
                 // "certification checked" sentinel for the on-demand backfill gate.
                 $info['tmdb_certification'] = $details['certification'] ?? null;
@@ -1145,12 +1140,10 @@ class FetchTmdbIds implements ShouldQueue
                     $updateData['metadata'] = $metadata;
                 }
 
-                // Populate US TV rating (TV-MA, TV-14, ...), keeping an existing one unless
-                // overwriting. Always set, even to null/[], alongside networks: the pair
-                // doubles as the on-demand backfill sentinel.
-                $metadata['content_rating'] = $this->overwriteExisting
-                    ? ($details['certification'] ?? null)
-                    : ($metadata['content_rating'] ?? $details['certification'] ?? null);
+                // Populate US TV rating (TV-MA, TV-14, ...). Only TMDB writes it, so it's
+                // always refreshed. Always set, even to null/[], alongside networks: the
+                // pair doubles as the on-demand backfill sentinel.
+                $metadata['content_rating'] = $details['certification'] ?? null;
 
                 // Populate networks (id/name/logo) - written to tvshow.nfo as <studio>
                 $metadata['networks'] = $details['networks'] ?? [];
