@@ -9,6 +9,7 @@
     pendingComplete: false,
     pendingApprovals: [],
     conversationId: null,
+    _resumedApprovals: [],
     toolCalls: [],
     _needsStepBreak: false,
     _cleanups: [],
@@ -138,7 +139,7 @@
                 },
                 body: JSON.stringify({
                     message: params.message,
-                    conversation_id: params.conversationId,
+                    conversation_id: params.conversationId || this.conversationId,
                     panel_id: params.panelId,
                     decisions: params.decisions || undefined,
                 }),
@@ -207,6 +208,18 @@
                                         this.toolCalls[idx].status = data.success ? 'done' : 'error';
                                         this.toolCalls[idx].result = data.result;
                                         this.toolCalls[idx].error = data.error;
+                                    } else {
+                                        // Results of an approved or rejected call arrive on the resumed
+                                        // stream, whose tool_call event was sent before the pause.
+                                        const approval = this._resumedApprovals.find(a => a.id === data.tool_id);
+                                        this.toolCalls.push({
+                                            id: data.tool_id,
+                                            name: data.tool_name,
+                                            arguments: approval ? approval.arguments : null,
+                                            status: data.success ? 'done' : 'error',
+                                            result: data.result,
+                                            error: data.error,
+                                        });
                                     }
                                     this.$nextTick(() => this.scrollToBottom());
                                     break;
@@ -302,6 +315,7 @@
         this.pendingApprovals.forEach(approval => {
             decisions[approval.id] = { action };
         });
+        this._resumedApprovals = this.pendingApprovals.slice();
         this.startStreaming({
             message: null,
             decisions,
@@ -547,21 +561,24 @@
                 </template>
 
                 {{-- Human approval requests (tools implementing Laravel AI's Approvable contract) --}}
-                <div x-show="pendingApprovals.length" x-cloak
-                    class="mx-1 rounded-xl border border-warning-200 bg-warning-50 p-3 dark:border-warning-800 dark:bg-warning-950/30">
-                    <div class="flex items-center gap-2 text-sm font-medium text-warning-700 dark:text-warning-300">
-                        <x-filament::icon icon="heroicon-o-shield-exclamation" class="h-4 w-4" />
-                        <span>{{ __('Approval required') }}</span>
-                    </div>
-                    <template x-for="approval in pendingApprovals" :key="approval.id">
-                        <div class="mt-2 text-xs text-warning-800 dark:text-warning-200">
-                            <div class="font-medium" x-text="approval.tool"></div>
-                            <div x-show="approval.reason" x-text="approval.reason"></div>
-                            <pre class="mt-1 max-h-20 overflow-y-auto whitespace-pre-wrap break-all"
-                                x-text="JSON.stringify(approval.arguments, null, 2)"></pre>
-                        </div>
-                    </template>
-                    <div class="mt-3 flex gap-2">
+                <x-filament::callout x-show="pendingApprovals.length" x-cloak color="warning"
+                    icon="heroicon-o-shield-exclamation" class="mx-1">
+                    <x-slot name="heading">
+                        {{ __('Approval required') }}
+                    </x-slot>
+
+                    <x-slot name="description">
+                        <template x-for="approval in pendingApprovals" :key="approval.id">
+                            <span class="mt-2 block text-xs">
+                                <span class="block font-medium" x-text="approval.tool"></span>
+                                <span class="block" x-show="approval.reason" x-text="approval.reason"></span>
+                                <code class="mt-1 block max-h-20 overflow-y-auto whitespace-pre-wrap break-all"
+                                    x-text="JSON.stringify(approval.arguments, null, 2)"></code>
+                            </span>
+                        </template>
+                    </x-slot>
+
+                    <x-slot name="footer">
                         <x-filament::button size="xs" color="success" icon="heroicon-m-check"
                             x-on:click="submitApprovals('approve')">
                             {{ __('Approve') }}
@@ -570,8 +587,8 @@
                             x-on:click="submitApprovals('reject')">
                             {{ __('Reject') }}
                         </x-filament::button>
-                    </div>
-                </div>
+                    </x-slot>
+                </x-filament::callout>
 
                 {{-- Loading indicator during streaming (dots) --}}
                 <template x-if="isStreaming">

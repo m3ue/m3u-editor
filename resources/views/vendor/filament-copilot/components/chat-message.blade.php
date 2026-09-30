@@ -5,6 +5,10 @@
     $isTool = ($msg['role'] ?? '') === 'tool';
     $isToolCall = ($msg['role'] ?? '') === 'tool_call';
     $isToolResult = ($msg['role'] ?? '') === 'tool_result';
+
+    // Reasoning models (DeepSeek, MiniMax, local models) can inline <think> blocks.
+    // A turn that only called tools (such as a rejected approval) leaves nothing to show.
+    $assistantContent = $isAssistant ? trim(preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? '')) : '';
 @endphp
 
 @if ($isUser)
@@ -67,7 +71,7 @@
             </div>
         </div>
     </div>
-@elseif($isAssistant)
+@elseif($isAssistant && $assistantContent !== '')
     {{-- Feedback thumbs. Only a persisted message carries an id, so the id gate
          doubles as the "is there something rateable to talk to" gate. --}}
     @php
@@ -75,12 +79,11 @@
         $rating = $msg['rating'] ?? null;
         $showFeedback = $messageId !== null && config('filament-copilot.feedback.enabled', true);
 
-        // Reasoning models (DeepSeek, MiniMax, local models) can inline <think> blocks.
         // Model output is untrusted (it can be steered by prompt injection through tool
         // results such as provider channel names or EPG text), so raw HTML is handled per
         // config('filament-copilot.chat.html_input') and javascript: links are never rendered.
         $assistantHtml = \Illuminate\Support\Str::markdown(
-            preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? ''),
+            $assistantContent,
             [
                 'html_input' => config('filament-copilot.chat.html_input', 'strip'),
                 'allow_unsafe_links' => false,

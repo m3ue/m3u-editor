@@ -147,7 +147,6 @@ return [
             'phpstan/phpstan',
             'phpunit/phpunit',
             'pragmarx/google2fa',
-            'prism-php/prism',
             'psy/psysh',
             'ralouphie/getallheaders',
             'react/promise',

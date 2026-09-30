@@ -324,6 +324,7 @@ class AdminPanelProvider extends PanelProvider
                 ->systemPrompt($s['copilot_system_prompt'] ?: $defaultPrompt)
                 ->globalTools($this->filterBuiltInTools($s['copilot_global_tools'] ?? []))
                 ->quickActions($this->buildQuickActions($s))
+                ->sidebarWidth('42rem')
                 ->managementEnabled($s['copilot_mgmt_enabled'] ?? false)
                 ->managementGuard('admin')
                 ->respectAuthorization()

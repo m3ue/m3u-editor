@@ -365,10 +365,6 @@
             "version": "v2.4.1",
             "hash": "tree-v2:2b88716e817c41adb8ee717d0b3e3fa347d255ab3c291521b1d44d8f46eeffe7"
         },
-        "prism-php/prism": {
-            "version": "v0.99.22",
-            "hash": "tree-v2:9ed09d25c8ae53022db13e9ed66785e54fabe60f9b746dc27ed2f6d6ec001105"
-        },
         "psr/cache": {
             "version": "3.0.0",
             "hash": "tree-v2:ac46f271c3134fa0193f61ed54dab6b7cf822030f0b249f8c54f51a1803c867d"
