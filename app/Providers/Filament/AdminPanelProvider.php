@@ -399,8 +399,9 @@ PROMPT;
     }
 
     /**
-     * Tools that ToolRegistry always registers by default — never pass these
-     * via ->globalTools() or they will be duplicated, causing Gemini 400 errors.
+     * Tools that ToolRegistry always registers by default. Never pass these
+     * via ->globalTools() or they will be duplicated, and providers such as
+     * Gemini reject duplicate function names with a 400 error.
      */
     private const COPILOT_BUILTIN_TOOLS = [
         GetToolsTool::class,
@@ -413,18 +414,19 @@ PROMPT;
     ];
 
     /**
-     * Strip built-in tools from the user-configured global tools list.
-     * Built-ins are always registered by ToolRegistry and must not be duplicated.
+     * Strip built-in tools and repeats from the user-configured global tools list.
+     * Built-ins are always registered by ToolRegistry, and every tool name must be
+     * unique in the request sent to the provider.
      *
      * @param  list<string>  $tools
      * @return list<string>
      */
     private function filterBuiltInTools(array $tools): array
     {
-        return array_values(array_filter(
+        return array_values(array_unique(array_filter(
             $tools,
             fn (string $tool) => ! in_array($tool, self::COPILOT_BUILTIN_TOOLS, true)
-        ));
+        )));
     }
 
     /**

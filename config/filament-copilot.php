@@ -36,6 +36,10 @@ return [
 
     'chat' => [
         'title_auto_generate' => true,
+
+        // How raw HTML in model output is rendered in the chat bubble ('escape',
+        // 'strip' or 'allow'). Model output is untrusted, so it is stripped.
+        'html_input' => 'strip',
     ],
 
     /*
@@ -107,6 +111,17 @@ return [
     'management' => [
         'enabled' => false,
         'guard' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Message Feedback
+    |--------------------------------------------------------------------------
+    | Thumbs up / down on assistant replies, reported in the management UI.
+    */
+
+    'feedback' => [
+        'enabled' => true,
     ],
 
     /*

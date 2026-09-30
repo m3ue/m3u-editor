@@ -8,11 +8,16 @@ use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema as DbSchema;
+use Laravel\Ai\Approvals\Approval;
+use Laravel\Ai\Concerns\InteractsWithApprovals;
+use Laravel\Ai\Contracts\Approvable;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
-class ExecuteDatabaseQueryTool extends BaseTool
+class ExecuteDatabaseQueryTool extends BaseTool implements Approvable
 {
+    use InteractsWithApprovals;
+
     public function description(): Stringable|string
     {
         return 'Execute a structured database query (SELECT, UPDATE, DELETE). Use this to dump or modify specific records accurately. Always use GetDatabaseSchemaTool first to know the table name and columns.';
@@ -37,6 +42,19 @@ class ExecuteDatabaseQueryTool extends BaseTool
             'limit' => $schema->integer()
                 ->description(__('Optional limit for select queries. Defaults to 50.')),
         ];
+    }
+
+    /**
+     * Anything other than a plain select changes data, so it waits for the
+     * user to approve it in the chat before it runs.
+     */
+    protected function needsApproval(Request $request): Approval|bool
+    {
+        if (strtolower((string) $request['action']) === 'select') {
+            return false;
+        }
+
+        return Approval::required(__('This query changes records in your database.'));
     }
 
     public function handle(Request $request): Stringable|string

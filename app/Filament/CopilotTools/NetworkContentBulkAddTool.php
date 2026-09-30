@@ -9,6 +9,9 @@ use App\Models\Network;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Collection;
+use Laravel\Ai\Approvals\Approval;
+use Laravel\Ai\Concerns\InteractsWithApprovals;
+use Laravel\Ai\Contracts\Approvable;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
@@ -21,8 +24,10 @@ use Stringable;
  * unique schedule regeneration job so bulk inserts collapse into a single
  * regen rather than one per row.
  */
-class NetworkContentBulkAddTool extends BaseTool
+class NetworkContentBulkAddTool extends BaseTool implements Approvable
 {
+    use InteractsWithApprovals;
+
     private const MAX_CHANNELS = 200;
 
     public function description(): Stringable|string
@@ -44,6 +49,15 @@ class NetworkContentBulkAddTool extends BaseTool
             'weight' => $schema->integer()
                 ->description('Scheduling weight for each item (default: 1). Higher values make the item play more often in weighted schedules.'),
         ];
+    }
+
+    /**
+     * Adding content changes the network's schedule, so it waits for the user
+     * to approve it in the chat before it runs.
+     */
+    protected function needsApproval(Request $request): Approval|bool
+    {
+        return Approval::required(__('This adds content to a network playlist.'));
     }
 
     public function handle(Request $request): Stringable|string
