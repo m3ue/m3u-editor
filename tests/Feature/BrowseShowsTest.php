@@ -329,6 +329,18 @@ it('resolves the once rule channel by tvg-id when the channel has no EPG mapping
     expect(DvrRecordingRule::where('programme_id', $programme->id)->value('channel_id'))->toBe($channel->id);
 });
 
+it('does not create a once rule for a programme from another user\'s EPG', function () {
+    $programme = EpgProgramme::factory()
+        ->for(Epg::factory()->for(User::factory()))
+        ->create(['title' => 'Foreign Show']);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('recordOnce', $programme->id);
+
+    expect(DvrRecordingRule::where('programme_id', $programme->id)->exists())->toBeFalse();
+});
+
 it('warns with a notification when a duplicate once rule exists', function () {
     $programme = EpgProgramme::factory()->for($this->epg)->create(['title' => 'Special Event']);
 

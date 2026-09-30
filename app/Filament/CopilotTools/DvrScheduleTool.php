@@ -15,6 +15,7 @@ use App\Services\EpgProgrammeChannelResolver;
 use Carbon\CarbonInterface;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Laravel\Ai\Tools\Request;
@@ -127,7 +128,9 @@ class DvrScheduleTool extends BaseTool
         }
 
         $programmes = EpgProgramme::query()
-            ->join('epg_channels', 'epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+            ->join('epg_channels', fn (JoinClause $join) => $join
+                ->on('epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+                ->on('epg_channels.epg_id', '=', 'epg_programmes.epg_id'))
             ->join('channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
             ->where('channels.user_id', $userId)
             ->where('channels.id', $channelId)
@@ -201,7 +204,9 @@ class DvrScheduleTool extends BaseTool
         }
 
         $programmesBuilder = EpgProgramme::query()
-            ->join('epg_channels', 'epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+            ->join('epg_channels', fn (JoinClause $join) => $join
+                ->on('epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+                ->on('epg_channels.epg_id', '=', 'epg_programmes.epg_id'))
             ->join('channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
             ->where('channels.user_id', $userId)
             ->where('epg_programmes.start_time', '>=', $windowStart)
@@ -318,7 +323,9 @@ class DvrScheduleTool extends BaseTool
         [$windowStart, $windowEnd] = $this->resolveWindowBounds($timeWindow, $airingTime);
 
         $programmes = EpgProgramme::query()
-            ->join('epg_channels', 'epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+            ->join('epg_channels', fn (JoinClause $join) => $join
+                ->on('epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+                ->on('epg_channels.epg_id', '=', 'epg_programmes.epg_id'))
             ->join('channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
             ->where('channels.user_id', $userId)
             ->where('channels.id', $channelId)
@@ -454,7 +461,9 @@ class DvrScheduleTool extends BaseTool
         [$windowStart, $windowEnd] = $this->resolveWindowBounds($timeWindow);
 
         $programmes = EpgProgramme::query()
-            ->join('epg_channels', 'epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+            ->join('epg_channels', fn (JoinClause $join) => $join
+                ->on('epg_channels.channel_id', '=', 'epg_programmes.epg_channel_id')
+                ->on('epg_channels.epg_id', '=', 'epg_programmes.epg_id'))
             ->join('channels', 'channels.epg_channel_id', '=', 'epg_channels.id')
             ->where('channels.user_id', $userId)
             ->where('channels.id', $channelId)
@@ -527,7 +536,7 @@ class DvrScheduleTool extends BaseTool
             return "DVR setting #{$dvrSettingId} not found or does not belong to you.";
         }
 
-        $programme = EpgProgramme::find($programmeId);
+        $programme = app(EpgProgrammeChannelResolver::class)->findOwnedProgramme($programmeId, $dvrSetting->user_id);
 
         if (! $programme) {
             return "Programme #{$programmeId} not found.";
@@ -705,7 +714,7 @@ class DvrScheduleTool extends BaseTool
             return "DVR setting #{$dvrSettingId} not found or does not belong to you.";
         }
 
-        $programme = EpgProgramme::find($programmeId);
+        $programme = app(EpgProgrammeChannelResolver::class)->findOwnedProgramme($programmeId, $dvrSetting->user_id);
 
         if (! $programme) {
             return "Programme #{$programmeId} not found.";

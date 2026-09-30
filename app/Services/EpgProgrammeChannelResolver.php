@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Channel;
+use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,6 +19,16 @@ use Illuminate\Support\Collection;
  */
 class EpgProgrammeChannelResolver
 {
+    /**
+     * Find a programme by id, limited to EPGs owned by the given user so a
+     * foreign programme id can't be used to create a rule.
+     */
+    public function findOwnedProgramme(int $programmeId, int $userId): ?EpgProgramme
+    {
+        return EpgProgramme::whereIn('epg_id', Epg::where('user_id', $userId)->select('id'))
+            ->find($programmeId);
+    }
+
     /**
      * Find the channel within the given owner scope that carries the programme.
      *

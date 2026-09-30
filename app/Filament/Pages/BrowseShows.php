@@ -371,7 +371,7 @@ class BrowseShows extends Page
             return;
         }
 
-        $programme = EpgProgramme::find($programmeId);
+        $programme = app(EpgProgrammeChannelResolver::class)->findOwnedProgramme($programmeId, $dvrSetting->user_id);
 
         if (! $programme) {
             Notification::make()->title(__('Programme not found.'))->danger()->send();

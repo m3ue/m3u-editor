@@ -924,10 +924,13 @@ class DvrSchedulerService
         } elseif ($rule->source_channel_id) {
             // Rule was created via Browse Shows — use the original source channel directly.
             $channel = $rule->sourceChannel;
-        } elseif ($programme?->epg_channel_id && ($ownerChannels = $setting->ownerChannelsSubquery())) {
+        } elseif ($programme?->epg_channel_id) {
             // Rule was created without an explicit channel (e.g. series defaults or guest once rule).
             // Attempt to resolve the matching channel from the programme's EPG channel ID.
-            $channel = app(EpgProgrammeChannelResolver::class)->channelForProgramme($programme, $ownerChannels);
+            $ownerChannels = $setting->ownerChannelsSubquery();
+            $channel = $ownerChannels
+                ? app(EpgProgrammeChannelResolver::class)->channelForProgramme($programme, $ownerChannels)
+                : null;
 
             if ($channel) {
                 Log::debug('DVR: Resolved channel via EPG fallback', [
