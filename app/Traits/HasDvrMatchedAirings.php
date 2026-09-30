@@ -6,9 +6,9 @@ use App\Enums\DvrMatchMode;
 use App\Enums\DvrSeriesMode;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
-use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Services\DvrSchedulerService;
+use App\Services\EpgProgrammeChannelResolver;
 use App\Settings\GeneralSettings;
 use App\Support\SeriesKey;
 use Illuminate\Database\Eloquent\Builder;
@@ -92,8 +92,7 @@ trait HasDvrMatchedAirings
             'skipped_count' => count($scheduledIds['skipped'] ?? []),
         ]);
 
-        $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
-        $channelNames = static::resolveAiringChannelNames($channelIds);
+        $channelNames = app(EpgProgrammeChannelResolver::class)->channelNames($programmes);
         $timezone = config('dev.timezone') ?? app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
         return $programmes->map(function (EpgProgramme $p) use ($channelNames, $timezone, $rule, $scheduledIds) {
@@ -138,7 +137,7 @@ trait HasDvrMatchedAirings
             }
 
             return [
-                'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
+                'channel_name' => EpgProgrammeChannelResolver::nameFor($channelNames, $p),
                 'start_time_human' => $p->start_time?->timezone($timezone)->format('D M j, g:ia'),
                 'season' => $season,
                 'episode' => $episode,
@@ -246,28 +245,6 @@ trait HasDvrMatchedAirings
             ->pluck('epg_channels.channel_id')
             ->filter()
             ->values()
-            ->all();
-    }
-
-    /**
-     * @param  list<string>  $channelIds
-     * @return array<string, string>
-     */
-    private static function resolveAiringChannelNames(array $channelIds): array
-    {
-        if (empty($channelIds)) {
-            return [];
-        }
-
-        return EpgChannel::without('epg')
-            ->whereIn('channel_id', $channelIds)
-            ->get(['channel_id', 'name', 'display_name', 'name_custom', 'display_name_custom'])
-            ->mapWithKeys(fn (EpgChannel $c) => [
-                $c->channel_id => $c->name_custom
-                    ?: $c->display_name_custom
-                    ?: $c->display_name
-                    ?: $c->name,
-            ])
             ->all();
     }
 

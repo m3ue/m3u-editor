@@ -19,6 +19,7 @@ use App\Models\CustomPlaylist;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\Group;
@@ -37,7 +38,8 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->create();
 
-    $this->epgChannel = EpgChannel::factory()->for($this->user)->create(['channel_id' => 'news.us']);
+    $this->epg = Epg::factory()->for($this->user)->create();
+    $this->epgChannel = EpgChannel::factory()->for($this->user)->for($this->epg)->create(['channel_id' => 'news.us']);
     $this->channel = Channel::factory()
         ->for($this->user)
         ->for($this->playlist)
@@ -465,11 +467,11 @@ it('deletes a series rule and cancels only its upcoming scheduled recordings', f
 });
 
 it('previews series rule matches without saving a rule', function () {
-    $programme = EpgProgramme::factory()->upcoming(60)->create([
+    $programme = EpgProgramme::factory()->for($this->epg)->upcoming(60)->create([
         'title' => 'Evening News',
         'epg_channel_id' => 'news.us',
     ]);
-    EpgProgramme::factory()->upcoming(90)->create([
+    EpgProgramme::factory()->for($this->epg)->upcoming(90)->create([
         'title' => 'Other Show',
         'epg_channel_id' => 'news.us',
     ]);
@@ -497,7 +499,7 @@ it('evaluates series rules and schedules newly matching airings', function () {
     ]);
 
     // The airing appears in the EPG after the rule was created.
-    EpgProgramme::factory()->upcoming(60)->create([
+    EpgProgramme::factory()->for($this->epg)->upcoming(60)->create([
         'title' => 'Evening News',
         'epg_channel_id' => 'news.us',
     ]);
