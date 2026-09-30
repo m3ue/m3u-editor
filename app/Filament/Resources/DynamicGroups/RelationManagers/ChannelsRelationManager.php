@@ -3,8 +3,10 @@
 namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 
 use App\Filament\Resources\Vods\VodResource;
+use Filament\Actions\ActionGroup;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 
@@ -14,10 +16,12 @@ use Illuminate\Database\Eloquent\Model;
  * (matching their `dynamic_groups_config` rule row), so a series-type parent
  * has zero channels to show and the tab is hidden.
  *
- * Strictly read-only - no `recordActions()`, no `toolbarActions()`. Membership
- * is computed by `SyncDynamicGroups` from the parent playlist's
- * `dynamic_groups_config`; this manager is a transparency window, not an edit
- * surface.
+ * Membership is read-only: it is computed by `SyncDynamicGroups` from the
+ * parent playlist's `dynamic_groups_config`, and this manager exposes no
+ * membership-mutating actions (no edit/delete/move/TMDB). The one row action
+ * and the one bulk action are the cache variants reused verbatim from
+ * `VodResource` - caching is a property of the channel itself, not of its
+ * group membership, so it is safe to offer here (and in bulk).
  */
 class ChannelsRelationManager extends RelationManager
 {
@@ -54,12 +58,20 @@ class ChannelsRelationManager extends RelationManager
         //
         // setupTable() also wires up VodResource's full record/bulk actions
         // (edit, delete, fetch metadata, sync, ...), which would break this
-        // manager's "strictly read-only" contract (see class docblock) - strip
-        // them back out rather than exposing mutation actions on a computed,
-        // read-only membership view.
+        // manager's read-only membership contract (see class docblock) - strip
+        // the membership-mutating actions back out, then re-add the cache
+        // actions in the same shape the canonical VOD list uses (single kebab
+        // row action, single toolbar bulk action). Anything beyond cache still
+        // has to stay out: membership is computed, so it cannot be bulk-edited.
         return VodResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('title')
-            ->recordActions([])
-            ->toolbarActions([]);
+            ->recordActions([
+                ActionGroup::make([
+                    VodResource::getCacheNowAction(),
+                ])->button()->hiddenLabel()->size('sm'),
+            ], position: RecordActionsPosition::BeforeCells)
+            ->toolbarActions([
+                VodResource::getCacheNowBulkAction(),
+            ]);
     }
 }

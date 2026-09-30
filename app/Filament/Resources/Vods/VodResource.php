@@ -545,6 +545,30 @@ class VodResource extends Resource implements CopilotResource
             });
     }
 
+    /**
+     * Bulk variant of `getCacheNowAction()` for selectors that operate on
+     * multiple channels (e.g. the Dynamic Group items table, where the row
+     * action is reused verbatim and the toolbar needs the same shape). One
+     * summary notification for the whole batch; per-item rules still run
+     * inside `dispatchMany()`.
+     */
+    public static function getCacheNowBulkAction(): BulkAction
+    {
+        return BulkAction::make('cache_now')
+            ->label(__('Cache Now (selected)'))
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('info')
+            ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+            ->requiresConfirmation()
+            ->modalHeading(__('Cache selected VODs?'))
+            ->modalDescription(__('Queue background downloads of every selected VOD to local storage. VODs that are already cached, queued, or have no cacheable source URL are skipped.'))
+            ->modalSubmitActionLabel(__('Cache now'))
+            ->action(function (Collection $records): void {
+                $counts = app(CachedContentDispatchService::class)->dispatchMany($records);
+                CachedContentDispatchService::vodBulkNotification($counts)->send();
+            });
+    }
+
     public static function getTableActions(): array
     {
         return [

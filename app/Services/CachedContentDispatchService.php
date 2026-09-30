@@ -12,6 +12,7 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
@@ -132,7 +133,7 @@ class CachedContentDispatchService
      */
     public function dispatchSeries(Series $series): array
     {
-        $counts = array_fill_keys(array_map(fn (CacheDispatchResult $r): string => $r->value, CacheDispatchResult::cases()), 0);
+        $counts = $this->emptyCounts();
 
         if (! $this->isEnabled()) {
             $counts[CacheDispatchResult::Disabled->value] = 1;
@@ -154,6 +155,62 @@ class CachedContentDispatchService
         }
 
         return $counts;
+    }
+
+    /**
+     * Queue every cacheable item in a Collection (BulkAction entry point).
+     * Aggregates result counts across the batch. Items that fail the
+     * per-item `dispatch()` rules fall into the same buckets as
+     * `dispatchSeries()`.
+     *
+     * @param  Collection<int, Channel|Episode>  $items
+     * @return array<string, int> keyed by CacheDispatchResult value
+     */
+    public function dispatchMany(Collection $items): array
+    {
+        $counts = $this->emptyCounts();
+
+        foreach ($items as $item) {
+            if (! $item instanceof Channel && ! $item instanceof Episode) {
+                continue;
+            }
+
+            $counts[$this->dispatch($item)->value]++;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Run `dispatchSeries()` for every Series in a Collection and merge the
+     * counts into one summary bucket (BulkAction entry point).
+     *
+     * @param  Collection<int, Series>  $serieses
+     * @return array<string, int> keyed by CacheDispatchResult value
+     */
+    public function dispatchManySeries(Collection $serieses): array
+    {
+        $counts = $this->emptyCounts();
+
+        foreach ($serieses as $series) {
+            if (! $series instanceof Series) {
+                continue;
+            }
+
+            foreach ($this->dispatchSeries($series) as $bucket => $count) {
+                $counts[$bucket] = ($counts[$bucket] ?? 0) + $count;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return array<string, int> keyed by CacheDispatchResult value, all zero
+     */
+    private function emptyCounts(): array
+    {
+        return array_fill_keys(array_map(fn (CacheDispatchResult $r): string => $r->value, CacheDispatchResult::cases()), 0);
     }
 
     /**
@@ -260,6 +317,43 @@ class CachedContentDispatchService
                 $queued === 0 => __('No episodes queued'),
                 $queued === 1 => __('Queued 1 episode for caching'),
                 default => __('Queued :count episodes for caching', ['count' => $queued]),
+            })
+            ->body(__(':skipped already cached or queued, :unavailable without a cacheable source.', [
+                'skipped' => $skipped,
+                'unavailable' => $unavailable,
+            ]));
+    }
+
+    /**
+     * Filament notification summarizing a VOD bulk-cache run. Same shape as
+     * `seriesNotification()` but uses VOD-flavored wording. Counts can come
+     * from a single channel batch or any caller that aggregates the
+     * `CacheDispatchResult` buckets for VODs.
+     *
+     * @param  array<string, int>  $counts
+     */
+    public static function vodBulkNotification(array $counts): Notification
+    {
+        if (($counts[CacheDispatchResult::Disabled->value] ?? 0) > 0) {
+            return Notification::make()
+                ->warning()
+                ->title(__('Could not queue cache'))
+                ->body(__('Caching is disabled in Settings.'));
+        }
+
+        $queued = $counts[CacheDispatchResult::Queued->value] ?? 0;
+        $skipped = ($counts[CacheDispatchResult::AlreadyCached->value] ?? 0)
+            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0);
+        $unavailable = $counts[CacheDispatchResult::Unavailable->value] ?? 0;
+
+        $notification = Notification::make();
+        $queued > 0 ? $notification->success() : $notification->info();
+
+        return $notification
+            ->title(match (true) {
+                $queued === 0 => __('No VODs queued'),
+                $queued === 1 => __('Queued 1 VOD for caching'),
+                default => __('Queued :count VODs for caching', ['count' => $queued]),
             })
             ->body(__(':skipped already cached or queued, :unavailable without a cacheable source.', [
                 'skipped' => $skipped,
