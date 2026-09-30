@@ -318,6 +318,50 @@ class SeriesResource extends Resource implements CopilotResource
         ];
     }
 
+    public static function getCacheAllEpisodesAction(): Action
+    {
+        return Action::make('cache_all_episodes')
+            ->label(__('Cache all episodes'))
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('info')
+            ->visible(fn (Series $record): bool => app(CachedContentDispatchService::class)->isEnabled()
+                && filled($record->playlist_id))
+            ->requiresConfirmation()
+            ->modalIcon('heroicon-o-arrow-down-tray')
+            ->modalHeading(__('Cache all episodes?'))
+            ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
+            ->modalSubmitActionLabel(__('Cache all episodes'))
+            ->action(function (Series $record): void {
+                $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
+                CachedContentDispatchService::seriesNotification($counts)->send();
+            });
+    }
+
+    /**
+     * Bulk variant of `getCacheAllEpisodesAction()` for selectors that
+     * operate on multiple series (e.g. the Dynamic Group items table, where
+     * the row action is reused verbatim and the toolbar needs the same
+     * shape). Episode counts are aggregated across every selected series
+     * before one summary notification fires.
+     */
+    public static function getCacheAllEpisodesBulkAction(): BulkAction
+    {
+        return BulkAction::make('cache_all_episodes')
+            ->label(__('Cache all episodes (selected)'))
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('info')
+            ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+            ->requiresConfirmation()
+            ->modalIcon('heroicon-o-arrow-down-tray')
+            ->modalHeading(__('Cache all episodes from selected series?'))
+            ->modalDescription(__('Queue background downloads of every episode of every selected series to local storage. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
+            ->modalSubmitActionLabel(__('Cache all episodes'))
+            ->action(function (Collection $records): void {
+                $counts = app(CachedContentDispatchService::class)->dispatchManySeries($records);
+                CachedContentDispatchService::seriesNotification($counts)->send();
+            });
+    }
+
     public static function getTableActions(): array
     {
         return [
@@ -573,21 +617,7 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-signal')
                     ->modalDescription(__('Probe all episodes of this series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
-                Action::make('cache_all_episodes')
-                    ->label(__('Cache all episodes'))
-                    ->icon('heroicon-o-arrow-down-tray')
-                    ->color('info')
-                    ->visible(fn (Series $record): bool => app(CachedContentDispatchService::class)->isEnabled()
-                        && filled($record->playlist_id))
-                    ->requiresConfirmation()
-                    ->modalIcon('heroicon-o-arrow-down-tray')
-                    ->modalHeading(__('Cache all episodes?'))
-                    ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
-                    ->modalSubmitActionLabel(__('Cache all episodes'))
-                    ->action(function (Series $record): void {
-                        $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
-                        CachedContentDispatchService::seriesNotification($counts)->send();
-                    }),
+                self::getCacheAllEpisodesAction(),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
                     ->modalDescription(__('Are you sure you want to delete this series? This will delete all episodes and seasons for this series. This action cannot be undone.'))
