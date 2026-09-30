@@ -346,8 +346,8 @@
             "hash": "tree-v2:b62416f10065930c8d9360481686b69cc63f37eb585dba067bc05da794b0047f"
         },
         "phpseclib/phpseclib": {
-            "version": "3.0.55",
-            "hash": "tree-v2:005ae855df96fc8e36d05196b9d848d5f06659d486b69852cd377a479e283b28"
+            "version": "3.0.57",
+            "hash": "tree-v2:55fd680d70046da18276ca8b09dd3f45507a955c8963f01b2b65e1d576241790"
         },
         "phpstan/phpdoc-parser": {
             "version": "2.3.3",
