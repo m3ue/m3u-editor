@@ -393,7 +393,7 @@ function flattenRecordActionNames(Table $table): array
  *
  * @return array<int, string>
  */
-function flattenBulkActionNames(Table $table): array
+function flattenTableBulkActionNames(Table $table): array
 {
     $names = [];
 
@@ -623,9 +623,9 @@ it('only exposes the cache bulk action on either relation manager', function () 
     // action on each manager is the cache variant (parallel to the row
     // action), and a future canonical resource bulk action must not silently
     // leak through.
-    expect(flattenBulkActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
+    expect(flattenTableBulkActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
         ->toBe(['cache_now'])
-        ->and(flattenBulkActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
+        ->and(flattenTableBulkActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
         ->toBe(['cache_all_episodes']);
 });
 
