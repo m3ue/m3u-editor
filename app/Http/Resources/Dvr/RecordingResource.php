@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Dvr;
 
 use App\Enums\DvrRecordingStatus;
+use App\Enums\ImageProfile;
 use App\Http\Controllers\XtreamApiController;
 use App\Models\DvrRecording;
 use Dedoc\Scramble\Attributes\SchemaName;
@@ -131,6 +132,6 @@ class RecordingResource extends JsonResource
             return $posterUrl;
         }
 
-        return XtreamApiController::proxyImageUrl($posterUrl, XtreamApiController::posterProxyWidth());
+        return XtreamApiController::proxyImageUrl($posterUrl, ImageProfile::Poster);
     }
 }

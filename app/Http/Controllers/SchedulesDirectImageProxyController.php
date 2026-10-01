@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ImageProfile;
 use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
+use App\Services\LogoCacheService;
 use App\Services\SchedulesDirectService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class SchedulesDirectImageProxyController extends Controller
 {
@@ -35,26 +39,29 @@ class SchedulesDirectImageProxyController extends Controller
                 return response()->json(['error' => 'EPG does not use SchedulesDirect'], 400);
             }
 
-            // Create cache key for this image
-            $cacheKey = "sd_image_{$epgId}_{$imageHash}";
+            // Image hashes are content-addressed, so a cached copy never goes
+            // stale and is served even after the daily download limit trips.
+            $sourceKey = LogoCacheService::schedulesDirectSourceKey($epgId, $imageHash);
+            $cachedProfile = ImageProfile::tryFrom((string) (LogoCacheService::readCacheMetadata($sourceKey)['profile'] ?? ''));
+            $cacheFile = LogoCacheService::findImage($sourceKey, $cachedProfile);
+            if ($cacheFile) {
+                return $this->imageResponse($cacheFile);
+            }
 
             // Short-circuit if this EPG already hit its daily download limit
             if (Cache::has("sd_download_limit_{$epgId}")) {
                 return response()->json(['error' => 'Daily image download limit reached'], 429);
             }
 
-            // Check cache first (cache for 24 hours)
-            $cachedResponse = Cache::get($cacheKey);
-            if ($cachedResponse) {
-                if (isset($cachedResponse['not_found'])) {
-                    return response()->json(['error' => 'Image not found'], 404);
-                }
+            // Failed lookups are remembered so they are not re-requested
+            $cacheKey = "sd_image_{$epgId}_{$imageHash}";
+            $cachedFailure = Cache::get($cacheKey);
+            if (isset($cachedFailure['not_found'])) {
+                return response()->json(['error' => 'Image not found'], 404);
+            }
 
-                if (isset($cachedResponse['download_limit'])) {
-                    return response()->json(['error' => 'Daily image download limit reached'], 429);
-                }
-
-                return response($cachedResponse['body'], 200, $cachedResponse['headers']);
+            if (isset($cachedFailure['download_limit'])) {
+                return response()->json(['error' => 'Daily image download limit reached'], 429);
             }
 
             // Ensure we have a valid token
@@ -74,30 +81,26 @@ class SchedulesDirectImageProxyController extends Controller
 
             if ($response->successful()) {
                 $body = $response->body();
-                $contentType = $response->header('Content-Type', 'image/jpeg');
+                $contentType = $response->header('Content-Type') ?: 'image/jpeg';
 
-                // Prepare headers for the proxied response
-                $headers = [
-                    'Content-Type' => $contentType,
-                    'Content-Length' => strlen($body),
-                    'Cache-Control' => 'public, max-age=86400', // Cache for 24 hours
-                    'X-Proxied-From' => 'SchedulesDirect',
-                ];
+                // The hash carries no role, so size by orientation: landscape
+                // art as a backdrop, portrait and square art as a poster.
+                $dimensions = @getimagesizefromstring($body);
+                $profile = is_array($dimensions)
+                    ? ImageProfile::forDimensions((int) $dimensions[0], (int) $dimensions[1])
+                    : null;
 
-                // Cache the successful response for 24 hours
-                Cache::put($cacheKey, [
-                    'body' => $body,
-                    'headers' => $headers,
-                ], now()->addHours(24));
+                $cacheFile = LogoCacheService::storeImage($sourceKey, $body, $contentType, $profile);
 
                 Log::debug('Successfully proxied SchedulesDirect image', [
                     'epg_id' => $epgId,
                     'image_hash' => $imageHash,
                     'content_type' => $contentType,
-                    'size_bytes' => strlen($body),
+                    'fetched_bytes' => strlen($body),
+                    'cached_bytes' => Storage::disk('local')->size($cacheFile),
                 ]);
 
-                return response($body, 200, $headers);
+                return $this->imageResponse($cacheFile, $contentType);
             } else {
                 $errorData = $response->json() ?: [];
                 $sdCode = $errorData['code'] ?? null;
@@ -153,5 +156,12 @@ class SchedulesDirectImageProxyController extends Controller
                 'error' => 'Internal server error while proxying image',
             ], 500);
         }
+    }
+
+    private function imageResponse(string $cacheFile, ?string $contentType = null): StreamedResponse
+    {
+        return LogoCacheService::streamResponse($cacheFile, $contentType, 86400, [
+            'X-Proxied-From' => 'SchedulesDirect',
+        ]);
     }
 }

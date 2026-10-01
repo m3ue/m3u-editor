@@ -2,6 +2,7 @@
 
 namespace App\Settings;
 
+use App\Enums\ImageProfile;
 use Filament\Support\Enums\Width;
 use Spatie\LaravelSettings\Settings;
 
@@ -106,6 +107,19 @@ class GeneralSettings extends Settings
     public ?array $managed_logo_assets = null;
 
     public ?bool $logo_repository_enabled = false;
+
+    // Artwork image optimization (Settings > Assets). PROXY_IMAGE_RESIZE_* env vars override these.
+    public ?bool $image_optimization_enabled = true;
+
+    public ?int $image_poster_width = 600;
+
+    public ?int $image_backdrop_width = 1280;
+
+    public ?int $image_title_logo_width = 800;
+
+    public ?int $image_photo_width = 300;
+
+    public ?int $image_quality = null;
 
     // SMTP settings
     public ?string $smtp_host = null;
@@ -349,6 +363,37 @@ class GeneralSettings extends Settings
     public function failedRetryCooldownMinutes(): int
     {
         return (int) (config('dev.failed_retry_cooldown_minutes') ?: ($this->failed_retry_cooldown_minutes ?: 15));
+    }
+
+    /**
+     * Whether cached artwork is downscaled to its profile size. The
+     * PROXY_IMAGE_RESIZE_ENABLED environment variable overrides the saved setting.
+     */
+    public function imageOptimizationEnabled(): bool
+    {
+        return (bool) (config('proxy.image_resize_enabled') ?? $this->image_optimization_enabled ?? true);
+    }
+
+    /**
+     * Max width cached artwork is stored at for [$profile], capped by
+     * PROXY_IMAGE_RESIZE_MAX. The profile's env var overrides the saved setting.
+     */
+    public function imageProfileWidth(ImageProfile $profile): int
+    {
+        $width = (int) (config($profile->configKey()) ?: ($this->{$profile->settingKey()} ?: $profile->defaultWidth()));
+
+        return max(1, min($width, (int) config('proxy.image_resize_max', 1920)));
+    }
+
+    /**
+     * Encoder quality (1-100) for optimized artwork, or null for the image
+     * driver's default. PROXY_IMAGE_RESIZE_QUALITY overrides the saved setting.
+     */
+    public function imageQuality(): ?int
+    {
+        $quality = (int) (config('proxy.image_resize_quality') ?: $this->image_quality);
+
+        return $quality > 0 ? min($quality, 100) : null;
     }
 
     public static function group(): string

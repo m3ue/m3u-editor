@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ImageProfile;
 use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
 use App\Models\MediaServerIntegration;
@@ -188,13 +189,13 @@ class AIOStreamsProxyController extends Controller
     private function proxyMetaImages(array $meta): array
     {
         if (is_string($meta['clearlogo'] ?? null)) {
-            $meta['clearlogo'] = $this->proxyImageUrl($meta['clearlogo']);
+            $meta['clearlogo'] = XtreamApiController::proxyImageUrl($meta['clearlogo'], ImageProfile::TitleLogo);
         }
 
         if (is_array($meta['cast_list'] ?? null)) {
             $meta['cast_list'] = array_map(function ($member) {
                 if (is_array($member) && isset($member['photo'])) {
-                    $member['photo'] = $this->proxyImageUrl($member['photo']);
+                    $member['photo'] = XtreamApiController::proxyImageUrl($member['photo'], ImageProfile::Photo);
                 }
 
                 return $member;
@@ -202,18 +203,6 @@ class AIOStreamsProxyController extends Controller
         }
 
         return $meta;
-    }
-
-    /**
-     * Wrap an image URL in the logo proxy unless it is already app-hosted.
-     */
-    private function proxyImageUrl(?string $url): ?string
-    {
-        if (! $url || ! filter_var($url, FILTER_VALIDATE_URL) || str_starts_with($url, url('/'))) {
-            return $url;
-        }
-
-        return LogoProxyController::generateProxyUrl($url);
     }
 
     /**

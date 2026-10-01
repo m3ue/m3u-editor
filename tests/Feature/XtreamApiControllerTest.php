@@ -1247,9 +1247,8 @@ it('does not double-proxy an already app-hosted vod cover when logo proxy is ena
         ->assertJsonPath('info.movie_image', $localCover);
 });
 
-it('downscales proxied vod stream icons to the poster width when logo proxy is enabled', function () {
+it('requests the poster size for proxied vod stream icons when logo proxy is enabled', function () {
     $this->playlist->update(['enable_logo_proxy' => true]);
-    config(['proxy.image_resize_enabled' => true, 'proxy.image_resize_poster_width' => 600]);
 
     $group = Group::factory()->for($this->user)->create();
     Channel::factory()->for($this->playlist)->for($group)->create([
@@ -1264,7 +1263,7 @@ it('downscales proxied vod stream icons to the poster width when logo proxy is e
     $response->assertOk();
     $streamIcon = $response->json('0.stream_icon');
     expect($streamIcon)->toStartWith(url('/'))
-        ->and($streamIcon)->toContain('w=600');
+        ->and($streamIcon)->toEndWith('?p=poster');
 });
 
 it('orders series categories by sort order for a regular playlist', function () {

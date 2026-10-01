@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ImageProfile;
 use App\Services\LogoCacheService;
 use App\Settings\GeneralSettings;
 use App\Support\PrivateNetworkGuard;
@@ -10,7 +11,6 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Image;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
@@ -32,18 +32,12 @@ class LogoProxyController extends Controller
                 return $this->returnPlaceholder();
             }
 
-            // Make sure the cache directory exists
-            Storage::disk('local')->makeDirectory(LogoCacheService::CACHE_DIRECTORY);
+            $profile = $this->resolveProfile($request);
 
-            // Optional on-the-fly downscale hints (see config/proxy.php). A weak
-            // TV client asks for a poster-sized image instead of a 2 MB source.
-            $width = $this->clampDimension($request->query('w'));
-            $height = $this->clampDimension($request->query('h'));
-
-            // Check if the logo is already cached
-            $cacheFile = LogoCacheService::findCacheFileForUrl($originalUrl);
-            if ($cacheFile && Storage::disk('local')->exists($cacheFile)) {
-                return $this->serveMaybeResized($cacheFile, null, $width, $height);
+            // Check if the logo is already cached (for this profile, if any)
+            $cacheFile = LogoCacheService::findImage($originalUrl, $profile);
+            if ($cacheFile) {
+                return LogoCacheService::streamResponse($cacheFile);
             }
 
             // Fetch the logo from the remote URL
@@ -53,18 +47,9 @@ class LogoProxyController extends Controller
                 return $this->returnPlaceholder();
             }
 
-            $extension = LogoCacheService::normalizeExtensionFromContentType(
-                $logoData['content_type'] ?? null,
-                $originalUrl
-            );
+            $cacheFile = LogoCacheService::storeImage($originalUrl, $logoData['content'], $logoData['content_type'] ?? null, $profile);
 
-            $cacheFile = LogoCacheService::cacheFileForUrl($originalUrl, $extension);
-
-            // Cache the logo and metadata
-            Storage::disk('local')->put($cacheFile, $logoData['content']);
-            LogoCacheService::writeCacheMetadata($originalUrl, $cacheFile, $logoData['content_type'] ?? null);
-
-            return $this->serveMaybeResized($cacheFile, $logoData['content_type'], $width, $height);
+            return LogoCacheService::streamResponse($cacheFile, $logoData['content_type'] ?? null);
         } catch (\Exception $e) {
             Log::error('Logo proxy error', [
                 'encoded_url' => $encodedUrl,
@@ -78,16 +63,16 @@ class LogoProxyController extends Controller
     /**
      * Generate a proxy URL for a given logo URL.
      *
-     * When [$width] (and/or [$height]) is passed, the proxy is asked to
-     * downscale the image to that box before serving it, so clients pull a
-     * poster-sized file instead of the full-resolution source. A null size
-     * leaves the URL exactly as before (no query string).
+     * When [$profile] is passed, the proxy serves (and caches) a copy sized
+     * for that role (see ImageProfile) instead of the full-resolution source.
+     * The URL carries the profile name, never pixel values, so it stays valid
+     * when the sizes change under Settings > Assets. No profile, or image
+     * optimization turned off, leaves the URL without a query string.
      */
     public static function generateProxyUrl(
         ?string $originalUrl,
         $internal = false,
-        ?int $width = null,
-        ?int $height = null
+        ?ImageProfile $profile = null
     ): string {
         // Get the config values (takes priority over settings values)
         $proxyUrlOverride = config('proxy.url_override');
@@ -117,12 +102,8 @@ class LogoProxyController extends Controller
                 ? rtrim($proxyUrlOverride, '/')."/logo-proxy/{$encodedUrl}/{$filename}"
                 : url("/logo-proxy/{$encodedUrl}/{$filename}");
 
-            $query = array_filter([
-                'w' => $width > 0 ? $width : null,
-                'h' => $height > 0 ? $height : null,
-            ]);
-            if ($query !== []) {
-                $url .= '?'.http_build_query($query);
+            if ($profile && ImageProfile::optimizationEnabled()) {
+                $url .= '?'.http_build_query(['p' => $profile->value]);
             }
         }
 
@@ -193,121 +174,28 @@ class LogoProxyController extends Controller
     }
 
     /**
-     * Parse and clamp a `?w=` / `?h=` query value. Returns null for anything
-     * missing, non-numeric, or <= 0 so callers fall back to the source size.
+     * The size profile a request asks for: `?p=` by name, or a `?w=` / `?h=`
+     * hint snapped to the nearest profile so arbitrary sizes never become
+     * extra cached copies. Null serves the original.
      */
-    private function clampDimension(mixed $value): ?int
+    private function resolveProfile(Request $request): ?ImageProfile
     {
-        if ($value === null || $value === '' || ! is_numeric($value)) {
-            return null;
+        $named = $request->query('p');
+        if (is_string($named) && $named !== '') {
+            return ImageProfile::tryFrom($named);
         }
 
-        $pixels = (int) $value;
-        if ($pixels <= 0) {
-            return null;
+        $width = $request->query('w');
+        if (is_numeric($width) && (int) $width > 0) {
+            return ImageProfile::nearestToWidth((int) $width);
         }
 
-        $max = (int) config('proxy.image_resize_max', 1920);
-
-        return min($pixels, $max);
-    }
-
-    /**
-     * Serve [$cacheFile], first downscaling it to fit [$width] x [$height]
-     * (aspect preserved, never upscaled) when either bound is given and
-     * resizing is enabled. The scaled variant is cached alongside the original
-     * keyed by its dimensions, so the transform runs once per size. Any
-     * failure (unsupported format, decode error, larger result) falls back to
-     * streaming the original untouched.
-     */
-    private function serveMaybeResized(
-        string $cacheFile,
-        ?string $contentType,
-        ?int $width,
-        ?int $height
-    ): StreamedResponse {
-        if (($width === null && $height === null) || ! config('proxy.image_resize_enabled', true)) {
-            return $this->serveFromCache($cacheFile, $contentType);
+        $height = $request->query('h');
+        if (is_numeric($height) && (int) $height > 0) {
+            return ImageProfile::Poster;
         }
 
-        // SVG scales losslessly on the client; rasterising it here only hurts.
-        $extension = strtolower(pathinfo($cacheFile, PATHINFO_EXTENSION));
-        if ($extension === 'svg') {
-            return $this->serveFromCache($cacheFile, $contentType);
-        }
-
-        $variantFile = $this->resizedCachePath($cacheFile, $width, $height);
-        if (Storage::disk('local')->exists($variantFile)) {
-            return $this->serveFromCache($variantFile, $contentType);
-        }
-
-        try {
-            $original = Storage::disk('local')->get($cacheFile);
-            if ($original === null || $original === '') {
-                return $this->serveFromCache($cacheFile, $contentType);
-            }
-
-            $resized = Image::fromBytes($original)
-                ->scale(width: $width, height: $height)
-                ->toBytes();
-
-            // A downscale that came back bigger (already-small source, format
-            // quirk) is not worth serving or caching.
-            if (strlen($resized) >= strlen($original)) {
-                return $this->serveFromCache($cacheFile, $contentType);
-            }
-
-            Storage::disk('local')->put($variantFile, $resized);
-
-            return $this->serveFromCache($variantFile, $contentType);
-        } catch (\Throwable $e) {
-            Log::warning('Logo proxy resize failed, serving original', [
-                'cache_file' => $cacheFile,
-                'width' => $width,
-                'height' => $height,
-                'error' => $e->getMessage(),
-            ]);
-
-            return $this->serveFromCache($cacheFile, $contentType);
-        }
-    }
-
-    /**
-     * Cache path for the [$width] x [$height] variant of [$cacheFile]:
-     * `name.jpg` -> `name@w600.jpg`.
-     */
-    private function resizedCachePath(string $cacheFile, ?int $width, ?int $height): string
-    {
-        $suffix = '@'.($width ? "w{$width}" : '').($height ? "h{$height}" : '');
-        $dot = strrpos($cacheFile, '.');
-
-        return $dot === false
-            ? $cacheFile.$suffix
-            : substr($cacheFile, 0, $dot).$suffix.substr($cacheFile, $dot);
-    }
-
-    /**
-     * Serve logo from cache
-     */
-    private function serveFromCache(string $cacheFile, ?string $contentType = null): StreamedResponse
-    {
-        $filePath = Storage::disk('local')->path($cacheFile);
-
-        if (! $contentType) {
-            // Try to determine content type from file
-            $contentType = $this->getContentTypeFromFile($filePath);
-        }
-
-        return response()->stream(function () use ($filePath) {
-            $stream = fopen($filePath, 'rb');
-            fpassthru($stream);
-            fclose($stream);
-        }, 200, [
-            'Content-Type' => $contentType,
-            'Cache-Control' => 'public, max-age=2592000', // 30 days
-            'Expires' => now()->addDays(30)->format('D, d M Y H:i:s \G\M\T'),
-            'Last-Modified' => date('D, d M Y H:i:s \G\M\T', filemtime($filePath)),
-        ]);
+        return null;
     }
 
     /**
@@ -428,30 +316,6 @@ class LogoProxyController extends Controller
         $sanitized = $dom->saveXML();
 
         return $sanitized !== false ? $sanitized : null;
-    }
-
-    /**
-     * Get content type from file
-     */
-    private function getContentTypeFromFile(string $filePath): string
-    {
-        $mimeType = mime_content_type($filePath);
-
-        // Fallback to common image types if detection fails
-        if (! $mimeType || ! str_starts_with($mimeType, 'image/')) {
-            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-
-            return match ($extension) {
-                'jpg', 'jpeg' => 'image/jpeg',
-                'png' => 'image/png',
-                'gif' => 'image/gif',
-                'webp' => 'image/webp',
-                'svg' => 'image/svg+xml',
-                default => 'image/png',
-            };
-        }
-
-        return $mimeType;
     }
 
     /**
