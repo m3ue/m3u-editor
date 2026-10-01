@@ -346,20 +346,32 @@ class LogoCacheService
     }
 
     /**
-     * Size variants cached for [$sourceKey] (of any extension when none is
-     * given), as cache file => width. A legacy width-and-height copy
-     * (`@w400h300`) reports width 0, so it is never reused or kept.
+     * Size variants of [$sourceKey] on disk, as cache file => width. Only the
+     * widths its metadata records and the current profile widths are
+     * checked, each directly, so a lookup never lists the cache directory.
+     * Older copies the metadata does not know about expire through the
+     * regular cache cleanup.
      *
      * @return array<string, int>
      */
     private static function variantFiles(string $sourceKey, ?string $extension = null): array
     {
-        $pattern = self::CACHE_DIRECTORY.'/'.self::cacheBaseNameForUrl($sourceKey).'@w*.'.($extension ? ltrim(strtolower($extension), '.') : '*');
-        $variants = [];
+        $meta = self::readCacheMetadata($sourceKey);
+        $extension ??= $meta['extension'] ?? null;
+        if (! $extension) {
+            return [];
+        }
 
-        foreach (glob(Storage::disk('local')->path($pattern)) ?: [] as $path) {
-            if (preg_match('/@w(\d+)(h\d+)?\.[^.]+$/', $path, $matches)) {
-                $variants[self::CACHE_DIRECTORY.'/'.basename($path)] = empty($matches[2]) ? (int) $matches[1] : 0;
+        $widths = array_unique([
+            ...array_map('intval', array_keys($meta['variants'] ?? [])),
+            ...self::currentProfileWidths(),
+        ]);
+
+        $variants = [];
+        foreach ($widths as $width) {
+            $file = self::variantFileFor($sourceKey, $extension, $width);
+            if (Storage::disk('local')->exists($file)) {
+                $variants[$file] = $width;
             }
         }
 
@@ -370,33 +382,41 @@ class LogoCacheService
      * Delete the size variants of [$sourceKey] that no profile is sized to any
      * more (a width was changed in settings, or optimization was turned off),
      * other than [$keepWidth]. Copies at another profile's current width stay:
-     * one URL can serve as both a poster and a backdrop.
+     * one URL can serve as both a poster and a backdrop. A current width is
+     * never stale, so the widths the metadata records are the only candidates.
      */
     private static function deleteStaleVariants(string $sourceKey, string $extension, ?int $keepWidth = null): void
     {
-        $currentWidths = array_filter(array_map(
-            fn (ImageProfile $profile): ?int => $profile->maxWidth(),
-            ImageProfile::cases()
-        ));
-        $isStale = fn (int $width): bool => $width !== $keepWidth && ! in_array($width, $currentWidths, true);
+        $currentWidths = self::currentProfileWidths();
 
         $forget = [];
-        foreach (self::variantFiles($sourceKey, $extension) as $file => $width) {
-            if ($isStale($width)) {
-                Storage::disk('local')->delete($file);
-                $forget[(string) $width] = null;
-            }
-        }
-
         foreach (array_keys(self::readCacheMetadata($sourceKey)['variants'] ?? []) as $width) {
-            if ($isStale((int) $width)) {
-                $forget[(string) $width] = null;
+            $width = (int) $width;
+            if ($width === $keepWidth || in_array($width, $currentWidths, true)) {
+                continue;
             }
+
+            Storage::disk('local')->delete(self::variantFileFor($sourceKey, $extension, $width));
+            $forget[(string) $width] = null;
         }
 
         if ($forget !== []) {
             self::updateCacheMetadata($sourceKey, ['variants' => $forget]);
         }
+    }
+
+    /**
+     * Widths artwork is currently stored at, one per profile (none when image
+     * optimization is off).
+     *
+     * @return list<int>
+     */
+    private static function currentProfileWidths(): array
+    {
+        return array_values(array_filter(array_map(
+            fn (ImageProfile $profile): ?int => $profile->maxWidth(),
+            ImageProfile::cases()
+        )));
     }
 
     /**
@@ -509,8 +529,11 @@ class LogoCacheService
             $cleared++;
         }
 
-        foreach (array_keys(self::variantFiles($sourceKey)) as $variant) {
-            $disk->delete($variant);
+        // Every size variant, including ones the metadata no longer knows
+        // about. Listing the cache directory is fine for this rare admin action.
+        $variantPattern = self::CACHE_DIRECTORY.'/'.self::cacheBaseNameForUrl($sourceKey).'@w*.*';
+        foreach (glob($disk->path($variantPattern)) ?: [] as $variantPath) {
+            $disk->delete(self::CACHE_DIRECTORY.'/'.basename($variantPath));
             $cleared++;
         }
 
