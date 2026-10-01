@@ -79,7 +79,7 @@ it('serves cached programme art even after the daily download limit is reached',
     $this->get("/schedules-direct/{$this->epg->uuid}/image/other.jpg")->assertStatus(429);
 });
 
-it('resizes cached programme art locally after the width setting changes, even past the download limit', function () {
+it('serves the previously sized copy past the download limit after the width setting changes', function () {
     Http::fake([
         'json.schedulesdirect.org/20141201/image/*' => Http::response(sdImageProxyJpeg(1920, 1080), 200, ['Content-Type' => 'image/jpeg']),
     ]);
@@ -94,11 +94,8 @@ it('resizes cached programme art locally after the width setting changes, even p
     $response = $this->get($path);
 
     $response->assertOk();
-    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(1000);
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(1280);
     Http::assertSentCount(1);
-
-    $sourceKey = LogoCacheService::schedulesDirectSourceKey($this->epg->uuid, 'hash123.jpg');
-    expect(Storage::disk('local')->exists(LogoCacheService::variantFileFor($sourceKey, 'jpg', 1280)))->toBeFalse();
 });
 
 it('serves the cached copy past the download limit once optimization is turned off', function () {

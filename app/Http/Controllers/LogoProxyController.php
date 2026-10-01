@@ -66,8 +66,8 @@ class LogoProxyController extends Controller
      * When [$profile] is passed, the proxy serves (and caches) a copy sized
      * for that role (see ImageProfile) instead of the full-resolution source.
      * The URL carries the profile name, never pixel values, so it stays valid
-     * when the sizes change under Settings > Assets. No profile, or image
-     * optimization turned off, leaves the URL without a query string.
+     * when the sizes change under Settings > Assets. No profile leaves the
+     * URL without a query string.
      */
     public static function generateProxyUrl(
         ?string $originalUrl,
@@ -102,7 +102,9 @@ class LogoProxyController extends Controller
                 ? rtrim($proxyUrlOverride, '/')."/logo-proxy/{$encodedUrl}/{$filename}"
                 : url("/logo-proxy/{$encodedUrl}/{$filename}");
 
-            if ($profile && ImageProfile::optimizationEnabled()) {
+            // Always carried (the server ignores it while optimization is off),
+            // so turning optimization on or off never changes artwork URLs.
+            if ($profile) {
                 $url .= '?'.http_build_query(['p' => $profile->value]);
             }
         }

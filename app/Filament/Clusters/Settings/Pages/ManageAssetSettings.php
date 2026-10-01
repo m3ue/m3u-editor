@@ -100,7 +100,7 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->minValue(1)
                             ->maxValue(100)
                             ->placeholder(70)
-                            ->helperText(__('Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). The source format is always kept.')),
+                            ->helperText(__('Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). Applies to newly cached copies; the source format is always kept.')),
                     ]),
                 Section::make(__('Placeholder Images'))
                     ->description(__('Override app-wide placeholder images for logos, episode previews, and VOD/Series poster fallbacks.'))

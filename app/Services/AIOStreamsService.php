@@ -837,7 +837,7 @@ class AIOStreamsService implements MediaServer
         return '';
     }
 
-    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string
+    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary', ?int $maxWidth = null): string
     {
         return '';
     }

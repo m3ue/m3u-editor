@@ -2420,7 +2420,7 @@
     "Enables audit log, custom rate limits, conversation history, and other management features for the AI Copilot assistant.": "为 AI 助手启用操作日志、自定义速率限制、对话历史记录及其他管理功能。",
     "Enables subtitles in this language for the broadcast. Leaving this empty disables subtitles.": "为广播启用该语言的字幕。留空则禁用字幕。",
     "Encoder Preset": "编码器预设",
-    "Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). The source format is always kept.": "缩小图片的编码质量（1-100）。留空则使用默认值（70）。始终保留原始格式。",
+    "Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). Applies to newly cached copies; the source format is always kept.": "缩小图片的编码质量（1-100）。留空则使用默认值（70）。仅适用于新缓存的副本；始终保留原始格式。",
     "End Late (seconds)": "延迟结束（秒）",
     "End Time": "结束时间",
     "End late (seconds)": "延迟结束（秒）",

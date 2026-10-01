@@ -4,6 +4,7 @@ use App\Http\Controllers\MediaServerProxyController;
 use App\Models\MediaServerIntegration;
 use App\Services\LogoCacheService;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -124,7 +125,7 @@ it('serves an expired cached image when the media server is unavailable', functi
     'connection failure' => [fn () => fn () => throw new ConnectionException('Connection refused')],
 ]);
 
-it('replaces an expired full-size copy when refreshed artwork is large enough to resize', function () {
+it('serves refreshed artwork once an expired full-size copy is refetched', function () {
     Http::fake([
         '*/Items/*' => Http::sequence()
             ->push(mediaServerJpeg(400, 600), 200, ['Content-Type' => 'image/jpeg'])
@@ -141,7 +142,62 @@ it('replaces an expired full-size copy when refreshed artwork is large enough to
     $response = $this->get($path);
 
     $response->assertOk();
-    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(600)
-        ->and(Storage::disk('local')->exists($original))->toBeFalse()
-        ->and(LogoCacheService::readCacheMetadata($sourceKey))->not->toHaveKey('file');
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(600);
+});
+
+it('asks Emby/Jellyfin for the profile width and caches a pre-sized image as-is', function () {
+    $sized = mediaServerJpeg(600, 900);
+    Http::fake([
+        '*/Items/*' => Http::response($sized, 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+
+    $response = $this->get(mediaServerImagePath($this->integration, 'item1', 'Primary'));
+
+    $response->assertOk();
+    expect($response->streamedContent())->toBe($sized);
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/Items/item1/Images/Primary')
+        && str_contains($request->url(), 'maxWidth=600'));
+});
+
+it('asks Plex for the profile width through its photo transcoder', function () {
+    $plex = MediaServerIntegration::factory()->create(['type' => 'plex']);
+    Http::fake([
+        '*/photo/*' => Http::response(mediaServerJpeg(1280, 720), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+
+    $this->get(mediaServerImagePath($plex, '42', 'Backdrop'))->assertOk();
+
+    Http::assertSent(function (Request $request): bool {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return str_contains($request->url(), '/photo/:/transcode')
+            && $query['width'] === '1280'
+            && $query['url'] === '/library/metadata/42/art';
+    });
+});
+
+it('falls back to the original and resizes it locally when the server rejects resizing', function () {
+    Http::fake([
+        '*maxWidth=*' => Http::response('bad request', 400),
+        '*/Items/*' => Http::response(mediaServerJpeg(2000, 3000), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+
+    $response = $this->get(mediaServerImagePath($this->integration, 'item1', 'Primary'));
+
+    $response->assertOk();
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(600);
+    Http::assertSentCount(2);
+});
+
+it('fetches the original when image optimization is off', function () {
+    config()->set('proxy.image_resize_enabled', false);
+    Http::fake([
+        '*/Items/*' => Http::response(mediaServerJpeg(2000, 3000), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+
+    $response = $this->get(mediaServerImagePath($this->integration, 'item1', 'Primary'));
+
+    $response->assertOk();
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(2000);
+    Http::assertSent(fn (Request $request): bool => ! str_contains($request->url(), 'maxWidth'));
 });

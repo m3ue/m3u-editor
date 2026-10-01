@@ -271,28 +271,8 @@ it('downscales an already cached original locally without refetching it', functi
     Http::assertNothingSent();
 });
 
-it('drops a cached variant that barely improves on the cached original', function () {
-    $remoteUrl = 'https://example.com/near-duplicate.jpg';
-    $original = bigJpegBytes(700, 1050);
-    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
-
-    Http::fake([
-        $remoteUrl => Http::response($original, 200, ['Content-Type' => 'image/jpeg']),
-    ]);
-    $this->get(proxyPathFor($remoteUrl))->assertOk();
-
-    // A copy left by the old on-demand resizer, barely smaller than the original.
-    Storage::disk('local')->put(LogoCacheService::CACHE_DIRECTORY."/{$baseName}@w600.jpg", substr($original, 0, (int) (strlen($original) * 0.9)));
-
-    $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
-
-    $response->assertOk();
-    expect($response->streamedContent())->toBe($original)
-        ->and(cachedLogoFiles())->toBe(["{$baseName}.jpg"]);
-});
-
-it('resizes the cached copy locally when a profile width is lowered and drops the old size', function () {
-    $remoteUrl = 'https://example.com/resized-setting.jpg';
+it('caches a new copy when a profile width changes and leaves the old one for cleanup', function (int $newWidth) {
+    $remoteUrl = "https://example.com/width-change-{$newWidth}.jpg";
     $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
 
     Http::fake([
@@ -301,41 +281,20 @@ it('resizes the cached copy locally when a profile width is lowered and drops th
     $this->get(proxyPathFor($remoteUrl).'?p=poster')->assertOk();
 
     $settings = app(GeneralSettings::class);
-    $settings->image_poster_width = 400;
-    $settings->save();
-
-    Http::fake([
-        $remoteUrl => Http::response('should-not-be-called', 500),
-    ]);
-    $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
-
-    $response->assertOk();
-    expect(imageWidthOf($response->streamedContent()))->toBe(400)
-        ->and(cachedLogoFiles())->toBe(["{$baseName}@w400.jpg"]);
-    Http::assertNothingSent();
-});
-
-it('refetches when a profile width is raised and drops the old size', function () {
-    $remoteUrl = 'https://example.com/raised-setting.jpg';
-    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
-
-    Http::fake([
-        $remoteUrl => Http::response(bigJpegBytes(1600, 900), 200, ['Content-Type' => 'image/jpeg']),
-    ]);
-    $this->get(proxyPathFor($remoteUrl).'?p=poster')->assertOk();
-
-    $settings = app(GeneralSettings::class);
-    $settings->image_poster_width = 900;
+    $settings->image_poster_width = $newWidth;
     $settings->save();
 
     $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
 
     $response->assertOk();
-    expect(imageWidthOf($response->streamedContent()))->toBe(900)
-        ->and(cachedLogoFiles())->toBe(["{$baseName}@w900.jpg"]);
-});
+    expect(imageWidthOf($response->streamedContent()))->toBe($newWidth)
+        ->and(cachedLogoFiles())->toEqualCanonicalizing(["{$baseName}@w600.jpg", "{$baseName}@w{$newWidth}.jpg"]);
+})->with([
+    'lowered' => [400],
+    'raised' => [900],
+]);
 
-it('keeps copies for every profile a url is currently used as', function () {
+it('keeps a copy for every profile a url is used as', function () {
     $remoteUrl = 'https://example.com/poster-and-backdrop.jpg';
     $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
 
@@ -343,11 +302,6 @@ it('keeps copies for every profile a url is currently used as', function () {
         $remoteUrl => Http::response(bigJpegBytes(1600, 900), 200, ['Content-Type' => 'image/jpeg']),
     ]);
     $this->get(proxyPathFor($remoteUrl).'?p=backdrop')->assertOk();
-
-    // The poster copy is resized from the cached backdrop, not refetched.
-    Http::fake([
-        $remoteUrl => Http::response('should-not-be-called', 500),
-    ]);
     $poster = $this->get(proxyPathFor($remoteUrl).'?p=poster');
 
     $poster->assertOk();
@@ -355,7 +309,7 @@ it('keeps copies for every profile a url is currently used as', function () {
         ->and(cachedLogoFiles())->toEqualCanonicalizing(["{$baseName}@w600.jpg", "{$baseName}@w1280.jpg"]);
 });
 
-it('refetches the original and drops resized copies once optimization is turned off', function () {
+it('refetches the original once optimization is turned off', function () {
     $remoteUrl = 'https://example.com/turned-off.jpg';
     $original = bigJpegBytes(1600, 900);
 
@@ -369,8 +323,9 @@ it('refetches the original and drops resized copies once optimization is turned 
     $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
 
     $response->assertOk();
+    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
     expect($response->streamedContent())->toBe($original)
-        ->and(cachedLogoFiles())->toBe([LogoCacheService::cacheKeyForUrl($remoteUrl).'.jpg']);
+        ->and(cachedLogoFiles())->toEqualCanonicalizing(["{$baseName}.jpg", "{$baseName}@w600.jpg"]);
 });
 
 it('serves the original when image optimization is disabled by config', function () {
@@ -402,7 +357,7 @@ it('never rasterises an SVG even when a profile is requested', function () {
     expect($response->headers->get('Content-Type'))->toStartWith('image/svg');
 });
 
-it('generateProxyUrl bakes in a profile name only when one is given', function () {
+it('generateProxyUrl bakes in a profile name whenever one is given', function () {
     $url = 'https://example.com/poster.jpg';
 
     expect(LogoProxyController::generateProxyUrl($url))
@@ -410,9 +365,10 @@ it('generateProxyUrl bakes in a profile name only when one is given', function (
         ->and(LogoProxyController::generateProxyUrl($url, profile: ImageProfile::Poster))
         ->toEndWith('?p=poster');
 
+    // Kept while optimization is off, so toggling it never changes artwork urls.
     config()->set('proxy.image_resize_enabled', false);
 
-    expect(LogoProxyController::generateProxyUrl($url, profile: ImageProfile::Poster))->not->toContain('?');
+    expect(LogoProxyController::generateProxyUrl($url, profile: ImageProfile::Poster))->toEndWith('?p=poster');
 });
 
 it('clears the original, its size variants and metadata for a url', function () {

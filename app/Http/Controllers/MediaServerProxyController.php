@@ -12,6 +12,7 @@ use App\Models\Scopes\ExcludeAioFailoverClonesScope;
 use App\Services\LogoCacheService;
 use App\Services\MediaServerService;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -76,13 +77,18 @@ class MediaServerProxyController extends Controller
             }
 
             $mediaServer = MediaServerService::make($integration);
-            $imageUrl = $mediaServer->getDirectImageUrl($itemId, $imageType);
+            $maxWidth = $profile->maxWidth();
 
-            // Fetch the image with authentication
+            // Ask the media server for a right-sized copy so the editor rarely
+            // has to resize anything itself (null = original size).
             try {
-                $response = Http::withHeaders([
-                    'Accept' => 'image/*',
-                ])->timeout(30)->get($imageUrl);
+                $response = $this->fetchImage($mediaServer->getDirectImageUrl($itemId, $imageType, $maxWidth));
+
+                // A server that rejects the resize request still serves the
+                // original, which storeImage() then downscales locally.
+                if ($maxWidth !== null && ! $response->successful() && $response->status() !== 404) {
+                    $response = $this->fetchImage($mediaServer->getDirectImageUrl($itemId, $imageType));
+                }
             } catch (ConnectionException $e) {
                 // The media server is unreachable: an expired copy beats a broken image.
                 $staleFile = LogoCacheService::findAnyCopy($sourceKey);
@@ -140,6 +146,13 @@ class MediaServerProxyController extends Controller
                 'error' => 'Internal server error while proxying image',
             ], 500);
         }
+    }
+
+    private function fetchImage(string $url): ClientResponse
+    {
+        return Http::withHeaders([
+            'Accept' => 'image/*',
+        ])->timeout(30)->get($url);
     }
 
     private function imageResponse(string $cacheFile, ?string $contentType = null): StreamedResponse

@@ -21,13 +21,6 @@ class LogoCacheService
      */
     private const CACHED_EXTENSIONS = ['jpg', 'png', 'gif', 'webp', 'svg', 'bmp', 'avif'];
 
-    /**
-     * A downscaled copy is only kept when it is at least this much smaller
-     * than its source. Below that, the re-encode costs quality for little
-     * gain, and next to a cached original it would store the image twice.
-     */
-    private const MIN_OPTIMIZED_SAVINGS = 0.25;
-
     public static function cacheKeyForUrl(string $url): string
     {
         return self::LEGACY_EXTENSIONLESS_PREFIX.md5($url);
@@ -54,7 +47,7 @@ class LogoCacheService
         $meta = self::readCacheMetadata($url);
 
         if ($meta !== null) {
-            // A variant-only entry (see storeImage()) has no original on disk.
+            // Only a size copy is cached when the source needed resizing (see storeImage()).
             return ! empty($meta['file']) && $disk->exists($meta['file']) ? $meta['file'] : null;
         }
 
@@ -75,7 +68,7 @@ class LogoCacheService
     }
 
     /**
-     * @return array{file?: ?string, extension?: string, content_type?: ?string, profile?: string, variants?: array<int|string, bool>, cached_at?: string}|null
+     * @return array{file?: string, extension?: string, content_type?: ?string, profile?: string, cached_at?: string}|null
      */
     public static function readCacheMetadata(string $url): ?array
     {
@@ -91,29 +84,19 @@ class LogoCacheService
     }
 
     /**
-     * Merge [$changes] into the companion metadata for [$sourceKey]:
-     * `file` (the original's path, absent for a variant-only entry),
-     * `extension`, `content_type`, `profile` (the role it was cached for),
-     * and `variants` (width => true when a downscaled copy is stored, false
-     * when the original already serves that width, null to forget it).
-     * Null values leave a key unchanged; keys in [$forget] are removed.
+     * Merge [$changes] into the companion metadata for [$sourceKey]: `file`
+     * (the original's path, absent when only a size copy is cached),
+     * `extension`, `content_type` and `profile` (the role it was cached for).
+     * Null values leave a key unchanged.
      *
-     * @param  array{file?: string, extension?: string, content_type?: ?string, profile?: ?string, variants?: array<string, ?bool>}  $changes
-     * @param  list<string>  $forget
+     * @param  array{file?: ?string, extension?: string, content_type?: ?string, profile?: ?string}  $changes
      */
-    private static function updateCacheMetadata(string $sourceKey, array $changes, array $forget = []): void
+    private static function writeCacheMetadata(string $sourceKey, array $changes): void
     {
-        $meta = self::readCacheMetadata($sourceKey) ?? [];
-        $variants = array_filter(
-            array_replace($meta['variants'] ?? [], $changes['variants'] ?? []),
-            fn (?bool $decision): bool => $decision !== null
-        );
-        unset($changes['variants']);
-
         $meta = array_merge(
-            array_diff_key($meta, array_flip($forget)),
+            self::readCacheMetadata($sourceKey) ?? [],
             array_filter($changes, fn ($value) => $value !== null),
-            ['variants' => $variants, 'cached_at' => now()->toIso8601String()],
+            ['cached_at' => now()->toIso8601String()],
         );
 
         Storage::disk('local')->put(self::cacheMetaFileForUrl($sourceKey), json_encode($meta, JSON_UNESCAPED_SLASHES));
@@ -152,7 +135,8 @@ class LogoCacheService
 
     /**
      * Cache path of the [$width]-wide copy of [$sourceKey]: `name.jpg` -> `name@w600.jpg`.
-     * The width is part of the name, so changing a profile size simply misses.
+     * The width is part of the name, so changing a profile size simply misses
+     * and the old copy expires through the regular cache cleanup.
      */
     public static function variantFileFor(string $sourceKey, string $extension, int $width): string
     {
@@ -170,96 +154,55 @@ class LogoCacheService
     }
 
     /**
-     * Find a cached copy of [$sourceKey] for [$profile] (or the original when
-     * no profile is given or optimization is off). An original, or a larger
-     * copy cached before a width was lowered, is downscaled locally rather
-     * than refetched; an original only gains a second copy when that copy is
-     * meaningfully smaller. Files older than [$maxAgeHours] count as missing
-     * so the caller refetches them.
+     * Find a cached copy of [$sourceKey] sized for [$profile] (or the original
+     * when no profile is given or optimization is off). A cached original
+     * wider than the profile is downscaled once into a size copy. Files older
+     * than [$maxAgeHours] count as missing so the caller refetches them.
      */
     public static function findImage(string $sourceKey, ?ImageProfile $profile = null, ?int $maxAgeHours = null): ?string
     {
         $disk = Storage::disk('local');
-        $width = $profile?->maxWidth();
-        $meta = self::readCacheMetadata($sourceKey);
         $original = self::findCacheFileForUrl($sourceKey);
         $freshOriginal = $original && self::isFresh($original, $maxAgeHours) ? $original : null;
 
-        if ($width === null) {
-            return $freshOriginal;
-        }
-
-        $extension = $meta['extension'] ?? ($original ? pathinfo($original, PATHINFO_EXTENSION) : null);
+        $width = $profile?->maxWidth();
+        $extension = self::readCacheMetadata($sourceKey)['extension']
+            ?? ($original ? strtolower(pathinfo($original, PATHINFO_EXTENSION)) : null);
 
         // SVG scales losslessly on the client and is never rasterised here.
-        if (! $extension || strtolower($extension) === 'svg') {
-            return $freshOriginal;
-        }
-
-        $useVariant = $meta['variants'][(string) $width] ?? null;
-        if ($useVariant === false) {
+        if ($width === null || ! $extension || $extension === 'svg') {
             return $freshOriginal;
         }
 
         $variant = self::variantFileFor($sourceKey, $extension, $width);
-        if ($disk->exists($variant)) {
-            if ($useVariant === null && $original) {
-                // Cached before sizes were tracked: drop a copy that barely
-                // improves on the original instead of storing both.
-                $worthKeeping = $disk->size($variant) <= $disk->size($original) * (1 - self::MIN_OPTIMIZED_SAVINGS);
-                if (! $worthKeeping) {
-                    $disk->delete($variant);
-                }
-                self::updateCacheMetadata($sourceKey, ['variants' => [(string) $width => $worthKeeping]]);
-
-                if (! $worthKeeping) {
-                    return $freshOriginal;
-                }
-            }
-
-            if (self::isFresh($variant, $maxAgeHours)) {
-                return $variant;
-            }
+        if ($disk->exists($variant) && self::isFresh($variant, $maxAgeHours)) {
+            return $variant;
         }
 
-        if ($freshOriginal) {
-            $optimized = self::optimize((string) $disk->get($freshOriginal), $width);
-            self::updateCacheMetadata($sourceKey, [
-                'extension' => $extension,
-                'variants' => [(string) $width => $optimized !== null],
-            ]);
-
-            if ($optimized === null) {
-                return $freshOriginal;
-            }
-
-            return self::writeVariant($sourceKey, $extension, $width, $optimized);
-        }
-
-        // Usually there is no original: only a downscaled copy is stored. A
-        // larger one (e.g. cached before this width was lowered in settings)
-        // is resized locally instead of refetching from upstream.
-        $larger = collect(self::variantFiles($sourceKey, $extension))
-            ->filter(fn (int $variantWidth, string $file): bool => $variantWidth > $width && self::isFresh($file, $maxAgeHours))
-            ->sort()
-            ->keys()
-            ->first();
-
-        if ($larger === null) {
+        if ($freshOriginal === null) {
             return null;
         }
 
-        $resized = self::optimize((string) $disk->get($larger), $width, minSavings: 0.0);
+        // Header-only check, so an original that already fits is served
+        // without reading it.
+        $originalWidth = @getimagesize($disk->path($freshOriginal))[0] ?? null;
+        if (! $originalWidth || $originalWidth <= $width) {
+            return $freshOriginal;
+        }
 
-        return $resized !== null
-            ? self::writeVariant($sourceKey, $extension, $width, $resized)
-            : $larger;
+        // A failed resize stores the original bytes as this size's copy, so
+        // the work is not retried on every request.
+        $bytes = (string) $disk->get($freshOriginal);
+        $disk->put($variant, self::optimize($bytes, $width) ?? $bytes);
+
+        return $variant;
     }
 
     /**
      * Any cached copy of [$sourceKey], whatever its size or age: the original,
-     * else the largest size variant. For when refetching is not an option
-     * (the upstream is down, or a daily download limit is reached).
+     * else the widest size copy. For when refetching is not an option (the
+     * upstream is down, or a daily download limit is reached), so listing
+     * the cache directory here is acceptable.
      */
     public static function findAnyCopy(string $sourceKey): ?string
     {
@@ -268,7 +211,13 @@ class LogoCacheService
             return $original;
         }
 
-        $variants = self::variantFiles($sourceKey);
+        $variants = [];
+        $pattern = self::CACHE_DIRECTORY.'/'.self::cacheBaseNameForUrl($sourceKey).'@w*.*';
+        foreach (glob(Storage::disk('local')->path($pattern)) ?: [] as $path) {
+            if (preg_match('/@w(\d+)\./', basename($path), $matches)) {
+                $variants[self::CACHE_DIRECTORY.'/'.basename($path)] = (int) $matches[1];
+            }
+        }
         arsort($variants);
 
         return array_key_first($variants);
@@ -276,10 +225,9 @@ class LogoCacheService
 
     /**
      * Cache freshly fetched image bytes for [$sourceKey] and return the file to
-     * serve. Exactly one file is written: with a profile, the downscaled copy
-     * when it is meaningfully smaller, otherwise the source bytes as the
-     * original (which then serves that profile too). Copies the new bytes
-     * supersede are removed.
+     * serve: with a profile, a downscaled copy when the source is wider than
+     * the profile, otherwise the source bytes as the original (which then
+     * serves that profile too).
      */
     public static function storeImage(string $sourceKey, string $bytes, ?string $contentType, ?ImageProfile $profile = null): string
     {
@@ -290,142 +238,28 @@ class LogoCacheService
         $width = $extension === 'svg' ? null : $profile?->maxWidth();
         $optimized = $width !== null ? self::optimize($bytes, $width) : null;
 
-        if ($width !== null && $optimized !== null) {
-            // Only reached when no fresh original exists, so any original on
-            // disk is an expired copy of the source these bytes replace.
-            $staleOriginal = self::findCacheFileForUrl($sourceKey);
-            if ($staleOriginal) {
-                $disk->delete($staleOriginal);
-            }
+        $cacheFile = $optimized !== null
+            ? self::variantFileFor($sourceKey, $extension, $width)
+            : self::cacheFileForUrl($sourceKey, $extension);
+        $disk->put($cacheFile, $optimized ?? $bytes);
 
-            self::updateCacheMetadata($sourceKey, [
-                'extension' => $extension,
-                'content_type' => $contentType,
-                'profile' => $profile?->value,
-            ], forget: ['file']);
-
-            return self::writeVariant($sourceKey, $extension, $width, $optimized);
-        }
-
-        $cacheFile = self::cacheFileForUrl($sourceKey, $extension);
-        $disk->put($cacheFile, $bytes);
-
-        if ($width !== null) {
-            // A refetch can replace a once-larger source; its old copy is stale.
-            $disk->delete(self::variantFileFor($sourceKey, $extension, $width));
-        }
-
-        self::updateCacheMetadata($sourceKey, [
-            'file' => $cacheFile,
+        self::writeCacheMetadata($sourceKey, [
+            'file' => $optimized === null ? $cacheFile : null,
             'extension' => $extension,
             'content_type' => $contentType,
             'profile' => $profile?->value,
-            'variants' => $width !== null ? [(string) $width => false] : [],
         ]);
-        self::deleteStaleVariants($sourceKey, $extension);
 
         return $cacheFile;
     }
 
     /**
-     * Write the [$width]-wide copy of [$sourceKey], record it, and drop copies
-     * no profile is sized to any more.
-     */
-    private static function writeVariant(string $sourceKey, string $extension, int $width, string $bytes): string
-    {
-        $variant = self::variantFileFor($sourceKey, $extension, $width);
-        Storage::disk('local')->put($variant, $bytes);
-
-        self::updateCacheMetadata($sourceKey, [
-            'extension' => $extension,
-            'variants' => [(string) $width => true],
-        ]);
-        self::deleteStaleVariants($sourceKey, $extension, keepWidth: $width);
-
-        return $variant;
-    }
-
-    /**
-     * Size variants of [$sourceKey] on disk, as cache file => width. Only the
-     * widths its metadata records and the current profile widths are
-     * checked, each directly, so a lookup never lists the cache directory.
-     * Older copies the metadata does not know about expire through the
-     * regular cache cleanup.
-     *
-     * @return array<string, int>
-     */
-    private static function variantFiles(string $sourceKey, ?string $extension = null): array
-    {
-        $meta = self::readCacheMetadata($sourceKey);
-        $extension ??= $meta['extension'] ?? null;
-        if (! $extension) {
-            return [];
-        }
-
-        $widths = array_unique([
-            ...array_map('intval', array_keys($meta['variants'] ?? [])),
-            ...self::currentProfileWidths(),
-        ]);
-
-        $variants = [];
-        foreach ($widths as $width) {
-            $file = self::variantFileFor($sourceKey, $extension, $width);
-            if (Storage::disk('local')->exists($file)) {
-                $variants[$file] = $width;
-            }
-        }
-
-        return $variants;
-    }
-
-    /**
-     * Delete the size variants of [$sourceKey] that no profile is sized to any
-     * more (a width was changed in settings, or optimization was turned off),
-     * other than [$keepWidth]. Copies at another profile's current width stay:
-     * one URL can serve as both a poster and a backdrop. A current width is
-     * never stale, so the widths the metadata records are the only candidates.
-     */
-    private static function deleteStaleVariants(string $sourceKey, string $extension, ?int $keepWidth = null): void
-    {
-        $currentWidths = self::currentProfileWidths();
-
-        $forget = [];
-        foreach (array_keys(self::readCacheMetadata($sourceKey)['variants'] ?? []) as $width) {
-            $width = (int) $width;
-            if ($width === $keepWidth || in_array($width, $currentWidths, true)) {
-                continue;
-            }
-
-            Storage::disk('local')->delete(self::variantFileFor($sourceKey, $extension, $width));
-            $forget[(string) $width] = null;
-        }
-
-        if ($forget !== []) {
-            self::updateCacheMetadata($sourceKey, ['variants' => $forget]);
-        }
-    }
-
-    /**
-     * Widths artwork is currently stored at, one per profile (none when image
-     * optimization is off).
-     *
-     * @return list<int>
-     */
-    private static function currentProfileWidths(): array
-    {
-        return array_values(array_filter(array_map(
-            fn (ImageProfile $profile): ?int => $profile->maxWidth(),
-            ImageProfile::cases()
-        )));
-    }
-
-    /**
      * Downscale [$bytes] to [$maxWidth] (aspect preserved, never upscaled) at
-     * the configured quality. Returns null when there is nothing to gain: an
-     * SVG or undecodable image, a source already within the width, or a
-     * result less than [$minSavings] (a fraction) smaller than the source.
+     * the configured quality, keeping the source format. Returns null when
+     * there is nothing to do: an undecodable image, a source already within
+     * the width, or a result no smaller than the source.
      */
-    public static function optimize(string $bytes, int $maxWidth, float $minSavings = self::MIN_OPTIMIZED_SAVINGS): ?string
+    public static function optimize(string $bytes, int $maxWidth): ?string
     {
         $info = @getimagesizefromstring($bytes);
         if (! is_array($info) || (int) ($info[0] ?? 0) <= $maxWidth) {
@@ -449,7 +283,7 @@ class LogoCacheService
             return null;
         }
 
-        return strlen($optimized) <= strlen($bytes) * (1 - $minSavings) ? $optimized : null;
+        return strlen($optimized) < strlen($bytes) ? $optimized : null;
     }
 
     /**

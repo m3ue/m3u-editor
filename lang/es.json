@@ -2420,7 +2420,7 @@
     "Enables audit log, custom rate limits, conversation history, and other management features for the AI Copilot assistant.": "Habilita el registro de auditoría, límites de velocidad personalizados, historial de conversaciones y otras funciones de administración para el asistente AI Copilot.",
     "Enables subtitles in this language for the broadcast. Leaving this empty disables subtitles.": "Activa los subtítulos en este idioma para la emisión. Dejar vacío desactiva los subtítulos.",
     "Encoder Preset": "Preajuste del codificador",
-    "Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). The source format is always kept.": "Calidad del codificador (1-100) para las imágenes reducidas. Déjalo vacío para usar el valor predeterminado (70). Siempre se conserva el formato original.",
+    "Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). Applies to newly cached copies; the source format is always kept.": "Calidad del codificador (1-100) para las imágenes reducidas. Déjalo vacío para usar el valor predeterminado (70). Se aplica a las copias nuevas en caché; siempre se conserva el formato original.",
     "End Late (seconds)": "Finalizar tarde (segundos)",
     "End Time": "Hora de finalización",
     "End late (seconds)": "Terminar tarde (segundos)",
