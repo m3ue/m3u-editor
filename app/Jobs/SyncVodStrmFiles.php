@@ -235,6 +235,17 @@ class SyncVodStrmFiles implements ShouldQueue
      */
     private function syncChannels(Collection $channels, GeneralSettings $settings, ?StreamFileSetting $globalStreamFileSetting, bool $skipCleanup = false): void
     {
+        // Prefer media-server sources: batch-eager-load the match relations
+        // when the toggle is on for any playlist in the batch (one query),
+        // so the "original" url branch below never queries per channel.
+        // Batched jobs can mix playlists, so check every channel, not just
+        // the first. (Single-channel mode passes a plain support Collection,
+        // which has no batch eager loading to do.)
+        if ($channels instanceof \Illuminate\Database\Eloquent\Collection
+            && $channels->contains(fn ($channel) => $channel->playlist?->prefer_media_server_sources)) {
+            $channels->loadMissing('mediaSourceMatch.mediaChannel');
+        }
+
         // Get the default sync location for bulk mapping cache
         $defaultSyncLocation = $globalStreamFileSetting?->location ?? $settings->vod_stream_file_sync_location ?? '';
 
@@ -468,6 +479,17 @@ class SyncVodStrmFiles implements ShouldQueue
             $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
             if ($useOriginalUrl) {
                 $url = $channel->url_custom ?? $channel->url;
+
+                // Prefer media-server sources: when matched, write the media
+                // item's signed URL instead. No availability check here — the
+                // file is static and stream-start applies its own fallback.
+                if ($channel->playlist?->prefer_media_server_sources) {
+                    $mediaChannel = $channel->mediaSourceMatch?->mediaChannel;
+
+                    if ($mediaChannel?->enabled) {
+                        $url = $mediaChannel->url;
+                    }
+                }
             } else {
                 $playlist = $this->playlist ?? $channel->getEffectivePlaylist();
                 $extension = $channel->container_extension ?? 'mkv';

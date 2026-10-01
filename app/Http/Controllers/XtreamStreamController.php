@@ -12,6 +12,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\MediaSourcePreferenceService;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
 use App\Settings\GeneralSettings;
@@ -378,6 +379,17 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
+                // Media-server source preference: stream the matched media
+                // item with its own playlist context instead of the
+                // provider's (needsProxy above still reflects the request
+                // context; proxy requests forward the provider id to
+                // M3uProxyApiController, which does the swap itself).
+                $media = app(MediaSourcePreferenceService::class)->resolveChannel($channel);
+                if ($media !== null) {
+                    $channel = $media;
+                    $playlist = $media->getEffectivePlaylist();
+                }
+
                 return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getChannelUrl($channel, $playlist)));
             }
         }
@@ -419,6 +431,13 @@ class XtreamStreamController extends Controller
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
+                // Media-server source preference (see handleVod()).
+                $media = app(MediaSourcePreferenceService::class)->resolveEpisode($episode);
+                if ($media !== null) {
+                    $episode = $media;
+                    $playlist = $media->playlist;
+                }
+
                 return Redirect::to($this->applyMediaFlowProxy(PlaylistUrlService::getEpisodeUrl($episode, $playlist)));
             }
         }

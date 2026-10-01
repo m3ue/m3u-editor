@@ -6,6 +6,7 @@ use App\Enums\EpgSourceType;
 use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
+use App\Jobs\MatchMediaServerSources;
 use App\Jobs\UpdateXtreamStats;
 use App\Settings\GeneralSettings;
 use App\Traits\ShortUrlTrait;
@@ -70,6 +71,7 @@ class Playlist extends Model
         'auto_probe_streams' => 'boolean',
         'reclassify_vod_groups_to_tmdb_genres' => 'boolean',
         'reclassify_series_categories_to_tmdb_genres' => 'boolean',
+        'prefer_media_server_sources' => 'boolean',
         'auto_probe_streams_only_unprobed' => 'boolean',
         'auto_probe_streams_include_disabled' => 'boolean',
         'auto_probe_vod_streams' => 'boolean',
@@ -106,6 +108,20 @@ class Playlist extends Model
         'resync_attempt' => 'integer',
         'share_cache_across_playlists' => 'boolean',
     ];
+
+    protected static function booted(): void
+    {
+        // Rebuild (or clear) media source matches whenever the toggle flips.
+        // On → match the current content; off → the rebuild deletes the rows.
+        // Uses the job's own ::dispatch (not the global dispatch() helper):
+        // the helper's PendingDispatch path acquires ShouldBeUnique locks
+        // before the bus fake sees the job, which silently drops it in tests.
+        static::updated(function (Playlist $playlist): void {
+            if ($playlist->wasChanged('prefer_media_server_sources')) {
+                MatchMediaServerSources::dispatch($playlist->id);
+            }
+        });
+    }
 
     public function getFolderPathAttribute(): string
     {

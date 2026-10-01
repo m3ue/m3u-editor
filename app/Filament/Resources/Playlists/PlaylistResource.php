@@ -2321,6 +2321,24 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
 
+            Section::make(__('Media Server Sources'))
+                ->description(__('Use matching files from your media server integrations instead of provider streams'))
+                ->columnSpanFull()
+                ->collapsible()
+                ->collapsed($creating)
+                ->columns(3)
+                ->schema([
+                    Toggle::make('prefer_media_server_sources')
+                        ->label(__('Prefer media server sources'))
+                        ->inline(false)
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('When a VOD movie or series episode matches an item in your Emby, Jellyfin, or local media integrations (by TMDB/TVDB/IMDB ID), stream the integration\'s file instead of the provider\'s. Falls back to the provider if the media source is unavailable.')
+                        )
+                        ->default(false)
+                        ->helperText(__('Requires TMDB IDs on this playlist (enable TMDB lookup or metadata fetch). Plex is not supported.')),
+                ])->hidden(fn (?Playlist $record): bool => $record !== null && $record->isMediaServerPlaylist()),
+
             Section::make(__('Auto-Merge Processing'))
                 ->description(__('Automatically merge channels with the same stream ID into failover relationships after sync'))
                 ->columnSpanFull()

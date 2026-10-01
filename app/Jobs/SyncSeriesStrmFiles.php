@@ -478,6 +478,13 @@ class SyncSeriesStrmFiles implements ShouldQueue
             // Get the series episodes
             $episodes = $series->enabled_episodes;
 
+            // Prefer media-server sources: batch-eager-load the match
+            // relations when the toggle is on (one query), so the "original"
+            // url branch below never queries per episode. Toggle off = zero.
+            if ($series->playlist?->prefer_media_server_sources) {
+                $episodes->loadMissing('mediaSourceMatch.mediaEpisode');
+            }
+
             // Check if there are any episodes
             if ($episodes->isEmpty()) {
                 if ($this->notify) {
@@ -750,6 +757,18 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $useOriginalUrl = ($sync_settings['url_type'] ?? 'proxy') === 'original';
                 if ($useOriginalUrl) {
                     $url = $ep->url;
+
+                    // Prefer media-server sources: when matched, write the
+                    // media item's signed URL instead. No availability check
+                    // here — the file is static and stream-start applies its
+                    // own fallback.
+                    if ($series->playlist?->prefer_media_server_sources) {
+                        $mediaEpisode = $ep->mediaSourceMatch?->mediaEpisode;
+
+                        if ($mediaEpisode?->enabled) {
+                            $url = $mediaEpisode->url;
+                        }
+                    }
                 } else {
                     $containerExtension = $ep->container_extension ?? 'mp4';
                     $url = rtrim("/series/{$playlistUser->name}/{$playlistUuid}/".$ep->id.'.'.$containerExtension, '.');

@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Facades\DB;
@@ -153,6 +154,14 @@ class Episode extends Model
         }
 
         return CachedContentFile::query()->servableFor($this)->exists();
+    }
+
+    /**
+     * The media-server source match when this episode is the provider episode.
+     */
+    public function mediaSourceMatch(): HasOne
+    {
+        return $this->hasOne(MediaSourceMatch::class);
     }
 
     /**

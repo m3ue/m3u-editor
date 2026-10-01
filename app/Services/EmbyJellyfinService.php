@@ -12,6 +12,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 /**
  * EmbyJellyfinService - The "Brain" for Emby/Jellyfin integration
@@ -70,6 +71,28 @@ class EmbyJellyfinService implements MediaServer
         return $withoutRedirecting
             ? $client->withoutRedirecting()
             : $client->retry(2, 1000);
+    }
+
+    /**
+     * Cheap reachability probe for stream-start gating. Unlike
+     * testConnection() this uses short timeouts and no retries — a dead
+     * media server must never stall playback start for ~90s.
+     */
+    public function isReachable(): bool
+    {
+        try {
+            return Http::baseUrl($this->baseUrl)
+                ->connectTimeout(2)
+                ->timeout(3)
+                ->withHeaders([
+                    'X-Emby-Token' => $this->apiKey,
+                    'Accept' => 'application/json',
+                ])
+                ->get('/System/Info/Public')
+                ->successful();
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     /**
@@ -358,7 +381,7 @@ class EmbyJellyfinService implements MediaServer
             $params = [
                 'IncludeItemTypes' => 'Movie',
                 'Recursive' => 'true',
-                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations,Studios',
+                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations,Studios,ProviderIds',
                 'EnableImages' => 'true',
                 'ImageTypeLimit' => 1,
             ];

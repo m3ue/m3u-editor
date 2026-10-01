@@ -21,6 +21,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -223,6 +224,13 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'integration_id' => $integration->id,
                 'stats' => $this->stats,
             ]);
+
+            // Re-match provider playlists that prefer media server sources
+            // (Emby/Jellyfin only — local ids arrive later via FetchTmdbIds,
+            // which carries the matching job as postCompletionJobs).
+            if (! $integration->usesLocalPathConfig()) {
+                $this->dispatchSourceMatching($integration);
+            }
 
             // Dispatch TMDB metadata lookup for local media integrations
             $this->dispatchMetadataLookup($integration, $playlist);
@@ -427,6 +435,12 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         $runtimeMinutes = $runtimeSeconds > 0 ? (int) ($runtimeSeconds / 60) : null;
         $duration = $runtimeSeconds > 0 ? gmdate('H:i:s', $runtimeSeconds) : null;
 
+        // Extract external IDs (Tmdb/Tvdb/Imdb keys, same as syncEpisode reads)
+        $providerIds = $movie['ProviderIds'] ?? [];
+        $movieTmdbId = isset($providerIds['Tmdb']) && $providerIds['Tmdb'] !== '' ? (int) $providerIds['Tmdb'] : null;
+        $movieTvdbId = isset($providerIds['Tvdb']) && $providerIds['Tvdb'] !== '' ? (int) $providerIds['Tvdb'] : null;
+        $movieImdbId = isset($providerIds['Imdb']) && $providerIds['Imdb'] !== '' ? $providerIds['Imdb'] : null;
+
         // Extract director(s) from People array
         $directors = array_column(
             array_filter($movie['People'] ?? [], fn ($p) => ($p['Type'] ?? '') === 'Director'),
@@ -550,6 +564,10 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'import_batch_no' => $this->batchNo,
             'year' => $movie['ProductionYear'] ?? null,
             'rating' => $movie['CommunityRating'] ?? null,
+            // Never overwrite an existing id with null (local items get ids later from FetchTmdbIds)
+            'tmdb_id' => $movieTmdbId ?: ($isNew ? null : $channel->tmdb_id),
+            'tvdb_id' => $movieTvdbId ?: ($isNew ? null : $channel->tvdb_id),
+            'imdb_id' => $movieImdbId ?: ($isNew ? null : $channel->imdb_id),
             'info' => $info,
         ]);
 
@@ -1102,6 +1120,9 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'integration_id' => $integration->id,
             ]);
 
+            // Items may already have ids from a previous sync — match anyway.
+            $this->dispatchSourceMatching($integration);
+
             return;
         }
 
@@ -1118,6 +1139,9 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 ->broadcast($integration->user)
                 ->sendToDatabase($integration->user);
 
+            // Items may already have ids from a previous sync — match anyway.
+            $this->dispatchSourceMatching($integration);
+
             return;
         }
 
@@ -1126,6 +1150,9 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             Log::debug('SyncMediaServer: Skipping metadata lookup (no items synced)', [
                 'integration_id' => $integration->id,
             ]);
+
+            // Items may already have ids from a previous sync — match anyway.
+            $this->dispatchSourceMatching($integration);
 
             return;
         }
@@ -1145,8 +1172,45 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             allVodPlaylists: false,
             allSeriesPlaylists: false,
             overwriteExisting: false,
-            user: $integration->user
+            user: $integration->user,
+            // Ids only exist after the lookup completes — chain one rebuild per
+            // toggled-on provider playlist (the integration's own playlist is
+            // never the target; it just fills the index).
+            postCompletionJobs: $this->sourceMatchingPlaylistIds($integration)
+                ->map(fn (int $playlistId) => new MatchMediaServerSources($playlistId))
+                ->all(),
         );
+    }
+
+    /**
+     * Dispatch MatchMediaServerSources for every playlist of the integration
+     * owner that prefers media server sources. Used when a sync just changed
+     * the media-server side of the index (ids written directly, or ids that
+     * already exist because a previous lookup filled them). The integration's
+     * own media playlist is excluded — it is a match target, not a provider.
+     */
+    protected function dispatchSourceMatching(MediaServerIntegration $integration): void
+    {
+        $this->sourceMatchingPlaylistIds($integration)
+            ->each(fn (int $playlistId) => MatchMediaServerSources::dispatch($playlistId));
+    }
+
+    /**
+     * Ids of the integration owner's playlists that prefer media server
+     * sources — the provider playlists that consume this integration's
+     * content. The integration's own media playlist is never included: it is
+     * a match target, not a provider.
+     *
+     * @return Collection<int, int>
+     */
+    protected function sourceMatchingPlaylistIds(MediaServerIntegration $integration): Collection
+    {
+        return Playlist::query()
+            ->where('user_id', $integration->user_id)
+            ->where('prefer_media_server_sources', true)
+            ->where('id', '!=', $integration->playlist_id)
+            ->orderBy('id')
+            ->pluck('id');
     }
 
     /**

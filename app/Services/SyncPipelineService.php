@@ -8,6 +8,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
+use App\Jobs\MatchMediaServerSources;
 use App\Jobs\MergeChannels;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProbeStreams;
@@ -293,6 +294,7 @@ class SyncPipelineService
             SyncRunPhase::LiveProbe => $this->dispatchLiveProbe($run, $playlist),
             SyncRunPhase::CustomPlaylistSync => $this->dispatchCustomPlaylistSync($run, $playlist),
             SyncRunPhase::DynamicGroups => $this->dispatchDynamicGroups($run, $playlist),
+            SyncRunPhase::MediaSourceMatch => $this->dispatchMediaSourceMatch($run, $playlist),
             SyncRunPhase::SyncCompleted => $this->finish($run),
         };
     }
@@ -541,6 +543,18 @@ class SyncPipelineService
         ));
     }
 
+    private function dispatchMediaSourceMatch(SyncRun $run, Playlist $playlist): void
+    {
+        // MatchMediaServerSources is responsible for signalling completion itself
+        // (handles the toggle-off / no-eligible-integration paths via its finally
+        // block), mirroring SyncDynamicGroups's behaviour.
+        dispatch(new MatchMediaServerSources(
+            playlistId: $playlist->id,
+            syncRunId: $run->id,
+            completionPhase: SyncRunPhase::MediaSourceMatch,
+        ));
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private function chainOrDispatch(array $jobs, ?SyncRun $run = null): void
@@ -691,6 +705,14 @@ class SyncPipelineService
             if ($hasSeries || $hasNewSeries) {
                 $phases[] = SyncRunPhase::SeriesTmdb;
             }
+        }
+
+        // Media-server source matching: needs the provider TMDB ids from
+        // Group 3, and must run before STRM so "original"-url STRM files can
+        // use the matched media source. The job completes the phase itself
+        // when the toggle is off or no eligible integrations exist.
+        if (($hasVod || $hasSeries) && $playlist->prefer_media_server_sources) {
+            $phases[] = SyncRunPhase::MediaSourceMatch;
         }
 
         // Group 4: STRM generation (runs after find-replace so filenames embed corrected titles)

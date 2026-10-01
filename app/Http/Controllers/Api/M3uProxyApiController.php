@@ -11,6 +11,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
+use App\Services\MediaSourcePreferenceService;
 use App\Services\NetworkBroadcastService;
 use App\Services\ProfileService;
 use App\Services\StreamProfileRuleEvaluator;
@@ -39,6 +40,18 @@ class M3uProxyApiController extends Controller
             'customPlaylist',
             'streamProfile',
         ])->findOrFail($id);
+
+        // Media-server source preference: stream the matched media item with
+        // its own playlist context instead of the provider's. The swap must
+        // happen before anything reaches M3uProxyService so no provider
+        // connection slot is consumed; the request uuid is ignored because
+        // alias/merged-playlist transforms don't apply to the media item.
+        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($channel);
+        if ($media !== $channel) {
+            $channel = $media;
+            $channel->loadMissing(['customPlaylist', 'streamProfile']);
+            $uuid = null;
+        }
 
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
@@ -108,6 +121,14 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
+        // Media-server source preference (see channel()): swap the model and
+        // playlist context before anything reaches M3uProxyService.
+        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($episode);
+        if ($media !== $episode) {
+            $episode = $media;
+            $uuid = null;
+        }
+
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
 
@@ -170,6 +191,15 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
+        // Media-server source preference (see channel()): swap the model and
+        // playlist context before anything reaches M3uProxyService.
+        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($channel);
+        if ($media !== $channel) {
+            $channel = $media;
+            $channel->loadMissing(['customPlaylist', 'streamProfile']);
+            $uuid = null;
+        }
+
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
         } else {
@@ -216,6 +246,14 @@ class M3uProxyApiController extends Controller
         $episode = Episode::query()->with([
             'playlist',
         ])->findOrFail($id);
+
+        // Media-server source preference (see channel()): swap the model and
+        // playlist context before anything reaches M3uProxyService.
+        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($episode);
+        if ($media !== $episode) {
+            $episode = $media;
+            $uuid = null;
+        }
 
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
