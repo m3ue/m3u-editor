@@ -1604,6 +1604,28 @@ class PlaylistResource extends Resource implements CopilotResource
                             : 'Specify the CRON schedule for automatic sync, e.g. "0 3 * * *".')
                         ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
 
+                    Grid::make()
+                        ->columns(2)
+                        ->columnSpanFull()
+                        ->schema([
+                            Toggle::make('auto_resync_on_failure')
+                                ->label(__('Auto resync on failure'))
+                                ->helperText(__('When enabled, a failed sync is retried automatically before waiting for the next scheduled sync. Invalidated syncs always wait for the next scheduled sync.'))
+                                ->live()
+                                ->inline(false)
+                                ->default(true),
+                            TextInput::make('auto_resync_retries')
+                                ->label(__('Max retry attempts'))
+                                ->numeric()
+                                ->default(3)
+                                ->minValue(1)
+                                ->maxValue(10)
+                                ->helperText(fn () => __('Number of retry attempts before waiting for the next scheduled sync. Each retry waits :minutes minutes (Settings > Sync Options).', [
+                                    'minutes' => app(GeneralSettings::class)->failedRetryCooldownMinutes(),
+                                ]))
+                                ->hidden(fn (Get $get): bool => ! $get('auto_resync_on_failure')),
+                        ])->hidden(fn (Get $get): bool => ! $get('auto_sync')),
+
                     Callout::make(__('Last Synced'))
                         ->columnSpan(2)
                         ->description(fn ($record) => app(DateFormatService::class)->format($record?->synced)),

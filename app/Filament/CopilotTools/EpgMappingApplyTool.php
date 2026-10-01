@@ -10,6 +10,9 @@ use App\Models\EpgChannel;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
+use Laravel\Ai\Approvals\Approval;
+use Laravel\Ai\Concerns\InteractsWithApprovals;
+use Laravel\Ai\Contracts\Approvable;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
@@ -20,8 +23,10 @@ use Stringable;
  * both IDs exist, then applies them in a single transaction. Only call this
  * after presenting the full plan to the user and receiving explicit approval.
  */
-class EpgMappingApplyTool extends BaseTool
+class EpgMappingApplyTool extends BaseTool implements Approvable
 {
+    use InteractsWithApprovals;
+
     public function description(): Stringable|string
     {
         return 'Apply confirmed EPG channel mappings from one selected EPG source. Pass epg_id and a JSON array of {"channel_id": int, "epg_channel_id": int} pairs. Only call this after presenting the mapping plan and receiving explicit approval. Existing mappings are never replaced.';
@@ -38,6 +43,15 @@ class EpgMappingApplyTool extends BaseTool
                 ->description('JSON array of confirmed mappings. Format: [{"channel_id": 123, "epg_channel_id": 456}, {"channel_id": 124, "epg_channel_id": 789}]')
                 ->required(),
         ];
+    }
+
+    /**
+     * Applying mappings writes to the playlist's channels, so it waits for the
+     * user to approve it in the chat before it runs.
+     */
+    protected function needsApproval(Request $request): Approval|bool
+    {
+        return Approval::required(__('This applies EPG mappings to your channels.'));
     }
 
     public function handle(Request $request): Stringable|string

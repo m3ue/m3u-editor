@@ -11,13 +11,12 @@ use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use App\Support\PrivateNetworkGuard;
 use App\Traits\ProviderRequestDelay;
-use GuzzleHttp\Psr7\UriResolver;
-use GuzzleHttp\Psr7\Utils;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Queue\InteractsWithQueue;
@@ -341,42 +340,20 @@ class DownloadCachedContentFile implements ShouldQueue
     }
 
     /**
-     * GET with redirects disabled, following each Location manually so every
-     * hop passes the private network guard.
+     * Streamed GET where every redirect hop passes the private network guard.
      */
     private function fetchWithSafeRedirects(string $url, Playlist $playlist): Response
     {
         $userAgent = $playlist->user_agent ?: self::DEFAULT_USER_AGENT;
-        $current = $url;
 
-        for ($i = 0; $i <= $this->maxRedirects; $i++) {
-            $resolvedIp = PrivateNetworkGuard::assertUrlSafe($current);
-            $parts = parse_url($current);
-            $host = (string) $parts['host'];
-            $port = (int) ($parts['port'] ?? (strtolower((string) $parts['scheme']) === 'https' ? 443 : 80));
-
-            $response = Http::withUserAgent($userAgent)
+        return PrivateNetworkGuard::get(
+            $url,
+            fn (): PendingRequest => Http::withUserAgent($userAgent)
                 ->timeout($this->timeout)
-                ->withOptions([
-                    'stream' => true,
-                    'allow_redirects' => false,
-                    'curl' => [
-                        CURLOPT_RESOLVE => [trim($host, '[]').":{$port}:{$resolvedIp}"],
-                    ],
-                ])
-                ->throw()
-                ->get($current);
-
-            $status = $response->status();
-            $location = $response->header('Location');
-            if ($status < 300 || $status >= 400 || ! $location) {
-                return $response;
-            }
-
-            $current = (string) UriResolver::resolve(Utils::uriFor($current), Utils::uriFor($location));
-        }
-
-        throw new RuntimeException("Exceeded {$this->maxRedirects} redirects while fetching {$url}.");
+                ->withOptions(['stream' => true])
+                ->throw(),
+            $this->maxRedirects,
+        );
     }
 
     /**

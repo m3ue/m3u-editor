@@ -105,17 +105,17 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(FilamentNotification::class, AppNotification::class);
 
-        // Override the Laravel AI manager to fix a strict-mode tool schema bug
-        // where tools with no parameters are missing the required `parameters`
-        // object, causing OpenAI to return a 400 invalid_function_parameters error.
+        // Override the Laravel AI manager so Gemini tools with no required
+        // parameters omit `required` instead of sending an empty array, which
+        // Gemini rejects with a 400 INVALID_ARGUMENT error.
         $this->app->scoped(AiManager::class, fn ($app) => new PatchedAiManager($app));
 
         $this->app->singleton(GitInfoService::class);
 
         // Detect HTTPS before any provider boot() runs, so package providers
-        // calling asset() during their boot() (e.g. filament-copilot) get the
-        // correct scheme. We can't rely on TrustProxies middleware here — it
-        // runs after all providers have booted.
+        // calling asset() during their boot() get the correct scheme. We can't
+        // rely on TrustProxies middleware here, since it runs after all
+        // providers have booted.
         $this->app->booting(function () {
             if (! $this->app->runningInConsole()) {
                 $this->configureDynamicHttpsDetection();

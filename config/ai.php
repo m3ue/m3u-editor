@@ -103,9 +103,16 @@ return [
         ],
 
         'minimax' => [
-            'driver' => 'minimax',
+            'driver' => 'openai_compatible',
             'key' => env('MINIMAX_API_KEY'),
             'url' => env('MINIMAX_URL', 'https://api.minimax.io/v1'),
+            'models' => [
+                'text' => [
+                    'default' => 'MiniMax-M2.7',
+                    'cheapest' => 'MiniMax-M2.7-highspeed',
+                    'smartest' => 'MiniMax-M2.7',
+                ],
+            ],
         ],
 
         'mistral' => [

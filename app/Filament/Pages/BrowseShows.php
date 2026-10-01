@@ -10,9 +10,9 @@ use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
 use App\Models\Epg;
-use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
 use App\Models\Group;
+use App\Services\EpgProgrammeChannelResolver;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
 use App\Support\EpgProgrammeNormalizer;
@@ -371,7 +371,7 @@ class BrowseShows extends Page
             return;
         }
 
-        $programme = EpgProgramme::find($programmeId);
+        $programme = app(EpgProgrammeChannelResolver::class)->findOwnedProgramme($programmeId, $dvrSetting->user_id);
 
         if (! $programme) {
             Notification::make()->title(__('Programme not found.'))->danger()->send();
@@ -391,17 +391,10 @@ class BrowseShows extends Page
             return;
         }
 
-        // epg_programmes.epg_channel_id is the string channel ID from the EPG XML;
-        // channels.epg_channel_id is an integer FK to epg_channels.id — resolve via EpgChannel first.
-        $channel = null;
-        if ($programme->epg_channel_id) {
-            $epgChannelId = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
-            if ($epgChannelId) {
-                $channel = Channel::where('user_id', Auth::id())
-                    ->where('epg_channel_id', $epgChannelId)
-                    ->first();
-            }
-        }
+        $ownerChannels = $dvrSetting->ownerChannelsSubquery();
+        $channel = $ownerChannels
+            ? app(EpgProgrammeChannelResolver::class)->channelForProgramme($programme, $ownerChannels, ['id'])
+            : null;
 
         DvrRecordingRule::create([
             'user_id' => Auth::id(),
@@ -514,20 +507,14 @@ class BrowseShows extends Page
         $programme = $this->buildBaseQuery()
             ->where('title', $title)
             ->orderBy('start_time')
-            ->first(['epg_channel_id']);
+            ->first(['epg_id', 'epg_channel_id']);
 
-        if (! $programme?->epg_channel_id) {
+        if (! $programme) {
             return [null, null];
         }
 
-        $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
-        if (! $epgChannelPk) {
-            return [null, null];
-        }
-
-        $channel = Channel::whereIn('id', $subquery)
-            ->where('epg_channel_id', $epgChannelPk)
-            ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
+        $channel = app(EpgProgrammeChannelResolver::class)
+            ->channelForProgramme($programme, $subquery, ['id', 'title', 'title_custom', 'name', 'name_custom']);
 
         if (! $channel) {
             return [null, null];
@@ -818,8 +805,7 @@ class BrowseShows extends Page
             return null;
         }
 
-        $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
-        $channelNames = $this->resolveChannelNames($channelIds);
+        $channelNames = app(EpgProgrammeChannelResolver::class)->channelNames($programmes);
         $timezone = config('dev.timezone') ?? app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
         $episodeLookups = [];
@@ -847,7 +833,7 @@ class BrowseShows extends Page
 
             return [
                 'id' => $p->id,
-                'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
+                'channel_name' => EpgProgrammeChannelResolver::nameFor($channelNames, $p),
                 'start_time_human' => $startTime?->format('D M j, g:ia'),
                 'end_time_human' => $endTime?->format('g:ia'),
                 'duration_human' => $this->formatDuration($startTime, $endTime),
@@ -936,28 +922,6 @@ class BrowseShows extends Page
         }
 
         return [$season, $episode, $subtitle, $description];
-    }
-
-    /**
-     * @param  list<string>  $channelIds
-     * @return array<string, string>
-     */
-    private function resolveChannelNames(array $channelIds): array
-    {
-        if (empty($channelIds)) {
-            return [];
-        }
-
-        return EpgChannel::without('epg')
-            ->whereIn('channel_id', $channelIds)
-            ->get(['channel_id', 'name', 'display_name', 'name_custom', 'display_name_custom'])
-            ->mapWithKeys(fn (EpgChannel $c) => [
-                $c->channel_id => $c->name_custom
-                    ?: $c->display_name_custom
-                    ?: $c->display_name
-                    ?: $c->name,
-            ])
-            ->all();
     }
 
     /**

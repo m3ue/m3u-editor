@@ -5,6 +5,10 @@
     $isTool = ($msg['role'] ?? '') === 'tool';
     $isToolCall = ($msg['role'] ?? '') === 'tool_call';
     $isToolResult = ($msg['role'] ?? '') === 'tool_result';
+
+    // Reasoning models (DeepSeek, MiniMax, local models) can inline <think> blocks.
+    // A turn that only called tools (such as a rejected approval) leaves nothing to show.
+    $assistantContent = $isAssistant ? trim(preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? '')) : '';
 @endphp
 
 @if ($isUser)
@@ -25,13 +29,13 @@
     @endphp
     <div class="flex items-start gap-2.5">
         <div class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0 mt-0.5">
-            <x-filament::icon icon="heroicon-o-wrench-screwdriver" class="w-4 h-4 text-gray-500" />
+            <x-filament::icon icon="heroicon-o-wrench-screwdriver" class="w-4 h-4 text-gray-500 dark:text-gray-400" />
         </div>
         <div class="min-w-0 max-w-[85%] w-full" x-data="{ open: false }">
             <button @click="open = !open" type="button"
                 class="flex items-center gap-2 px-3 py-2 w-full rounded-t-xl border transition-colors {{ $hasError ? 'bg-danger-50 dark:bg-danger-900/10 border-danger-200 dark:border-danger-800 hover:bg-danger-100 dark:hover:bg-danger-900/20' : 'bg-success-50 dark:bg-success-900/10 border-success-200 dark:border-success-800 hover:bg-success-100 dark:hover:bg-success-900/20' }}"
                 :class="{ 'rounded-b-xl': !open }">
-                <svg class="w-3.5 h-3.5 text-gray-500 transition-transform duration-200" :class="{ 'rotate-90': open }"
+                <svg class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200" :class="{ 'rotate-90': open }"
                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                 </svg>
@@ -67,11 +71,23 @@
             </div>
         </div>
     </div>
-@elseif($isAssistant)
+@elseif($isAssistant && $assistantContent !== '')
+    {{-- Feedback thumbs. Only a persisted message carries an id, so the id gate
+         doubles as the "is there something rateable to talk to" gate. --}}
     @php
+        $messageId = $msg['id'] ?? null;
+        $rating = $msg['rating'] ?? null;
+        $showFeedback = $messageId !== null && config('filament-copilot.feedback.enabled', true);
+
+        // Model output is untrusted (it can be steered by prompt injection through tool
+        // results such as provider channel names or EPG text), so raw HTML is handled per
+        // config('filament-copilot.chat.html_input') and javascript: links are never rendered.
         $assistantHtml = \Illuminate\Support\Str::markdown(
-            preg_replace('/<think>.*?<\/think>/s', '', $msg['content'] ?? ''),
-            ['html_input' => 'strip']
+            $assistantContent,
+            [
+                'html_input' => config('filament-copilot.chat.html_input', 'strip'),
+                'allow_unsafe_links' => false,
+            ]
         );
     @endphp
     <div class="flex items-start gap-2.5">
@@ -86,6 +102,40 @@
                 {!! $assistantHtml !!}
             </div>
         </div>
+        @if ($showFeedback)
+            @php
+                $helpfulLabel = $rating === 'positive'
+                    ? __('filament-copilot::filament-copilot.feedback_remove_helpful')
+                    : __('filament-copilot::filament-copilot.feedback_helpful');
+                $notHelpfulLabel = $rating === 'negative'
+                    ? __('filament-copilot::filament-copilot.feedback_remove_not_helpful')
+                    : __('filament-copilot::filament-copilot.feedback_not_helpful');
+            @endphp
+            <div class="flex items-center gap-0.5 shrink-0 self-end">
+                <x-filament::icon-button
+                    :icon="$rating === 'positive' ? 'heroicon-s-hand-thumb-up' : 'heroicon-o-hand-thumb-up'"
+                    :color="$rating === 'positive' ? 'success' : 'gray'"
+                    size="sm"
+                    :label="$helpfulLabel"
+                    :tooltip="$helpfulLabel"
+                    wire:click="submitRating('{{ $messageId }}', 'positive')"
+                    wire:loading.attr="disabled"
+                    wire:target="submitRating"
+                    :aria-pressed="$rating === 'positive' ? 'true' : 'false'"
+                />
+                <x-filament::icon-button
+                    :icon="$rating === 'negative' ? 'heroicon-s-hand-thumb-down' : 'heroicon-o-hand-thumb-down'"
+                    :color="$rating === 'negative' ? 'danger' : 'gray'"
+                    size="sm"
+                    :label="$notHelpfulLabel"
+                    :tooltip="$notHelpfulLabel"
+                    wire:click="submitRating('{{ $messageId }}', 'negative')"
+                    wire:loading.attr="disabled"
+                    wire:target="submitRating"
+                    :aria-pressed="$rating === 'negative' ? 'true' : 'false'"
+                />
+            </div>
+        @endif
     </div>
 @elseif($isSystem)
     <div class="flex justify-center px-4">

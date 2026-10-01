@@ -2,7 +2,6 @@
 
 namespace App\Filament\Clusters\Settings\Pages;
 
-use App\Enums\SyncRetryBackoff;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Models\StreamFileSetting;
 use BackedEnum;
@@ -10,6 +9,7 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -76,27 +76,54 @@ class ManageSyncSettings extends BaseSettingsPage
                             ->hidden(fn ($get) => ! $get('enable_provider_request_delay'))
                             ->helperText(__('Minimum delay between provider requests, in milliseconds.')),
                     ]),
-                Section::make(__('Sync Invalidation'))
-                    ->description(__('Prevent sync from proceeding if conditions are met.'))
+                Section::make(__('Sync Invalidation & Retries'))
+                    ->description(__('Cancel syncs that would remove too much content, and control how long failed syncs wait before they are retried.'))
                     ->columnSpan('full')
                     ->columns(3)
                     ->collapsible(false)
                     ->schema([
-                        Toggle::make('invalidate_import')
-                            ->label(__('Enable sync invalidation'))
-                            ->columnSpanFull()
-                            ->disabled(fn () => ! empty(config('dev.invalidate_import')))
-                            ->live()
-                            ->hint(fn () => ! empty(config('dev.invalidate_import')) ? __('Already set by environment variable!') : null)
-                            ->default(function () {
-                                return ! empty(config('dev.invalidate_import')) ? (bool) config('dev.invalidate_import') : false;
-                            })
-                            ->afterStateHydrated(function (Toggle $component, $state) {
-                                if (! empty(config('dev.invalidate_import'))) {
-                                    $component->state((bool) config('dev.invalidate_import'));
-                                }
-                            })
-                            ->dehydrated(fn () => empty(config('dev.invalidate_import'))),
+                        Grid::make()
+                            ->columnSpan('full')
+                            ->columns(2)
+                            ->schema([
+                                Toggle::make('invalidate_import')
+                                    ->label(__('Enable sync invalidation'))
+                                    ->inline(false)
+                                    ->disabled(fn () => ! empty(config('dev.invalidate_import')))
+                                    ->live()
+                                    ->hint(fn () => ! empty(config('dev.invalidate_import')) ? __('Already set by environment variable!') : null)
+                                    ->default(function () {
+                                        return ! empty(config('dev.invalidate_import')) ? (bool) config('dev.invalidate_import') : false;
+                                    })
+                                    ->afterStateHydrated(function (Toggle $component, $state) {
+                                        if (! empty(config('dev.invalidate_import'))) {
+                                            $component->state((bool) config('dev.invalidate_import'));
+                                        }
+                                    })
+                                    ->dehydrated(fn () => empty(config('dev.invalidate_import')))
+                                    ->helperText(__('Cancel a sync that would remove more content than the configured thresholds allow.')),
+                                TextInput::make('failed_retry_cooldown_minutes')
+                                    ->label(__('Failed sync retry cooldown'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Playlists only retry when "Auto resync on failure" is enabled on the playlist, up to its max retry attempts. Invalidated playlist syncs always wait for the next scheduled sync.')
+                                    )
+                                    ->suffixIcon(fn () => ! empty(config('dev.failed_retry_cooldown_minutes')) ? 'heroicon-m-lock-closed' : null)
+                                    ->disabled(fn () => ! empty(config('dev.failed_retry_cooldown_minutes')))
+                                    ->hint(fn () => ! empty(config('dev.failed_retry_cooldown_minutes')) ? __('Already set by environment variable!') : null)
+                                    ->dehydrated(fn () => empty(config('dev.failed_retry_cooldown_minutes')))
+                                    ->afterStateHydrated(function (TextInput $component) {
+                                        if (! empty(config('dev.failed_retry_cooldown_minutes'))) {
+                                            $component->state(config('dev.failed_retry_cooldown_minutes'));
+                                        }
+                                    })
+                                    ->integer()
+                                    ->minValue(1)
+                                    ->default(15)
+                                    ->placeholder(15)
+                                    ->suffix(__('minutes'))
+                                    ->helperText(__('Minutes to wait before automatically retrying a failed playlist or EPG sync.')),
+                            ]),
                         TextInput::make('invalidate_import_threshold')
                             ->label(__('Channel removal threshold'))
                             ->columnSpan(1)
@@ -142,27 +169,6 @@ class ManageSyncSettings extends BaseSettingsPage
                             ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
                             ->numeric()
                             ->helperText(__('If sync will remove more than this number of groups/categories, the sync will be canceled.')),
-                        Select::make('invalidate_import_retry_backoff')
-                            ->label(__('Retry backoff'))
-                            ->columnSpanFull()
-                            ->options(SyncRetryBackoff::options())
-                            ->hintIcon(
-                                'heroicon-m-question-mark-circle',
-                                tooltip: __('Each invalidated retry waits longer than the last, and never longer than the playlist\'s own sync schedule. If every retry is invalidated, the playlist waits for its next scheduled sync and the backoff starts over. A successful sync resets the backoff.')
-                            )
-                            ->suffixIcon(fn () => ! empty(config('dev.invalidate_import_retry_backoff')) ? 'heroicon-m-lock-closed' : null)
-                            ->disabled(fn () => ! empty(config('dev.invalidate_import_retry_backoff')))
-                            ->hint(fn () => ! empty(config('dev.invalidate_import_retry_backoff')) ? __('Already set by environment variable!') : null)
-                            ->dehydrated(fn () => empty(config('dev.invalidate_import_retry_backoff')))
-                            ->afterStateHydrated(function (Select $component) {
-                                if (! empty(config('dev.invalidate_import_retry_backoff'))) {
-                                    $component->state(config('dev.invalidate_import_retry_backoff'));
-                                }
-                            })
-                            ->default(SyncRetryBackoff::Balanced->value)
-                            ->selectablePlaceholder(false)
-                            ->hidden(fn ($get) => ! empty(config('dev.invalidate_import')) || ! $get('invalidate_import'))
-                            ->helperText(__('How long to wait before automatically retrying an invalidated sync.')),
                     ]),
                 Section::make(__('Series stream file settings'))
                     ->description(__('Select a Stream File Setting for series .strm file generation.'))

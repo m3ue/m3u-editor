@@ -7,6 +7,7 @@ use Dedoc\Scramble\OpenApiContext;
 use Dedoc\Scramble\Support\Generator\Combined\AnyOf;
 use Dedoc\Scramble\Support\Generator\OpenApi;
 use Dedoc\Scramble\Support\Generator\Operation;
+use Dedoc\Scramble\Support\Generator\Reference;
 use Dedoc\Scramble\Support\Generator\Response;
 use Dedoc\Scramble\Support\Generator\Schema;
 use Dedoc\Scramble\Support\Generator\Types\ArrayType;
@@ -40,7 +41,9 @@ class DocumentXtreamApiResponses implements DocumentTransformer
 
         $actionSchemas = [];
         foreach (self::actionResponses() as $schemaName => $actionResponse) {
-            $type = $this->typeFromExample($actionResponse['example'])
+            $type = (isset($actionResponse['item'])
+                ? (new ArrayType)->setItems($this->itemSchema($document, $actionResponse['item'], $actionResponse['example'][0]))
+                : $this->typeFromExample($actionResponse['example']))
                 ->setDescription("Returned by `{$actionResponse['actions']}`. {$actionResponse['description']}")
                 ->examples([$actionResponse['example']]);
 
@@ -68,6 +71,21 @@ class DocumentXtreamApiResponses implements DocumentTransformer
         }
 
         return null;
+    }
+
+    /**
+     * Register a list response's item as its own titled schema. Stoplight Elements names an
+     * array option in the anyOf picker after its item's `title`, so without this every list
+     * action shows up as a bare `array[object]`.
+     *
+     * @param  array<string, mixed>  $example
+     */
+    private function itemSchema(OpenApi $document, string $schemaName, array $example): Reference
+    {
+        return $document->components->addSchema(
+            $schemaName,
+            Schema::fromType($this->typeFromExample($example))->setTitle($schemaName),
+        );
     }
 
     /**
@@ -107,9 +125,10 @@ class DocumentXtreamApiResponses implements DocumentTransformer
     }
 
     /**
-     * Representative responses per action, keyed by schema name.
+     * Representative responses per action, keyed by schema name. List responses name their
+     * item schema in `item`, which is built from the first example entry.
      *
-     * @return array<string, array{actions: string, description: string, example: array<mixed>}>
+     * @return array<string, array{actions: string, description: string, item?: string, example: array<mixed>}>
      */
     private static function actionResponses(): array
     {
@@ -151,6 +170,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamLiveStreams' => [
                 'actions' => 'get_live_streams',
                 'description' => 'Enabled live channels, optionally filtered by `category_id`.',
+                'item' => 'XtreamLiveStream',
                 'example' => [
                     [
                         'num' => 1,
@@ -173,6 +193,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamVodStreams' => [
                 'actions' => 'get_vod_streams',
                 'description' => 'Enabled VOD channels (movies), optionally filtered by `category_id`.',
+                'item' => 'XtreamVodStream',
                 'example' => [
                     [
                         'num' => 1,
@@ -198,6 +219,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamSeries' => [
                 'actions' => 'get_series',
                 'description' => 'Enabled series, optionally filtered by `category_id`.',
+                'item' => 'XtreamSeriesItem',
                 'example' => [
                     [
                         'num' => 1,
@@ -289,6 +311,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamLiveCategories' => [
                 'actions' => 'get_live_categories',
                 'description' => 'Live categories.',
+                'item' => 'XtreamLiveCategory',
                 'example' => [
                     [
                         'category_id' => '1',
@@ -305,6 +328,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamVodCategories' => [
                 'actions' => 'get_vod_categories',
                 'description' => 'VOD categories.',
+                'item' => 'XtreamVodCategory',
                 'example' => [
                     [
                         'category_id' => '1',
@@ -321,6 +345,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             'XtreamSeriesCategories' => [
                 'actions' => 'get_series_categories',
                 'description' => 'Series categories.',
+                'item' => 'XtreamSeriesCategory',
                 'example' => [
                     [
                         'category_id' => '1',

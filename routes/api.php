@@ -144,4 +144,7 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
         ->name('tv.push.unsubscribe');
     Route::post('player-stream/stop', [TvApiController::class, 'stopPlayerStream'])
         ->name('tv.player-stream.stop');
+    Route::post('logs', [TvApiController::class, 'uploadLogs'])
+        ->middleware('throttle:6,1')
+        ->name('tv.logs.upload');
 });

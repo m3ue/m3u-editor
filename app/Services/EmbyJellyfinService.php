@@ -801,10 +801,13 @@ class EmbyJellyfinService implements MediaServer
      *
      * @param  string  $itemId  The media server's item ID
      * @param  string  $imageType  Image type: 'Primary', 'Backdrop', 'Logo', etc.
+     * @param  int|null  $maxWidth  Have the server downscale to this width (never upscales)
      */
-    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string
+    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary', ?int $maxWidth = null): string
     {
-        return "{$this->baseUrl}/Items/{$itemId}/Images/{$imageType}?api_key={$this->apiKey}";
+        $url = "{$this->baseUrl}/Items/{$itemId}/Images/{$imageType}?api_key={$this->apiKey}";
+
+        return $maxWidth ? "{$url}&maxWidth={$maxWidth}" : $url;
     }
 
     /**

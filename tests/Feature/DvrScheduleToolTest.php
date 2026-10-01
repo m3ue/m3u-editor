@@ -144,6 +144,37 @@ it('search scopes to users mapped channels only', function () {
         ->toContain("No upcoming programmes found matching 'xyznonexistent'");
 });
 
+it('search ignores programmes from another EPG that reuses the channel XMLTV id', function () {
+    $user = User::factory()->create();
+    $otherEpg = Epg::factory()->for($user)->create();
+    $otherEpgChannel = EpgChannel::factory()->for($otherEpg)->for($user)->create(['channel_id' => '101']);
+
+    $epg = Epg::factory()->for($user)->create();
+    $epgChannel = EpgChannel::factory()->for($epg)->for($user)->create([
+        'channel_id' => '101',
+        'display_name' => 'BBC Two',
+    ]);
+    $playlist = Playlist::factory()->for($user)->create();
+    Channel::factory()->for($user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannel->id,
+        'enabled' => true,
+    ]);
+
+    makeEpgProgramme($epgChannel, $user, ['title' => 'Match of the Day']);
+    makeEpgProgramme($otherEpgChannel, $user, ['title' => 'Sheffield United Live']);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+
+    expect((string) $tool->handle(new Request(['action' => 'search', 'query' => 'Match of the Day'])))
+        ->toContain('Match of the Day')
+        ->toContain('BBC Two');
+
+    expect((string) $tool->handle(new Request(['action' => 'search', 'query' => 'Sheffield United'])))
+        ->toContain("No upcoming programmes found matching 'Sheffield United'");
+});
+
 // ── Schedule Once Action ───────────────────────────────────────────────────────
 
 it('schedule_once creates a Once rule and dispatches DvrSchedulerTick', function () {

@@ -38,17 +38,19 @@ return [
     'url_override' => env('PROXY_URL_OVERRIDE', null),
     'url_override_include_logos' => env('PROXY_URL_OVERRIDE_INCLUDE_LOGOS', default: null),
 
-    // Logo/artwork proxy on-the-fly downscaling. When enabled, a `?w=`/`?h=`
-    // query on a /logo-proxy URL makes the editor return an aspect-preserved,
-    // never-upscaled copy at that size (cached per size), so TV clients pull a
-    // poster-sized file instead of a multi-MB source image. The API layer bakes
-    // role-based sizes into artwork URLs (config keys below); a client can still
-    // override with its own `?w=`.
-    'image_resize_enabled' => env('PROXY_IMAGE_RESIZE_ENABLED', true),
+    // Artwork image optimization. Logo proxy, media server and Schedules Direct
+    // artwork is cached as an aspect-preserved, never-upscaled copy sized for its
+    // role (poster, backdrop, title logo, cast photo), so clients pull a right-sized
+    // file instead of a multi-MB source image. Sizes are configured under
+    // Settings > Assets; these env vars override the saved settings when set
+    // (null = use the setting). `image_resize_max` caps every configured width.
+    'image_resize_enabled' => env('PROXY_IMAGE_RESIZE_ENABLED'),
     'image_resize_max' => (int) env('PROXY_IMAGE_RESIZE_MAX', 1920),
-    'image_resize_poster_width' => (int) env('PROXY_IMAGE_RESIZE_POSTER_WIDTH', 600),
-    'image_resize_backdrop_width' => (int) env('PROXY_IMAGE_RESIZE_BACKDROP_WIDTH', 1280),
-    'image_resize_photo_width' => (int) env('PROXY_IMAGE_RESIZE_PHOTO_WIDTH', 300),
+    'image_resize_poster_width' => env('PROXY_IMAGE_RESIZE_POSTER_WIDTH'),
+    'image_resize_backdrop_width' => env('PROXY_IMAGE_RESIZE_BACKDROP_WIDTH'),
+    'image_resize_title_logo_width' => env('PROXY_IMAGE_RESIZE_TITLE_LOGO_WIDTH'),
+    'image_resize_photo_width' => env('PROXY_IMAGE_RESIZE_PHOTO_WIDTH'),
+    'image_resize_quality' => env('PROXY_IMAGE_RESIZE_QUALITY'),
 
     // Media Server (Plex/Emby/Jellyfin/local/WebDAV) proxy URLs are signed but
     // non-expiring — they're stored on the Channel record and must stay valid

@@ -90,8 +90,8 @@
             "hash": "tree-v2:7621e009898aea85dfa2ad91d25a3441db9ef5bf90a1b55e9b8396b3a43830f9"
         },
         "eslam-reda-div/filament-copilot": {
-            "version": "v1.1.3",
-            "hash": "tree-v2:704376bc0d228791d02ff935af299e689ae8ba9a36bf08252af92c4fb9daa0d2"
+            "version": "v1.8.0",
+            "hash": "tree-v2:cbf8a118d9af9aa96ce058a003e1ad9a220be7473c2957ed940dc5177ce89e8d"
         },
         "evenement/evenement": {
             "version": "v3.0.2",
@@ -202,8 +202,8 @@
             "hash": "tree-v2:5a3fd9c02f97551fd55e310dc0251d8779e537f8bef80c887446bbf7e5ccfc86"
         },
         "laravel/ai": {
-            "version": "v0.4.5",
-            "hash": "tree-v2:4f7e7cd4c94bbf3d64edf7c0674de01cf142aabd315cc8e0f8bf77833c462e8a"
+            "version": "v0.11.2",
+            "hash": "tree-v2:0a26ef0d0502ddbe57b37e7af3a65ddf1d3b9d2684741c75f3fdd8f6305864cd"
         },
         "laravel/framework": {
             "version": "v13.34.0",
@@ -246,8 +246,8 @@
             "hash": "tree-v2:7374370ed18d7728465afcdcdbede894a4916ff0aea1fac63d2ae85859f74d66"
         },
         "league/commonmark": {
-            "version": "2.10.0",
-            "hash": "tree-v2:71086e809dadc7ebb87d5d7153de0eee93f23b5ce6330f00e1b91b8f356fdc32"
+            "version": "2.10.3",
+            "hash": "tree-v2:ee619e9faf2cbab26a72cb89c809211c91e772fecf8c1a3cbc5e98f8a1233db2"
         },
         "league/config": {
             "version": "v1.2.0",
@@ -346,8 +346,8 @@
             "hash": "tree-v2:b62416f10065930c8d9360481686b69cc63f37eb585dba067bc05da794b0047f"
         },
         "phpseclib/phpseclib": {
-            "version": "3.0.55",
-            "hash": "tree-v2:005ae855df96fc8e36d05196b9d848d5f06659d486b69852cd377a479e283b28"
+            "version": "3.0.57",
+            "hash": "tree-v2:55fd680d70046da18276ca8b09dd3f45507a955c8963f01b2b65e1d576241790"
         },
         "phpstan/phpdoc-parser": {
             "version": "2.3.3",
@@ -364,10 +364,6 @@
         "predis/predis": {
             "version": "v2.4.1",
             "hash": "tree-v2:2b88716e817c41adb8ee717d0b3e3fa347d255ab3c291521b1d44d8f46eeffe7"
-        },
-        "prism-php/prism": {
-            "version": "v0.99.22",
-            "hash": "tree-v2:9ed09d25c8ae53022db13e9ed66785e54fabe60f9b746dc27ed2f6d6ec001105"
         },
         "psr/cache": {
             "version": "3.0.0",
@@ -614,8 +610,8 @@
             "hash": "tree-v2:a9c8cb96ff984032b9ba2c4ad692eba9376cfe8ad9aa95b238bd3edfde57d9b9"
         },
         "symfony/polyfill-php80": {
-            "version": "v1.37.0",
-            "hash": "tree-v2:db9811052bb9f7cd15e09bd54128f33f64516627d90efa9747b8cb0862188aa8"
+            "version": "v1.43.0",
+            "hash": "tree-v2:dac9a7018f6de962c077a8a96a80deaf4da282d85250f36c90e293fde4804664"
         },
         "symfony/polyfill-php83": {
             "version": "v1.41.0",

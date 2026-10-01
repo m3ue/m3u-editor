@@ -2952,20 +2952,29 @@ class TmdbService
     /**
      * Get all seasons for a TV series.
      *
+     * Pass $withEpisodesFor to also attach each listed season's `episodes`
+     * (runtime, vote_average, ...) in the same request via TMDB's
+     * `append_to_response=season/N` - TMDB caps appends at 20 per request, so
+     * anything past that is ignored rather than costing extra calls.
+     *
      * @param  int  $tmdbId  The TMDB ID of the TV series
+     * @param  array<int, int>  $withEpisodesFor  Season numbers to attach episodes for
      * @return array Array of season data
      */
-    public function getAllSeasons(int $tmdbId): array
+    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = []): array
     {
         $this->waitForRateLimit();
+
+        $appendSeasons = array_slice(array_values(array_unique($withEpisodesFor)), 0, 20);
 
         try {
             $response = Http::timeout(15)->get(
                 self::BASE_URL."/tv/{$tmdbId}",
-                [
+                array_filter([
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                ]
+                    'append_to_response' => implode(',', array_map(fn ($number) => "season/{$number}", $appendSeasons)),
+                ], fn ($value) => $value !== '')
             );
 
             if (! $response->successful()) {
@@ -2979,7 +2988,14 @@ class TmdbService
 
             $data = $response->json();
 
-            return $data['seasons'] ?? [];
+            return array_map(function ($season) use ($data) {
+                $appended = $data['season/'.($season['season_number'] ?? '')] ?? null;
+                if (is_array($appended['episodes'] ?? null)) {
+                    $season['episodes'] = $appended['episodes'];
+                }
+
+                return $season;
+            }, $data['seasons'] ?? []);
         } catch (\Exception $e) {
             Log::error('TMDB get all seasons error', [
                 'tmdb_id' => $tmdbId,

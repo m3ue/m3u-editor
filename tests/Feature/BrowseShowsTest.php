@@ -276,6 +276,71 @@ it('creates a once rule from a programme', function () {
         ->exists())->toBeTrue();
 });
 
+it('resolves the once rule channel and airing channel name from the programme\'s own EPG', function () {
+    // Another EPG (created first) reuses the same XMLTV id for an unrelated channel.
+    $otherEpg = Epg::factory()->for($this->user)->create();
+    $otherEpgChannel = EpgChannel::factory()->for($otherEpg)->create([
+        'user_id' => $this->user->id,
+        'channel_id' => '101',
+        'display_name' => 'CHAMP | Sheffield United',
+    ]);
+    Channel::factory()->for($this->setting->playlist)->create(['epg_channel_id' => $otherEpgChannel->id]);
+
+    $epgChannel = EpgChannel::factory()->for($this->epg)->create([
+        'user_id' => $this->user->id,
+        'channel_id' => '101',
+        'display_name' => 'BBC Two',
+    ]);
+    $channel = Channel::factory()->for($this->setting->playlist)->create(['epg_channel_id' => $epgChannel->id]);
+
+    $programme = EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'Match of the Day',
+        'epg_channel_id' => '101',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('openShowDetail', 'Match of the Day')
+        ->assertSet('selectedShowDetail', fn (?array $detail) => $detail['airings'][0]['channel_name'] === 'BBC Two')
+        ->call('recordOnce', $programme->id);
+
+    expect(DvrRecordingRule::where('programme_id', $programme->id)->value('channel_id'))->toBe($channel->id);
+});
+
+it('resolves the once rule channel by tvg-id when the channel has no EPG mapping', function () {
+    $channel = Channel::factory()->for($this->setting->playlist)->create([
+        'stream_id' => 'bbctwo.uk',
+        'epg_channel_id' => null,
+    ]);
+
+    $programme = EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'Match of the Day',
+        'epg_channel_id' => 'bbctwo.uk',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('recordOnce', $programme->id);
+
+    expect(DvrRecordingRule::where('programme_id', $programme->id)->value('channel_id'))->toBe($channel->id);
+});
+
+it('does not create a once rule for a programme from another user\'s EPG', function () {
+    $programme = EpgProgramme::factory()
+        ->for(Epg::factory()->for(User::factory()))
+        ->create(['title' => 'Foreign Show']);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->call('recordOnce', $programme->id);
+
+    expect(DvrRecordingRule::where('programme_id', $programme->id)->exists())->toBeFalse();
+});
+
 it('warns with a notification when a duplicate once rule exists', function () {
     $programme = EpgProgramme::factory()->for($this->epg)->create(['title' => 'Special Event']);
 

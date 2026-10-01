@@ -7,7 +7,11 @@
     isStreaming: false,
     streamedContent: '',
     pendingComplete: false,
+    pendingApprovals: [],
+    conversationId: null,
+    _resumedApprovals: [],
     toolCalls: [],
+    _needsStepBreak: false,
     _cleanups: [],
     _abortController: null,
     _pendingNavigateUrl: null,
@@ -37,7 +41,7 @@
                         const overlay = this.$el.querySelector('[data-streaming-overlay]');
                         if (overlay) overlay.style.display = 'none';
 
-                                        this.pendingComplete = false;
+                        this.pendingComplete = false;
                         this.streamedContent = '';
                         this.toolCalls = [];
                         this.isStreaming = false;
@@ -51,6 +55,14 @@
         this._cleanups.push(
             Livewire.on('copilot-send-stream', (data) => {
                 this.startStreaming(data[0] || data);
+            })
+        );
+
+        this._cleanups.push(
+            Livewire.on('copilot-conversation-changed', (data) => {
+                const params = data[0] || data;
+                this.conversationId = params?.conversationId ?? null;
+                this.pendingApprovals = [];
             })
         );
 
@@ -85,7 +97,7 @@
     handleKeydown(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (!this.isStreaming && !$wire.isLoading) {
+            if (!this.isStreaming && !$wire.isLoading && !this.pendingApprovals.length) {
                 $wire.sendMessage();
             }
         }
@@ -112,7 +124,10 @@
         this.isStreaming = true;
         this.streamedContent = '';
         this.toolCalls = [];
+        this.pendingApprovals = [];
         this.pendingComplete = false;
+        this._needsStepBreak = false;
+        if (params.conversationId) this.conversationId = params.conversationId;
 
         try {
             const response = await fetch(params.streamUrl, {
@@ -124,8 +139,9 @@
                 },
                 body: JSON.stringify({
                     message: params.message,
-                    conversation_id: params.conversationId,
+                    conversation_id: params.conversationId || this.conversationId,
                     panel_id: params.panelId,
+                    decisions: params.decisions || undefined,
                 }),
                 signal: this._abortController.signal,
             });
@@ -138,6 +154,7 @@
             const decoder = new TextDecoder();
             let buffer = '';
             let newConversationId = null;
+            let assistantMessageId = null;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -159,12 +176,20 @@
                             switch (currentEvent) {
                                 case 'conversation':
                                     newConversationId = data.id;
+                                    this.conversationId = data.id;
                                     break;
                                 case 'chunk':
+                                    // Text from the step after a tool call starts a new block,
+                                    // otherwise it is glued onto the previous step's sentence.
+                                    if (this._needsStepBreak && this.streamedContent && !this.streamedContent.endsWith('\n\n')) {
+                                        this.streamedContent += '\n\n';
+                                    }
+                                    this._needsStepBreak = false;
                                     this.streamedContent += data.text;
                                     this.$nextTick(() => this.scrollToBottom());
                                     break;
                                 case 'tool_call':
+                                    this._needsStepBreak = true;
                                     this.toolCalls.push({
                                         id: data.tool_id,
                                         name: data.tool_name,
@@ -183,10 +208,27 @@
                                         this.toolCalls[idx].status = data.success ? 'done' : 'error';
                                         this.toolCalls[idx].result = data.result;
                                         this.toolCalls[idx].error = data.error;
+                                    } else {
+                                        // Results of an approved or rejected call arrive on the resumed
+                                        // stream, whose tool_call event was sent before the pause.
+                                        const approval = this._resumedApprovals.find(a => a.id === data.tool_id);
+                                        this.toolCalls.push({
+                                            id: data.tool_id,
+                                            name: data.tool_name,
+                                            arguments: approval ? approval.arguments : null,
+                                            status: data.success ? 'done' : 'error',
+                                            result: data.result,
+                                            error: data.error,
+                                        });
                                     }
+                                    this.$nextTick(() => this.scrollToBottom());
+                                    break;
                                 }
-                                this.$nextTick(() => this.scrollToBottom());
-                                break;
+                                case 'tool_approval_request':
+                                    this.pendingApprovals = data.approvals || [];
+                                    this.isStreaming = false;
+                                    this.$nextTick(() => this.scrollToBottom());
+                                    break;
                                 case 'navigate':
                                     // Queue navigation URL to execute after stream completes
                                     this._pendingNavigateUrl = data.url;
@@ -198,6 +240,10 @@
                                     this.toolCalls = [];
                                     break;
                                 case 'done':
+                                    // Absent on error streams, and on servers
+                                    // running an older package release.
+                                    assistantMessageId = data.message_id || null;
+                                    if (data.approvals) this.pendingApprovals = data.approvals;
                                     break;
                             }
                         } catch (e) {
@@ -211,15 +257,19 @@
 
             this._abortController = null;
 
-            if (this.streamedContent) {
+            if (this.pendingApprovals.length) {
+                this.isStreaming = false;
+                return;
+            } else if (this.streamedContent || this.toolCalls.length) {
                 this.pendingComplete = true;
                 this.isStreaming = false;
 
-                // Keep streamedContent in memory — overlay stays invisible until the Livewire morph replaces it.
+                // Keep streamedContent in memory; the overlay stays invisible until the Livewire morph replaces it.
                 $wire.dispatchSelf('copilot-stream-complete', {
                     content: this.streamedContent,
                     newConversationId: newConversationId,
                     toolCalls: this.toolCalls.length ? JSON.parse(JSON.stringify(this.toolCalls)) : null,
+                    messageId: assistantMessageId,
                 });
 
                 // Execute pending navigation after stream completes
@@ -259,6 +309,21 @@
             this.streamedContent = '';
             this.toolCalls = [];
         }
+    },
+    submitApprovals(action) {
+        const decisions = {};
+        this.pendingApprovals.forEach(approval => {
+            decisions[approval.id] = { action };
+        });
+        this._resumedApprovals = this.pendingApprovals.slice();
+        this.startStreaming({
+            message: null,
+            decisions,
+            conversationId: this.conversationId || $wire.conversationId,
+            panelId: @js(\Filament\Facades\Filament::getCurrentPanel()?->getId()),
+            streamUrl: @js(route('filament-copilot.stream')),
+            csrfToken: @js(csrf_token()),
+        });
     }
 }" x-cloak @copilot-open.window="open = true" @copilot-close-sidebar.window="sidebarOpen = false"
     @copilot-load-conversation.window="sidebarOpen = false" @keydown.escape.window="if(open) open = false">
@@ -274,7 +339,8 @@
         x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
         x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0"
         x-transition:leave-end="translate-x-full"
-        class="copilot-chat-widget fixed inset-y-0 right-0 z-50 flex flex-col h-dvh w-screen max-w-md bg-white dark:bg-gray-900 shadow-xl ring-1 ring-gray-950/5 dark:ring-white/10 overflow-hidden">
+        style="max-width: {{ $sidebarWidth }};"
+        class="copilot-chat-widget fixed inset-y-0 right-0 z-50 flex flex-col h-dvh w-screen bg-white dark:bg-gray-900 shadow-xl ring-1 ring-gray-950/5 dark:ring-white/10 overflow-hidden">
 
         {{-- Header (sticky, matches Filament slide-over) --}}
         <div
@@ -292,25 +358,25 @@
                     type="button"
                     class="fi-icon-btn relative flex items-center justify-center rounded-lg outline-none transition duration-75 focus-visible:ring-2 hover:bg-gray-500/5 dark:hover:bg-gray-400/5 fi-color-gray w-8 h-8"
                     title="{{ __('filament-copilot::filament-copilot.export') }}">
-                    <x-filament::icon icon="heroicon-o-arrow-down-tray" class="w-5 h-5 text-gray-400 dark:text-gray-500"
+                    <x-filament::icon icon="heroicon-o-arrow-down-tray" class="w-5 h-5 text-gray-400 dark:text-gray-400"
                         wire:loading.class="animate-pulse" wire:target="exportConversation" />
                 </button>
                 <button @click="toggleSidebar()" type="button"
                     class="fi-icon-btn relative flex items-center justify-center rounded-lg outline-none transition duration-75 focus-visible:ring-2 w-8 h-8"
                     :class="sidebarOpen ? 'bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400' :
-                        'hover:bg-gray-500/5 dark:hover:bg-gray-400/5 text-gray-400 dark:text-gray-500'"
+                        'hover:bg-gray-500/5 dark:hover:bg-gray-400/5 text-gray-400 dark:text-gray-400'"
                     title="{{ __('filament-copilot::filament-copilot.history') }}">
                     <x-filament::icon icon="heroicon-o-clock" class="w-5 h-5" />
                 </button>
                 <button wire:click="newConversation" type="button"
                     class="fi-icon-btn relative flex items-center justify-center rounded-lg outline-none transition duration-75 focus-visible:ring-2 hover:bg-gray-500/5 dark:hover:bg-gray-400/5 fi-color-gray w-8 h-8"
                     title="{{ __('filament-copilot::filament-copilot.new_conversation') }}">
-                    <x-filament::icon icon="heroicon-o-plus" class="w-5 h-5 text-gray-400 dark:text-gray-500" />
+                    <x-filament::icon icon="heroicon-o-plus" class="w-5 h-5 text-gray-400 dark:text-gray-400" />
                 </button>
                 <button @click="open = false" type="button"
                     class="fi-icon-btn fi-modal-close-btn relative flex items-center justify-center rounded-lg outline-none transition duration-75 focus-visible:ring-2 hover:bg-gray-500/5 dark:hover:bg-gray-400/5 fi-color-gray w-8 h-8"
                     title="{{ __('filament-copilot::filament-copilot.close') ?? 'Close' }}">
-                    <x-filament::icon icon="heroicon-o-x-mark" class="w-5 h-5 text-gray-400 dark:text-gray-500" />
+                    <x-filament::icon icon="heroicon-o-x-mark" class="w-5 h-5 text-gray-400 dark:text-gray-400" />
                 </button>
             </div>
         </div>
@@ -373,7 +439,7 @@
             <div id="copilot-messages" x-ref="messages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                 @if (empty($messages))
                     <div
-                        class="flex flex-col items-center justify-center h-full text-center text-gray-400 dark:text-gray-500 gap-4 px-4">
+                        class="flex flex-col items-center justify-center h-full text-center text-gray-400 dark:text-gray-400 gap-4 px-4">
                         <div
                             class="w-14 h-14 rounded-2xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
                             <x-filament::icon icon="heroicon-o-sparkles"
@@ -382,7 +448,7 @@
                         <div>
                             <p class="text-sm font-medium text-gray-600 dark:text-gray-300">
                                 {{ __('filament-copilot::filament-copilot.welcome_message') }}</p>
-                            <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            <p class="text-xs text-gray-400 dark:text-gray-400 mt-1">
                                 {{ __('filament-copilot::filament-copilot.input_placeholder') }}</p>
                         </div>
 
@@ -414,7 +480,7 @@
                     <div class="flex items-start gap-2.5" x-show="isStreaming || pendingComplete">
                         <div
                             class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0 mt-0.5">
-                            <x-filament::icon icon="heroicon-o-wrench-screwdriver" class="w-4 h-4 text-gray-500" />
+                            <x-filament::icon icon="heroicon-o-wrench-screwdriver" class="w-4 h-4 text-gray-500 dark:text-gray-400" />
                         </div>
                         <div class="min-w-0 max-w-[85%] w-full" x-data="{ toolOpen: false }">
                             <button @click="toolOpen = !toolOpen" type="button"
@@ -428,7 +494,7 @@
                                     'bg-danger-50 dark:bg-danger-900/10 border-danger-200 dark:border-danger-800 hover:bg-danger-100 dark:hover:bg-danger-900/20': tool
                                         .status === 'error',
                                 }">
-                                <svg class="w-3.5 h-3.5 text-gray-500 transition-transform duration-200"
+                                <svg class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200"
                                     :class="{ 'rotate-90': toolOpen }" fill="none" viewBox="0 0 24 24"
                                     stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -494,6 +560,36 @@
                     </div>
                 </template>
 
+                {{-- Human approval requests (tools implementing Laravel AI's Approvable contract) --}}
+                <x-filament::callout x-show="pendingApprovals.length" x-cloak color="warning"
+                    icon="heroicon-o-shield-exclamation" class="mx-1">
+                    <x-slot name="heading">
+                        {{ __('Approval required') }}
+                    </x-slot>
+
+                    <x-slot name="description">
+                        <template x-for="approval in pendingApprovals" :key="approval.id">
+                            <span class="mt-2 block text-xs">
+                                <span class="block font-medium" x-text="approval.tool"></span>
+                                <span class="block" x-show="approval.reason" x-text="approval.reason"></span>
+                                <code class="mt-1 block max-h-20 overflow-y-auto whitespace-pre-wrap break-all"
+                                    x-text="JSON.stringify(approval.arguments, null, 2)"></code>
+                            </span>
+                        </template>
+                    </x-slot>
+
+                    <x-slot name="footer">
+                        <x-filament::button size="xs" color="success" icon="heroicon-m-check"
+                            x-on:click="submitApprovals('approve')">
+                            {{ __('Approve') }}
+                        </x-filament::button>
+                        <x-filament::button size="xs" color="danger" icon="heroicon-m-x-mark"
+                            x-on:click="submitApprovals('reject')">
+                            {{ __('Reject') }}
+                        </x-filament::button>
+                    </x-slot>
+                </x-filament::callout>
+
                 {{-- Loading indicator during streaming (dots) --}}
                 <template x-if="isStreaming">
                     <div class="flex items-start gap-2.5">
@@ -504,11 +600,11 @@
                         </div>
                         <div
                             class="flex items-center gap-1.5 py-2.5 px-3.5 bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md">
-                            <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                            <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                                 style="animation-delay: 0ms"></span>
-                            <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                            <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                                 style="animation-delay: 150ms"></span>
-                            <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                            <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                                 style="animation-delay: 300ms"></span>
                         </div>
                     </div>
@@ -540,11 +636,11 @@
                     </div>
                     <div
                         class="flex items-center gap-1.5 py-2.5 px-3.5 bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md">
-                        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                        <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                             style="animation-delay: 0ms"></span>
-                        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                        <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                             style="animation-delay: 150ms"></span>
-                        <span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
+                        <span class="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
                             style="animation-delay: 300ms"></span>
                     </div>
                 </div>
@@ -559,10 +655,10 @@
                 <textarea wire:model="message" @keydown="handleKeydown($event)" @input="autoResize($event.target)" rows="1"
                     class="copilot-textarea flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-white py-1 px-2 border-none shadow-none outline-none placeholder-gray-400 dark:placeholder-gray-500"
                     style="max-height: 120px" placeholder="{{ __('filament-copilot::filament-copilot.input_placeholder') }}"
-                    :disabled="$wire.isLoading || isStreaming"></textarea>
+                    :disabled="$wire.isLoading || isStreaming || pendingApprovals.length > 0"></textarea>
                 <button type="submit"
                     class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-primary-600 hover:bg-primary-500 active:bg-primary-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-                    :disabled="$wire.isLoading || isStreaming">
+                    :disabled="$wire.isLoading || isStreaming || pendingApprovals.length > 0">
                     <svg x-show="!isStreaming && !$wire.isLoading" class="w-4 h-4" viewBox="0 0 24 24"
                         fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M7 11L12 6L17 11M12 18V7" stroke="currentColor" stroke-width="2"
@@ -581,7 +677,7 @@
 
             {{-- Keyboard shortcut hint (desktop only) --}}
             <div class="hidden sm:flex items-center justify-center mt-2">
-                <span class="text-[10px] text-gray-400 dark:text-gray-500">
+                <span class="text-[10px] text-gray-400 dark:text-gray-400">
                     <kbd
                         class="px-1 py-0.5 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 font-mono text-[10px]">Enter</kbd>
                     send &middot;

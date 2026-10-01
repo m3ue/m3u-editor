@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
@@ -60,6 +61,14 @@ class TvDevice extends Model
     public function pushToken(): HasOne
     {
         return $this->hasOne(PushDeviceToken::class, 'device_id', 'device_id');
+    }
+
+    /**
+     * Diagnostic log snapshots this device uploaded, newest first.
+     */
+    public function logs(): HasMany
+    {
+        return $this->hasMany(TvDeviceLog::class)->latest('id');
     }
 
     public function isRevoked(): bool

@@ -10,8 +10,8 @@ use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
-use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use App\Services\EpgProgrammeChannelResolver;
 use App\Services\ShowMetadataService;
 use App\Settings\GeneralSettings;
 use App\Support\EpgProgrammeNormalizer;
@@ -318,7 +318,7 @@ class GuestBrowseShows extends Page
             return;
         }
 
-        $programme = EpgProgramme::find($programmeId);
+        $programme = app(EpgProgrammeChannelResolver::class)->findOwnedProgramme($programmeId, $dvrSetting->user_id);
 
         if (! $programme) {
             Notification::make()->title(__('Programme not found.'))->danger()->send();
@@ -337,15 +337,10 @@ class GuestBrowseShows extends Page
             return;
         }
 
-        $channel = null;
-        if ($programme->epg_channel_id) {
-            $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
-            if ($epgChannelPk) {
-                $channel = Channel::whereIn('id', $dvrSetting->ownerChannelsSubquery())
-                    ->where('epg_channel_id', $epgChannelPk)
-                    ->first();
-            }
-        }
+        $ownerChannels = $dvrSetting->ownerChannelsSubquery();
+        $channel = $ownerChannels
+            ? app(EpgProgrammeChannelResolver::class)->channelForProgramme($programme, $ownerChannels, ['id'])
+            : null;
 
         if (! $channel) {
             Notification::make()
@@ -699,8 +694,7 @@ class GuestBrowseShows extends Page
             return null;
         }
 
-        $channelIds = $programmes->pluck('epg_channel_id')->unique()->filter()->values()->all();
-        $channelNames = $this->resolveChannelNames($channelIds);
+        $channelNames = app(EpgProgrammeChannelResolver::class)->channelNames($programmes);
         $timezone = app(GeneralSettings::class)->app_timezone ?? 'UTC';
 
         $episodeLookups = [];
@@ -728,7 +722,7 @@ class GuestBrowseShows extends Page
 
             return [
                 'id' => $p->id,
-                'channel_name' => $channelNames[$p->epg_channel_id] ?? $p->epg_channel_id,
+                'channel_name' => EpgProgrammeChannelResolver::nameFor($channelNames, $p),
                 'start_time' => $startTime?->format('Y-m-d H:i'),
                 'start_time_human' => $startTime?->format('D M j, g:ia'),
                 'end_time' => $p->end_time?->format('Y-m-d H:i'),
@@ -818,28 +812,6 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * @param  list<string>  $channelIds
-     * @return array<string, string>
-     */
-    private function resolveChannelNames(array $channelIds): array
-    {
-        if (empty($channelIds)) {
-            return [];
-        }
-
-        return EpgChannel::without('epg')
-            ->whereIn('channel_id', $channelIds)
-            ->get(['channel_id', 'name', 'display_name', 'name_custom', 'display_name_custom'])
-            ->mapWithKeys(fn (EpgChannel $c) => [
-                $c->channel_id => $c->name_custom
-                    ?: $c->display_name_custom
-                    ?: $c->display_name
-                    ?: $c->name,
-            ])
-            ->all();
-    }
-
-    /**
      * Resolve the set of XMLTV channel IDs in scope for the given channels.
      *
      * Uses SQL joins (same as the authenticated BrowseShows) to avoid loading
@@ -921,20 +893,14 @@ class GuestBrowseShows extends Page
         $programme = $this->buildBaseQuery()
             ->where('title', $title)
             ->orderBy('start_time')
-            ->first(['epg_channel_id']);
+            ->first(['epg_id', 'epg_channel_id']);
 
-        if (! $programme?->epg_channel_id) {
+        if (! $programme) {
             return [null, null];
         }
 
-        $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
-        if (! $epgChannelPk) {
-            return [null, null];
-        }
-
-        $channel = Channel::whereIn('id', $subquery)
-            ->where('epg_channel_id', $epgChannelPk)
-            ->first(['id', 'title', 'title_custom', 'name', 'name_custom']);
+        $channel = app(EpgProgrammeChannelResolver::class)
+            ->channelForProgramme($programme, $subquery, ['id', 'title', 'title_custom', 'name', 'name_custom']);
 
         if (! $channel) {
             return [null, null];

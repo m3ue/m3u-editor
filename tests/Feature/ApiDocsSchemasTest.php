@@ -137,7 +137,14 @@ it('documents each player_api action with a schema matching the real response', 
             : $response->json();
 
         $schema = $document['components']['schemas'][$schemaName];
-        $documentedKeys = ($schema['type'] === 'array' ? $schema['items'] : $schema)['required'];
+        if ($schema['type'] === 'array') {
+            // List items are their own titled schema so the docs UI can name the array.
+            $itemSchemaName = str($schema['items']['$ref'])->afterLast('/')->toString();
+            $schema = $document['components']['schemas'][$itemSchemaName];
+
+            expect($schema['title'])->toBe($itemSchemaName);
+        }
+        $documentedKeys = $schema['required'];
         $actualKeys = array_keys(array_is_list($body) ? $body[0] : $body);
 
         expect($documentedKeys)->toEqualCanonicalizing($actualKeys, "{$schemaName} is out of date with the {$action} response");

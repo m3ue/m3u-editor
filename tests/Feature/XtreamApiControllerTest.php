@@ -1247,6 +1247,25 @@ it('does not double-proxy an already app-hosted vod cover when logo proxy is ena
         ->assertJsonPath('info.movie_image', $localCover);
 });
 
+it('requests the poster size for proxied vod stream icons when logo proxy is enabled', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+
+    $group = Group::factory()->for($this->user)->create();
+    Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Proxied VOD',
+        'logo' => 'https://image.tmdb.org/t/p/original/poster.jpg',
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_streams'));
+
+    $response->assertOk();
+    $streamIcon = $response->json('0.stream_icon');
+    expect($streamIcon)->toStartWith(url('/'))
+        ->and($streamIcon)->toEndWith('?p=poster');
+});
+
 it('orders series categories by sort order for a regular playlist', function () {
     $third = Category::factory()->for($this->user)->for($this->playlist)->create([
         'name' => 'Third',

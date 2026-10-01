@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
-use App\Enums\SyncRetryBackoff;
 use App\Enums\SyncRunPhase;
 use App\Models\Channel;
 use App\Models\EpgMap;
@@ -16,12 +15,10 @@ use App\Models\PlaylistSyncStatusLog;
 use App\Models\Series;
 use App\Models\SyncRun;
 use App\Models\User;
-use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
-use Carbon\CarbonInterface;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -52,9 +49,6 @@ class ProcessM3uImportComplete implements ShouldQueue
     public $invalidateImportSeriesThreshold = 100;
 
     public $invalidateImportGroupThreshold = 50;
-
-    // Retry ladder applied when the sync is invalidated
-    public SyncRetryBackoff $invalidateImportRetryBackoff = SyncRetryBackoff::Balanced;
 
     // Default user agent to use for HTTP requests
     // Used when user agent is not set in the playlist
@@ -101,11 +95,6 @@ class ProcessM3uImportComplete implements ShouldQueue
             $this->invalidateImportGroupThreshold = $settings->invalidate_import_group_threshold ?? 50;
             $this->invalidateImportSeriesThreshold = $settings->invalidate_import_series_threshold ?? 100;
         }
-
-        // The retry backoff has its own env override, independent of the enable toggle
-        $this->invalidateImportRetryBackoff = SyncRetryBackoff::tryFrom(
-            (string) (config('dev.invalidate_import_retry_backoff') ?: $settings->invalidate_import_retry_backoff)
-        ) ?? SyncRetryBackoff::Balanced;
 
         $user = User::find($this->userId);
         $playlist = $user->playlists()->find($this->playlistId);
@@ -373,8 +362,7 @@ class ProcessM3uImportComplete implements ShouldQueue
             'sync_time' => $completedIn,
             'auto_retry_503_count' => 0,
             'auto_retry_503_last_at' => null,
-            'sync_retry_count' => 0,
-            'sync_retry_after' => null,
+            'resync_attempt' => 0,
             'processing' => [
                 ...$playlist->processing ?? [],
                 'live_processing' => false,
@@ -510,14 +498,12 @@ class ProcessM3uImportComplete implements ShouldQueue
             );
         }
 
-        $retry = $this->nextInvalidationRetry($playlist);
-        $message = "{$message} {$retry['message']}";
-
+        // Invalidated syncs skip the auto resync loop: an immediate retry would most likely be
+        // invalidated too, so use up the attempts and wait for the next scheduled sync instead.
         $playlist->update([
             'status' => Status::Failed,
             'errors' => $message,
-            'sync_retry_count' => $retry['count'],
-            'sync_retry_after' => $retry['after'],
+            'resync_attempt' => $playlist->auto_resync_retries,
             'processing' => [
                 ...$playlist->processing ?? [],
                 'live_processing' => false,
@@ -529,72 +515,12 @@ class ProcessM3uImportComplete implements ShouldQueue
         $newChannels->delete();
         Job::where('batch_no', $this->batchNo)->delete();
 
-        // Only notify when a backoff cycle starts or runs out, not on every retry in between
-        if ($retry['notify']) {
-            Notification::make()
-                ->danger()
-                ->title('Playlist Sync Invalidated')
-                ->body($message)
-                ->broadcast($user)
-                ->sendToDatabase($user);
-        }
-    }
-
-    /**
-     * Work out the next automatic retry for an invalidated sync.
-     *
-     * Walks the configured backoff ladder one step per invalidation. A step never waits
-     * longer than the playlist's regular schedule would. Once the ladder is exhausted the
-     * retry lands on the next regular scheduled sync, and if that one is invalidated too
-     * the ladder starts over. Playlists without auto sync are never retried by the
-     * scheduler, so nothing is scheduled for them.
-     *
-     * @return array{count: int, after: ?CarbonInterface, notify: bool, message: string}
-     */
-    private function nextInvalidationRetry(Playlist $playlist): array
-    {
-        if (! $playlist->auto_sync) {
-            return [
-                'count' => 0,
-                'after' => null,
-                'notify' => true,
-                'message' => 'Automatic sync is disabled, sync manually to retry.',
-            ];
-        }
-
-        $dates = app(DateFormatService::class);
-        $steps = $this->invalidateImportRetryBackoff->steps();
-        $previousCount = (int) ($playlist->sync_retry_count ?? 0);
-        $count = $previousCount > count($steps) ? 1 : $previousCount + 1;
-
-        $now = now();
-        $nextScheduled = $playlist->nextScheduledSyncAfter($now);
-
-        if ($count > count($steps)) {
-            $retryAt = $nextScheduled ?? $now->copy()->addMinutes((int) config('dev.failed_retry_cooldown_minutes', 15));
-            $retryText = count($steps) > 0
-                ? "All {$previousCount} automatic retries were invalidated, waiting for the next scheduled sync at {$dates->format($retryAt)}."
-                : "Waiting for the next scheduled sync at {$dates->format($retryAt)}.";
-
-            return [
-                'count' => $count,
-                'after' => $retryAt,
-                'notify' => true,
-                'message' => $retryText,
-            ];
-        }
-
-        $retryAt = $now->copy()->addMinutes($steps[$count - 1]);
-        if ($nextScheduled && $nextScheduled->lt($retryAt)) {
-            $retryAt = $nextScheduled;
-        }
-
-        return [
-            'count' => $count,
-            'after' => $retryAt,
-            'notify' => $count === 1,
-            'message' => 'Retry '.$count.' of '.count($steps)." scheduled for {$dates->format($retryAt)}.",
-        ];
+        Notification::make()
+            ->danger()
+            ->title('Playlist Sync Invalidated')
+            ->body($message)
+            ->broadcast($user)
+            ->sendToDatabase($user);
     }
 
     /**

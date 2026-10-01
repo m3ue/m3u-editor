@@ -96,7 +96,7 @@ class EpgChannelResource extends Resource implements CopilotResource
                     ->checkFileExistence(false)
                     ->size('inherit', 'inherit')
                     ->extraImgAttributes(fn ($record): array => [
-                        'style' => 'height:2.5rem; width:auto; border-radius:4px;', // Live channel style
+                        'style' => 'height:2.5rem !important; width:auto !important; border-radius:4px;', // Live channel style
                     ])
                     ->getStateUsing(fn ($record) => $record->icon_custom ?? $record->icon)
                     ->toggleable(),

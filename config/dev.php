@@ -24,12 +24,11 @@ return [
     'invalidate_import_threshold' => env('INVALIDATE_IMPORT_THRESHOLD', null), // Threshold for invalidating import
     'invalidate_import_series_threshold' => env('INVALIDATE_IMPORT_SERIES_THRESHOLD', null), // Threshold for invalidating import based on series removal count
     'invalidate_import_group_threshold' => env('INVALIDATE_IMPORT_GROUP_THRESHOLD', null), // Threshold for invalidating import based on group/category removal count
-    'invalidate_import_retry_backoff' => env('INVALIDATE_IMPORT_RETRY_BACKOFF', null), // Retry backoff after an invalidated sync: aggressive, balanced, conservative or none
     'default_epg_days' => env('DEFAULT_EPG_DAYS', 7), // Default number of days to fetch for EPG generation
     'default_epg_catchup_days' => env('DEFAULT_EPG_CATCHUP_DAYS', 7), // Fallback tv_archive_duration (days) reported when catchup is enabled but no duration is known; 0 disables the fallback (reports no retention)
     'show_wan_details' => env('SHOW_WAN_DETAILS', null), // Show WAN details in admin panel
     'stuck_processing_minutes' => env('STUCK_PROCESSING_MINUTES', 240),
-    'failed_retry_cooldown_minutes' => env('FAILED_RETRY_COOLDOWN_MINUTES', 15),
+    'failed_retry_cooldown_minutes' => env('FAILED_RETRY_COOLDOWN_MINUTES', null), // Minutes before a failed playlist/EPG sync is retried; overrides the Sync Options setting (default 15)
     'sync_run_stale_minutes' => env('SYNC_RUN_STALE_MINUTES', 20), // Minutes without a phase transition or playlist progress heartbeat before a post-Import SyncRun is considered dead
     'auto_retry_503_enabled' => env('AUTO_RETRY_503_ENABLED', true),
     'auto_retry_503_max' => env('AUTO_RETRY_503_MAX', 3),

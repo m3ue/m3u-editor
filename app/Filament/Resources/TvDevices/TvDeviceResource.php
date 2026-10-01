@@ -10,6 +10,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\TvDevice;
+use App\Models\TvDeviceLog;
 use App\Settings\GeneralSettings;
 use BackedEnum;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -18,8 +19,11 @@ use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -29,6 +33,8 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Number;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TvDeviceResource extends Resource implements CopilotResource
 {
@@ -109,7 +115,7 @@ class TvDeviceResource extends Resource implements CopilotResource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['notifiable.user', 'pushToken']);
+        return parent::getEloquentQuery()->with(['notifiable.user', 'pushToken'])->withCount('logs');
     }
 
     public static function table(Table $table): Table
@@ -216,6 +222,63 @@ class TvDeviceResource extends Resource implements CopilotResource
                     )),
             ])
             ->recordActions([
+                Action::make('logs')
+                    ->label(__('Logs'))
+                    ->icon('heroicon-o-document-text')
+                    ->color('gray')
+                    ->button()->hiddenLabel()->size('sm')
+                    ->badge(fn (TvDevice $record): ?int => $record->logs_count ?: null)
+                    ->disabled(fn (TvDevice $record): bool => $record->logs_count === 0)
+                    ->tooltip(fn (TvDevice $record): string => $record->logs_count === 0
+                        ? __('No logs uploaded. Upload them from Settings > General > Logs & Diagnostics in the M3U TV app.')
+                        : __('View diagnostic logs uploaded from this device'))
+                    ->slideOver()
+                    ->modalHeading(fn (TvDevice $record): string => __('Logs for :device', ['device' => $record->device_name ?: __('Unknown device')]))
+                    ->fillForm(function (TvDevice $record): array {
+                        $latest = $record->logs()->first();
+
+                        return [
+                            'log_id' => $latest?->id,
+                            'content' => $latest?->content,
+                        ];
+                    })
+                    ->schema(fn (TvDevice $record): array => [
+                        Select::make('log_id')
+                            ->label(__('Upload'))
+                            ->options(fn (): array => $record->logs()
+                                ->get(['id', 'created_at', 'app_version', 'size_bytes'])
+                                ->mapWithKeys(fn (TvDeviceLog $log): array => [
+                                    $log->id => __(':date (v:version, :size)', [
+                                        'date' => $log->created_at->toDayDateTimeString(),
+                                        'version' => $log->app_version ?: '?',
+                                        'size' => Number::fileSize($log->size_bytes),
+                                    ]),
+                                ])
+                                ->all())
+                            ->selectablePlaceholder(false)
+                            ->live()
+                            ->afterStateUpdated(fn (?string $state, Set $set) => $set(
+                                'content',
+                                $record->logs()->whereKey($state)->value('content'),
+                            )),
+                        Textarea::make('content')
+                            ->hiddenLabel()
+                            ->readOnly()
+                            ->rows(30)
+                            ->extraInputAttributes(['class' => 'font-mono text-xs']),
+                    ])
+                    ->modalSubmitActionLabel(__('Download'))
+                    ->modalCancelActionLabel(__('Close'))
+                    ->action(function (TvDevice $record, array $data): StreamedResponse {
+                        $log = $record->logs()->whereKey($data['log_id'])->firstOrFail();
+
+                        return response()->streamDownload(
+                            fn () => print $log->content,
+                            "m3u-tv-{$record->device_id}-{$log->created_at->format('Ymd-His')}.txt",
+                            ['Content-Type' => 'text/plain; charset=UTF-8'],
+                        );
+                    }),
+
                 DeleteAction::make()
                     ->label(__('Delete'))
                     ->icon('heroicon-o-trash')

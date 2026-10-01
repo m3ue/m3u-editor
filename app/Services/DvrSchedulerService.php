@@ -13,7 +13,7 @@ use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
-use App\Models\EpgChannel;
+use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Support\SeriesKey;
 use Closure;
@@ -217,10 +217,15 @@ class DvrSchedulerService
         $lookahead = now()->addMinutes($lookaheadMinutes);
         $scheduledProgrammeIds = ['scheduled' => [], 'skipped' => [], 'scheduled_keys' => []];
 
+        // XMLTV channel ids are only unique per EPG, so restrict matching to the
+        // DVR owner's own EPGs - another user's EPG can reuse the same ids.
+        // Ordered so the earliest airing of a sports event wins the same-day dedup.
         $query = EpgProgramme::query()
             ->whereIn('epg_channel_id', $epgChannelStringIds)
+            ->whereIn('epg_id', Epg::where('user_id', $rule->dvrSetting->user_id)->select('id'))
             ->where('start_time', '>=', $now)
-            ->where('start_time', '<=', $lookahead);
+            ->where('start_time', '<=', $lookahead)
+            ->orderBy('start_time');
 
         $title = $rule->series_title;
         $matchMode = $rule->match_mode ?? DvrMatchMode::Contains;
@@ -922,20 +927,17 @@ class DvrSchedulerService
         } elseif ($programme?->epg_channel_id) {
             // Rule was created without an explicit channel (e.g. series defaults or guest once rule).
             // Attempt to resolve the matching channel from the programme's EPG channel ID.
-            $epgChannelPk = EpgChannel::where('channel_id', $programme->epg_channel_id)->value('id');
+            $ownerChannels = $setting->ownerChannelsSubquery();
+            $channel = $ownerChannels
+                ? app(EpgProgrammeChannelResolver::class)->channelForProgramme($programme, $ownerChannels)
+                : null;
 
-            if ($epgChannelPk) {
-                $channel = Channel::where('playlist_id', $setting->playlist_id)
-                    ->where('epg_channel_id', $epgChannelPk)
-                    ->first();
-
-                if ($channel) {
-                    Log::debug('DVR: Resolved channel via EPG fallback', [
-                        'rule_id' => $rule->id,
-                        'epg_channel_id' => $programme->epg_channel_id,
-                        'channel_id' => $channel->id,
-                    ]);
-                }
+            if ($channel) {
+                Log::debug('DVR: Resolved channel via EPG fallback', [
+                    'rule_id' => $rule->id,
+                    'epg_channel_id' => $programme->epg_channel_id,
+                    'channel_id' => $channel->id,
+                ]);
             }
         }
 

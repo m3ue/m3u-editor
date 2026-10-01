@@ -19,6 +19,9 @@ use Illuminate\Support\Facades\Storage;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // Fixture programmes start on the next hour and run consecutively, while cachedTitles reads a single
+    // date, so pin the clock to midday to keep them from crossing midnight (fails between 22:00 and 23:59).
+    $this->travelTo(now()->setTime(12, 0));
     Storage::fake('local');
     Bus::fake();
     Http::preventStrayRequests();

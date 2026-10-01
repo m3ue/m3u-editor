@@ -158,7 +158,7 @@ it('groups multiple airings of the same title into one card', function () {
 // --- recordOnce ---
 
 it('creates a Once rule with playlist_auth_id and dvr_setting_id stamped', function () {
-    $programme = EpgProgramme::factory()->create([
+    $programme = EpgProgramme::factory()->for(Epg::factory()->for($this->user))->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),
@@ -178,7 +178,7 @@ it('creates a Once rule with playlist_auth_id and dvr_setting_id stamped', funct
 });
 
 it('does not duplicate a Once rule for the same programme', function () {
-    $programme = EpgProgramme::factory()->create([
+    $programme = EpgProgramme::factory()->for(Epg::factory()->for($this->user))->create([
         'title' => 'Breaking Bad',
         'start_time' => now()->addHours(2),
         'end_time' => now()->addHours(3),

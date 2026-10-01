@@ -174,11 +174,13 @@ class PostProcessResource extends Resource implements CopilotResource
                 ->grouped()
                 ->required()
                 ->columnSpanFull()
-                ->options([
+                // Local scripts run on the server, so only admins can pick them
+                // (RunPostProcess enforces the same rule at run time).
+                ->options(fn (): array => array_filter([
                     'url' => 'URL',
-                    'path' => 'Local file',
+                    'path' => auth()->user()?->isAdmin() ? 'Local file' : null,
                     'email' => 'Email',
-                ])
+                ]))
                 ->icons([
                     'url' => 'heroicon-s-link',
                     'path' => 'heroicon-s-document',

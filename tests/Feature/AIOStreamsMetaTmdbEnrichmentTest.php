@@ -230,6 +230,78 @@ it('resolves a related tmdb: id directly from TMDB when the manifest cannot prox
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'aiostreams.test'));
 });
 
+it('borrows the episode list from the imdb meta for a series resolved directly from TMDB', function () {
+    $this->integration->update(['aiostreams_meta_id_prefixes' => ['tt']]);
+
+    Http::fake([
+        'api.themoviedb.org/3/tv/1399*' => Http::response(fakeTmdbSeries(), 200),
+        'aiostreams.test/abc/meta/series/tt0944947.json*' => Http::response([
+            'meta' => [
+                'id' => 'tt0944947',
+                'type' => 'series',
+                'name' => 'Game of Thrones',
+                'videos' => [
+                    ['id' => 'tt0944947:1:1', 'title' => 'Winter Is Coming', 'season' => 1, 'episode' => 1],
+                    ['id' => 'tt0944947:1:2', 'title' => 'The Kingsroad', 'season' => 1, 'episode' => 2],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $meta = AIOStreamsService::make($this->integration)->fetchMeta('series', 'tmdb:1399')['meta'];
+
+    expect($meta['id'])->toBe('tmdb:1399');
+    expect($meta['seasons'])->toHaveCount(2);
+    expect($meta['videos'])->toHaveCount(2);
+    expect($meta['videos'][0])->toMatchArray([
+        'id' => 'tt0944947:1:1',
+        'season' => 1,
+        'episode' => 1,
+    ]);
+});
+
+it('stamps TMDB episode runtime and rating onto videos from the one seasons request', function () {
+    $series = fakeTmdbSeries();
+    $series['season/1'] = [
+        'episodes' => [
+            // Matched by TMDB episode id even though the numbering differs.
+            ['id' => 63056, 'season_number' => 1, 'episode_number' => 9, 'runtime' => 62, 'vote_average' => 7.94],
+            ['id' => 63057, 'season_number' => 1, 'episode_number' => 2, 'runtime' => 56, 'vote_average' => 0],
+        ],
+    ];
+
+    Http::fake([
+        'aiostreams.test/abc/meta/series/tt0944947.json*' => Http::response([
+            'meta' => [
+                'id' => 'tt0944947',
+                'type' => 'series',
+                'name' => 'Game of Thrones',
+                'videos' => [
+                    ['id' => 'tt0944947:1:1', 'season' => 1, 'episode' => 1, 'moviedb_id' => 63056],
+                    // No moviedb_id - falls back to season + episode number.
+                    ['id' => 'tt0944947:1:2', 'season' => 1, 'episode' => 2],
+                    ['id' => 'tt0944947:1:3', 'season' => 1, 'episode' => 3, 'rating' => 9.1],
+                ],
+            ],
+        ], 200),
+        'api.themoviedb.org/3/find/tt0944947*' => Http::response([
+            'tv_results' => [['id' => 1399, 'popularity' => 100]],
+            'movie_results' => [],
+        ], 200),
+        'api.themoviedb.org/3/tv/1399*' => Http::response($series, 200),
+    ]);
+
+    $videos = AIOStreamsService::make($this->integration)->fetchMeta('series', 'tt0944947')['meta']['videos'];
+
+    expect($videos[0])->toMatchArray(['runtime' => 62, 'rating' => 7.9]);
+    // Unrated (vote_average 0) is dropped, runtime still applies.
+    expect($videos[1])->toMatchArray(['runtime' => 56])->not->toHaveKey('rating');
+    expect($videos[2])->toMatchArray(['rating' => 9.1])->not->toHaveKey('runtime');
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'api.themoviedb.org/3/tv/1399')
+        && str_contains(urldecode($request->url()), 'append_to_response=season/1,season/2,season/0'));
+});
+
 it('does not resolve a related tmdb: id from TMDB when enrichment is disabled', function () {
     $this->integration->update([
         'aiostreams_meta_id_prefixes' => ['tt'],

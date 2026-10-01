@@ -2,19 +2,24 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ImageProfile;
 use App\Facades\ProxyFacade;
 use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
 use App\Models\Scopes\ExcludeAioFailoverClonesScope;
+use App\Services\LogoCacheService;
 use App\Services\MediaServerService;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response as ClientResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -27,6 +32,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class MediaServerProxyController extends Controller
 {
+    /**
+     * Hours a cached media server image is served before it is refetched, so
+     * artwork changed on the media server shows up within a day.
+     */
+    private const IMAGE_CACHE_HOURS = 24;
+
     /**
      * Proxy an image from the media server.
      *
@@ -54,50 +65,62 @@ class MediaServerProxyController extends Controller
                 return response()->json(['error' => 'Integration is disabled'], 403);
             }
 
-            // Build cache key for this image
-            $cacheKey = "media_server_image_{$integrationId}_{$itemId}_{$imageType}";
+            // Artwork is cached on disk at the size its image type calls for
+            // (Primary = poster, Backdrop = backdrop, Logo = title logo), keyed
+            // by integration/item/type rather than by the signed URL.
+            $profile = ImageProfile::fromMediaServerImageType($imageType);
+            $sourceKey = LogoCacheService::mediaServerSourceKey($integrationId, $itemId, $imageType);
 
-            // Check cache first (cache for 24 hours)
-            $cachedResponse = Cache::get($cacheKey);
-            if ($cachedResponse) {
-                return response($cachedResponse['body'], 200, $cachedResponse['headers']);
+            $cacheFile = LogoCacheService::findImage($sourceKey, $profile, self::IMAGE_CACHE_HOURS);
+            if ($cacheFile) {
+                return $this->imageResponse($cacheFile);
             }
 
             $mediaServer = MediaServerService::make($integration);
-            $imageUrl = $mediaServer->getDirectImageUrl($itemId, $imageType);
+            $maxWidth = $profile->maxWidth();
 
-            // Fetch the image with authentication
-            $response = Http::withHeaders([
-                'Accept' => 'image/*',
-            ])->timeout(30)->get($imageUrl);
+            // Ask the media server for a right-sized copy so the editor rarely
+            // has to resize anything itself (null = original size).
+            try {
+                $response = $this->fetchImage($mediaServer->getDirectImageUrl($itemId, $imageType, $maxWidth));
+
+                // A server that rejects the resize request still serves the
+                // original, which storeImage() then downscales locally.
+                if ($maxWidth !== null && ! $response->successful() && $response->status() !== 404) {
+                    $response = $this->fetchImage($mediaServer->getDirectImageUrl($itemId, $imageType));
+                }
+            } catch (ConnectionException $e) {
+                // The media server is unreachable: an expired copy beats a broken image.
+                $staleFile = LogoCacheService::findAnyCopy($sourceKey);
+                if ($staleFile) {
+                    return $this->imageResponse($staleFile);
+                }
+
+                throw $e;
+            }
 
             if ($response->successful()) {
                 $body = $response->body();
-                $contentType = $response->header('Content-Type', 'image/jpeg');
+                $contentType = $response->header('Content-Type') ?: 'image/jpeg';
 
-                // Prepare headers for the proxied response
-                $headers = [
-                    'Content-Type' => $contentType,
-                    'Content-Length' => strlen($body),
-                    'Cache-Control' => 'public, max-age=86400', // Cache for 24 hours
-                    'X-Proxied-From' => 'MediaServer',
-                ];
-
-                // Cache the successful response for 24 hours
-                Cache::put($cacheKey, [
-                    'body' => $body,
-                    'headers' => $headers,
-                ], now()->addHours(24));
+                $cacheFile = LogoCacheService::storeImage($sourceKey, $body, $contentType, $profile);
 
                 Log::debug('Successfully proxied media server image', [
                     'integration_id' => $integrationId,
                     'item_id' => $itemId,
                     'image_type' => $imageType,
                     'content_type' => $contentType,
-                    'size_bytes' => strlen($body),
+                    'fetched_bytes' => strlen($body),
+                    'cached_bytes' => Storage::disk('local')->size($cacheFile),
                 ]);
 
-                return response($body, 200, $headers);
+                return $this->imageResponse($cacheFile, $contentType);
+            }
+
+            // The media server refused: an expired copy beats a broken image.
+            $staleFile = LogoCacheService::findAnyCopy($sourceKey);
+            if ($staleFile) {
+                return $this->imageResponse($staleFile);
             }
 
             Log::warning('Failed to fetch media server image', [
@@ -123,6 +146,20 @@ class MediaServerProxyController extends Controller
                 'error' => 'Internal server error while proxying image',
             ], 500);
         }
+    }
+
+    private function fetchImage(string $url): ClientResponse
+    {
+        return Http::withHeaders([
+            'Accept' => 'image/*',
+        ])->timeout(30)->get($url);
+    }
+
+    private function imageResponse(string $cacheFile, ?string $contentType = null): StreamedResponse
+    {
+        return LogoCacheService::streamResponse($cacheFile, $contentType, self::IMAGE_CACHE_HOURS * 3600, [
+            'X-Proxied-From' => 'MediaServer',
+        ]);
     }
 
     /**

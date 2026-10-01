@@ -115,7 +115,9 @@ class AssetInventoryService
     {
         $disk = Storage::disk($asset->disk);
 
-        if ($asset->source === 'logo_cache') {
+        // A size variant shares its source's metadata, which still describes
+        // any other copies, so only deleting the source clears it.
+        if ($asset->source === 'logo_cache' && ! $this->isLogoVariant($asset->path)) {
             $this->deleteCompanionLogoMetadata($disk, $asset->path);
         }
 
@@ -203,6 +205,11 @@ class AssetInventoryService
         }
     }
 
+    protected function isLogoVariant(string $path): bool
+    {
+        return LogoCacheService::cacheBaseNameOf($path) !== pathinfo($path, PATHINFO_FILENAME);
+    }
+
     protected function companionLogoMetadataPath(string $path): ?string
     {
         if (str_ends_with(strtolower($path), '.json')) {
@@ -210,7 +217,8 @@ class AssetInventoryService
         }
 
         $directory = pathinfo($path, PATHINFO_DIRNAME);
-        $filename = pathinfo($path, PATHINFO_FILENAME);
+        // `logo_x@w600.jpg` is a size variant of `logo_x`: same metadata file.
+        $filename = LogoCacheService::cacheBaseNameOf($path);
         $metaPath = trim($directory !== '.' ? $directory : '', '/');
 
         return ($metaPath !== '' ? $metaPath.'/' : '').$filename.'.meta.json';

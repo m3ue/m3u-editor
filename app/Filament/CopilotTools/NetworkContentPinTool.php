@@ -8,6 +8,9 @@ use App\Models\Network;
 use App\Models\NetworkContent;
 use EslamRedaDiv\FilamentCopilot\Tools\BaseTool;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Ai\Approvals\Approval;
+use Laravel\Ai\Concerns\InteractsWithApprovals;
+use Laravel\Ai\Contracts\Approvable;
 use Laravel\Ai\Tools\Request;
 use Stringable;
 
@@ -17,8 +20,10 @@ use Stringable;
  * Allows the AI to set or clear weekly time pins on content items
  * in a network playlist (e.g. "play The Wild Robot every Friday at 8pm").
  */
-class NetworkContentPinTool extends BaseTool
+class NetworkContentPinTool extends BaseTool implements Approvable
 {
+    use InteractsWithApprovals;
+
     public function description(): Stringable|string
     {
         return 'Pin or unpin a content item in a network playlist to a specific day of the week and time. Use this to schedule "play X every Friday at 8pm" — the schedule generator will always place the content at that time. To clear a pin, omit pin_day_of_week and pin_time_of_day (or pass null). You must provide the network_content_id, which you can get by listing the network\'s content items.';
@@ -35,6 +40,15 @@ class NetworkContentPinTool extends BaseTool
             'pin_time_of_day' => $schema->string()
                 ->description('Time in 24-hour HH:MM format, e.g. "20:00" for 8pm. Required when setting a pin.'),
         ];
+    }
+
+    /**
+     * Pinning changes when content airs, so it waits for the user to approve
+     * it in the chat before it runs.
+     */
+    protected function needsApproval(Request $request): Approval|bool
+    {
+        return Approval::required(__('This changes when content airs in a network schedule.'));
     }
 
     public function handle(Request $request): Stringable|string

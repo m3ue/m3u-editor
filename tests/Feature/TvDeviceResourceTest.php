@@ -6,6 +6,7 @@ use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Models\Playlist;
 use App\Models\PushDeviceToken;
 use App\Models\TvDevice;
+use App\Models\TvDeviceLog;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Event;
@@ -205,4 +206,25 @@ it('filters to stale devices past the prune window', function () {
 
 it('labels the clustered devices list as Registered Devices', function () {
     expect(TvDeviceResource::getNavigationLabel())->toBe('Registered Devices');
+});
+
+it('shows the newest uploaded log and downloads the selected one', function () {
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
+    TvDeviceLog::factory()->for($device, 'device')->create(['content' => 'older log']);
+    $newest = TvDeviceLog::factory()->for($device, 'device')->create(['content' => 'newest log']);
+
+    Livewire::test(ListTvDevices::class)
+        ->loadTable()
+        ->mountAction(TestAction::make('logs')->table($device))
+        ->assertSchemaStateSet(['log_id' => $newest->id, 'content' => 'newest log'])
+        ->callMountedAction()
+        ->assertFileDownloaded("m3u-tv-{$device->device_id}-{$newest->created_at->format('Ymd-His')}.txt");
+});
+
+it('disables the logs action for a device that never uploaded any', function () {
+    $device = TvDevice::factory()->for($this->playlist, 'notifiable')->create();
+
+    Livewire::test(ListTvDevices::class)
+        ->loadTable()
+        ->assertActionDisabled(TestAction::make('logs')->table($device));
 });

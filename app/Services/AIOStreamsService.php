@@ -308,15 +308,29 @@ class AIOStreamsService implements MediaServer
         ], fn ($value) => $value !== null && $value !== [] && $value !== '');
 
         if ($isSeries) {
-            $seasons = Cache::remember(
-                "aiostreams.tmdb.seasons.{$tmdbId}",
-                now()->addWeek(),
-                fn () => $tmdb->getAllSeasons($tmdbId)
-            );
+            $seasons = $this->fetchTmdbSeasons($tmdb, $tmdbId, $details);
 
-            $shaped = $this->shapeTmdbSeasons(is_array($seasons) ? $seasons : []);
+            $shaped = $this->shapeTmdbSeasons($seasons);
             if (! empty($shaped)) {
                 $meta['seasons'] = $shaped;
+            }
+
+            // TMDB seasons carry no per-episode list, so without `videos` a
+            // series opened from a `tmdb:` catalog (AIOStreams' own TMDB
+            // trending/top/search catalogs emit these) shows seasons but no
+            // episodes. Borrow the episode list from the Stremio meta for the
+            // IMDb id instead - its `tt...:season:episode` video ids go
+            // straight to the stream route with no tmdb -> imdb remap.
+            // TMDB has no series-level runtime either, so take the Stremio
+            // meta's (e.g. "22 min") from the same response.
+            $imdbMeta = ! empty($meta['imdb_id'])
+                ? ($this->fetchMetaRaw($type, $meta['imdb_id'])['meta'] ?? null)
+                : null;
+            if (is_array($imdbMeta['videos'] ?? null) && ! empty($imdbMeta['videos'])) {
+                $meta['videos'] = $this->applyTmdbEpisodeStats($imdbMeta['videos'], $seasons);
+            }
+            if (! empty($imdbMeta['runtime'])) {
+                $meta['runtime'] = $imdbMeta['runtime'];
             }
         }
 
@@ -559,15 +573,15 @@ class AIOStreamsService implements MediaServer
         }
 
         if ($isSeries) {
-            $seasons = Cache::remember(
-                "aiostreams.tmdb.seasons.{$tmdbId}",
-                now()->addWeek(),
-                fn () => $tmdb->getAllSeasons($tmdbId)
-            );
+            $seasons = $this->fetchTmdbSeasons($tmdb, $tmdbId, $details);
 
-            $shaped = $this->shapeTmdbSeasons(is_array($seasons) ? $seasons : []);
+            $shaped = $this->shapeTmdbSeasons($seasons);
             if (! empty($shaped)) {
                 $meta['seasons'] = $shaped;
+            }
+
+            if (is_array($meta['videos'] ?? null)) {
+                $meta['videos'] = $this->applyTmdbEpisodeStats($meta['videos'], $seasons);
             }
         }
 
@@ -578,6 +592,85 @@ class AIOStreamsService implements MediaServer
         $data['meta'] = $meta;
 
         return $data;
+    }
+
+    /**
+     * TMDB season rows for a series, each carrying its `episodes` for up to
+     * the first 20 seasons (TMDB's append_to_response cap) - fetched in the
+     * one request the season metadata already needed, not one per season.
+     *
+     * @param  array<string, mixed>  $details  Cached getTvSeriesDetails() payload
+     * @return array<int, array<string, mixed>>
+     */
+    protected function fetchTmdbSeasons(TmdbService $tmdb, int $tmdbId, array $details): array
+    {
+        // Regular seasons first so long-running shows spend the append budget
+        // on real seasons, then Specials (season 0) if there is room left.
+        $seasonCount = (int) ($details['number_of_seasons'] ?? 0);
+        $seasonNumbers = [...range(1, max($seasonCount, 1)), 0];
+
+        $seasons = Cache::remember(
+            "aiostreams.tmdb.seasons.episodes.{$tmdbId}",
+            now()->addWeek(),
+            fn () => $tmdb->getAllSeasons($tmdbId, $seasonNumbers)
+        );
+
+        return is_array($seasons) ? $seasons : [];
+    }
+
+    /**
+     * Stamp TMDB per-episode `runtime` (minutes) and `rating` onto Stremio
+     * `videos`, which carry neither. Matches on the video's `moviedb_id`
+     * (the TMDB episode id Cinemeta includes) so differing season/episode
+     * numbering between the two sources can't mislabel an episode, falling
+     * back to season + episode number only when that id is absent. Values the
+     * video already has are never overwritten.
+     *
+     * @param  array<int, mixed>  $videos
+     * @param  array<int, array<string, mixed>>  $seasons  fetchTmdbSeasons() rows
+     * @return array<int, mixed>
+     */
+    protected function applyTmdbEpisodeStats(array $videos, array $seasons): array
+    {
+        $byId = [];
+        $byNumber = [];
+
+        foreach ($seasons as $season) {
+            foreach ($season['episodes'] ?? [] as $episode) {
+                $stats = array_filter([
+                    'runtime' => ! empty($episode['runtime']) ? (int) $episode['runtime'] : null,
+                    // TMDB reports 0 for unrated episodes - treat as missing.
+                    'rating' => ! empty($episode['vote_average']) ? round((float) $episode['vote_average'], 1) : null,
+                ], fn ($value) => $value !== null);
+
+                if (empty($stats)) {
+                    continue;
+                }
+
+                if (isset($episode['id'])) {
+                    $byId[(int) $episode['id']] = $stats;
+                }
+                if (isset($episode['season_number'], $episode['episode_number'])) {
+                    $byNumber[(int) $episode['season_number'].':'.(int) $episode['episode_number']] = $stats;
+                }
+            }
+        }
+
+        if (empty($byId) && empty($byNumber)) {
+            return $videos;
+        }
+
+        return array_map(function ($video) use ($byId, $byNumber) {
+            if (! is_array($video)) {
+                return $video;
+            }
+
+            $stats = isset($video['moviedb_id'])
+                ? ($byId[(int) $video['moviedb_id']] ?? null)
+                : ($byNumber[(int) ($video['season'] ?? 0).':'.(int) ($video['episode'] ?? 0)] ?? null);
+
+            return $stats ? $video + $stats : $video;
+        }, $videos);
     }
 
     /**
@@ -744,7 +837,7 @@ class AIOStreamsService implements MediaServer
         return '';
     }
 
-    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string
+    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary', ?int $maxWidth = null): string
     {
         return '';
     }

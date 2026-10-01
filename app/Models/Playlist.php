@@ -101,8 +101,9 @@ class Playlist extends Model
         'enable_series' => 'boolean',
         'auto_retry_503_count' => 'integer',
         'auto_retry_503_last_at' => 'datetime',
-        'sync_retry_count' => 'integer',
-        'sync_retry_after' => 'datetime',
+        'auto_resync_on_failure' => 'boolean',
+        'auto_resync_retries' => 'integer',
+        'resync_attempt' => 'integer',
         'share_cache_across_playlists' => 'boolean',
     ];
 

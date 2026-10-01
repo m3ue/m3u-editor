@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\Status;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
+use App\Settings\GeneralSettings;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
 
@@ -80,7 +81,7 @@ class RefreshEpg extends Command
             }
 
             $count = 0;
-            $failedRetryCooldown = (int) config('dev.failed_retry_cooldown_minutes', 30);
+            $failedRetryCooldown = app(GeneralSettings::class)->failedRetryCooldownMinutes();
             $epgs->get()->each(function (Epg $epg) use (&$count, $failedRetryCooldown) {
                 $interval = $epg->sync_interval === '24hr' ? '0 0 * * *' : $epg->sync_interval;
                 $cronExpression = new CronExpression($interval);

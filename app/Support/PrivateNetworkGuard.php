@@ -2,7 +2,16 @@
 
 namespace App\Support;
 
+use Closure;
+use GuzzleHttp\Psr7\UriResolver;
+use GuzzleHttp\Psr7\Utils;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use InvalidArgumentException;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
+use RuntimeException;
 
 /**
  * Centralised guard for outbound HTTP destinations. Used wherever the
@@ -15,12 +24,17 @@ use InvalidArgumentException;
  *    non-link-local IP. This blocks SSRF to internal services
  *    (localhost admin panels, link-local metadata endpoints, RFC1918
  *    internal subnets).
+ *  - Every redirect hop is held to the same rules - checking only the
+ *    first URL lets a public host 302 the request onto 127.0.0.1.
  *  - Optional allow_private toggle for trusted deployments (test env,
  *    isolated lab setups) - opt-in only, never the default.
  *
  * Usage:
  *   PrivateNetworkGuard::assertUrlSafe($url);
  *   // throws on disallowed scheme or destination; returns true on safe.
+ *
+ *   PrivateNetworkGuard::get($url, fn () => Http::timeout(10));
+ *   // GET with every hop checked and IP-pinned.
  */
 class PrivateNetworkGuard
 {
@@ -123,5 +137,67 @@ class PrivateNetworkGuard
         }
 
         return $ip;
+    }
+
+    /**
+     * GET a URL with the HTTP client's own redirect-following disabled,
+     * walking each Location manually so every hop passes assertUrlSafe()
+     * and connects to the exact IP that was checked (CURLOPT_RESOLVE).
+     * Pinning closes the DNS rebinding gap between the check and the
+     * connect.
+     *
+     * @param  Closure(): PendingRequest  $makeRequest  Builds the base request (headers, timeout, stream mode) for each hop.
+     *
+     * @throws InvalidArgumentException When any hop is not a safe http(s) destination.
+     * @throws RuntimeException When the chain is longer than $maxRedirects.
+     */
+    public static function get(string $url, Closure $makeRequest, int $maxRedirects = 5): Response
+    {
+        $current = $url;
+
+        for ($i = 0; $i <= $maxRedirects; $i++) {
+            $resolvedIp = self::assertUrlSafe($current);
+            $parts = parse_url($current);
+            $host = (string) $parts['host'];
+            $port = (int) ($parts['port'] ?? (strtolower((string) $parts['scheme']) === 'https' ? 443 : 80));
+
+            $response = $makeRequest()
+                ->withOptions([
+                    'allow_redirects' => false,
+                    'curl' => [
+                        CURLOPT_RESOLVE => [trim($host, '[]').":{$port}:{$resolvedIp}"],
+                    ],
+                ])
+                ->get($current);
+
+            $location = $response->header('Location');
+            if (! $response->redirect() || ! $location) {
+                return $response;
+            }
+
+            $current = (string) UriResolver::resolve(Utils::uriFor($current), Utils::uriFor($location));
+        }
+
+        throw new RuntimeException("Exceeded {$maxRedirects} redirects while fetching {$url}.");
+    }
+
+    /**
+     * Guzzle options that keep the HTTP client's own redirect handling
+     * (POST downgraded to GET on 302/303, Authorization dropped on
+     * cross-origin hops) but refuse to follow a hop to a non-http(s) or
+     * private destination. For requests get() can't make (POST, custom
+     * bodies). Later hops are re-checked but not IP-pinned.
+     *
+     * @return array{allow_redirects: array{on_redirect: Closure}}
+     */
+    public static function redirectGuardOptions(): array
+    {
+        return [
+            'allow_redirects' => [
+                'on_redirect' => static function (RequestInterface $request, ResponseInterface $response, UriInterface $uri): void {
+                    self::assertUrlSafe((string) $uri);
+                },
+            ],
+        ];
     }
 }

@@ -40,7 +40,7 @@ class FakeTmdbService extends TmdbService
         ];
     }
 
-    public function getAllSeasons(int $tmdbId): array
+    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = []): array
     {
         return [
             ['season_number' => 1],
