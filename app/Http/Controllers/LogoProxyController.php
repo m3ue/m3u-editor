@@ -331,31 +331,37 @@ class LogoProxyController extends Controller
         } catch (\Exception $e) {
         }
 
+        $disk = Storage::disk('local');
+        $expiryDays = (int) config('app.logo_cache_expiry_days', 30);
         $cleared = 0;
-        $logoFiles = Storage::disk('local')->files(LogoCacheService::CACHE_DIRECTORY);
+        $remainingBaseNames = [];
+        $metaFiles = [];
 
-        if (empty($logoFiles)) {
-            return 0;
-        }
-
-        foreach ($logoFiles as $file) {
+        foreach ($disk->files(LogoCacheService::CACHE_DIRECTORY) as $file) {
             if (str_ends_with($file, '.meta.json')) {
+                $metaFiles[] = $file;
+
                 continue;
             }
 
-            // Get file last modified timestamp
-            $lastModified = Carbon::createFromTimestamp(Storage::disk('local')->lastModified($file));
-
-            // If no metadata or file is older than X days, delete it
-            if (now()->diffInDays($lastModified) > config('app.logo_cache_expiry_days', 30)) {
-                Storage::disk('local')->delete($file);
+            // Delete files last written more than X days ago
+            $lastModified = Carbon::createFromTimestamp($disk->lastModified($file));
+            if ($lastModified->diffInDays(now()) > $expiryDays) {
+                $disk->delete($file);
                 $cleared++;
 
-                $metaFile = LogoCacheService::CACHE_DIRECTORY.'/'.pathinfo($file, PATHINFO_FILENAME).'.meta.json';
-                if (Storage::disk('local')->exists($metaFile)) {
-                    Storage::disk('local')->delete($metaFile);
-                    $cleared++;
-                }
+                continue;
+            }
+
+            $remainingBaseNames[LogoCacheService::cacheBaseNameOf($file)] = true;
+        }
+
+        // An original and its size variants share one metadata file, which
+        // goes once none of them are left.
+        foreach ($metaFiles as $metaFile) {
+            if (! isset($remainingBaseNames[basename($metaFile, '.meta.json')])) {
+                $disk->delete($metaFile);
+                $cleared++;
             }
         }
 

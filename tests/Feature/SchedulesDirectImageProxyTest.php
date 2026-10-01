@@ -4,6 +4,7 @@ use App\Enums\EpgSourceType;
 use App\Models\Epg;
 use App\Models\User;
 use App\Services\LogoCacheService;
+use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -76,4 +77,43 @@ it('serves cached programme art even after the daily download limit is reached',
 
     // An uncached image still respects the limit.
     $this->get("/schedules-direct/{$this->epg->uuid}/image/other.jpg")->assertStatus(429);
+});
+
+it('resizes cached programme art locally after the width setting changes, even past the download limit', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/image/*' => Http::response(sdImageProxyJpeg(1920, 1080), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $path = "/schedules-direct/{$this->epg->uuid}/image/hash123.jpg";
+    $this->get($path)->assertOk();
+
+    $settings = app(GeneralSettings::class);
+    $settings->image_backdrop_width = 1000;
+    $settings->save();
+    Cache::put("sd_download_limit_{$this->epg->uuid}", true, now()->endOfDay());
+
+    $response = $this->get($path);
+
+    $response->assertOk();
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(1000);
+    Http::assertSentCount(1);
+
+    $sourceKey = LogoCacheService::schedulesDirectSourceKey($this->epg->uuid, 'hash123.jpg');
+    expect(Storage::disk('local')->exists(LogoCacheService::variantFileFor($sourceKey, 'jpg', 1280)))->toBeFalse();
+});
+
+it('serves the cached copy past the download limit once optimization is turned off', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/image/*' => Http::response(sdImageProxyJpeg(1920, 1080), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $path = "/schedules-direct/{$this->epg->uuid}/image/hash123.jpg";
+    $cached = $this->get($path)->streamedContent();
+
+    config()->set('proxy.image_resize_enabled', false);
+    Cache::put("sd_download_limit_{$this->epg->uuid}", true, now()->endOfDay());
+
+    $response = $this->get($path);
+
+    $response->assertOk();
+    expect($response->streamedContent())->toBe($cached);
+    Http::assertSentCount(1);
 });

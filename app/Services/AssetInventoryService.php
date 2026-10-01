@@ -207,7 +207,7 @@ class AssetInventoryService
 
     protected function isLogoVariant(string $path): bool
     {
-        return (bool) preg_match('/@w\d+(h\d+)?$/', pathinfo($path, PATHINFO_FILENAME));
+        return LogoCacheService::cacheBaseNameOf($path) !== pathinfo($path, PATHINFO_FILENAME);
     }
 
     protected function companionLogoMetadataPath(string $path): ?string
@@ -218,7 +218,7 @@ class AssetInventoryService
 
         $directory = pathinfo($path, PATHINFO_DIRNAME);
         // `logo_x@w600.jpg` is a size variant of `logo_x`: same metadata file.
-        $filename = preg_replace('/@w\d+(h\d+)?$/', '', pathinfo($path, PATHINFO_FILENAME));
+        $filename = LogoCacheService::cacheBaseNameOf($path);
         $metaPath = trim($directory !== '.' ? $directory : '', '/');
 
         return ($metaPath !== '' ? $metaPath.'/' : '').$filename.'.meta.json';

@@ -7,6 +7,7 @@ use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
 use App\Services\LogoCacheService;
 use App\Services\SchedulesDirectService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -27,6 +28,8 @@ class SchedulesDirectImageProxyController extends Controller
      */
     public function proxyImage(Request $request, string $epgId, string $imageHash)
     {
+        $sourceKey = LogoCacheService::schedulesDirectSourceKey($epgId, $imageHash);
+
         try {
             // Find the EPG
             $epg = Epg::where('uuid', $epgId)->first();
@@ -41,7 +44,6 @@ class SchedulesDirectImageProxyController extends Controller
 
             // Image hashes are content-addressed, so a cached copy never goes
             // stale and is served even after the daily download limit trips.
-            $sourceKey = LogoCacheService::schedulesDirectSourceKey($epgId, $imageHash);
             $cachedProfile = ImageProfile::tryFrom((string) (LogoCacheService::readCacheMetadata($sourceKey)['profile'] ?? ''));
             $cacheFile = LogoCacheService::findImage($sourceKey, $cachedProfile);
             if ($cacheFile) {
@@ -50,7 +52,7 @@ class SchedulesDirectImageProxyController extends Controller
 
             // Short-circuit if this EPG already hit its daily download limit
             if (Cache::has("sd_download_limit_{$epgId}")) {
-                return response()->json(['error' => 'Daily image download limit reached'], 429);
+                return $this->cachedCopyOrDownloadLimit($sourceKey);
             }
 
             // Failed lookups are remembered so they are not re-requested
@@ -61,7 +63,7 @@ class SchedulesDirectImageProxyController extends Controller
             }
 
             if (isset($cachedFailure['download_limit'])) {
-                return response()->json(['error' => 'Daily image download limit reached'], 429);
+                return $this->cachedCopyOrDownloadLimit($sourceKey);
             }
 
             // Ensure we have a valid token
@@ -125,7 +127,7 @@ class SchedulesDirectImageProxyController extends Controller
                     Cache::put("sd_download_limit_{$epgId}", true, now()->endOfDay());
                     Cache::put($cacheKey, ['download_limit' => true], now()->endOfDay());
 
-                    return response()->json(['error' => 'Daily image download limit reached'], 429);
+                    return $this->cachedCopyOrDownloadLimit($sourceKey);
                 }
 
                 return response()->json([
@@ -134,6 +136,11 @@ class SchedulesDirectImageProxyController extends Controller
                 ], $response->status());
             }
         } catch (SchedulesDirectRateLimitException $e) {
+            $cachedCopy = LogoCacheService::findAnyCopy($sourceKey);
+            if ($cachedCopy) {
+                return $this->imageResponse($cachedCopy);
+            }
+
             // Provider login-limit cooldown is active; do not attempt to log in.
             Log::warning('SchedulesDirect image proxy skipped during login-limit cooldown', [
                 'epg_id' => $epgId,
@@ -156,6 +163,19 @@ class SchedulesDirectImageProxyController extends Controller
                 'error' => 'Internal server error while proxying image',
             ], 500);
         }
+    }
+
+    /**
+     * Once the daily download limit is reached, any cached copy of the image
+     * (even one sized for an older setting) beats a 429.
+     */
+    private function cachedCopyOrDownloadLimit(string $sourceKey): StreamedResponse|JsonResponse
+    {
+        $cachedCopy = LogoCacheService::findAnyCopy($sourceKey);
+
+        return $cachedCopy
+            ? $this->imageResponse($cachedCopy)
+            : response()->json(['error' => 'Daily image download limit reached'], 429);
     }
 
     private function imageResponse(string $cacheFile, ?string $contentType = null): StreamedResponse

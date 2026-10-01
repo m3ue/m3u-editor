@@ -291,8 +291,9 @@ it('drops a cached variant that barely improves on the cached original', functio
         ->and(cachedLogoFiles())->toBe(["{$baseName}.jpg"]);
 });
 
-it('stores a new copy when the profile width changes in settings', function () {
+it('resizes the cached copy locally when a profile width is lowered and drops the old size', function () {
     $remoteUrl = 'https://example.com/resized-setting.jpg';
+    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
 
     Http::fake([
         $remoteUrl => Http::response(bigJpegBytes(1600, 900), 200, ['Content-Type' => 'image/jpeg']),
@@ -303,11 +304,73 @@ it('stores a new copy when the profile width changes in settings', function () {
     $settings->image_poster_width = 400;
     $settings->save();
 
+    Http::fake([
+        $remoteUrl => Http::response('should-not-be-called', 500),
+    ]);
     $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
 
     $response->assertOk();
     expect(imageWidthOf($response->streamedContent()))->toBe(400)
-        ->and(cachedLogoFiles())->toContain(LogoCacheService::cacheKeyForUrl($remoteUrl).'@w400.jpg');
+        ->and(cachedLogoFiles())->toBe(["{$baseName}@w400.jpg"]);
+    Http::assertNothingSent();
+});
+
+it('refetches when a profile width is raised and drops the old size', function () {
+    $remoteUrl = 'https://example.com/raised-setting.jpg';
+    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
+
+    Http::fake([
+        $remoteUrl => Http::response(bigJpegBytes(1600, 900), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $this->get(proxyPathFor($remoteUrl).'?p=poster')->assertOk();
+
+    $settings = app(GeneralSettings::class);
+    $settings->image_poster_width = 900;
+    $settings->save();
+
+    $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
+
+    $response->assertOk();
+    expect(imageWidthOf($response->streamedContent()))->toBe(900)
+        ->and(cachedLogoFiles())->toBe(["{$baseName}@w900.jpg"]);
+});
+
+it('keeps copies for every profile a url is currently used as', function () {
+    $remoteUrl = 'https://example.com/poster-and-backdrop.jpg';
+    $baseName = LogoCacheService::cacheKeyForUrl($remoteUrl);
+
+    Http::fake([
+        $remoteUrl => Http::response(bigJpegBytes(1600, 900), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $this->get(proxyPathFor($remoteUrl).'?p=backdrop')->assertOk();
+
+    // The poster copy is resized from the cached backdrop, not refetched.
+    Http::fake([
+        $remoteUrl => Http::response('should-not-be-called', 500),
+    ]);
+    $poster = $this->get(proxyPathFor($remoteUrl).'?p=poster');
+
+    $poster->assertOk();
+    expect(imageWidthOf($poster->streamedContent()))->toBe(600)
+        ->and(cachedLogoFiles())->toEqualCanonicalizing(["{$baseName}@w600.jpg", "{$baseName}@w1280.jpg"]);
+});
+
+it('refetches the original and drops resized copies once optimization is turned off', function () {
+    $remoteUrl = 'https://example.com/turned-off.jpg';
+    $original = bigJpegBytes(1600, 900);
+
+    Http::fake([
+        $remoteUrl => Http::response($original, 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $this->get(proxyPathFor($remoteUrl).'?p=poster')->assertOk();
+
+    config()->set('proxy.image_resize_enabled', false);
+
+    $response = $this->get(proxyPathFor($remoteUrl).'?p=poster');
+
+    $response->assertOk();
+    expect($response->streamedContent())->toBe($original)
+        ->and(cachedLogoFiles())->toBe([LogoCacheService::cacheKeyForUrl($remoteUrl).'.jpg']);
 });
 
 it('serves the original when image optimization is disabled by config', function () {

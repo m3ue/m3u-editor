@@ -123,3 +123,25 @@ it('serves an expired cached image when the media server is unavailable', functi
     'error response' => [fn () => fn () => Http::response('down', 500)],
     'connection failure' => [fn () => fn () => throw new ConnectionException('Connection refused')],
 ]);
+
+it('replaces an expired full-size copy when refreshed artwork is large enough to resize', function () {
+    Http::fake([
+        '*/Items/*' => Http::sequence()
+            ->push(mediaServerJpeg(400, 600), 200, ['Content-Type' => 'image/jpeg'])
+            ->push(mediaServerJpeg(2000, 3000), 200, ['Content-Type' => 'image/jpeg']),
+    ]);
+    $path = mediaServerImagePath($this->integration, 'item1', 'Primary');
+    $this->get($path)->assertOk();
+
+    $sourceKey = LogoCacheService::mediaServerSourceKey($this->integration->id, 'item1', 'Primary');
+    $original = LogoCacheService::cacheFileForUrl($sourceKey, 'jpg');
+    expect(Storage::disk('local')->exists($original))->toBeTrue();
+    touch(Storage::disk('local')->path($original), now()->subHours(25)->timestamp);
+
+    $response = $this->get($path);
+
+    $response->assertOk();
+    expect(getimagesizefromstring($response->streamedContent())[0])->toBe(600)
+        ->and(Storage::disk('local')->exists($original))->toBeFalse()
+        ->and(LogoCacheService::readCacheMetadata($sourceKey))->not->toHaveKey('file');
+});

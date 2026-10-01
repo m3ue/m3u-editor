@@ -85,7 +85,7 @@ class MediaServerProxyController extends Controller
                 ])->timeout(30)->get($imageUrl);
             } catch (ConnectionException $e) {
                 // The media server is unreachable: an expired copy beats a broken image.
-                $staleFile = LogoCacheService::findImage($sourceKey, $profile);
+                $staleFile = LogoCacheService::findAnyCopy($sourceKey);
                 if ($staleFile) {
                     return $this->imageResponse($staleFile);
                 }
@@ -112,7 +112,7 @@ class MediaServerProxyController extends Controller
             }
 
             // The media server refused: an expired copy beats a broken image.
-            $staleFile = LogoCacheService::findImage($sourceKey, $profile);
+            $staleFile = LogoCacheService::findAnyCopy($sourceKey);
             if ($staleFile) {
                 return $this->imageResponse($staleFile);
             }
