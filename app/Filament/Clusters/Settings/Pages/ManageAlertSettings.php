@@ -319,6 +319,9 @@ HTML))
                                         Toggle::make('alerts_on_import_failed')
                                             ->label(__('Notify on playlist import failures'))
                                             ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.')),
+                                        Toggle::make('alerts_on_sync_invalidated')
+                                            ->label(__('Notify on invalidated playlist syncs'))
+                                            ->helperText(__('Sends an alert when a playlist sync is canceled because it would have removed more channels, groups or series than the invalidation threshold allows.')),
                                     ]),
                             ]),
                     ]),

@@ -427,7 +427,7 @@ class LocalMediaService implements MediaServer
     /**
      * Get direct image URL.
      */
-    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary'): string
+    public function getDirectImageUrl(string $itemId, string $imageType = 'Primary', ?int $maxWidth = null): string
     {
         return '';
     }

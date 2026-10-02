@@ -442,6 +442,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 $record->update([
                                     'status' => Status::Processing,
                                     'progress' => 0,
+                                    'resync_attempt' => 0,
                                 ]);
                                 $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                                 app('Illuminate\Contracts\Bus\Dispatcher')
@@ -545,6 +546,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,
+                            'resync_attempt' => 0,
                         ]);
                         $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                         app('Illuminate\Contracts\Bus\Dispatcher')
@@ -3968,6 +3970,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             'status' => Status::Processing,
                             'progress' => 0,
                             'vod_progress' => 0,
+                            'resync_attempt' => 0,
                         ]);
                         $syncRun = app(SyncPipelineService::class)->startImport($record, trigger: 'filament_refresh');
                         app('Illuminate\Contracts\Bus\Dispatcher')

@@ -2,13 +2,16 @@
 
 namespace App\Filament\Clusters\Settings\Pages;
 
+use App\Enums\ImageProfile;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Filament\Resources\Assets\AssetResource;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 
@@ -63,6 +66,42 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->helperText(__('When enabled, /logo-repository endpoints are publicly accessible for apps like UHF.')),
 
                     ]),
+                Section::make(__('Image Optimization'))
+                    ->description(__('Artwork from the logo proxy, media servers and Schedules Direct is cached as a downscaled copy sized for where it is shown, so clients download a right-sized image instead of the full-resolution source.'))
+                    ->columns(2)
+                    ->schema([
+                        Toggle::make('image_optimization_enabled')
+                            ->label(__('Optimize cached artwork'))
+                            ->live()
+                            ->columnSpanFull()
+                            ->disabled(fn () => config('proxy.image_resize_enabled') !== null)
+                            ->hint(fn () => config('proxy.image_resize_enabled') !== null ? __('Already set by environment variable!') : null)
+                            ->dehydrated(fn () => config('proxy.image_resize_enabled') === null)
+                            ->afterStateHydrated(function (Toggle $component) {
+                                if (config('proxy.image_resize_enabled') !== null) {
+                                    $component->state((bool) config('proxy.image_resize_enabled'));
+                                }
+                            })
+                            ->helperText(__('When disabled, artwork is cached and served at its original size. Changing a size below creates new cached copies; old ones expire or can be cleared from Manage Assets.')),
+                        ...array_map(fn (ImageProfile $profile): TextInput => $this->profileWidthInput($profile), ImageProfile::cases()),
+                        TextInput::make('image_quality')
+                            ->label(__('Image quality'))
+                            ->visible(fn (Get $get): bool => (bool) $get('image_optimization_enabled'))
+                            ->suffixIcon(fn () => ! empty(config('proxy.image_resize_quality')) ? 'heroicon-m-lock-closed' : null)
+                            ->disabled(fn () => ! empty(config('proxy.image_resize_quality')))
+                            ->hint(fn () => ! empty(config('proxy.image_resize_quality')) ? __('Already set by environment variable!') : null)
+                            ->dehydrated(fn () => empty(config('proxy.image_resize_quality')))
+                            ->afterStateHydrated(function (TextInput $component) {
+                                if (! empty(config('proxy.image_resize_quality'))) {
+                                    $component->state(config('proxy.image_resize_quality'));
+                                }
+                            })
+                            ->integer()
+                            ->minValue(1)
+                            ->maxValue(100)
+                            ->placeholder(70)
+                            ->helperText(__('Encoder quality (1-100) for downscaled artwork. Leave empty for the default (70). Applies to newly cached copies; the source format is always kept.')),
+                    ]),
                 Section::make(__('Placeholder Images'))
                     ->description(__('Override app-wide placeholder images for logos, episode previews, and VOD/Series poster fallbacks.'))
                     ->columns(3)
@@ -108,5 +147,32 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 600x900px for best results.<br/>Default image: <img src="'.url('/vod-series-poster-placeholder.png').'" alt="Default VOD/Series Poster Placeholder" style="width:80px; height:120px; margin-top:5px;">')),
                     ]),
             ]);
+    }
+
+    /**
+     * Max width input for one artwork size profile, locked when its env var is set.
+     */
+    private function profileWidthInput(ImageProfile $profile): TextInput
+    {
+        $envValue = config($profile->configKey());
+
+        return TextInput::make($profile->settingKey())
+            ->label($profile->getLabel())
+            ->visible(fn (Get $get): bool => (bool) $get('image_optimization_enabled'))
+            ->suffixIcon(! empty($envValue) ? 'heroicon-m-lock-closed' : null)
+            ->disabled(! empty($envValue))
+            ->hint(! empty($envValue) ? __('Already set by environment variable!') : null)
+            ->dehydrated(empty($envValue))
+            ->afterStateHydrated(function (TextInput $component) use ($envValue) {
+                if (! empty($envValue)) {
+                    $component->state($envValue);
+                }
+            })
+            ->integer()
+            ->minValue(100)
+            ->maxValue((int) config('proxy.image_resize_max', 1920))
+            ->placeholder($profile->defaultWidth())
+            ->suffix(__('px max width'))
+            ->helperText($profile->getDescription());
     }
 }
