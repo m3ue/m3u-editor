@@ -2,7 +2,10 @@
 
 use App\Enums\CachedContentFileStatus;
 use App\Enums\CacheDispatchResult;
+use App\Filament\Resources\Series\SeriesResource;
+use App\Filament\Resources\Vods\VodResource;
 use App\Jobs\DownloadCachedContentFile;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\Episode;
@@ -11,9 +14,11 @@ use App\Models\Series;
 use App\Models\User;
 use App\Services\CachedContentDispatchService;
 use App\Settings\GeneralSettings;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
@@ -335,7 +340,7 @@ it('uses episode-specific copy for episodes', function () {
 });
 
 it('summarizes a series run', function () {
-    $notification = CachedContentDispatchService::seriesNotification([
+    $notification = CachedContentDispatchService::summaryNotification([
         CacheDispatchResult::Queued->value => 3,
         CacheDispatchResult::AlreadyCached->value => 1,
         CacheDispatchResult::AlreadyQueued->value => 1,
@@ -346,4 +351,61 @@ it('summarizes a series run', function () {
     expect($notification->getStatus())->toBe('success')
         ->and($notification->getTitle())->toBe('Queued 3 episodes for caching')
         ->and($notification->getBody())->toBe('2 already cached or queued, 2 without a cacheable source.');
+});
+
+it('summarizes a VOD bulk run with VOD wording', function () {
+    $notification = CachedContentDispatchService::summaryNotification([
+        CacheDispatchResult::Queued->value => 1,
+        CacheDispatchResult::AlreadyCached->value => 0,
+        CacheDispatchResult::AlreadyQueued->value => 0,
+        CacheDispatchResult::Unavailable->value => 0,
+        CacheDispatchResult::Disabled->value => 0,
+    ], episodes: false);
+
+    expect($notification->getStatus())->toBe('success')
+        ->and($notification->getTitle())->toBe('Queued 1 VOD for caching');
+});
+
+// --- QueueCachedContentDownloads ---
+
+it('QueueCachedContentDownloads only queues the requesting user\'s VODs', function () {
+    NotificationFacade::fake();
+    $playlist = Playlist::factory()->create();
+    $mine = makeCacheableChannel($playlist, ['tmdb_id' => 601]);
+    $other = makeCacheableChannel(null, ['tmdb_id' => 602]);
+
+    (new QueueCachedContentDownloads('vod', [$mine->id, $other->id], $playlist->user_id))
+        ->handle(app(CachedContentDispatchService::class));
+
+    expect(CachedContentFile::pluck('cacheable_id')->all())->toBe([$mine->id]);
+    NotificationFacade::assertSentTo(User::find($playlist->user_id), DatabaseNotification::class, fn (DatabaseNotification $notification): bool => $notification->toArray()['title'] === 'Queued 1 VOD for caching');
+    Bus::assertDispatchedTimes(DownloadCachedContentFile::class, 1);
+});
+
+it('QueueCachedContentDownloads queues every episode of every selected series', function () {
+    NotificationFacade::fake();
+    $playlist = Playlist::factory()->create();
+    $first = makeCacheableEpisode($playlist, ['tmdb_id' => 701]);
+    $second = makeCacheableEpisode($playlist, ['tmdb_id' => 702]);
+
+    (new QueueCachedContentDownloads('series', [$first->series_id, $second->series_id], $playlist->user_id))
+        ->handle(app(CachedContentDispatchService::class));
+
+    expect(CachedContentFile::where('status', CachedContentFileStatus::Pending)->count())->toBe(2);
+    NotificationFacade::assertSentTo(User::find($playlist->user_id), DatabaseNotification::class, fn (DatabaseNotification $notification): bool => $notification->toArray()['title'] === 'Queued 2 episodes for caching');
+});
+
+it('adds the cache bulk actions to the standard VOD and Series bulk menus', function () {
+    $vodSchema = (new ReflectionMethod(VodResource::class, 'getBulkActionSchema'))
+        ->invoke(null, true, true);
+    $seriesSchema = (new ReflectionMethod(SeriesResource::class, 'getBulkActionSchema'))
+        ->invoke(null, true);
+
+    $actionNames = fn (array $schema): array => collect($schema)
+        ->flatMap(fn ($fieldset) => $fieldset->getDefaultChildComponents())
+        ->map(fn ($action) => $action->getName())
+        ->all();
+
+    expect($actionNames($vodSchema))->toContain('cache_now')
+        ->and($actionNames($seriesSchema))->toContain('cache_all_episodes');
 });

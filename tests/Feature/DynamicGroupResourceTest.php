@@ -11,6 +11,7 @@ use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\Vods\VodResource;
 use App\Jobs\DownloadCachedContentFile;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
@@ -21,15 +22,18 @@ use App\Models\Season;
 use App\Models\Series;
 use App\Models\SyncRun;
 use App\Models\User;
+use App\Services\CachedContentDispatchService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\Testing\TestAction;
+use Filament\Notifications\DatabaseNotification;
 use Filament\Tables\Table;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
@@ -366,7 +370,7 @@ function seriesManagerForTest(DynamicGroup $group)
  *
  * @return array<int, string>
  */
-function flattenRecordActionNames(Table $table): array
+function dynamicGroupRecordActionNames(Table $table): array
 {
     $names = [];
 
@@ -388,12 +392,12 @@ function flattenRecordActionNames(Table $table): array
 /**
  * Flatten a table's configured bulk actions to their names, descending into
  * `BulkActionGroup`s and `BulkModalActionGroup`s so the assertion sees what
- * the toolbar actually renders. Mirrors `flattenRecordActionNames()` for the
+ * the toolbar actually renders. Mirrors `dynamicGroupRecordActionNames()` for the
  * bulk slot.
  *
  * @return array<int, string>
  */
-function flattenTableBulkActionNames(Table $table): array
+function dynamicGroupBulkActionNames(Table $table): array
 {
     $names = [];
 
@@ -587,9 +591,9 @@ it('exposes no membership-mutating record actions on either relation manager', f
     // into the internal `$flatActions` lookup, which `setupTable()` already
     // populated with the pre-strip actions - so a name lookup still resolves
     // them even though they are not in the menu.
-    expect(flattenRecordActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
+    expect(dynamicGroupRecordActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
         ->toBe(['cache_now'])
-        ->and(flattenRecordActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
+        ->and(dynamicGroupRecordActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
         ->toBe(['cache_all_episodes']);
 });
 
@@ -623,9 +627,9 @@ it('only exposes the cache bulk action on either relation manager', function () 
     // action on each manager is the cache variant (parallel to the row
     // action), and a future canonical resource bulk action must not silently
     // leak through.
-    expect(flattenTableBulkActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
+    expect(dynamicGroupBulkActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
         ->toBe(['cache_now'])
-        ->and(flattenTableBulkActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
+        ->and(dynamicGroupBulkActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
         ->toBe(['cache_all_episodes']);
 });
 
@@ -678,6 +682,7 @@ it('hides the Cache Now bulk action on the Movies relation manager when caching 
 it('queues a download for every selected VOD when Cache Now bulk runs on the Movies relation manager', function () {
     setEnableCacheForDynamicGroupTest(true);
     Storage::fake(CachedContentFile::DISK);
+    NotificationFacade::fake();
 
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id,
@@ -700,9 +705,19 @@ it('queues a download for every selected VOD when Cache Now bulk runs on the Mov
     channelsManagerForTest($group)
         ->assertOk()
         ->callTableBulkAction('cache_now', $channels)
-        ->assertNotified('Queued 3 VODs for caching');
+        ->assertNotified('Caching started');
+
+    // The selection is handed to a background job instead of being queued
+    // inside the request.
+    Bus::assertNotDispatched(DownloadCachedContentFile::class);
+    Bus::assertDispatched(QueueCachedContentDownloads::class, fn (QueueCachedContentDownloads $job): bool => $job->type === 'vod'
+        && collect($job->ids)->sort()->values()->all() === $channels->pluck('id')->sort()->values()->all()
+        && $job->userId === $this->user->id);
+
+    Bus::dispatched(QueueCachedContentDownloads::class)->first()->handle(app(CachedContentDispatchService::class));
 
     expect(CachedContentFile::where('status', CachedContentFileStatus::Pending)->count())->toBe(3);
+    NotificationFacade::assertSentTo($this->user, DatabaseNotification::class, fn (DatabaseNotification $notification): bool => $notification->toArray()['title'] === 'Queued 3 VODs for caching');
     Bus::assertDispatchedTimes(DownloadCachedContentFile::class, 3);
 });
 
@@ -745,6 +760,7 @@ it('hides the Cache all episodes bulk action on the Series relation manager when
 it('queues a download for every episode across every selected series when Cache all episodes bulk runs on the Series relation manager', function () {
     setEnableCacheForDynamicGroupTest(true);
     Storage::fake(CachedContentFile::DISK);
+    NotificationFacade::fake();
 
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id,
@@ -776,9 +792,18 @@ it('queues a download for every episode across every selected series when Cache 
     seriesManagerForTest($group)
         ->assertOk()
         ->callTableBulkAction('cache_all_episodes', $serieses)
-        ->assertNotified('Queued 4 episodes for caching');
+        ->assertNotified('Caching started');
+
+    // Episodes are fanned out from a background job, not inside the request.
+    Bus::assertNotDispatched(DownloadCachedContentFile::class);
+    Bus::assertDispatched(QueueCachedContentDownloads::class, fn (QueueCachedContentDownloads $job): bool => $job->type === 'series'
+        && collect($job->ids)->sort()->values()->all() === $serieses->pluck('id')->sort()->values()->all()
+        && $job->userId === $this->user->id);
+
+    Bus::dispatched(QueueCachedContentDownloads::class)->first()->handle(app(CachedContentDispatchService::class));
 
     expect(CachedContentFile::where('status', CachedContentFileStatus::Pending)->count())->toBe(4);
+    NotificationFacade::assertSentTo($this->user, DatabaseNotification::class, fn (DatabaseNotification $notification): bool => $notification->toArray()['title'] === 'Queued 4 episodes for caching');
     Bus::assertDispatchedTimes(DownloadCachedContentFile::class, 4);
 });
 

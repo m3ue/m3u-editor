@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 
 use App\Filament\Resources\Series\SeriesResource;
-use Filament\Actions\ActionGroup;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -53,18 +52,13 @@ class SeriesRelationManager extends RelationManager
         // `Categories\RelationManagers\SeriesRelationManager`'s convention) and why
         // the membership-mutating record/bulk actions are stripped back out
         // afterward (this manager keeps membership read-only, see class
-        // docblock). The cache actions are re-added in the same shape the
-        // canonical series list uses (single kebab row action, single toolbar
+        // docblock). Only the cache actions are re-added (row kebab + toolbar
         // bulk action). Anything beyond cache still has to stay out: membership
         // is computed, so it cannot be bulk-edited.
         return SeriesResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('name')
             ->defaultSort('dynamic_group_items.position')
-            ->recordActions([
-                ActionGroup::make([
-                    SeriesResource::getCacheAllEpisodesAction(),
-                ])->button()->hiddenLabel()->size('sm'),
-            ], position: RecordActionsPosition::BeforeCells)
+            ->recordActions(SeriesResource::getTableActions(), position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 SeriesResource::getCacheAllEpisodesBulkAction(),
             ]);

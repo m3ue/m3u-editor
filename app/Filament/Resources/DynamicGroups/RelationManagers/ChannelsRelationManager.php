@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 
 use App\Filament\Resources\Vods\VodResource;
-use Filament\Actions\ActionGroup;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Tables\Enums\RecordActionsPosition;
@@ -59,18 +58,14 @@ class ChannelsRelationManager extends RelationManager
         // setupTable() also wires up VodResource's full record/bulk actions
         // (edit, delete, fetch metadata, sync, ...), which would break this
         // manager's read-only membership contract (see class docblock) - strip
-        // the membership-mutating actions back out, then re-add the cache
-        // actions in the same shape the canonical VOD list uses (single kebab
-        // row action, single toolbar bulk action). Anything beyond cache still
-        // has to stay out: membership is computed, so it cannot be bulk-edited.
+        // the membership-mutating actions back out, then re-add only the
+        // cache actions (row kebab + toolbar bulk action). Anything beyond
+        // cache still has to stay out: membership is computed, so it cannot be
+        // bulk-edited.
         return VodResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('title')
             ->defaultSort('dynamic_group_items.position')
-            ->recordActions([
-                ActionGroup::make([
-                    VodResource::getCacheNowAction(),
-                ])->button()->hiddenLabel()->size('sm'),
-            ], position: RecordActionsPosition::BeforeCells)
+            ->recordActions(VodResource::getTableActions(), position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 VodResource::getCacheNowBulkAction(),
             ]);

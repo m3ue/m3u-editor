@@ -18,6 +18,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
 use App\Jobs\ProcessM3uImportSeriesEpisodes;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Jobs\SeriesFindAndReplace;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Models\Category;
@@ -323,7 +324,7 @@ class SeriesResource extends Resource implements CopilotResource
         return Action::make('cache_all_episodes')
             ->label(__('Cache all episodes'))
             ->icon('heroicon-o-arrow-down-tray')
-            ->color('info')
+            ->color('gray')
             ->visible(fn (Series $record): bool => app(CachedContentDispatchService::class)->isEnabled()
                 && filled($record->playlist_id))
             ->requiresConfirmation()
@@ -333,23 +334,21 @@ class SeriesResource extends Resource implements CopilotResource
             ->modalSubmitActionLabel(__('Cache all episodes'))
             ->action(function (Series $record): void {
                 $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
-                CachedContentDispatchService::seriesNotification($counts)->send();
+                CachedContentDispatchService::summaryNotification($counts)->send();
             });
     }
 
     /**
-     * Bulk variant of `getCacheAllEpisodesAction()` for selectors that
-     * operate on multiple series (e.g. the Dynamic Group items table, where
-     * the row action is reused verbatim and the toolbar needs the same
-     * shape). Episode counts are aggregated across every selected series
-     * before one summary notification fires.
+     * Bulk variant of `getCacheAllEpisodesAction()`. The episodes are queued
+     * from a background job (see `QueueCachedContentDownloads`), which sends
+     * one summary notification across every selected series when it finishes.
      */
     public static function getCacheAllEpisodesBulkAction(): BulkAction
     {
         return BulkAction::make('cache_all_episodes')
-            ->label(__('Cache all episodes (selected)'))
+            ->label(__('Cache all episodes'))
             ->icon('heroicon-o-arrow-down-tray')
-            ->color('info')
+            ->color('gray')
             ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-arrow-down-tray')
@@ -357,9 +356,15 @@ class SeriesResource extends Resource implements CopilotResource
             ->modalDescription(__('Queue background downloads of every episode of every selected series to local storage. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache all episodes'))
             ->action(function (Collection $records): void {
-                $counts = app(CachedContentDispatchService::class)->dispatchManySeries($records);
-                CachedContentDispatchService::seriesNotification($counts)->send();
-            });
+                QueueCachedContentDownloads::dispatch('series', $records->modelKeys(), auth()->id());
+            })->after(function () {
+                Notification::make()
+                    ->success()
+                    ->title(__('Caching started'))
+                    ->body(__('Cache downloads are being queued in the background. You will be notified once the process is complete.'))
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion();
     }
 
     public static function getTableActions(): array
@@ -1054,6 +1059,11 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalDescription(__('Probe the episodes of the selected series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
             ]),
+
+            // -- Caching --
+            BulkModalActionGroup::section('Caching', [
+                self::getCacheAllEpisodesBulkAction(),
+            ])->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled()),
 
             // -- Enable / Disable --
             BulkModalActionGroup::section('Enable / Disable', [

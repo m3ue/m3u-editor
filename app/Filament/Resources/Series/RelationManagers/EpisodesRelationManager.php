@@ -188,7 +188,7 @@ class EpisodesRelationManager extends RelationManager
                     ->label(__('Cache Now'))
                     ->tooltip(__('Cache Now'))
                     ->icon('heroicon-o-arrow-down-tray')
-                    ->color('info')
+                    ->color('gray')
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()

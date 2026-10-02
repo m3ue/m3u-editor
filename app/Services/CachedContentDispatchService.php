@@ -12,7 +12,6 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
@@ -158,23 +157,17 @@ class CachedContentDispatchService
     }
 
     /**
-     * Queue every cacheable item in a Collection (BulkAction entry point).
-     * Aggregates result counts across the batch. Items that fail the
-     * per-item `dispatch()` rules fall into the same buckets as
-     * `dispatchSeries()`.
+     * Queue every cacheable channel or episode in `$items` and aggregate the
+     * result counts (bulk Cache Now entry point).
      *
-     * @param  Collection<int, Channel|Episode>  $items
+     * @param  iterable<Channel|Episode>  $items
      * @return array<string, int> keyed by CacheDispatchResult value
      */
-    public function dispatchMany(Collection $items): array
+    public function dispatchMany(iterable $items): array
     {
         $counts = $this->emptyCounts();
 
         foreach ($items as $item) {
-            if (! $item instanceof Channel && ! $item instanceof Episode) {
-                continue;
-            }
-
             $counts[$this->dispatch($item)->value]++;
         }
 
@@ -182,23 +175,19 @@ class CachedContentDispatchService
     }
 
     /**
-     * Run `dispatchSeries()` for every Series in a Collection and merge the
-     * counts into one summary bucket (BulkAction entry point).
+     * Run `dispatchSeries()` for every series in `$series` and merge the
+     * counts into one summary (bulk Cache all episodes entry point).
      *
-     * @param  Collection<int, Series>  $serieses
+     * @param  iterable<Series>  $series
      * @return array<string, int> keyed by CacheDispatchResult value
      */
-    public function dispatchManySeries(Collection $serieses): array
+    public function dispatchManySeries(iterable $series): array
     {
         $counts = $this->emptyCounts();
 
-        foreach ($serieses as $series) {
-            if (! $series instanceof Series) {
-                continue;
-            }
-
-            foreach ($this->dispatchSeries($series) as $bucket => $count) {
-                $counts[$bucket] = ($counts[$bucket] ?? 0) + $count;
+        foreach ($series as $item) {
+            foreach ($this->dispatchSeries($item) as $bucket => $count) {
+                $counts[$bucket] += $count;
             }
         }
 
@@ -291,11 +280,12 @@ class CachedContentDispatchService
     }
 
     /**
-     * Filament notification summarizing a series "Cache all episodes" run.
+     * Filament notification summarizing a multi-item cache run: a series
+     * "Cache all episodes" (`$episodes` true) or a bulk VOD Cache Now.
      *
      * @param  array<string, int>  $counts
      */
-    public static function seriesNotification(array $counts): Notification
+    public static function summaryNotification(array $counts, bool $episodes = true): Notification
     {
         if (($counts[CacheDispatchResult::Disabled->value] ?? 0) > 0) {
             return Notification::make()
@@ -312,49 +302,20 @@ class CachedContentDispatchService
         $notification = Notification::make();
         $queued > 0 ? $notification->success() : $notification->info();
 
-        return $notification
-            ->title(match (true) {
+        $title = $episodes
+            ? match (true) {
                 $queued === 0 => __('No episodes queued'),
                 $queued === 1 => __('Queued 1 episode for caching'),
                 default => __('Queued :count episodes for caching', ['count' => $queued]),
-            })
-            ->body(__(':skipped already cached or queued, :unavailable without a cacheable source.', [
-                'skipped' => $skipped,
-                'unavailable' => $unavailable,
-            ]));
-    }
-
-    /**
-     * Filament notification summarizing a VOD bulk-cache run. Same shape as
-     * `seriesNotification()` but uses VOD-flavored wording. Counts can come
-     * from a single channel batch or any caller that aggregates the
-     * `CacheDispatchResult` buckets for VODs.
-     *
-     * @param  array<string, int>  $counts
-     */
-    public static function vodBulkNotification(array $counts): Notification
-    {
-        if (($counts[CacheDispatchResult::Disabled->value] ?? 0) > 0) {
-            return Notification::make()
-                ->warning()
-                ->title(__('Could not queue cache'))
-                ->body(__('Caching is disabled in Settings.'));
-        }
-
-        $queued = $counts[CacheDispatchResult::Queued->value] ?? 0;
-        $skipped = ($counts[CacheDispatchResult::AlreadyCached->value] ?? 0)
-            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0);
-        $unavailable = $counts[CacheDispatchResult::Unavailable->value] ?? 0;
-
-        $notification = Notification::make();
-        $queued > 0 ? $notification->success() : $notification->info();
+            }
+        : match (true) {
+            $queued === 0 => __('No VODs queued'),
+            $queued === 1 => __('Queued 1 VOD for caching'),
+            default => __('Queued :count VODs for caching', ['count' => $queued]),
+        };
 
         return $notification
-            ->title(match (true) {
-                $queued === 0 => __('No VODs queued'),
-                $queued === 1 => __('Queued 1 VOD for caching'),
-                default => __('Queued :count VODs for caching', ['count' => $queued]),
-            })
+            ->title($title)
             ->body(__(':skipped already cached or queued, :unavailable without a cacheable source.', [
                 'skipped' => $skipped,
                 'unavailable' => $unavailable,

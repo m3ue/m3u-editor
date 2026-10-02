@@ -20,6 +20,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
 use App\Jobs\ProcessVodChannels;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Jobs\SyncPlexDvrJob;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Channel;
@@ -529,7 +530,7 @@ class VodResource extends Resource implements CopilotResource
         return Action::make('cache_now')
             ->label(__('Cache Now'))
             ->icon('heroicon-o-arrow-down-tray')
-            ->color('info')
+            ->color('gray')
             ->visible(function (Channel $record): bool {
                 $service = app(CachedContentDispatchService::class);
 
@@ -546,27 +547,32 @@ class VodResource extends Resource implements CopilotResource
     }
 
     /**
-     * Bulk variant of `getCacheNowAction()` for selectors that operate on
-     * multiple channels (e.g. the Dynamic Group items table, where the row
-     * action is reused verbatim and the toolbar needs the same shape). One
-     * summary notification for the whole batch; per-item rules still run
-     * inside `dispatchMany()`.
+     * Bulk variant of `getCacheNowAction()`. The selection is queued from a
+     * background job (see `QueueCachedContentDownloads`), which sends one
+     * summary notification when it finishes.
      */
     public static function getCacheNowBulkAction(): BulkAction
     {
         return BulkAction::make('cache_now')
-            ->label(__('Cache Now (selected)'))
+            ->label(__('Cache Now'))
             ->icon('heroicon-o-arrow-down-tray')
-            ->color('info')
+            ->color('gray')
             ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
             ->requiresConfirmation()
+            ->modalIcon('heroicon-o-arrow-down-tray')
             ->modalHeading(__('Cache selected VODs?'))
             ->modalDescription(__('Queue background downloads of every selected VOD to local storage. VODs that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache now'))
             ->action(function (Collection $records): void {
-                $counts = app(CachedContentDispatchService::class)->dispatchMany($records);
-                CachedContentDispatchService::vodBulkNotification($counts)->send();
-            });
+                QueueCachedContentDownloads::dispatch('vod', $records->modelKeys(), auth()->id());
+            })->after(function () {
+                Notification::make()
+                    ->success()
+                    ->title(__('Caching started'))
+                    ->body(__('Cache downloads are being queued in the background. You will be notified once the process is complete.'))
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion();
     }
 
     public static function getTableActions(): array
@@ -1503,6 +1509,11 @@ class VodResource extends Resource implements CopilotResource
                     ->modalDescription(__('Probe the selected VOD streams with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
             ]),
+
+            // -- Caching --
+            BulkModalActionGroup::section('Caching', [
+                self::getCacheNowBulkAction(),
+            ])->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled()),
 
             // -- Enable / Disable --
             BulkModalActionGroup::section('Enable / Disable', [
