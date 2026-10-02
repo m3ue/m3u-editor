@@ -11,9 +11,11 @@ use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Services\MediaSourceMatchService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Redis;
 
 uses(RefreshDatabase::class);
 
@@ -42,6 +44,49 @@ beforeEach(function () {
         'playlist_id' => $this->media->id,
     ]);
 });
+
+function fakeProxyForStreamCreation(): void
+{
+    config([
+        'proxy.m3u_proxy_host' => 'http://localhost',
+        'proxy.m3u_proxy_port' => 8765,
+        'proxy.m3u_proxy_token' => 'test-token',
+    ]);
+    Http::fake([
+        '*/streams/by-metadata*' => Http::response(['matching_streams' => []]),
+        '*/streams' => Http::response(['stream_id' => 'media-stream']),
+    ]);
+    Redis::shouldReceive('exists')->andReturn(0);
+}
+
+function makeMatchedEpisodes($test): array
+{
+    $mediaSeries = Series::factory()->for($test->media)->for($test->user)->create(['enabled' => true, 'tmdb_id' => 1399]);
+    $mediaEpisode = Episode::factory()->for($test->media)->for($test->user)->create([
+        'series_id' => $mediaSeries->id,
+        'season_id' => Season::factory()->create(['series_id' => $mediaSeries->id, 'playlist_id' => $test->media->id, 'season_number' => 1])->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'enabled' => true,
+        'url' => 'http://app.test/media-server/2/stream/def.mp4',
+    ]);
+
+    $providerSeries = Series::factory()->for($test->provider)->for($test->user)->create(['enabled' => true, 'tmdb_id' => 1399]);
+    $providerEpisode = Episode::factory()->for($test->provider)->for($test->user)->create([
+        'series_id' => $providerSeries->id,
+        'season_id' => Season::factory()->create(['series_id' => $providerSeries->id, 'playlist_id' => $test->provider->id, 'season_number' => 1])->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'enabled' => true,
+        'url' => 'http://provider.test/series/1/1.mp4',
+        'container_extension' => 'mp4',
+    ]);
+
+    app(MediaSourceMatchService::class)->rebuildForPlaylist($test->provider);
+    Cache::put("media-server-reachable:{$test->integration->id}", true, 60);
+
+    return [$providerEpisode, $mediaEpisode];
+}
 
 function makeMatchedMovies($test): array
 {
@@ -89,32 +134,23 @@ test('handleVod redirects to the provider URL when no match exists', function ()
 });
 
 test('handleSeries redirects to the media episode URL when matched', function () {
-    $mediaSeries = Series::factory()->for($this->media)->for($this->user)->create(['enabled' => true, 'tmdb_id' => 1399]);
-    $mediaEpisode = Episode::factory()->for($this->media)->for($this->user)->create([
-        'series_id' => $mediaSeries->id,
-        'season_id' => Season::factory()->create(['series_id' => $mediaSeries->id, 'playlist_id' => $this->media->id, 'season_number' => 1])->id,
-        'season' => 1,
-        'episode_num' => 1,
-        'enabled' => true,
-        'url' => 'http://app.test/media-server/2/stream/def.mp4',
-    ]);
-
-    $providerSeries = Series::factory()->for($this->provider)->for($this->user)->create(['enabled' => true, 'tmdb_id' => 1399]);
-    $providerEpisode = Episode::factory()->for($this->provider)->for($this->user)->create([
-        'series_id' => $providerSeries->id,
-        'season_id' => Season::factory()->create(['series_id' => $providerSeries->id, 'playlist_id' => $this->provider->id, 'season_number' => 1])->id,
-        'season' => 1,
-        'episode_num' => 1,
-        'enabled' => true,
-        'url' => 'http://provider.test/series/1/1.mp4',
-        'container_extension' => 'mp4',
-    ]);
-
-    app(MediaSourceMatchService::class)->rebuildForPlaylist($this->provider);
-    Cache::put("media-server-reachable:{$this->integration->id}", true, 60);
+    [$providerEpisode] = makeMatchedEpisodes($this);
 
     $this->get("/series/{$this->user->name}/{$this->provider->uuid}/{$providerEpisode->id}.mp4")
         ->assertRedirect('http://app.test/media-server/2/stream/def.mp4');
+});
+
+test('a proxied media swap tags the stream with the episode the client asked for', function () {
+    [$providerEpisode, $mediaEpisode] = makeMatchedEpisodes($this);
+    fakeProxyForStreamCreation();
+
+    $this->get("/series/{$this->user->name}/{$this->provider->uuid}/{$providerEpisode->id}.mp4?proxy=true")
+        ->assertRedirect();
+
+    // The TV app stops its stream by the episode it asked for, not the media copy serving it.
+    Http::assertSent(fn (ClientRequest $request) => $request->method() === 'POST'
+        && ($request['metadata']['original_episode_id'] ?? null) === $mediaEpisode->id
+        && ($request['metadata']['requested_episode_id'] ?? null) === $providerEpisode->id);
 });
 
 test('the proxy entry point swaps to the media playlist so no provider slot is used', function () {
@@ -139,6 +175,20 @@ test('the proxy entry point swaps to the media playlist so no provider slot is u
 
     // The swap happened before M3uProxyService: media channel + media playlist.
     expect($captured)->toBe([$this->media->id, $mediaMovie->id]);
+});
+
+test('a proxied media swap tags the stream with the movie the client asked for', function () {
+    [$providerMovie, $mediaMovie] = makeMatchedMovies($this);
+    $providerMovie->update(['enable_proxy' => true]);
+    fakeProxyForStreamCreation();
+
+    $this->get("/movie/{$this->user->name}/{$this->provider->uuid}/{$providerMovie->id}.mkv?proxy=true")
+        ->assertRedirect();
+
+    // The TV app stops its stream by the movie it asked for, not the media copy serving it.
+    Http::assertSent(fn (ClientRequest $request) => $request->method() === 'POST'
+        && ($request['metadata']['original_channel_id'] ?? null) === $mediaMovie->id
+        && ($request['metadata']['requested_channel_id'] ?? null) === $providerMovie->id);
 });
 
 test('the proxy entry point keeps the provider context when unmatched', function () {

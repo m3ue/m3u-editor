@@ -42,7 +42,7 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        [$channel, $uuid] = $this->preferMediaServerSource($channel, $uuid);
+        [$channel, $uuid] = $this->preferMediaServerSource($request, $channel, $uuid);
 
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
@@ -120,7 +120,7 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        [$episode, $uuid] = $this->preferMediaServerSource($episode, $uuid);
+        [$episode, $uuid] = $this->preferMediaServerSource($request, $episode, $uuid);
 
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
@@ -184,7 +184,7 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        [$channel, $uuid] = $this->preferMediaServerSource($channel, $uuid);
+        [$channel, $uuid] = $this->preferMediaServerSource($request, $channel, $uuid);
 
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
@@ -233,7 +233,7 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        [$episode, $uuid] = $this->preferMediaServerSource($episode, $uuid);
+        [$episode, $uuid] = $this->preferMediaServerSource($request, $episode, $uuid);
 
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
@@ -911,10 +911,20 @@ class M3uProxyApiController extends Controller
      * provider connection slot is consumed; the request uuid is dropped
      * because alias/merged-playlist transforms don't apply to the media item.
      *
+     * The item the client asked for is recorded on the request first, since the
+     * TV app stops its stream by that id (see M3uProxyService::getChannelUrl's
+     * requested_channel_id). The timeshift route records its own before swapping
+     * to a catchup failover, so an existing value is kept.
+     *
      * @return array{0: Channel|Episode, 1: string|null}
      */
-    private function preferMediaServerSource(Channel|Episode $item, ?string $uuid): array
+    private function preferMediaServerSource(Request $request, Channel|Episode $item, ?string $uuid): array
     {
+        $requestedKey = $item instanceof Channel ? 'requested_channel_id' : 'requested_episode_id';
+        if (! $request->attributes->has($requestedKey)) {
+            $request->attributes->set($requestedKey, $item->id);
+        }
+
         $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($item);
 
         if ($media === $item) {

@@ -12,6 +12,7 @@
  */
 
 use App\Models\Channel;
+use App\Models\ChannelFailover;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
@@ -117,6 +118,29 @@ it('hands a proxied catchup client its running stream back on every seek', funct
 
     Http::assertSent(fn (ClientRequest $request) => $request->method() === 'POST'
         && ($request['metadata']['timeshift'] ?? null) === 'true');
+});
+
+it('tags a catchup stream served by a failover with the channel the client asked for', function () {
+    $this->playlist->update(['enable_proxy' => true]);
+    $this->channel->update(['catchup' => null]);
+    $failover = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/777.ts',
+        'catchup' => '1',
+    ]);
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $this->channel->id,
+        'channel_failover_id' => $failover->id,
+    ]);
+    ($this->fakeProxy)();
+
+    $this->get(($this->timeshiftUrl)())->assertRedirect();
+
+    // The TV app stops its stream by the channel it asked for, not the failover serving it.
+    Http::assertSent(fn (ClientRequest $request) => $request->method() === 'POST'
+        && ($request['metadata']['original_channel_id'] ?? null) === $failover->id
+        && ($request['metadata']['requested_channel_id'] ?? null) === $this->channel->id);
 });
 
 it('resolves a new proxy stream once the remembered one has stopped', function () {

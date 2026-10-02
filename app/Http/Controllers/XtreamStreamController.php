@@ -493,6 +493,10 @@ class XtreamStreamController extends Controller
             return response()->json(['error' => 'Unauthorized or stream not found'], 403);
         }
 
+        // Recorded before any catchup failover swap below: the TV app stops its stream by the
+        // channel it asked for (see M3uProxyService::getChannelUrl's requested_channel_id).
+        $request->attributes->set('requested_channel_id', $channel->id);
+
         // If the primary channel doesn't support catchup, defer to the first failover that does.
         // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
         $timeshiftChannel = $channel;

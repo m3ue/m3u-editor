@@ -1126,6 +1126,11 @@ class M3uProxyService
         $originalChannelId = $channel->id;
         $originalPlaylistUuid = $playlist->uuid;
 
+        // The channel the client asked for, which differs from $originalChannelId when the
+        // request was swapped to a media-server item or a catchup failover before reaching
+        // here. The TV app stops its stream by this id.
+        $requestedChannelId = $request?->attributes->get('requested_channel_id') ?? $originalChannelId;
+
         // The channel's true source Playlist, if it has one - distinct from $playlist,
         // which may be a CustomPlaylist/MergedPlaylist/PlaylistAlias wrapper. Tagged on
         // every stream (regardless of profiles_enabled) so DVR capacity accounting can
@@ -1638,6 +1643,7 @@ class M3uProxyService
                 'playlist_uuid' => $playlist->uuid,  // Actual playlist being used
                 'profile_id' => $profile->id,
                 'original_channel_id' => $originalChannelId,  // For cross-provider failover pooling
+                'requested_channel_id' => $requestedChannelId,  // Searched by TvApiController::stopPlayerStream
                 'original_playlist_uuid' => $originalPlaylistUuid,  // For cross-provider failover pooling
                 'is_failover' => $isFailover,
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
@@ -1720,6 +1726,7 @@ class M3uProxyService
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_channel_id' => $originalChannelId,  // For cross-provider failover pooling
+                'requested_channel_id' => $requestedChannelId,  // Searched by TvApiController::stopPlayerStream
                 'original_playlist_uuid' => $originalPlaylistUuid,  // For cross-provider failover pooling
                 'is_failover' => $isFailover,
             ];
@@ -1836,6 +1843,11 @@ class M3uProxyService
         $actualEpisode = $episode;
         $originalEpisodeId = $id;
         $originalPlaylistUuid = $playlist->uuid;
+
+        // The episode the client asked for, which differs from $originalEpisodeId when the
+        // request was swapped to a media-server episode before reaching here. The TV app
+        // stops its stream by this id.
+        $requestedEpisodeId = $request?->attributes->get('requested_episode_id') ?? $originalEpisodeId;
 
         // The episode's true source Playlist, if it has one - distinct from $playlist,
         // which may be a CustomPlaylist/MergedPlaylist/PlaylistAlias wrapper. See
@@ -2121,6 +2133,7 @@ class M3uProxyService
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_episode_id' => $originalEpisodeId,           // Enables findExistingPooledStream reuse
+                'requested_episode_id' => $requestedEpisodeId,         // Searched by TvApiController::stopPlayerStream
                 'original_playlist_uuid' => $originalPlaylistUuid,
                 'is_failover' => $actualEpisode->id !== $originalEpisodeId,
             ];
@@ -2175,6 +2188,7 @@ class M3uProxyService
                 'strict_live_ts' => $playlist->strict_live_ts ?? false,
                 'use_sticky_session' => $playlist->use_sticky_session ?? false,
                 'original_episode_id' => $originalEpisodeId,           // Enables findExistingPooledStream reuse
+                'requested_episode_id' => $requestedEpisodeId,         // Searched by TvApiController::stopPlayerStream
                 'original_playlist_uuid' => $originalPlaylistUuid,
                 'is_failover' => $actualEpisode->id !== $originalEpisodeId,
             ];
