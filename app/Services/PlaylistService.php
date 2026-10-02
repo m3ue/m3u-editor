@@ -717,6 +717,16 @@ class PlaylistService
     }
 
     /**
+     * Whether the request asks for catchup (timeshift) rather than the live stream: Xtream
+     * timeshift_duration/timeshift_date (merged in by the /timeshift/ route) or TiviMate utc.
+     */
+    public static function isTimeshiftRequest(?Request $request): bool
+    {
+        return $request !== null
+            && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'));
+    }
+
+    /**
      * Generate a timeshift URL for a given stream.
      *
      * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist

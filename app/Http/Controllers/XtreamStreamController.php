@@ -27,6 +27,11 @@ use Illuminate\Support\Facades\Redirect;
 class XtreamStreamController extends Controller
 {
     /**
+     * How long (seconds) a player may cache a direct (non-proxied) catchup redirect.
+     */
+    private const TIMESHIFT_DIRECT_REDIRECT_MAX_AGE = 3600;
+
+    /**
      * Validate a client-requested transcoding profile (?profile=<id>|none) and stash
      * the result in request attributes for the proxy controller. Request attributes
      * are server-side only, so downstream code can trust the resolved value.
@@ -324,7 +329,7 @@ class XtreamStreamController extends Controller
                 $streamUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
                 if ($utcPresent || $xtreamTimeshiftPresent) {
                     // Timeshift stream request
-                    $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $channel);
+                    return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $channel));
                 }
 
                 // Regular live stream request, redirect to the stream URL (via MediaFlow Proxy if enabled)
@@ -530,10 +535,22 @@ class XtreamStreamController extends Controller
             ]);
         } else {
             $streamUrl = PlaylistUrlService::getChannelUrl($timeshiftChannel, $playlist);
-            $streamUrl = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $timeshiftChannel);
 
-            return Redirect::to($this->applyMediaFlowProxy($streamUrl));
+            return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $timeshiftChannel));
         }
+    }
+
+    /**
+     * Redirect a direct (non-proxied) catchup request to the provider. FFmpeg-based players
+     * (mpv) restart every seek's Range requests from the original URL unless the redirect is
+     * cacheable, so this lets them go straight to the provider for the rest of the session.
+     * The provider URL for a programme window doesn't change, so a long max-age is safe.
+     */
+    private function timeshiftRedirect(string $streamUrl): RedirectResponse
+    {
+        return Redirect::to($this->applyMediaFlowProxy($streamUrl))
+            ->setPrivate()
+            ->setMaxAge(self::TIMESHIFT_DIRECT_REDIRECT_MAX_AGE);
     }
 
     /**

@@ -33,6 +33,20 @@ use Illuminate\Support\Facades\Redis;
 
 class M3uProxyService
 {
+    /**
+     * How long (seconds) a player may cache the redirect to a catchup proxy stream. Seeking
+     * players (FFmpeg/mpv) then send their Range requests straight to the proxy instead of
+     * back through the editor. Kept below m3u-proxy's idle stream cleanup (STREAM_TIMEOUT,
+     * 15s by default) so a cached redirect never points at a stream the proxy has removed.
+     */
+    public const TIMESHIFT_REDIRECT_MAX_AGE = 10;
+
+    /**
+     * How long (seconds) a client's catchup session is remembered. Each reuse first checks
+     * that the proxy still has the stream, so this only bounds how long the entry is kept.
+     */
+    private const TIMESHIFT_SESSION_TTL = 6 * 60 * 60;
+
     protected string $apiBaseUrl;
 
     protected ?string $apiPublicUrl;
@@ -1158,7 +1172,28 @@ class M3uProxyService
         // Timeshift/catchup requests require a different upstream URL (/timeshift/ instead of /live/),
         // so they must NEVER reuse an existing pooled live stream. We detect this early and skip
         // all pool reuse paths when timeshift parameters are present on the request.
-        $isTimeshiftRequest = $request && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'));
+        $isTimeshiftRequest = PlaylistService::isTimeshiftRequest($request);
+
+        // Catchup players request this URL again for every seek (each Range probe), while the
+        // stream from their previous request may still be open. Hand the same client its own
+        // running stream back instead of re-running capacity checks (which would count that
+        // stream against the client) and provider profile selection on every probe.
+        $timeshiftSessionKey = $isTimeshiftRequest
+            ? self::timeshiftSessionKey($request, $originalChannelId, $originalPlaylistUuid, $profile, $username)
+            : null;
+        if ($timeshiftSessionKey !== null) {
+            $session = Cache::get($timeshiftSessionKey);
+
+            if ($session && $this->streamExists($session['stream_id'])) {
+                Log::debug('Reusing running timeshift stream for the same client and programme window', [
+                    'stream_id' => $session['stream_id'],
+                    'original_channel_id' => $originalChannelId,
+                    'original_playlist_uuid' => $originalPlaylistUuid,
+                ]);
+
+                return $session['url'];
+            }
+        }
 
         // Before creating a new stream, check if there's an active DVR recording for this channel.
         // If so, route through the editor's DVR HLS proxy so we piggyback off the existing
@@ -1535,7 +1570,7 @@ class M3uProxyService
         }
 
         // Check if timeshift parameters are provided
-        if ($request && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'))) {
+        if ($isTimeshiftRequest) {
             $primaryUrl = PlaylistService::generateTimeshiftUrl($request, $primaryUrl, $playlist, $channel);
         }
 
@@ -1626,6 +1661,11 @@ class M3uProxyService
                 $metadata['playlist_auth_id'] = (string) $playlistAuthId;
             }
 
+            // Catchup streams carry a different upstream URL; tag them so live pool reuse skips them
+            if ($isTimeshiftRequest) {
+                $metadata['timeshift'] = 'true';
+            }
+
             Log::debug('Creating transcoded stream with provider profile', [
                 'channel_id' => $actualChannel->id,
                 'original_channel_id' => $originalChannelId,
@@ -1658,7 +1698,7 @@ class M3uProxyService
             }
 
             // Return transcoded stream URL
-            return $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts', $username);
+            return $this->rememberTimeshiftSession($timeshiftSessionKey, $streamId, $this->buildTranscodeStreamUrl($streamId, $profile->format ?? 'ts', $username));
         } else {
             // Use direct streaming endpoint
             Log::debug('Creating direct stream', [
@@ -1701,6 +1741,11 @@ class M3uProxyService
                 $metadata['playlist_auth_id'] = (string) $playlistAuthId;
             }
 
+            // Catchup streams carry a different upstream URL; tag them so live pool reuse skips them
+            if ($isTimeshiftRequest) {
+                $metadata['timeshift'] = 'true';
+            }
+
             try {
                 $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
             } catch (Exception $e) {
@@ -1732,8 +1777,41 @@ class M3uProxyService
             }
 
             // Return the direct proxy URL using the stream ID
-            return $this->buildProxyUrl($streamId, $format, $username);
+            return $this->rememberTimeshiftSession($timeshiftSessionKey, $streamId, $this->buildProxyUrl($streamId, $format, $username));
         }
+    }
+
+    /**
+     * Cache key for one client's catchup session: the same client (client_id when the player
+     * sends one, otherwise its user agent) on the same IP and account, watching the same
+     * programme window of the same channel with the same transcoding profile.
+     */
+    private static function timeshiftSessionKey(Request $request, int $originalChannelId, string $originalPlaylistUuid, ?StreamProfile $profile, ?string $username): string
+    {
+        return 'timeshift_session:'.sha1(implode('|', [
+            $request->ip(),
+            $request->input('client_id') ?? $request->userAgent(),
+            $username,
+            $originalPlaylistUuid,
+            $originalChannelId,
+            $profile?->id,
+            $request->input('timeshift_duration'),
+            $request->input('timeshift_date'),
+            $request->input('utc'),
+            $request->input('lutc'),
+        ]));
+    }
+
+    /**
+     * Remember the stream created for a catchup session (see getChannelUrl()) and return its URL.
+     */
+    private function rememberTimeshiftSession(?string $sessionKey, string $streamId, string $url): string
+    {
+        if ($sessionKey !== null) {
+            Cache::put($sessionKey, ['stream_id' => $streamId, 'url' => $url], self::TIMESHIFT_SESSION_TTL);
+        }
+
+        return $url;
     }
 
     /**
@@ -2260,6 +2338,33 @@ class M3uProxyService
             ]);
 
             return ['success' => false, 'triggered_count' => 0, 'stream_ids' => [], 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Whether the external proxy still has the given stream (it removes streams once idle).
+     */
+    public function streamExists(string $streamId): bool
+    {
+        if (empty($this->apiBaseUrl)) {
+            return false;
+        }
+
+        try {
+            return Http::timeout(5)->acceptJson()
+                ->withHeaders($this->apiToken ? [
+                    'X-API-Token' => $this->apiToken,
+                ] : [])
+                ->get($this->apiBaseUrl.'/streams/'.$streamId)
+                ->successful();
+        } catch (Exception $e) {
+            Log::warning('Error checking proxy stream', [
+                'stream_id' => $streamId,
+                'exception_class' => $e::class,
+                'exception_code' => $e->getCode(),
+            ]);
+
+            return false;
         }
     }
 
@@ -3209,6 +3314,11 @@ class M3uProxyService
                 // 3. If profileId specified: must be a transcoded stream with matching StreamProfile ID
                 //    If profileId is null: must be a direct (non-transcoded) stream
                 // 4. Same PlaylistProfile ID (provider profile, if specified)
+                // 5. Not a catchup stream (same channel, but a different upstream URL)
+                if (($metadata['timeshift'] ?? null) === 'true') {
+                    continue;
+                }
+
                 $isTranscoded = ($metadata['transcoding'] ?? null) === 'true';
                 $transcodingMatch = $profileId !== null
                     ? ($isTranscoded && ($metadata['profile_id'] ?? null) == $profileId)

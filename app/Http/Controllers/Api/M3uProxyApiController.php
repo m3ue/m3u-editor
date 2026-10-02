@@ -13,6 +13,7 @@ use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use App\Services\MediaSourcePreferenceService;
 use App\Services\NetworkBroadcastService;
+use App\Services\PlaylistService;
 use App\Services\ProfileService;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Settings\GeneralSettings;
@@ -95,7 +96,15 @@ class M3uProxyApiController extends Controller
                 $playlistAuthId
             );
 
-        return redirect($url);
+        $response = redirect($url);
+
+        // Seeking catchup players re-request this URL for every Range probe; let them reuse
+        // the redirect briefly so those probes go straight to the proxy stream.
+        if (PlaylistService::isTimeshiftRequest($request)) {
+            $response->setPrivate()->setMaxAge(M3uProxyService::TIMESHIFT_REDIRECT_MAX_AGE);
+        }
+
+        return $response;
     }
 
     /**
