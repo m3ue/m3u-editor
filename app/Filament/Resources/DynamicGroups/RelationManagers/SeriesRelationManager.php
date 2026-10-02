@@ -5,7 +5,6 @@ namespace App\Filament\Resources\DynamicGroups\RelationManagers;
 use App\Filament\Resources\Series\SeriesResource;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Tabs\Tab;
-use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 
@@ -15,12 +14,11 @@ use Illuminate\Database\Eloquent\Model;
  * vod-type parent has zero series to show and the tab is hidden.
  *
  * Membership is read-only: it is computed by `SyncDynamicGroups` from the
- * parent playlist's `dynamic_groups_config`, and this manager exposes no
- * membership-mutating actions (no edit/delete/move/TMDB). The one row action
- * and the one bulk action are the cache variants reused verbatim from
- * `SeriesResource` - caching a series' episodes is a property of the series
- * itself, not of its group membership, so it is safe to offer here (and in
- * bulk).
+ * parent playlist's `dynamic_groups_config`. Row actions are the canonical
+ * `SeriesResource` ones, since they act on the series itself rather than its
+ * group membership. The bulk slot is limited to Cache all episodes, because
+ * the canonical bulk menu includes membership-style actions (move to category,
+ * add to playlist) that make no sense on a computed group.
  */
 class SeriesRelationManager extends RelationManager
 {
@@ -50,15 +48,11 @@ class SeriesRelationManager extends RelationManager
         // Reuse SeriesResource's full table setup - see the parallel comment on
         // `ChannelsRelationManager::table()` for why (drift prevention, matches
         // `Categories\RelationManagers\SeriesRelationManager`'s convention) and why
-        // the membership-mutating record/bulk actions are stripped back out
-        // afterward (this manager keeps membership read-only, see class
-        // docblock). Only the cache actions are re-added (row kebab + toolbar
-        // bulk action). Anything beyond cache still has to stay out: membership
-        // is computed, so it cannot be bulk-edited.
+        // the bulk menu is swapped for Cache all episodes only (see class
+        // docblock). The canonical row actions are kept as-is.
         return SeriesResource::setupTable($table, $this->ownerRecord->id)
             ->recordTitleAttribute('name')
             ->defaultSort('dynamic_group_items.position')
-            ->recordActions(SeriesResource::getTableActions(), position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 SeriesResource::getCacheAllEpisodesBulkAction(),
             ]);

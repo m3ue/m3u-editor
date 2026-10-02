@@ -7,6 +7,7 @@ use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Filament\Resources\DynamicGroups\Pages\ViewDynamicGroup;
 use App\Filament\Resources\DynamicGroups\RelationManagers\ChannelsRelationManager;
 use App\Filament\Resources\DynamicGroups\RelationManagers\SeriesRelationManager;
+use App\Filament\Resources\Series\SeriesResource;
 use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\Vods\VodResource;
@@ -557,7 +558,7 @@ it('queues a download for every episode when Cache all episodes runs from the Se
     Bus::assertDispatchedTimes(DownloadCachedContentFile::class, 3);
 });
 
-it('exposes no membership-mutating record actions on either relation manager', function () {
+it('reuses the canonical row actions on either relation manager', function () {
     setEnableCacheForDynamicGroupTest(true);
     Storage::fake(CachedContentFile::DISK);
 
@@ -582,19 +583,21 @@ it('exposes no membership-mutating record actions on either relation manager', f
     $series = Series::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Attached Show']);
     attachItemToDynamicGroupTest($seriesGroup, Series::class, $series->id);
 
-    // Membership is computed by SyncDynamicGroups, so neither manager may
-    // re-expose VodResource/SeriesResource's edit, delete, move or TMDB
-    // actions - only the cache action survives the strip-down. Assert the
-    // configured record actions (what the kebab menu actually renders)
-    // rather than `assertActionDoesNotExist()`: Filament v5's
-    // `Table::recordActions()` resets the visible list but only *merges*
-    // into the internal `$flatActions` lookup, which `setupTable()` already
-    // populated with the pre-strip actions - so a name lookup still resolves
-    // them even though they are not in the menu.
+    // Row actions act on the item itself, not its (computed) group
+    // membership, so both managers keep the canonical VodResource /
+    // SeriesResource row menus unchanged.
+    $canonicalNames = fn (array $actions): array => collect($actions)
+        ->flatMap(fn ($action) => $action instanceof ActionGroup ? $action->getActions() : [$action])
+        ->map(fn ($action) => $action->getName())
+        ->values()
+        ->all();
+
     expect(dynamicGroupRecordActionNames(channelsManagerForTest($vodGroup)->instance()->getTable()))
-        ->toBe(['cache_now'])
+        ->toBe($canonicalNames(VodResource::getTableActions()))
+        ->toContain('cache_now')
         ->and(dynamicGroupRecordActionNames(seriesManagerForTest($seriesGroup)->instance()->getTable()))
-        ->toBe(['cache_all_episodes']);
+        ->toBe($canonicalNames(SeriesResource::getTableActions()))
+        ->toContain('cache_all_episodes');
 });
 
 it('only exposes the cache bulk action on either relation manager', function () {
