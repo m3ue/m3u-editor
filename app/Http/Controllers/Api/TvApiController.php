@@ -332,8 +332,10 @@ class TvApiController extends Controller
             'client_id' => ['required', 'string', 'max:128', 'regex:/^[\w-]+$/'],
         ]);
 
+        // Match on the ID the TV asked for: when the proxy fell back to a failover
+        // channel, channel_id is the failover's while original_channel_id is still ours.
         $isSeries = $data['type'] === 'series';
-        $field = $isSeries ? 'episode_id' : 'channel_id';
+        $field = $isSeries ? 'original_episode_id' : 'original_channel_id';
         $id = $isSeries ? $data['episode_id'] : $data['stream_id'];
 
         $belongsToPlaylist = $isSeries

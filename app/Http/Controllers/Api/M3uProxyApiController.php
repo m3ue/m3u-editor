@@ -96,7 +96,7 @@ class M3uProxyApiController extends Controller
                 $playlistAuthId
             );
 
-        $response = redirect($url);
+        $response = redirect($this->appendClientId($url, $request));
 
         // Seeking catchup players re-request this URL for every Range probe; let them reuse
         // the redirect briefly so those probes go straight to the proxy stream.
@@ -166,7 +166,7 @@ class M3uProxyApiController extends Controller
                 $playlistAuthId
             );
 
-        return redirect($url);
+        return redirect($this->appendClientId($url, $request));
     }
 
     /**
@@ -838,13 +838,17 @@ class M3uProxyApiController extends Controller
     /**
      * Append a client_id query parameter to a URL if the request contains one.
      *
-     * Each browser tab supplies a unique client_id so the proxy can maintain a
-     * separate stream_clients entry per tab, preventing collisions when multiple
-     * tabs on the same machine watch the same stream.
+     * Each browser tab (and each m3u-tv playback session) supplies a unique client_id
+     * so the proxy can maintain a separate stream_clients entry per player, preventing
+     * collisions when several players on the same machine watch the same stream, and
+     * so the player can later stop exactly its own stream (see stopPlayerStream()).
+     * Only IDs in the format the stop endpoints accept are forwarded.
      */
     private function appendClientId(string $url, Request $request): string
     {
-        if ($clientId = $request->input('client_id')) {
+        $clientId = $request->input('client_id');
+
+        if (is_string($clientId) && preg_match('/^[\w-]{1,128}$/', $clientId)) {
             $separator = str_contains($url, '?') ? '&' : '?';
             $url .= $separator.'client_id='.rawurlencode($clientId);
         }

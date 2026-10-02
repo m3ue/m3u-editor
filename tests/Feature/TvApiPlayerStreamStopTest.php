@@ -26,8 +26,18 @@ it('lets the owner stop a live channel belonging to their playlist', function ()
         ['type' => 'live', 'stream_id' => $channel->id, 'client_id' => 'client-1']
     );
 
+    // Matches the requested channel even when the proxy fell back to a failover channel
     $response->assertNoContent();
     Http::assertSentCount(1);
+    Http::assertSent(function ($request) use ($channel) {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return $request->method() === 'DELETE'
+            && $query['field'] === 'original_channel_id'
+            && $query['value'] === (string) $channel->id
+            && $query['force'] === 'false'
+            && $query['client_id'] === 'client-1';
+    });
 });
 
 it('prevents the owner from stopping a channel belonging to another playlist', function () {
@@ -66,6 +76,12 @@ it('uses the episode id and checks playlist ownership for series type', function
 
     $response->assertNoContent();
     Http::assertSentCount(1);
+    Http::assertSent(function ($request) use ($episode) {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return $query['field'] === 'original_episode_id'
+            && $query['value'] === (string) $episode->id;
+    });
 });
 
 it('rejects invalid credentials', function () {
