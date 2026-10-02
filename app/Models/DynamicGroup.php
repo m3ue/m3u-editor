@@ -120,6 +120,70 @@ class DynamicGroup extends Model
     }
 
     /**
+     * Query for the playlist items a theme rule matches locally — VOD
+     * channels when $type is 'vod', otherwise series. Membership is the
+     * union of two sets:
+     *   - stored `tmdb_keywords` contains any of the rule's keywords
+     *     (`info->tmdb_keywords` for VOD, `metadata->tmdb_keywords` for
+     *     series — populated by the TMDB enrichment pipeline so they cover
+     *     every title TMDB knows about, not just the ones in this
+     *     playlist's text fields).
+     *   - title or plot text contains any of the rule's terms,
+     *     case-insensitively, on a per-column basis.
+     *
+     * The OR block is grouped so it can't leak past the playlist
+     * constraint. With no keywords and no terms the query resolves to a
+     * base that matches nothing — callers can use that as the "empty
+     * membership" signal without special-casing.
+     *
+     * @param  list<string>  $keywords
+     * @param  list<string>  $terms
+     */
+    public static function itemsMatchingTheme(string $type, int $playlistId, array $keywords, array $terms): Builder
+    {
+        $isVod = $type === 'vod';
+        $query = $isVod
+            ? Channel::query()->where('playlist_id', $playlistId)->where('is_vod', true)
+            : Series::query()->where('playlist_id', $playlistId);
+
+        if ($keywords === [] && $terms === []) {
+            // No matching criteria — return a query guaranteed to match
+            // nothing rather than every row. `whereRaw('1 = 0')` is the
+            // dialect-agnostic "false" predicate; cheaper than `whereRaw`
+            // with an inline ID check, and avoids needing to know the
+            // primary key name here.
+            return $query->whereRaw('1 = 0');
+        }
+
+        $keywordColumn = $isVod ? 'info->tmdb_keywords' : 'metadata->tmdb_keywords';
+
+        // Title columns differ between VOD (title/title_custom/name) and
+        // series (name only). VOD plot lives on `info->plot`; series plot
+        // is a real column `plot`.
+        $titleColumns = $isVod ? ['title', 'title_custom', 'name'] : ['name'];
+        $plotColumn = $isVod ? 'info->plot' : 'plot';
+
+        $query->where(function (Builder $inner) use ($keywords, $terms, $keywordColumn, $titleColumns, $plotColumn): void {
+            foreach ($keywords as $keyword) {
+                $inner->orWhereJsonContains($keywordColumn, $keyword);
+            }
+
+            foreach ($terms as $term) {
+                $escaped = addcslashes($term, '%_\\');
+                $needle = '%'.$escaped.'%';
+                $inner->orWhere(function (Builder $termGroup) use ($titleColumns, $plotColumn, $needle): void {
+                    foreach ($titleColumns as $column) {
+                        $termGroup->orWhereLike($column, $needle, caseSensitive: false);
+                    }
+                    $termGroup->orWhereLike($plotColumn, $needle, caseSensitive: false);
+                });
+            }
+        });
+
+        return $query;
+    }
+
+    /**
      * Numeric Xtream category_id for this row.
      */
     public function xtreamCategoryId(): int

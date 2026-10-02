@@ -4,17 +4,29 @@
     </div>
 @else
     <div class="space-y-4 text-sm">
+        @if (! empty($outOfSeason))
+            <div class="border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-200 rounded-lg border px-3 py-2">
+                {{ __('This theme rule is currently outside its seasonal window. The group will hide itself on the next sync and reappear when the window opens again.') }}
+            </div>
+        @endif
+
         {{-- Summary --}}
         <div class="flex flex-wrap items-center gap-2">
             <x-filament::badge :color="$matchedTotal > 0 ? 'success' : 'warning'">
                 {{ trans_choice(':count entry matched|:count entries matched', $matchedTotal, ['count' => $matchedTotal]) }}
             </x-filament::badge>
-            <span class="text-gray-500 dark:text-gray-400">
-                {{ __(':total titles returned by TMDB for this rule.', ['total' => $tmdbTotal]) }}
-            </span>
+            @if (empty($isTheme))
+                <span class="text-gray-500 dark:text-gray-400">
+                    {{ __(':total titles returned by TMDB for this rule.', ['total' => $tmdbTotal]) }}
+                </span>
+            @endif
         </div>
 
-        @if ($matchedTotal === 0)
+        @if ($matchedTotal === 0 && ! empty($isTheme))
+            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 dark:border-white/10 dark:bg-gray-800/50 dark:text-gray-300">
+                {{ __('Nothing in this playlist matches the theme\'s keywords or search terms yet. Keyword matches fill in as titles are enriched from TMDB.') }}
+            </div>
+        @elseif ($matchedTotal === 0)
             <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-600 dark:border-white/10 dark:bg-gray-800/50 dark:text-gray-300">
                 {{
                     $type === 'series'

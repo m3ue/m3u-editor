@@ -53,6 +53,21 @@ class TmdbService
      */
     public const MAX_DYNAMIC_GROUP_PAGES = 10;
 
+    /**
+     * TMDB keywords that are production / format meta-tags rather than themes
+     * (e.g. "sequel", "holiday", "heist" stay; "duringcreditsstinger" does not).
+     * Kept here so the same blocklist is applied to movie and TV details,
+     * which TMDB returns with a different payload shape (`keywords.keywords[]`
+     * vs `keywords.results[]`).
+     */
+    private const BLOCKED_KEYWORDS = [
+        'duringcreditsstinger',
+        'aftercreditsstinger',
+        'woman director',
+        '3d',
+        'imax',
+    ];
+
     protected ?string $apiKey;
 
     protected string $language;
@@ -892,7 +907,7 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos,images,recommendations,content_ratings',
+                    'append_to_response' => 'external_ids,credits,videos,images,recommendations,content_ratings,keywords',
                     'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
@@ -994,6 +1009,8 @@ class TmdbService
                 'youtube_trailer' => $youtubeTrailer,
                 'certification' => $this->pickUsContentRating($data['content_ratings']['results'] ?? []),
                 'networks' => $this->reshapeCompanies($data['networks'] ?? []),
+                // TV uses `results` (movies use `keywords`) - TMDB's API shape differs.
+                'keywords' => $this->normalizeKeywords($data['keywords']['results'] ?? []),
                 'recommendations' => $this->reshapeRecommendations($data['recommendations']['results'] ?? [], 'tv'),
             ];
         } catch (\Exception $e) {
@@ -1023,7 +1040,7 @@ class TmdbService
                 [
                     'api_key' => $this->apiKey,
                     'language' => $this->language,
-                    'append_to_response' => 'external_ids,credits,videos,images,recommendations,release_dates',
+                    'append_to_response' => 'external_ids,credits,videos,images,recommendations,release_dates,keywords',
                     'include_image_language' => substr($this->language, 0, 2).',en,null',
                 ]
             );
@@ -1115,6 +1132,7 @@ class TmdbService
                 'certification' => $this->pickUsCertification($data['release_dates']['results'] ?? []),
                 'studios' => $this->reshapeCompanies($data['production_companies'] ?? []),
                 'recommendations' => $this->reshapeRecommendations($data['recommendations']['results'] ?? [], 'movie'),
+                'keywords' => $this->normalizeKeywords($data['keywords']['keywords'] ?? []),
             ];
         } catch (\Exception $e) {
             Log::error('TMDB get movie details error', [
@@ -1182,6 +1200,36 @@ class TmdbService
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Normalise TMDB `keywords` entries to a de-duplicated, lowercased list of
+     * theme names. TMDB's payload shape differs by media type
+     * (`keywords.keywords[]` for movies, `keywords.results[]` for TV), so both
+     * callers pass the inner list here. Production / format meta-tags are
+     * filtered via BLOCKED_KEYWORDS so a holiday dynamic-group query won't
+     * match a movie's "duringcreditsstinger" entry, for example.
+     *
+     * @param  array<int, array{name?: string}>  $rawKeywords
+     * @return list<string>
+     */
+    private function normalizeKeywords(array $rawKeywords): array
+    {
+        $blocked = array_flip(self::BLOCKED_KEYWORDS);
+
+        $seen = [];
+
+        foreach ($rawKeywords as $entry) {
+            $name = mb_strtolower(trim((string) ($entry['name'] ?? '')));
+
+            if ($name === '' || isset($blocked[$name]) || isset($seen[$name])) {
+                continue;
+            }
+
+            $seen[$name] = true;
+        }
+
+        return array_keys($seen);
     }
 
     /**
