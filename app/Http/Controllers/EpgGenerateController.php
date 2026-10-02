@@ -16,6 +16,7 @@ use App\Services\ChannelNumberSequence;
 use App\Services\EpgCacheService;
 use App\Services\EpisodeNumberNormalizer;
 use App\Services\NetworkEpgService;
+use App\Support\EpgProgrammeIdentity;
 use Carbon\Carbon;
 use DOMDocument;
 use DOMElement;
@@ -385,41 +386,47 @@ class EpgGenerateController extends Controller
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
+                                $images = $this->normalizeProgrammeImages($programme['images'] ?? [], $epg, $logoProxyEnabled);
+                                $standardImages = $this->canonicalProgrammeImages($images);
+                                foreach ($this->programmeLegacyIcons($programme, $images, $epg, $logoProxyEnabled) as $legacyIcon) {
+                                    $dimensionAttributes = isset($legacyIcon['width'], $legacyIcon['height'])
+                                        ? ' width="'.$legacyIcon['width'].'" height="'.$legacyIcon['height'].'"'
+                                        : '';
+                                    $progXml .= '    <icon src="'.$this->escapeXml($legacyIcon['url']).'"'.$dimensionAttributes.'/>'.PHP_EOL;
+                                }
+                                $identity = EpgProgrammeIdentity::fromProgramme($programme);
                                 foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
+                                    $system = mb_strtolower(trim((string) ($episodeNumber['system'] ?? '')));
+                                    if (in_array($system, ['m3u-editor:content-id', 'm3u-editor:series-id'], true)) {
+                                        continue;
+                                    }
                                     $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
                                         ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
                                         : '';
                                     $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
-                                if ($programme['icon']) {
-                                    $icon = $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($programme['icon'], $epg)
-                                        ? LogoProxyController::generateProxyUrl($programme['icon'])
-                                        : $programme['icon'];
-                                    $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
+                                foreach ($identity as $identityKey => $identityValue) {
+                                    $identitySystem = $identityKey === 'content_id' ? 'm3u-editor:content-id' : 'm3u-editor:series-id';
+                                    $progXml .= '    <episode-num system="'.$this->escapeXml($identitySystem).'">'.$this->escapeXml($identityValue).'</episode-num>'.PHP_EOL;
                                 }
-                                // Program artwork images (NEW)
-                                if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
-                                    foreach ($programme['images'] as $image) {
-                                        $rawUrl = $image['url'] ?? '';
-                                        $proxiedUrl = $logoProxyEnabled && $rawUrl && ! $this->isSchedulesDirectImageUrl($rawUrl, $epg)
-                                            ? LogoProxyController::generateProxyUrl($rawUrl)
-                                            : $rawUrl;
-
-                                        $url = $this->escapeXml($proxiedUrl);
-                                        $type = $this->escapeXml($image['type']);
-                                        $width = $this->escapeXml($image['width']);
-                                        $height = $this->escapeXml($image['height']);
-                                        $orient = $this->escapeXml($image['orient']);
-                                        $size = $this->escapeXml($image['size']);
-
-                                        $progXml .= "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n";
-                                    }
+                                if (! empty($programme['new']) && $programme['new']) {
+                                    $progXml .= '    <new />'.PHP_EOL;
                                 }
                                 if ($programme['rating']) {
                                     $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
-                                if (! empty($programme['new']) && $programme['new']) {
-                                    $progXml .= '    <new />'.PHP_EOL;
+                                foreach ($standardImages as $image) {
+                                    $attributes = ' type="'.$this->escapeXml($image['type']).'"';
+                                    if ($image['size'] !== null) {
+                                        $attributes .= ' size="'.$image['size'].'"';
+                                    }
+                                    if ($image['orient'] !== null) {
+                                        $attributes .= ' orient="'.$image['orient'].'"';
+                                    }
+                                    if ($image['system'] !== null) {
+                                        $attributes .= ' system="'.$this->escapeXml($image['system']).'"';
+                                    }
+                                    $progXml .= '    <image'.$attributes.'>'.$this->escapeXml($image['url']).'</image>'.PHP_EOL;
                                 }
 
                                 $progXml .= '  </programme>'.PHP_EOL;
@@ -906,6 +913,251 @@ class EpgGenerateController extends Controller
         }
 
         return ! in_array($matches[1], ['.', '..'], true);
+    }
+
+    /**
+     * Normalize programme artwork to attributes supported by the XMLTV DTD.
+     *
+     * @param  array<mixed>  $images
+     * @return list<array{url: string, source_url: string, type: string, width: int|null, height: int|null, orient: string|null, size: int|null, system: string|null}>
+     */
+    private function normalizeProgrammeImages(array $images, Epg $epg, bool $logoProxyEnabled): array
+    {
+        $evidenceByUrl = [];
+        foreach ($images as $image) {
+            if (! is_array($image)) {
+                continue;
+            }
+
+            $url = trim((string) ($image['url'] ?? ''));
+            $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            if (! filter_var($url, FILTER_VALIDATE_URL)
+                || ! in_array($scheme, ['http', 'https'], true)
+                || $this->containsDotPathSegment($url)) {
+                continue;
+            }
+
+            $type = mb_strtolower(trim((string) ($image['type'] ?? '')));
+            $declaredOrientation = strtoupper(trim((string) ($image['orient'] ?? '')));
+            $width = filter_var($image['width'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $height = filter_var($image['height'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($type !== '') {
+                $evidenceByUrl[$url]['types'][$type] = true;
+            }
+            if ($declaredOrientation !== '') {
+                $evidenceByUrl[$url]['orientations'][$declaredOrientation] = true;
+            }
+            if ($width !== false && $height !== false) {
+                $evidenceByUrl[$url]['dimensions'][$width.'x'.$height] = true;
+            }
+        }
+
+        $conflictingUrls = [];
+        foreach ($evidenceByUrl as $url => $evidence) {
+            if (count($evidence['types'] ?? []) > 1
+                || count($evidence['orientations'] ?? []) > 1
+                || count($evidence['dimensions'] ?? []) > 1) {
+                $conflictingUrls[$url] = true;
+            }
+        }
+
+        $normalized = [];
+
+        foreach ($images as $image) {
+            if (! is_array($image)) {
+                continue;
+            }
+
+            $url = trim((string) ($image['url'] ?? ''));
+            $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $type = mb_strtolower(trim((string) ($image['type'] ?? '')));
+            $width = filter_var($image['width'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $height = filter_var($image['height'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $hasGeometry = $width !== false && $height !== false;
+
+            if (! filter_var($url, FILTER_VALIDATE_URL)
+                || ! in_array($scheme, ['http', 'https'], true)
+                || $this->containsDotPathSegment($url)
+                || isset($conflictingUrls[$url])
+                || ! in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true)) {
+                continue;
+            }
+
+            $width = $hasGeometry ? $width : null;
+            $height = $hasGeometry ? $height : null;
+
+            $system = trim((string) ($image['system'] ?? ''));
+            if ($system === '' || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/', $system) !== 1) {
+                $system = null;
+            }
+
+            $declaredOrientation = strtoupper(trim((string) ($image['orient'] ?? '')));
+            $geometryOrientation = $hasGeometry ? match (true) {
+                $width > $height => 'L',
+                $height > $width => 'P',
+                default => null,
+            } : null;
+            if ($declaredOrientation !== ''
+                && (! in_array($declaredOrientation, ['P', 'L'], true)
+                    || ($geometryOrientation !== null && $declaredOrientation !== $geometryOrientation))) {
+                continue;
+            }
+            $orientation = $geometryOrientation ?? ($declaredOrientation !== '' ? $declaredOrientation : null);
+            if (($hasGeometry && $geometryOrientation === null && in_array($type, ['poster', 'backdrop'], true))
+                || ($type === 'poster' && $orientation !== 'P')
+                || ($type === 'backdrop' && $orientation !== 'L')) {
+                continue;
+            }
+
+            $declaredSize = filter_var($image['size'] ?? null, FILTER_VALIDATE_INT);
+            $size = in_array($declaredSize, [1, 2, 3], true) ? $declaredSize : null;
+
+            $key = $url.'|'.$type;
+            $candidate = [
+                'url' => $this->proxyProgrammeArtworkUrl($url, $epg, $logoProxyEnabled),
+                'source_url' => $url,
+                'type' => $type,
+                'width' => $width,
+                'height' => $height,
+                'orient' => $orientation,
+                'size' => $hasGeometry ? match (true) {
+                    max($width, $height) < 200 => 1,
+                    max($width, $height) <= 400 => 2,
+                    default => 3,
+                } : $size,
+                'system' => $system,
+            ];
+            if (! isset($normalized[$key])
+                || ($normalized[$key]['width'] === null && $candidate['width'] !== null)) {
+                $normalized[$key] = $candidate;
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    /**
+     * Emit one deterministic validated portrait while retaining alternatives as legacy icons.
+     *
+     * @param  list<array{url: string, source_url: string, type: string, width: int|null, height: int|null, orient: string|null, size: int|null, system: string|null}>  $images
+     * @return list<array{url: string, source_url: string, type: string, width: int|null, height: int|null, orient: string|null, size: int|null, system: string|null}>
+     */
+    private function canonicalProgrammeImages(array $images): array
+    {
+        $posters = array_values(array_filter(
+            $images,
+            static fn (array $image): bool => $image['type'] === 'poster'
+                && $image['orient'] === 'P'
+                && $image['width'] !== null
+                && $image['height'] !== null
+                && $image['height'] > $image['width'],
+        ));
+        if ($posters === []) {
+            return $images;
+        }
+
+        usort($posters, static function (array $left, array $right): int {
+            return ($right['width'] * $right['height']) <=> ($left['width'] * $left['height'])
+                ?: $right['height'] <=> $left['height']
+                ?: $right['width'] <=> $left['width']
+                ?: strcmp($left['source_url'], $right['source_url']);
+        });
+        $canonicalUrl = $posters[0]['source_url'];
+
+        return array_values(array_filter(
+            $images,
+            static fn (array $image): bool => $image['type'] !== 'poster' || $image['source_url'] === $canonicalUrl,
+        ));
+    }
+
+    /**
+     * Build DTD-valid icons for legacy consumers and same-URL dimension attestation.
+     *
+     * @param  array<string, mixed>  $programme
+     * @param  list<array{url: string, type: string, width: int|null, height: int|null, orient: string|null, size: int|null, system: string|null}>  $images
+     * @return list<array{url: string, width?: int, height?: int}>
+     */
+    private function programmeLegacyIcons(array $programme, array $images, Epg $epg, bool $logoProxyEnabled): array
+    {
+        $icons = [];
+        $url = trim((string) ($programme['icon'] ?? ''));
+        $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (filter_var($url, FILTER_VALIDATE_URL)
+            && in_array($scheme, ['http', 'https'], true)
+            && ! $this->containsDotPathSegment($url)) {
+            $icons[] = ['url' => $this->proxyProgrammeArtworkUrl($url, $epg, $logoProxyEnabled)];
+        }
+
+        foreach ($images as $image) {
+            if ($image['width'] === null || $image['height'] === null) {
+                continue;
+            }
+
+            $icons[] = [
+                'url' => $image['url'],
+                'width' => $image['width'],
+                'height' => $image['height'],
+            ];
+        }
+
+        foreach ($programme['images'] ?? [] as $legacyImage) {
+            if (! is_array($legacyImage) || trim((string) ($legacyImage['type'] ?? '')) !== '') {
+                continue;
+            }
+
+            $legacyUrl = trim((string) ($legacyImage['url'] ?? ''));
+            $legacyScheme = mb_strtolower((string) parse_url($legacyUrl, PHP_URL_SCHEME));
+            $legacyWidth = filter_var($legacyImage['width'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $legacyHeight = filter_var($legacyImage['height'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if (filter_var($legacyUrl, FILTER_VALIDATE_URL)
+                && in_array($legacyScheme, ['http', 'https'], true)
+                && ! $this->containsDotPathSegment($legacyUrl)
+                && $legacyWidth !== false
+                && $legacyHeight !== false) {
+                $icons[] = [
+                    'url' => $this->proxyProgrammeArtworkUrl($legacyUrl, $epg, $logoProxyEnabled),
+                    'width' => $legacyWidth,
+                    'height' => $legacyHeight,
+                ];
+            }
+        }
+
+        return $icons;
+    }
+
+    private function containsDotPathSegment(string $url): bool
+    {
+        $path = (string) parse_url($url, PHP_URL_PATH);
+
+        return collect(explode('/', trim($path, '/')))
+            ->contains(fn (string $segment): bool => in_array($segment, ['.', '..'], true));
+    }
+
+    private function isInternalProgrammeArtworkUrl(string $url): bool
+    {
+        $candidate = parse_url($url);
+        $base = parse_url(url('/'));
+        if (! is_array($candidate) || ! is_array($base)
+            || isset($candidate['user'], $candidate['pass'])
+            || ($candidate['scheme'] ?? null) !== ($base['scheme'] ?? null)
+            || ($candidate['host'] ?? null) !== ($base['host'] ?? null)
+            || ($candidate['port'] ?? null) !== ($base['port'] ?? null)) {
+            return false;
+        }
+
+        $path = (string) ($candidate['path'] ?? '');
+
+        return $path === '/logo-proxy.php'
+            || str_starts_with($path, '/media-server-image-proxy/');
+    }
+
+    private function proxyProgrammeArtworkUrl(string $url, Epg $epg, bool $logoProxyEnabled): string
+    {
+        return $logoProxyEnabled
+            && ! $this->isSchedulesDirectImageUrl($url, $epg)
+            && ! $this->isInternalProgrammeArtworkUrl($url)
+                ? LogoProxyController::generateProxyUrl($url)
+                : $url;
     }
 
     /**

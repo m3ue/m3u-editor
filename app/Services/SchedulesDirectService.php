@@ -6,6 +6,7 @@ use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Exceptions\SchedulesDirectTokenExpiredException;
 use App\Facades\ProxyFacade;
 use App\Models\Epg;
+use App\Support\EpgProgrammeIdentity;
 use Carbon\Carbon;
 use Exception;
 use Generator;
@@ -1749,22 +1750,13 @@ class SchedulesDirectService
             fwrite($file, "    <desc>{$desc}</desc>\n");
         }
 
-        // Program artwork using proper XMLTV <image> tags
+        // Keep artwork buffered so each element is emitted in XMLTV DTD order.
+        $artworkList = [];
         $programId = $programData->programID ?? null;
         if ($programId && isset($artworkCache['programs'][$programId])) {
-            $artworkList = $artworkCache['programs'][$programId];
-            if (is_array($artworkList)) {
-                // New format - multiple images with proper XMLTV attributes
-                foreach ($artworkList as $artwork) {
-                    $url = htmlspecialchars($artwork['url']);
-                    $type = htmlspecialchars($artwork['type']);
-                    $size = htmlspecialchars($artwork['size']);
-                    $orient = htmlspecialchars($artwork['orient']);
-                    $width = (int) ($artwork['width'] ?? 0);
-                    $height = (int) ($artwork['height'] ?? 0);
-                    fwrite($file, "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n");
-                }
-            }
+            $artworkList = is_array($artworkCache['programs'][$programId])
+                ? $artworkCache['programs'][$programId]
+                : [];
         }
 
         // Categories/Genres
@@ -1773,6 +1765,26 @@ class SchedulesDirectService
                 $genre = htmlspecialchars($genre);
                 fwrite($file, "    <category>{$genre}</category>\n");
             }
+        }
+
+        foreach ($artworkList as $artwork) {
+            $url = trim((string) ($artwork['url'] ?? ''));
+            $width = (int) ($artwork['width'] ?? 0);
+            $height = (int) ($artwork['height'] ?? 0);
+            $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+            if (! filter_var($url, FILTER_VALIDATE_URL)
+                || ! in_array($scheme, ['http', 'https'], true)
+                || $width <= 0
+                || $height <= 0) {
+                continue;
+            }
+
+            $escapedUrl = htmlspecialchars($url);
+            fwrite(
+                $file,
+                "    <icon src=\"{$escapedUrl}\" width=\"{$width}\" height=\"{$height}\" />\n",
+            );
         }
 
         // Episode numbering
@@ -1785,6 +1797,15 @@ class SchedulesDirectService
                     break;
                 }
             }
+        }
+        foreach (EpgProgrammeIdentity::fromSchedulesDirect($programData) as $identityKey => $identityValue) {
+            $identitySystem = $identityKey === 'content_id' ? 'm3u-editor:content-id' : 'm3u-editor:series-id';
+            fwrite($file, '    <episode-num system="'.$identitySystem.'">'.htmlspecialchars($identityValue)."</episode-num>\n");
+        }
+
+        // New must precede rating in the XMLTV programme content model.
+        if (! empty($isNew)) {
+            fwrite($file, "    <new />\n");
         }
 
         // Content rating
@@ -1799,9 +1820,42 @@ class SchedulesDirectService
             }
         }
 
-        // New flag
-        if (! empty($isNew)) {
-            fwrite($file, "    <new />\n");
+        // Standard programme images are text URLs and intentionally carry no dimensions.
+        foreach ($artworkList as $artwork) {
+            $url = trim((string) ($artwork['url'] ?? ''));
+            $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $type = mb_strtolower(trim((string) ($artwork['type'] ?? '')));
+            $width = (int) ($artwork['width'] ?? 0);
+            $height = (int) ($artwork['height'] ?? 0);
+
+            if (! filter_var($url, FILTER_VALIDATE_URL)
+                || ! in_array($scheme, ['http', 'https'], true)
+                || ! in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true)) {
+                continue;
+            }
+
+            $largestDimension = max($width, $height);
+            $size = match (true) {
+                $largestDimension <= 0 => null,
+                $largestDimension < 200 => 1,
+                $largestDimension <= 400 => 2,
+                default => 3,
+            };
+            $orient = match (true) {
+                $width > $height => 'L',
+                $height > $width => 'P',
+                default => null,
+            };
+            if (($type === 'poster' && $orient !== 'P')
+                || ($type === 'backdrop' && $orient !== 'L')) {
+                continue;
+            }
+
+            $attributes = ' type="'.$type.'"';
+            $attributes .= $size !== null ? ' size="'.$size.'"' : '';
+            $attributes .= $orient !== null ? ' orient="'.$orient.'"' : '';
+            $attributes .= ' system="schedulesdirect"';
+            fwrite($file, '    <image'.$attributes.'>'.htmlspecialchars($url)."</image>\n");
         }
 
         // End programme entry

@@ -298,7 +298,10 @@ it('accepts full-shape artwork from hosts outside the playlist domain allowlist,
 
     $document = new DOMDocument;
     expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
-    expect((new DOMXPath($document))->query('//programme[title="Enriched"]/icon[@type="poster" and @width="500" and @height="750" and @orient="P" and @size="2"]'))->toHaveCount(1);
+    $xpath = new DOMXPath($document);
+    expect($xpath->query('//programme[title="Enriched"]/image[@type="poster"][@orient="P"][@size="3"][text()="https://image.tmdb.org/t/p/w500/a.jpg"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Enriched"]/icon[@src="https://image.tmdb.org/t/p/w500/a.jpg"][@width="500"][@height="750"][not(@type)][not(@orient)][not(@size)]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Enriched"]/icon[@type or @orient or @size]'))->toHaveCount(0);
 });
 
 it('rejects duplicate ids and oversized batches', function () {

@@ -285,20 +285,63 @@ class EpgCacheService
                 }
                 break;
             case 'icon':
-                if (! $programme['icon']) {
-                    $programme['icon'] = trim($reader->getAttribute('src') ?: '');
-                } else {
-                    $imageUrl = trim($reader->getAttribute('src') ?: '');
-                    if ($imageUrl) {
-                        $programme['images'][] = [
-                            'url' => $imageUrl,
-                            'type' => trim($reader->getAttribute('type') ?: 'poster'),
-                            'width' => (int) ($reader->getAttribute('width') ?: 0),
-                            'height' => (int) ($reader->getAttribute('height') ?: 0),
-                            'orient' => trim($reader->getAttribute('orient') ?: 'P'),
-                            'size' => (int) ($reader->getAttribute('size') ?: 1),
-                        ];
+                $imageUrl = trim($reader->getAttribute('src') ?: '');
+                $type = mb_strtolower(trim($reader->getAttribute('type') ?: ''));
+                $width = (int) ($reader->getAttribute('width') ?: 0);
+                $height = (int) ($reader->getAttribute('height') ?: 0);
+
+                if ($imageUrl === '') {
+                    break;
+                }
+                if (! $programme['icon'] && $type === '') {
+                    $programme['icon'] = $imageUrl;
+                }
+                if (in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true) || ($width > 0 && $height > 0)) {
+                    $programme['images'][] = [
+                        'url' => $imageUrl,
+                        'type' => $type,
+                        'width' => $width,
+                        'height' => $height,
+                        'orient' => $width > $height ? 'L' : ($height > $width ? 'P' : ''),
+                        'size' => (int) ($reader->getAttribute('size') ?: 0),
+                    ];
+                }
+                break;
+            case 'image':
+                $type = mb_strtolower(trim($reader->getAttribute('type') ?: ''));
+                $orient = strtoupper(trim($reader->getAttribute('orient') ?: ''));
+                $size = (int) ($reader->getAttribute('size') ?: 0);
+                $imageUrl = trim($reader->readString() ?: '');
+                if ($imageUrl === '' || ! in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true)) {
+                    break;
+                }
+
+                $image = [
+                    'url' => $imageUrl,
+                    'type' => $type,
+                    'width' => 0,
+                    'height' => 0,
+                    'orient' => $orient,
+                    'size' => $size,
+                ];
+
+                $matchedIcon = false;
+                foreach ($programme['images'] as &$existingImage) {
+                    if (($existingImage['url'] ?? null) === $imageUrl
+                        && ($existingImage['width'] ?? 0) > 0
+                        && ($existingImage['height'] ?? 0) > 0) {
+                        $existingImage = array_replace($existingImage, array_filter(
+                            $image,
+                            fn (mixed $value, string $key): bool => ! in_array($key, ['width', 'height'], true) && $value !== '' && $value !== 0,
+                            ARRAY_FILTER_USE_BOTH,
+                        ));
+                        $matchedIcon = true;
+                        break;
                     }
+                }
+                unset($existingImage);
+                if (! $matchedIcon) {
+                    $programme['images'][] = $image;
                 }
                 break;
             case 'new':

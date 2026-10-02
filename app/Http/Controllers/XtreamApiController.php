@@ -54,6 +54,7 @@ use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
+use App\Support\EpgProgrammeIdentity;
 use App\Support\EpisodeNumberParser;
 use App\Support\SeriesKey;
 use App\Support\TmdbRating;
@@ -1913,7 +1914,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist) + EpgProgrammeIdentity::fromProgramme($programme);
                     $count++;
                 }
             }
@@ -1993,7 +1994,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist) + EpgProgrammeIdentity::fromProgramme($programme);
                 }
             }
 
@@ -2176,6 +2177,7 @@ class XtreamApiController extends Controller
                         if ($includeDetails) {
                             $listing += $this->epgProgrammeDetails($programme, $playlist);
                         }
+                        $listing += EpgProgrammeIdentity::fromProgramme($programme);
                         $epgListings[] = $listing;
                     }
                     $result[(string) $streamId] = ['epg_listings' => $epgListings];
@@ -2529,7 +2531,7 @@ class XtreamApiController extends Controller
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
-        $details = [];
+        $details = $this->epgProgrammeArtwork($programme, $playlist);
 
         $icon = $this->epgWideProgrammeImage($programme['images'] ?? null)
             ?? trim((string) ($programme['icon'] ?? ''));
@@ -2565,6 +2567,140 @@ class XtreamApiController extends Controller
         }
 
         return $details;
+    }
+
+    /**
+     * @param  array<string, mixed>  $programme
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string}
+     */
+    private function epgProgrammeArtwork(array $programme, $playlist): array
+    {
+        if (! is_array($programme['images'] ?? null)) {
+            return [];
+        }
+
+        $candidates = $this->validatedProgrammeArtworkCandidates($programme['images']);
+        $artwork = [];
+        if ($poster = $candidates['poster'][0] ?? null) {
+            $artwork['poster_url'] = $this->proxyEpgProgrammeArtworkUrl($poster['url'], $playlist);
+            $artwork['poster_width'] = $poster['width'];
+            $artwork['poster_height'] = $poster['height'];
+        }
+        if ($backdrop = $candidates['backdrop'][0] ?? null) {
+            $artwork['backdrop_url'] = $this->proxyEpgProgrammeArtworkUrl($backdrop['url'], $playlist);
+        }
+
+        return $artwork;
+    }
+
+    /**
+     * @param  array<mixed>  $images
+     * @return array{poster: list<array{url: string, width: int, height: int}>, backdrop: list<array{url: string, width: int, height: int}>}
+     */
+    private function validatedProgrammeArtworkCandidates(array $images): array
+    {
+        $evidence = [];
+        foreach ($images as $image) {
+            if (! is_array($image)) {
+                continue;
+            }
+
+            $url = trim((string) ($image['url'] ?? ''));
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array($scheme, ['http', 'https'], true)) {
+                continue;
+            }
+
+            $type = strtolower(trim((string) ($image['type'] ?? '')));
+            $declaredOrientation = strtoupper(trim((string) ($image['orient'] ?? '')));
+            $width = filter_var($image['width'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $height = filter_var($image['height'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $hasGeometry = $width !== false && $height !== false;
+            $geometryOrientation = $hasGeometry ? ($height > $width ? 'P' : ($width > $height ? 'L' : null)) : null;
+
+            $evidence[$url]['images'][] = compact('url', 'type', 'declaredOrientation', 'width', 'height', 'hasGeometry', 'geometryOrientation');
+            if ($type !== '') {
+                $evidence[$url]['types'][$type] = true;
+            }
+            if ($declaredOrientation !== '') {
+                $evidence[$url]['orientations'][$declaredOrientation] = true;
+            }
+            if ($hasGeometry) {
+                $evidence[$url]['dimensions'][$width.'x'.$height] = true;
+            }
+        }
+
+        $candidates = ['poster' => [], 'backdrop' => []];
+        foreach ($evidence as $url => $urlEvidence) {
+            $types = array_keys($urlEvidence['types'] ?? []);
+            $orientations = array_keys($urlEvidence['orientations'] ?? []);
+            $dimensions = array_keys($urlEvidence['dimensions'] ?? []);
+            if (count($types) > 1 || count($orientations) > 1 || count($dimensions) > 1) {
+                continue;
+            }
+
+            foreach ($urlEvidence['images'] as $image) {
+                if (! in_array($image['type'], ['poster', 'backdrop'], true)
+                    || ! $image['hasGeometry']
+                    || $image['geometryOrientation'] === null
+                    || ($image['declaredOrientation'] !== '' && $image['declaredOrientation'] !== $image['geometryOrientation'])
+                    || ($image['type'] === 'poster' && $image['geometryOrientation'] !== 'P')
+                    || ($image['type'] === 'backdrop' && $image['geometryOrientation'] !== 'L')) {
+                    continue 2;
+                }
+            }
+
+            $image = $urlEvidence['images'][0];
+            if (in_array($image['type'], ['poster', 'backdrop'], true)) {
+                $candidates[$image['type']][] = [
+                    'url' => $url,
+                    'width' => $image['width'],
+                    'height' => $image['height'],
+                ];
+            }
+        }
+
+        foreach ($candidates as &$roleCandidates) {
+            usort($roleCandidates, static function (array $left, array $right): int {
+                return ($right['width'] * $right['height']) <=> ($left['width'] * $left['height'])
+                    ?: $right['height'] <=> $left['height']
+                    ?: $right['width'] <=> $left['width']
+                    ?: strcmp($left['url'], $right['url']);
+            });
+        }
+        unset($roleCandidates);
+
+        return $candidates;
+    }
+
+    private function isInternalEpgArtworkUrl(string $url): bool
+    {
+        $candidate = parse_url($url);
+        $base = parse_url(url('/'));
+        if (! is_array($candidate) || ! is_array($base)
+            || isset($candidate['user'], $candidate['pass'], $candidate['fragment'])
+            || ($candidate['scheme'] ?? null) !== ($base['scheme'] ?? null)
+            || ($candidate['host'] ?? null) !== ($base['host'] ?? null)
+            || ($candidate['port'] ?? null) !== ($base['port'] ?? null)) {
+            return false;
+        }
+
+        $path = (string) ($candidate['path'] ?? '');
+        if ($path === '/logo-proxy.php' || str_starts_with($path, '/media-server-image-proxy/')) {
+            return true;
+        }
+
+        return ! isset($candidate['query'])
+            && preg_match('#^/schedules-direct/[^/]+/image/[^/.][^/]*$#', $path) === 1;
+    }
+
+    /** @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist */
+    private function proxyEpgProgrammeArtworkUrl(string $url, $playlist): string
+    {
+        return $playlist->enable_logo_proxy && ! $this->isInternalEpgArtworkUrl($url)
+            ? LogoProxyController::generateProxyUrl($url)
+            : $url;
     }
 
     /**

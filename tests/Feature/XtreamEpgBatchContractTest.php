@@ -1,9 +1,12 @@
 <?php
 
 use App\Http\Controllers\LogoProxyController;
+use App\Http\Controllers\XtreamApiController;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\Network;
+use App\Models\NetworkProgramme;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
@@ -53,6 +56,15 @@ function batchUrl(string $username, string $password, array $params = []): strin
         'username' => $username,
         'password' => $password,
         'action' => 'get_epg_batch',
+    ], $params));
+}
+
+function programmeUrl(string $username, string $password, string $action, array $params = []): string
+{
+    return route('xtream.api.player').'?'.http_build_query(array_merge([
+        'username' => $username,
+        'password' => $password,
+        'action' => $action,
     ], $params));
 }
 
@@ -357,6 +369,43 @@ it('rejects batch EPG for network playlists', function () {
         ->assertJsonPath('error', 'Batch EPG not supported for network playlists');
 });
 
+it('does not infer network programme artwork from generic content cover fields', function () {
+    $networkPlaylist = Playlist::factory()->for($this->user)->create(['is_network_playlist' => true]);
+    $auth = PlaylistAuth::create([
+        'name' => 'Network Artwork Auth',
+        'username' => 'network_art_'.uniqid(),
+        'password' => 'network_pass',
+        'enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $networkPlaylist->playlistAuths()->attach($auth->id);
+
+    $content = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'group_id' => null,
+        'logo' => 'https://images.example/generic-logo.jpg',
+        'info' => ['cover_big' => 'https://images.example/generic-cover-big.jpg'],
+    ]);
+    $network = Network::factory()->for($this->user)->create([
+        'network_playlist_id' => $networkPlaylist->id,
+        'enabled' => true,
+    ]);
+    NetworkProgramme::factory()->for($network)->create([
+        'title' => 'Network Programme',
+        'start_time' => Carbon::now()->subMinutes(5),
+        'end_time' => Carbon::now()->addHour(),
+        'contentable_type' => Channel::class,
+        'contentable_id' => $content->id,
+    ]);
+
+    $listing = $this->getJson(programmeUrl($auth->username, $auth->password, 'get_short_epg', [
+        'stream_id' => $network->id,
+    ]))->assertOk()->json('epg_listings.0');
+
+    expect($listing)->not->toHaveKeys(['poster_url', 'poster_width', 'poster_height', 'backdrop_url', 'icon']);
+});
+
 it('omits extended programme details unless the client asks for them', function () {
     $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.plain');
 
@@ -422,6 +471,126 @@ it('includes extended programme details when details=1', function () {
         ->and($listings['bare-1'])->not->toHaveKeys(['category', 'rating', 'icon', 'season', 'episode', 'is_new', 'year']);
 });
 
+it('preserves validated role-specific artwork in short simple and detailed batch listings', function () {
+    $this->playlist->update(['enable_logo_proxy' => false]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.roles');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles', [
+        'id' => 'roles-1', 'title' => 'Role Art', 'desc' => '',
+        'start' => Carbon::now()->subMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'icon' => 'https://images.example/generic-wide.jpg',
+        'images' => [
+            ['url' => 'https://images.example/square-poster.jpg', 'type' => 'poster', 'width' => 600, 'height' => 600, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/poster.jpg', 'type' => 'poster', 'width' => 600, 'height' => 900, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/other-poster.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/backdrop.jpg', 'type' => 'backdrop', 'width' => 1280, 'height' => 720, 'orient' => 'L', 'size' => 3],
+        ],
+    ]);
+
+    $short = $this->getJson(programmeUrl($this->username, $this->password, 'get_short_epg', [
+        'stream_id' => $ctx['channel']->id,
+    ]))->assertOk()->json('epg_listings.0');
+    $simple = $this->getJson(programmeUrl($this->username, $this->password, 'get_simple_data_table', [
+        'stream_id' => $ctx['channel']->id,
+    ]))->assertOk()->json('epg_listings.0');
+    $batchListings = $this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => (string) $ctx['channel']->id,
+        'details' => 1,
+    ]))->assertOk()->json((string) $ctx['channel']->id.'.epg_listings');
+    $batch = collect($batchListings)->firstWhere('id', 'roles-1');
+
+    foreach ([$short, $simple, $batch] as $listing) {
+        expect($listing)->toMatchArray([
+            'poster_url' => 'https://images.example/poster.jpg',
+            'poster_width' => 600,
+            'poster_height' => 900,
+            'backdrop_url' => 'https://images.example/backdrop.jpg',
+        ]);
+    }
+
+    expect($batch['icon'])->toBe('https://images.example/backdrop.jpg');
+});
+
+it('selects canonical artwork independently of source order and rejects same-url conflicts', function () {
+    $this->playlist->update(['enable_logo_proxy' => false]);
+    $controller = app(XtreamApiController::class);
+    $method = new ReflectionMethod($controller, 'epgProgrammeArtwork');
+    $small = ['url' => 'https://images.example/small.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P'];
+    $large = ['url' => 'https://images.example/large.jpg', 'type' => 'poster', 'width' => 800, 'height' => 1200, 'orient' => 'P'];
+    $duplicate = ['url' => 'https://images.example/duplicate.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P'];
+
+    $forward = $method->invoke($controller, ['images' => [$small, $large]], $this->playlist);
+    $reverse = $method->invoke($controller, ['images' => [$large, $small]], $this->playlist);
+    $duplicates = $method->invoke($controller, ['images' => [$duplicate, $duplicate]], $this->playlist);
+    $geometryConflict = $method->invoke($controller, ['images' => [
+        ['url' => 'https://images.example/conflict.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P'],
+        ['url' => 'https://images.example/conflict.jpg', 'type' => 'poster', 'width' => 1280, 'height' => 720, 'orient' => 'L'],
+    ]], $this->playlist);
+    $roleConflict = $method->invoke($controller, ['images' => [
+        ['url' => 'https://images.example/role-conflict.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750, 'orient' => 'P'],
+        ['url' => 'https://images.example/role-conflict.jpg', 'type' => 'backdrop', 'width' => 1280, 'height' => 720, 'orient' => 'L'],
+    ]], $this->playlist);
+
+    expect($forward)->toMatchArray(['poster_url' => $large['url'], 'poster_width' => 800, 'poster_height' => 1200])
+        ->and($reverse)->toBe($forward)
+        ->and($duplicates)->toMatchArray(['poster_url' => $duplicate['url'], 'poster_width' => 500, 'poster_height' => 750])
+        ->and($geometryConflict)->toBe([])
+        ->and($roleConflict)->toBe([]);
+});
+
+it('omits unproven or unsafe artwork and retains detailed batch opt in semantics', function () {
+    $this->playlist->update(['enable_logo_proxy' => false]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.invalid-art');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.invalid-art', [
+        'id' => 'invalid-art-1', 'title' => 'Invalid Art', 'desc' => '',
+        'start' => Carbon::now()->addMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'icon' => 'https://images.example/generic.jpg',
+        'images' => [
+            ['url' => 'https://images.example/no-geometry.jpg', 'type' => 'poster', 'width' => 0, 'height' => 0, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/landscape-poster.jpg', 'type' => 'poster', 'width' => 900, 'height' => 600, 'orient' => 'P', 'size' => 3],
+            ['url' => 'javascript:alert(1)', 'type' => 'backdrop', 'width' => 1280, 'height' => 720, 'orient' => 'L', 'size' => 3],
+            ['url' => 'https://images.example/portrait-backdrop.jpg', 'type' => 'backdrop', 'width' => 600, 'height' => 900, 'orient' => 'L', 'size' => 3],
+        ],
+    ]);
+
+    $short = $this->getJson(programmeUrl($this->username, $this->password, 'get_short_epg', [
+        'stream_id' => $ctx['channel']->id,
+    ]))->assertOk()->json('epg_listings.0');
+    $batchListings = $this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => (string) $ctx['channel']->id,
+    ]))->assertOk()->json((string) $ctx['channel']->id.'.epg_listings');
+    $batchWithoutDetails = collect($batchListings)->firstWhere('id', 'invalid-art-1');
+
+    expect($short)->not->toHaveKeys(['poster_url', 'poster_width', 'poster_height', 'backdrop_url'])
+        ->and($batchWithoutDetails)->not->toHaveKeys(['icon', 'poster_url', 'poster_width', 'poster_height', 'backdrop_url']);
+});
+
+it('proxies role-specific artwork once and preserves already internal urls', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.proxied-roles');
+    $internalPoster = url('/media-server-image-proxy/art/poster.jpg');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.proxied-roles', [
+        'id' => 'proxied-roles-1', 'title' => 'Proxied Roles', 'desc' => '',
+        'start' => Carbon::now()->subMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'images' => [
+            ['url' => $internalPoster, 'type' => 'poster', 'width' => 600, 'height' => 900, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/backdrop.jpg', 'type' => 'backdrop', 'width' => 1280, 'height' => 720, 'orient' => 'L', 'size' => 3],
+        ],
+    ]);
+
+    $listing = $this->getJson(programmeUrl($this->username, $this->password, 'get_short_epg', [
+        'stream_id' => $ctx['channel']->id,
+    ]))->assertOk()->json('epg_listings.0');
+
+    expect($listing['poster_url'])->toBe($internalPoster)
+        ->and($listing['backdrop_url'])->toBe(LogoProxyController::generateProxyUrl('https://images.example/backdrop.jpg'));
+});
+
 it('routes extended programme icons through the logo proxy when the playlist enables it', function () {
     $this->playlist->update(['enable_logo_proxy' => true]);
     $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.proxied');
@@ -479,4 +648,28 @@ it('prefers the alternative image closest to 16:9 for the guide artwork', functi
 
     expect($listings['wide-1']['icon'])->toBe('https://images.example/wide.jpg')
         ->and($listings['tall-1']['icon'])->toBe('https://images.example/primary.jpg');
+});
+
+it('preserves exact programme identities in short simple and batch listings', function () {
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.identity');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.identity', [
+        'id' => 'occurrence-1', 'title' => 'Synthetic Episode', 'desc' => '',
+        'start' => Carbon::now()->subMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'episode_nums' => [['system' => 'dd_progid', 'value' => 'EP012345670089']],
+    ]);
+
+    $short = $this->getJson(programmeUrl($this->username, $this->password, 'get_short_epg', ['stream_id' => $ctx['channel']->id]))->assertOk()->json('epg_listings.0');
+    $simple = $this->getJson(programmeUrl($this->username, $this->password, 'get_simple_data_table', ['stream_id' => $ctx['channel']->id]))->assertOk()->json('epg_listings.0');
+    $batchListings = $this->getJson(batchUrl($this->username, $this->password, ['stream_ids' => (string) $ctx['channel']->id]))->assertOk()->json((string) $ctx['channel']->id.'.epg_listings');
+    $batch = collect($batchListings)->firstWhere('id', 'occurrence-1');
+
+    foreach ([$short, $simple, $batch] as $listing) {
+        expect($listing)->toMatchArray([
+            'id' => 'occurrence-1',
+            'content_id' => 'gracenote:EP012345670089',
+            'series_id' => 'gracenote:SH012345670000',
+        ]);
+    }
 });

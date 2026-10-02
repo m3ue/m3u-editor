@@ -4,10 +4,15 @@ use App\Models\Epg;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Event::fake();
+});
 
 it('fetches station artwork and includes in XMLTV', function () {
     $user = User::factory()->create();
@@ -251,4 +256,80 @@ it('adds no extra image when a 16:9 one is already among the picks', function ()
 
     expect(collect($artwork['SH012345670000'])->map(fn (array $image) => basename($image['url']))->all())
         ->toBe(['wide.jpg', 'square.jpg']);
+});
+
+it('serializes schedules direct artwork in xmltv dtd order with dimensioned legacy icons', function () {
+    $service = new SchedulesDirectService;
+    $method = new ReflectionMethod($service, 'writeProgramToXMLTV');
+    $file = fopen('php://memory', 'w+');
+    $programData = json_decode(json_encode([
+        'programID' => 'EP012345670089',
+        'entityType' => 'Episode',
+        'titles' => [['title120' => 'Programme Art']],
+        'descriptions' => ['description1000' => [['description' => 'Description']]],
+        'genres' => ['Drama'],
+        'metadata' => [['Gracenote' => ['season' => 1, 'episode' => 2]]],
+        'contentRating' => [['country' => 'USA', 'body' => 'TVPG', 'code' => 'TV-14']],
+    ], JSON_THROW_ON_ERROR), false, 512, JSON_THROW_ON_ERROR);
+
+    $method->invoke(
+        $service,
+        $file,
+        'station-1',
+        [
+            'airDateTime' => '2026-09-30T10:00:00Z',
+            'duration' => 3600,
+            'new' => true,
+        ],
+        $programData,
+        ['programs' => ['EP012345670089' => [
+            ['url' => 'https://example.com/poster.jpg', 'type' => 'poster', 'width' => 500, 'height' => 750],
+            ['url' => 'https://example.com/backdrop.jpg', 'type' => 'backdrop', 'width' => 1280, 'height' => 720],
+            ['url' => 'https://example.com/banner.jpg', 'type' => 'banner', 'width' => 1280, 'height' => 300],
+        ]]],
+    );
+
+    rewind($file);
+    $programmeXml = stream_get_contents($file);
+    fclose($file);
+    $dtd = realpath(base_path('tests/Fixtures/xmltv/xmltv.dtd'));
+    $xml = '<?xml version="1.0"?><!DOCTYPE tv SYSTEM "file://'.$dtd.'"><tv>'.$programmeXml.'</tv>';
+    $document = new DOMDocument;
+    expect($document->loadXML($xml))->toBeTrue()
+        ->and($document->validate())->toBeTrue();
+
+    $xpath = new DOMXPath($document);
+    $programme = $xpath->query('//programme')->item(0);
+    $children = [];
+    foreach ($programme->childNodes as $child) {
+        if ($child instanceof DOMElement) {
+            $children[] = $child->tagName;
+        }
+    }
+
+    expect($xpath->query('//programme/icon'))->toHaveCount(3)
+        ->and($xpath->query('//programme/icon[@src="https://example.com/backdrop.jpg"][@width="1280"][@height="720"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/icon[@src="https://example.com/poster.jpg"][@width="500"][@height="750"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/icon[@src="https://example.com/banner.jpg"][@width="1280"][@height="300"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/icon[@type or @orient or @size]'))->toHaveCount(0)
+        ->and($xpath->query('//programme/episode-num[@system="m3u-editor:content-id"][text()="gracenote:EP012345670089"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/episode-num[@system="m3u-editor:series-id"][text()="gracenote:SH012345670000"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/image[@type="poster"][@orient="P"][@system="schedulesdirect"][text()="https://example.com/poster.jpg"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/image[@type="backdrop"][@orient="L"][@system="schedulesdirect"][text()="https://example.com/backdrop.jpg"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme/image[contains(text(), "banner.jpg")]'))->toHaveCount(0)
+        ->and($children)->toBe([
+            'title',
+            'desc',
+            'category',
+            'icon',
+            'icon',
+            'icon',
+            'episode-num',
+            'episode-num',
+            'episode-num',
+            'new',
+            'rating',
+            'image',
+            'image',
+        ]);
 });
