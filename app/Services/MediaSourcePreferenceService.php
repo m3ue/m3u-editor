@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
  *
  * This is the playback hot path: with prefer_media_server_sources off there
  * are zero extra queries (the toggle check reads the already-loaded
- * playlist). No knowledge of PlaylistAlias/PlaylistProfile lives here —
+ * playlist). No knowledge of PlaylistAlias/PlaylistProfile lives here;
  * callers use the media item's own playlist as context, so provider
  * alias/profile transforms never touch the media URL.
  */
@@ -92,7 +92,7 @@ class MediaSourcePreferenceService
             return null;
         }
 
-        if (! in_array($integration->type, ['emby', 'jellyfin', 'local'], true)) {
+        if (! in_array($integration->type, MediaSourceMatchService::SUPPORTED_INTEGRATION_TYPES, true)) {
             return null;
         }
 
@@ -124,7 +124,7 @@ class MediaSourcePreferenceService
 
     /**
      * Local items store base64_encode($filePath) as info['media_server_id']
-     * (see LocalMediaService) — decode and require a readable file.
+     * (see LocalMediaService); decode and require a readable file.
      */
     private function isLocalFileReadable(Channel|Episode $mediaItem): bool
     {
@@ -140,9 +140,9 @@ class MediaSourcePreferenceService
     }
 
     /**
-     * Emby/Jellyfin reachability, cached briefly so a burst of playback
+     * Emby/Jellyfin/Plex reachability, cached briefly so a burst of playback
      * start requests doesn't hammer the media server. Probed via a dedicated
-     * short-timeout, no-retry call — testConnection() can block ~90s on a
+     * short-timeout, no-retry call: testConnection() can block ~90s on a
      * dead server, which would stall stream start.
      */
     private function isMediaServerReachable(MediaServerIntegration $integration): bool
@@ -155,7 +155,7 @@ class MediaSourcePreferenceService
         }
 
         $service = MediaServerService::make($integration);
-        $reachable = $service instanceof EmbyJellyfinService
+        $reachable = $service instanceof EmbyJellyfinService || $service instanceof PlexService
             ? $service->isReachable()
             : false;
 

@@ -5,6 +5,8 @@ use App\Enums\SyncRunStatus;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MatchMediaServerSources;
 use App\Jobs\SyncMediaServer;
+use App\Jobs\SyncSeriesStrmFiles;
+use App\Jobs\SyncVodStrmFiles;
 use App\Models\Channel;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -40,7 +42,7 @@ function mediaSourcePlaylistWithVod(User $user, array $attrs = []): Playlist
 }
 
 beforeEach(function () {
-    // NOTE: no Event::fake() here — a full event fake swallows Eloquent model
+    // NOTE: no Event::fake() here: a full event fake swallows Eloquent model
     // events, and the toggle test asserts on the Playlist::updated listener.
     //
     // The array cache store matters too: MatchMediaServerSources is
@@ -113,6 +115,70 @@ it('completes the MediaSourceMatch phase even when the rebuild throws', function
     expect($run->isPhaseComplete(SyncRunPhase::MediaSourceMatch))->toBeTrue();
 });
 
+it('completes the MediaSourceMatch phase when the job fails outside handle()', function () {
+    $playlist = Playlist::factory()->for($this->user)->create(['prefer_media_server_sources' => true]);
+    $run = SyncRun::factory()->create([
+        'playlist_id' => $playlist->id,
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::MediaSourceMatch->value, SyncRunPhase::SyncCompleted->value],
+        'context' => ['playlist_id' => $playlist->id],
+    ]);
+
+    // Timeout kill or retryUntil() expiry: handle()'s finally never ran.
+    (new MatchMediaServerSources($playlist->id, $run->id, SyncRunPhase::MediaSourceMatch))
+        ->failed(new RuntimeException('timed out'));
+
+    expect($run->refresh()->isPhaseComplete(SyncRunPhase::MediaSourceMatch))->toBeTrue();
+});
+
+function mediaSourceMockRebuildResult(bool $changed): void
+{
+    $service = Mockery::mock(MediaSourceMatchService::class.'[rebuildForPlaylist]');
+    $service->shouldReceive('rebuildForPlaylist')
+        ->andReturn(['movies' => 1, 'episodes' => 1, 'changed' => $changed]);
+    app()->instance(MediaSourceMatchService::class, $service);
+}
+
+it('regenerates STRM files after an ad-hoc rebuild that changed the matches', function () {
+    mediaSourceMockRebuildResult(changed: true);
+
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'prefer_media_server_sources' => true,
+        'auto_sync_vod_stream_files' => true,
+        'auto_sync_series_stream_files' => true,
+    ]);
+
+    (new MatchMediaServerSources($playlist->id))->handle();
+
+    Bus::assertDispatched(SyncVodStrmFiles::class, fn (SyncVodStrmFiles $job) => $job->playlist?->is($playlist));
+    Bus::assertDispatched(SyncSeriesStrmFiles::class, fn (SyncSeriesStrmFiles $job) => $job->playlist_id === $playlist->id);
+});
+
+it('skips STRM regeneration when matches are unchanged, STRM sync is off, or the pipeline owns it', function () {
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'prefer_media_server_sources' => true,
+        'auto_sync_vod_stream_files' => true,
+        'auto_sync_series_stream_files' => false,
+    ]);
+
+    mediaSourceMockRebuildResult(changed: false);
+    (new MatchMediaServerSources($playlist->id))->handle();
+
+    mediaSourceMockRebuildResult(changed: true);
+    $run = SyncRun::factory()->create([
+        'playlist_id' => $playlist->id,
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::MediaSourceMatch->value, SyncRunPhase::VodStrm->value, SyncRunPhase::SyncCompleted->value],
+        'context' => ['playlist_id' => $playlist->id],
+    ]);
+    (new MatchMediaServerSources($playlist->id, $run->id, SyncRunPhase::MediaSourceMatch))->handle();
+
+    Bus::assertNotDispatched(SyncSeriesStrmFiles::class);
+    // The only VOD STRM dispatch is the pipeline's own VodStrm phase.
+    Bus::assertDispatchedTimes(SyncVodStrmFiles::class, 1);
+    Bus::assertDispatched(SyncVodStrmFiles::class, fn (SyncVodStrmFiles $job) => $job->syncRunId === $run->id);
+});
+
 it('dispatches MatchMediaServerSources when an emby sync finishes', function () {
     $integration = MediaServerIntegration::factory()->for($this->user)->create([
         'type' => 'emby',
@@ -180,7 +246,7 @@ it('chains post-completion matching jobs for the provider playlists, not the med
     ]);
     $mediaPlaylist = Playlist::factory()->for($this->user)->create([
         // The integration's own playlist can never carry the toggle (the form
-        // hides it there) — but set it anyway to prove the target selection
+        // hides it there), but set it anyway to prove the target selection
         // doesn't depend on it.
         'prefer_media_server_sources' => true,
     ]);

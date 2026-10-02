@@ -145,13 +145,26 @@ it('falls back to the series TVDB id for episode matching', function () {
         ->and(MediaSourceMatch::firstOrFail()->match_key)->toBe('series-tvdb:364642:s2:e5');
 });
 
-it('ignores Plex and WebDAV integrations', function () {
+it('matches Plex integrations', function () {
     $plexMedia = Playlist::factory()->for($this->user)->create();
-    makeMediaIntegration($this->user, 'plex', $plexMedia);
-    Channel::factory()->for($plexMedia)->for($this->user)->create([
+    $integration = makeMediaIntegration($this->user, 'plex', $plexMedia);
+    $plexChannel = Channel::factory()->for($plexMedia)->for($this->user)->create([
         'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
     ]);
 
+    Channel::factory()->for($this->provider)->for($this->user)->create([
+        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
+    ]);
+
+    $counts = $this->service->rebuildForPlaylist($this->provider);
+
+    $match = MediaSourceMatch::firstOrFail();
+    expect($counts['movies'])->toBe(1)
+        ->and($match->media_channel_id)->toBe($plexChannel->id)
+        ->and($match->media_server_integration_id)->toBe($integration->id);
+});
+
+it('ignores WebDAV integrations', function () {
     $webdavMedia = Playlist::factory()->for($this->user)->create();
     makeMediaIntegration($this->user, 'webdav', $webdavMedia);
     Channel::factory()->for($webdavMedia)->for($this->user)->create([
@@ -159,7 +172,7 @@ it('ignores Plex and WebDAV integrations', function () {
     ]);
 
     Channel::factory()->for($this->provider)->for($this->user)->create([
-        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
+        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 604,
     ]);
 
     $counts = $this->service->rebuildForPlaylist($this->provider);
@@ -242,7 +255,7 @@ it('deletes match rows when the toggle is off', function () {
 
     $counts = $this->service->rebuildForPlaylist($this->provider);
 
-    expect($counts)->toBe(['movies' => 0, 'episodes' => 0])
+    expect($counts)->toBe(['movies' => 0, 'episodes' => 0, 'changed' => true])
         ->and(MediaSourceMatch::count())->toBe(0);
 });
 
@@ -305,5 +318,24 @@ it('does not match the provider playlist against itself when it is a media-serve
 
     expect($counts['movies'])->toBe(0)
         ->and($selfIntegration->exists)->toBeTrue()
+        ->and(MediaSourceMatch::count())->toBe(0);
+});
+
+it('reports whether a rebuild changed the stored matches', function () {
+    $media = Playlist::factory()->for($this->user)->create();
+    makeMediaIntegration($this->user, 'emby', $media);
+    $mediaChannel = Channel::factory()->for($media)->for($this->user)->create([
+        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
+    ]);
+    Channel::factory()->for($this->provider)->for($this->user)->create([
+        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
+    ]);
+
+    expect($this->service->rebuildForPlaylist($this->provider)['changed'])->toBeTrue()
+        ->and($this->service->rebuildForPlaylist($this->provider)['changed'])->toBeFalse();
+
+    $mediaChannel->forceFill(['enabled' => false])->save();
+
+    expect($this->service->rebuildForPlaylist($this->provider)['changed'])->toBeTrue()
         ->and(MediaSourceMatch::count())->toBe(0);
 });

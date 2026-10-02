@@ -15,7 +15,7 @@ use Throwable;
 
 /**
  * Rebuild a playlist's media_source_matches rows (provider items keyed to
- * same-user Emby/Jellyfin/local media items by external IDs).
+ * same-user Emby/Jellyfin/Plex/local media items by external IDs).
  *
  * Runs from the sync pipeline (after TMDB IDs are populated, before STRM),
  * from a completed media-server sync, and when the playlist toggle flips.
@@ -23,7 +23,7 @@ use Throwable;
  * Deduplication is split in two because ShouldBeUnique alone can stall a
  * sync run: if an ad-hoc job (toggle flip, media sync) holds the unique lock
  * when the pipeline dispatches its phase job, Laravel silently drops the
- * pipeline job and completePhase() never runs — the SyncRun hangs at
+ * pipeline job and completePhase() never runs, so the SyncRun hangs at
  * MediaSourceMatch. So:
  *  - uniqueId() separates pipeline runs from ad-hoc dispatches, and
  *  - WithoutOverlapping serializes the actual rebuilds per playlist, with
@@ -46,7 +46,7 @@ class MatchMediaServerSources implements ShouldBeUnique, ShouldQueue
 
     /**
      * Pipeline-scheduled runs dedupe against other runs of the same sync
-     * only — never against an ad-hoc rebuild, whose lock would otherwise
+     * only, never against an ad-hoc rebuild, whose lock would otherwise
      * silently drop this job and strand the SyncRun phase.
      */
     public function uniqueId(): string
@@ -80,9 +80,9 @@ class MatchMediaServerSources implements ShouldBeUnique, ShouldQueue
     /**
      * Execute the job.
      *
-     * Always completes the pipeline phase (when scheduled via the pipeline)
-     * — even on early returns (playlist gone, toggle off) and on exceptions
-     * — so the SyncRun timeline can advance past MediaSourceMatch.
+     * Always completes the pipeline phase (when scheduled via the pipeline),
+     * even on early returns (playlist gone, toggle off) and on exceptions,
+     * so the SyncRun timeline can advance past MediaSourceMatch.
      */
     public function handle(): void
     {
@@ -94,13 +94,23 @@ class MatchMediaServerSources implements ShouldBeUnique, ShouldQueue
                 'error' => $e->getMessage(),
             ]);
         } finally {
-            if ($this->syncRunId !== null && $this->completionPhase !== null) {
-                app(SyncPipelineService::class)->completePhase(
-                    $this->syncRunId,
-                    $this->completionPhase,
-                );
-            }
+            $this->completePipelinePhase();
         }
+    }
+
+    /**
+     * Covers the paths where handle()'s finally block never runs: the worker
+     * is killed at $timeout, or retryUntil() expires while the job is still
+     * being released by WithoutOverlapping. completePhase() is idempotent.
+     */
+    public function failed(Throwable $exception): void
+    {
+        Log::error('MatchMediaServerSources: job failed', [
+            'playlist_id' => $this->playlistId,
+            'error' => $exception->getMessage(),
+        ]);
+
+        $this->completePipelinePhase();
     }
 
     /**
@@ -116,6 +126,39 @@ class MatchMediaServerSources implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        app(MediaSourceMatchService::class)->rebuildForPlaylist($playlist);
+        $result = app(MediaSourceMatchService::class)->rebuildForPlaylist($playlist);
+
+        // Pipeline runs regenerate STRM files in their own later phase. Ad-hoc
+        // rebuilds (toggle flip, media-server sync) would otherwise leave
+        // "original"-url STRM files pointing at the old source until the
+        // playlist's next sync.
+        if ($this->syncRunId === null && $result['changed']) {
+            $this->refreshStrmFiles($playlist);
+        }
+    }
+
+    private function refreshStrmFiles(Playlist $playlist): void
+    {
+        if ($playlist->auto_sync_vod_stream_files) {
+            dispatch(new SyncVodStrmFiles(notify: false, playlist: $playlist));
+        }
+
+        if ($playlist->auto_sync_series_stream_files) {
+            dispatch(new SyncSeriesStrmFiles(
+                notify: false,
+                playlist_id: $playlist->id,
+                user_id: $playlist->user_id,
+            ));
+        }
+    }
+
+    private function completePipelinePhase(): void
+    {
+        if ($this->syncRunId !== null && $this->completionPhase !== null) {
+            app(SyncPipelineService::class)->completePhase(
+                $this->syncRunId,
+                $this->completionPhase,
+            );
+        }
     }
 }

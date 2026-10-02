@@ -16,11 +16,11 @@ use Illuminate\Support\Facades\DB;
 uses(RefreshDatabase::class);
 
 /**
- * Shared fixture: a provider playlist with the toggle on, an eligible emby
- * integration with a media playlist, a matched provider movie + enabled
+ * Shared fixture: a provider playlist with the toggle on, an eligible
+ * integration (emby by default) with a media playlist, a matched provider movie + enabled
  * media movie.
  */
-function makeMatchedMovieFixture(bool $providerToggle = true): array
+function makeMatchedMovieFixture(bool $providerToggle = true, string $integrationType = 'emby'): array
 {
     $user = User::factory()->create();
     $provider = Playlist::factory()->for($user)->create([
@@ -28,7 +28,7 @@ function makeMatchedMovieFixture(bool $providerToggle = true): array
     ]);
     $media = Playlist::factory()->for($user)->create();
     $integration = MediaServerIntegration::factory()->for($user)->create([
-        'type' => 'emby',
+        'type' => $integrationType,
         'enabled' => true,
         'playlist_id' => $media->id,
     ]);
@@ -59,7 +59,7 @@ function mockGeneralSettings(): void
 it('returns null with zero queries when the toggle is off', function () {
     $f = makeMatchedMovieFixture(providerToggle: false);
 
-    // Matches exist in the table but the toggle is off — the resolver must
+    // Matches exist in the table but the toggle is off, so the resolver must
     // short-circuit before touching media_source_matches.
     DB::enableQueryLog();
     $resolved = app(MediaSourcePreferenceService::class)->resolveChannel($f['providerMovie']);
@@ -160,6 +160,32 @@ it('keeps the provider stream when the emby probe connection fails', function ()
 
     Http::fake([
         '*.*/System/Info/Public' => fn () => throw new ConnectionException('dead'),
+    ]);
+
+    $resolved = app(MediaSourcePreferenceService::class)->resolveChannel($f['providerMovie']);
+
+    expect($resolved)->toBeNull();
+});
+
+it('swaps to a Plex item when the Plex server is reachable', function () {
+    $f = makeMatchedMovieFixture(integrationType: 'plex');
+
+    Http::fake([
+        '*/identity' => Http::response(['MediaContainer' => ['machineIdentifier' => 'abc']]),
+    ]);
+
+    $resolved = app(MediaSourcePreferenceService::class)->resolveChannel($f['providerMovie']);
+
+    expect($resolved?->id)->toBe($f['mediaMovie']->id);
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/identity')
+        && $request->hasHeader('X-Plex-Token'));
+});
+
+it('keeps the provider stream when the Plex probe fails', function () {
+    $f = makeMatchedMovieFixture(integrationType: 'plex');
+
+    Http::fake([
+        '*/identity' => fn () => throw new ConnectionException('dead'),
     ]);
 
     $resolved = app(MediaSourcePreferenceService::class)->resolveChannel($f['providerMovie']);

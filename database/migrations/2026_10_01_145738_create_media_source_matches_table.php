@@ -15,7 +15,7 @@ return new class extends Migration
      * FK cascades cheap when SyncMediaServer::cleanupStaleRecords bulk-deletes
      * stale media rows.
      *
-     * Index/uniqueness are declared as separate statements — chained onto
+     * Index/uniqueness are declared as separate statements: chained onto
      * ->constrained() they land on the ForeignKeyDefinition and are silently
      * ignored.
      */

@@ -226,7 +226,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             ]);
 
             // Re-match provider playlists that prefer media server sources
-            // (Emby/Jellyfin only — local ids arrive later via FetchTmdbIds,
+            // (Emby/Jellyfin/Plex only; local ids arrive later via FetchTmdbIds,
             // which carries the matching job as postCompletionJobs).
             if (! $integration->usesLocalPathConfig()) {
                 $this->dispatchSourceMatching($integration);
@@ -1120,7 +1120,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'integration_id' => $integration->id,
             ]);
 
-            // Items may already have ids from a previous sync — match anyway.
+            // Items may already have ids from a previous sync, so match anyway.
             $this->dispatchSourceMatching($integration);
 
             return;
@@ -1139,7 +1139,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 ->broadcast($integration->user)
                 ->sendToDatabase($integration->user);
 
-            // Items may already have ids from a previous sync — match anyway.
+            // Items may already have ids from a previous sync, so match anyway.
             $this->dispatchSourceMatching($integration);
 
             return;
@@ -1151,7 +1151,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
                 'integration_id' => $integration->id,
             ]);
 
-            // Items may already have ids from a previous sync — match anyway.
+            // Items may already have ids from a previous sync, so match anyway.
             $this->dispatchSourceMatching($integration);
 
             return;
@@ -1173,7 +1173,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             allSeriesPlaylists: false,
             overwriteExisting: false,
             user: $integration->user,
-            // Ids only exist after the lookup completes — chain one rebuild per
+            // Ids only exist after the lookup completes, so chain one rebuild per
             // toggled-on provider playlist (the integration's own playlist is
             // never the target; it just fills the index).
             postCompletionJobs: $this->sourceMatchingPlaylistIds($integration)
@@ -1187,7 +1187,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
      * owner that prefers media server sources. Used when a sync just changed
      * the media-server side of the index (ids written directly, or ids that
      * already exist because a previous lookup filled them). The integration's
-     * own media playlist is excluded — it is a match target, not a provider.
+     * own media playlist is excluded: it is a match target, not a provider.
      */
     protected function dispatchSourceMatching(MediaServerIntegration $integration): void
     {
@@ -1197,7 +1197,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
 
     /**
      * Ids of the integration owner's playlists that prefer media server
-     * sources — the provider playlists that consume this integration's
+     * sources, i.e. the provider playlists that consume this integration's
      * content. The integration's own media playlist is never included: it is
      * a match target, not a provider.
      *

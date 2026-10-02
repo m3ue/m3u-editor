@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class PlexService implements MediaServer
 {
@@ -44,6 +45,28 @@ class PlexService implements MediaServer
                 'X-Plex-Token' => $this->apiKey,
                 'Accept' => 'application/json',
             ]);
+    }
+
+    /**
+     * Cheap reachability probe for stream-start gating. Unlike
+     * testConnection() this uses short timeouts and no retries: a dead
+     * media server must never stall playback start.
+     */
+    public function isReachable(): bool
+    {
+        try {
+            return Http::baseUrl($this->baseUrl)
+                ->connectTimeout(2)
+                ->timeout(3)
+                ->withHeaders([
+                    'X-Plex-Token' => $this->apiKey,
+                    'Accept' => 'application/json',
+                ])
+                ->get('/identity')
+                ->successful();
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     public function testConnection(): array
@@ -143,7 +166,11 @@ class PlexService implements MediaServer
 
         foreach ($libraries as $library) {
             try {
-                $response = $this->client()->get("/library/sections/{$library['key']}/all");
+                // includeGuids exposes the tmdb/tvdb/imdb ids (ProviderIds)
+                // that media-source matching keys on.
+                $response = $this->client()->get("/library/sections/{$library['key']}/all", [
+                    'includeGuids' => 1,
+                ]);
 
                 if ($response->successful()) {
                     $data = $response->json();

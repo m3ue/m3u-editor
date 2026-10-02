@@ -41,17 +41,7 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        // Media-server source preference: stream the matched media item with
-        // its own playlist context instead of the provider's. The swap must
-        // happen before anything reaches M3uProxyService so no provider
-        // connection slot is consumed; the request uuid is ignored because
-        // alias/merged-playlist transforms don't apply to the media item.
-        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($channel);
-        if ($media !== $channel) {
-            $channel = $media;
-            $channel->loadMissing(['customPlaylist', 'streamProfile']);
-            $uuid = null;
-        }
+        [$channel, $uuid] = $this->preferMediaServerSource($channel, $uuid);
 
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
@@ -121,13 +111,7 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        // Media-server source preference (see channel()): swap the model and
-        // playlist context before anything reaches M3uProxyService.
-        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($episode);
-        if ($media !== $episode) {
-            $episode = $media;
-            $uuid = null;
-        }
+        [$episode, $uuid] = $this->preferMediaServerSource($episode, $uuid);
 
         $username = $request->input('username', $request->header('X-Username'));
         $playlistAuthId = $request->input('playlist_auth_id') ? (int) $request->input('playlist_auth_id') : null;
@@ -191,14 +175,7 @@ class M3uProxyApiController extends Controller
             'streamProfile',
         ])->findOrFail($id);
 
-        // Media-server source preference (see channel()): swap the model and
-        // playlist context before anything reaches M3uProxyService.
-        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($channel);
-        if ($media !== $channel) {
-            $channel = $media;
-            $channel->loadMissing(['customPlaylist', 'streamProfile']);
-            $uuid = null;
-        }
+        [$channel, $uuid] = $this->preferMediaServerSource($channel, $uuid);
 
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
@@ -247,13 +224,7 @@ class M3uProxyApiController extends Controller
             'playlist',
         ])->findOrFail($id);
 
-        // Media-server source preference (see channel()): swap the model and
-        // playlist context before anything reaches M3uProxyService.
-        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($episode);
-        if ($media !== $episode) {
-            $episode = $media;
-            $uuid = null;
-        }
+        [$episode, $uuid] = $this->preferMediaServerSource($episode, $uuid);
 
         if ($uuid) {
             $playlist = PlaylistFacade::resolvePlaylistByUuid($uuid);
@@ -918,5 +889,29 @@ class M3uProxyApiController extends Controller
         }
 
         return response()->noContent();
+    }
+
+    /**
+     * Media-server source preference: swap a provider VOD movie / episode for
+     * its matched media-server item, streamed with its own playlist context.
+     * The swap must happen before anything reaches M3uProxyService so no
+     * provider connection slot is consumed; the request uuid is dropped
+     * because alias/merged-playlist transforms don't apply to the media item.
+     *
+     * @return array{0: Channel|Episode, 1: string|null}
+     */
+    private function preferMediaServerSource(Channel|Episode $item, ?string $uuid): array
+    {
+        $media = app(MediaSourcePreferenceService::class)->resolveForStreaming($item);
+
+        if ($media === $item) {
+            return [$item, $uuid];
+        }
+
+        if ($media instanceof Channel) {
+            $media->loadMissing(['customPlaylist', 'streamProfile']);
+        }
+
+        return [$media, null];
     }
 }

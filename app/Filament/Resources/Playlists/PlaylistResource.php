@@ -2335,10 +2335,10 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->inline(false)
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
-                            tooltip: __('When a VOD movie or series episode matches an item in your Emby, Jellyfin, or local media integrations (by TMDB/TVDB/IMDB ID), stream the integration\'s file instead of the provider\'s. Falls back to the provider if the media source is unavailable.')
+                            tooltip: __('When a VOD movie or series episode matches an item in your Emby, Jellyfin, Plex, or local media integrations (by TMDB/TVDB/IMDB ID), stream the integration\'s file instead of the provider\'s. Falls back to the provider if the media source is unavailable.')
                         )
                         ->default(false)
-                        ->helperText(__('Requires TMDB IDs on this playlist (enable TMDB lookup or metadata fetch). Plex is not supported.')),
+                        ->helperText(__('Requires TMDB IDs on this playlist (enable TMDB lookup or metadata fetch).')),
                 ])->hidden(fn (?Playlist $record): bool => $record !== null && $record->isMediaServerPlaylist()),
 
             Section::make(__('Auto-Merge Processing'))

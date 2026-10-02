@@ -760,7 +760,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
 
                     // Prefer media-server sources: when matched, write the
                     // media item's signed URL instead. No availability check
-                    // here — the file is static and stream-start applies its
+                    // here: the file is static and stream-start applies its
                     // own fallback.
                     if ($series->playlist?->prefer_media_server_sources) {
                         $mediaEpisode = $ep->mediaSourceMatch?->mediaEpisode;

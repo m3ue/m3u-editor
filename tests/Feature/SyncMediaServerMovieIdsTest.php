@@ -135,3 +135,27 @@ it('requests ProviderIds in the movie list Fields', function () {
             && str_contains($request['Fields'] ?? '', 'ProviderIds');
     });
 });
+
+it('requests Plex movie GUIDs so ProviderIds carry tmdb/tvdb/imdb ids', function () {
+    $this->integration->update(['type' => 'plex', 'port' => 32400]);
+
+    Http::preventStrayRequests();
+    Http::fake([
+        'http://10.0.0.2:32400/library/sections' => Http::response(['MediaContainer' => ['Directory' => [
+            ['key' => '1', 'type' => 'movie', 'title' => 'Movies'],
+        ]]]),
+        'http://10.0.0.2:32400/library/sections/1/all*' => Http::response(['MediaContainer' => ['Metadata' => [[
+            'ratingKey' => '42',
+            'title' => 'The Matrix',
+            'type' => 'movie',
+            'Guid' => [['id' => 'tmdb://603'], ['id' => 'imdb://tt0133093']],
+        ]]]]),
+    ]);
+
+    $movies = MediaServerService::make($this->integration->refresh())->fetchMovies();
+
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/library/sections/1/all')
+        && ($request['includeGuids'] ?? null) == 1);
+
+    expect($movies->first()['ProviderIds'])->toMatchArray(['Tmdb' => '603', 'Imdb' => 'tt0133093']);
+});

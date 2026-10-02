@@ -193,7 +193,7 @@ test('an alias uuid request still swaps to the media playlist and media channel'
     app()->instance(M3uProxyService::class, $mock);
 
     // Requesting through the alias wrapper must not leak the alias context
-    // into the media URL — the swap replaces the playlist context entirely.
+    // into the media URL: the swap replaces the playlist context entirely.
     $this->get("/movie/{$this->user->name}/{$alias->uuid}/{$providerMovie->id}.mkv?proxy=true")
         ->assertRedirect();
 

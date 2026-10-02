@@ -75,19 +75,16 @@ class EmbyJellyfinService implements MediaServer
 
     /**
      * Cheap reachability probe for stream-start gating. Unlike
-     * testConnection() this uses short timeouts and no retries — a dead
-     * media server must never stall playback start for ~90s.
+     * testConnection() this uses short timeouts and no retries (the
+     * non-redirecting client skips them): a dead media server must never
+     * stall playback start for ~90s.
      */
     public function isReachable(): bool
     {
         try {
-            return Http::baseUrl($this->baseUrl)
+            return $this->client(withoutRedirecting: true)
                 ->connectTimeout(2)
                 ->timeout(3)
-                ->withHeaders([
-                    'X-Emby-Token' => $this->apiKey,
-                    'Accept' => 'application/json',
-                ])
                 ->get('/System/Info/Public')
                 ->successful();
         } catch (Throwable $e) {
