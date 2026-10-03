@@ -3,16 +3,19 @@
 namespace App\Services;
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use App\Enums\CacheDispatchResult;
 use App\Jobs\DownloadCachedContentFile;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
+use App\Models\DynamicGroup;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Settings\GeneralSettings;
 use Filament\Notifications\Notification;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Queues cache downloads for VOD channels and series episodes.
@@ -28,9 +31,28 @@ use Illuminate\Database\UniqueConstraintViolationException;
  *    re-queued rather than reported as done.
  *  - A playable copy shared by another of the same user's playlists
  *    (`share_cache_across_playlists`) counts as already cached.
+ *
+ * Dynamic-group auto-caching enters through `dispatchForDynamicGroup()`,
+ * which calls `dispatch(automatic: true)` per member: rows it creates are
+ * stamped `managed_by = CachedContentManagedBy::DynamicGroup` so group
+ * retention may release them later, members with an eligible media-server
+ * match are skipped (local media always wins), and recently failed rows
+ * are not re-queued (cooldown below).
  */
 class CachedContentDispatchService
 {
+    /**
+     * Hours after a failure before the automatic (dynamic-group) path may
+     * re-queue an item. Manual Cache Now / Retry re-queue immediately.
+     */
+    public const AUTO_RETRY_COOLDOWN_HOURS = 24;
+
+    /**
+     * How often dispatchForDynamicGroup() re-queries the group's tracked
+     * bytes while enforcing the rule's max-GB budget.
+     */
+    private const BUDGET_RECHECK_EVERY = 25;
+
     /**
      * Whether the global `enable_cache` toggle is on.
      */
@@ -65,8 +87,15 @@ class CachedContentDispatchService
 
     /**
      * Queue a download for one channel or episode.
+     *
+     * `$automatic` marks the dynamic-group path: rows it creates are
+     * `managed_by = CachedContentManagedBy::DynamicGroup`, and a Failed row
+     * inside the auto-retry cooldown returns CoolingDown instead of
+     * re-queueing. Manual callers (the default) adopt an existing
+     * group-managed row, turning it manual so group retention never
+     * deletes it afterwards.
      */
-    public function dispatch(Channel|Episode $item): CacheDispatchResult
+    public function dispatch(Channel|Episode $item, bool $automatic = false): CacheDispatchResult
     {
         if (! $this->isEnabled()) {
             return CacheDispatchResult::Disabled;
@@ -79,12 +108,26 @@ class CachedContentDispatchService
         $existing = $item->cachedContentFile()->first();
 
         if ($existing) {
+            if (! $automatic && $existing->managed_by === CachedContentManagedBy::DynamicGroup) {
+                // Manual Cache Now on a group-created file adopts it.
+                $existing->forceFill(['managed_by' => null])->save();
+            }
+
             if (in_array($existing->status, [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading], true)) {
                 return CacheDispatchResult::AlreadyQueued;
             }
 
             if ($existing->isPlayable()) {
                 return CacheDispatchResult::AlreadyCached;
+            }
+
+            if (
+                $automatic
+                && $existing->status === CachedContentFileStatus::Failed
+                && $existing->last_failed_at !== null
+                && $existing->last_failed_at->isAfter(now()->subHours(self::AUTO_RETRY_COOLDOWN_HOURS))
+            ) {
+                return CacheDispatchResult::CoolingDown;
             }
 
             // Failed, or Completed with the file missing on disk.
@@ -113,6 +156,7 @@ class CachedContentDispatchService
                 'content_fingerprint' => $item->cacheFingerprint(),
                 'title' => $this->resolveTitle($item),
                 'status' => CachedContentFileStatus::Pending,
+                'managed_by' => $automatic ? CachedContentManagedBy::DynamicGroup : null,
             ]);
         } catch (UniqueConstraintViolationException) {
             // A concurrent dispatch created the row first.
@@ -203,6 +247,168 @@ class CachedContentDispatchService
     }
 
     /**
+     * Queue cache downloads for every member of a dynamic group whose rule
+     * has caching enabled. VOD rules cache each member channel; series
+     * rules cache only the latest season (highest episodes.season) of each
+     * member series. Members are processed in dynamic_group_items.position
+     * (TMDB rank) order so the caps keep the top-ranked items.
+     *
+     * @return array<string, int> keyed by CacheDispatchResult value
+     */
+    public function dispatchForDynamicGroup(DynamicGroup $group): array
+    {
+        $counts = $this->emptyCounts();
+
+        if (! $this->isEnabled()) {
+            $counts[CacheDispatchResult::Disabled->value] = 1;
+
+            return $counts;
+        }
+
+        $settings = DynamicGroup::cacheSettings($group->ruleFromConfig());
+        if ($settings === null) {
+            return $counts;
+        }
+
+        $playlist = $group->playlist;
+        $isSeries = $group->type === 'series';
+
+        $members = $isSeries ? $group->series() : $group->channels();
+        $members->orderByPivot('position');
+        if ($settings['max_items'] !== null) {
+            $members->limit((int) $settings['max_items']);
+        }
+
+        // Soft max-GB budget: stop queueing new items once this group's
+        // tracked bytes (Completed file_size_bytes + in-flight
+        // bytes_expected, 0 when unknown) reach the limit. Freshly queued
+        // rows have no bytes_expected yet, so the cap is enforced across
+        // runs, not within the first one — max_items is the hard limit.
+        // Re-checked every BUDGET_RECHECK_EVERY items, not once per item.
+        $trackedBytes = $settings['max_bytes'] === null ? 0 : null;
+        $itemsSinceCheck = 0;
+
+        $budgetReached = function () use ($group, $settings, &$trackedBytes, &$itemsSinceCheck): bool {
+            if ($settings['max_bytes'] === null) {
+                return false;
+            }
+
+            if ($trackedBytes === null || $itemsSinceCheck >= self::BUDGET_RECHECK_EVERY) {
+                $trackedBytes = (int) $group->cachedContentFiles()
+                    ->sum(DB::raw('COALESCE(cached_content_files.file_size_bytes, cached_content_files.bytes_expected, 0)'));
+                $itemsSinceCheck = 0;
+            }
+
+            return $trackedBytes >= $settings['max_bytes'];
+        };
+
+        foreach ($members->cursor() as $member) {
+            // cursor() can't eager load; every member shares the group's
+            // playlist, so hand it over directly.
+            $member->setRelation('playlist', $playlist);
+
+            if (! $isSeries) {
+                if ($budgetReached()) {
+                    return $this->finishGroupDispatch($group, $counts);
+                }
+
+                $this->dispatchGroupItem($member, $group, $settings, $counts);
+                $itemsSinceCheck++;
+
+                continue;
+            }
+
+            // Series rules cache only the latest season of each series.
+            $latestSeason = (int) $member->episodes()->max('season');
+
+            foreach ($member->episodes()->where('season', $latestSeason)->orderBy('episode_num')->cursor() as $episode) {
+                if ($budgetReached()) {
+                    return $this->finishGroupDispatch($group, $counts);
+                }
+
+                $episode->setRelation('series', $member);
+                $episode->setRelation('playlist', $playlist);
+
+                $this->dispatchGroupItem($episode, $group, $settings, $counts);
+                $itemsSinceCheck++;
+            }
+        }
+
+        return $this->finishGroupDispatch($group, $counts);
+    }
+
+    /**
+     * Dispatch one in-scope group member and attach (or refresh) its
+     * provenance row carrying the rule's retention snapshot.
+     *
+     * Local media always wins: a member with an eligible media-server
+     * match is skipped entirely — no download, no provenance row — and
+     * keeps playing from the media server. The skipped member counts
+     * toward neither the budget nor new downloads (top N is applied to
+     * the member list before this).
+     *
+     * @param  array{retention: string, retention_days: int, max_items: int|null, max_bytes: int|null}  $settings
+     * @param  array<string, int>  $counts
+     */
+    private function dispatchGroupItem(Channel|Episode $item, DynamicGroup $group, array $settings, array &$counts): void
+    {
+        if (app(MediaSourcePreferenceService::class)->hasEligibleMatch($item)) {
+            $counts[CacheDispatchResult::MediaServerAvailable->value]++;
+
+            return;
+        }
+
+        $counts[$this->dispatch($item, automatic: true)->value]++;
+
+        $file = $item->cachedContentFile()->first();
+        if (($file?->managed_by ?? null) !== CachedContentManagedBy::DynamicGroup) {
+            // Manual files and shared sibling-playlist copies (no row on
+            // this item) are not group-managed; never attach to them.
+            return;
+        }
+
+        // syncWithoutDetaching refreshes the snapshot and clears dropped_at
+        // when an item re-enters scope, and is how a renamed rule's new
+        // group adopts the old group's files (their NULL-group pivot rows
+        // are then released under their own snapshots). Adoption timing:
+        // SyncDynamicGroups::runSync() materializes the renamed rule's new
+        // group (queueing this fan-out job) and deletes the old group in
+        // the same run, so adoption is queued at the moment the old rows
+        // go NULL. It does NOT rely on cron ordering — the daily refresh
+        // runs at 04:15, after the 03:00 retention sweep; NULL-group rows
+        // carry a 24h floor grace (see
+        // CachedContentRetentionService::deleteReleasedPivotRows) so a
+        // same-day sweep can't race the queue.
+        $file->dynamicGroups()->syncWithoutDetaching([
+            $group->id => [
+                'retention' => $settings['retention'],
+                'retention_days' => $settings['retention_days'],
+                'dropped_at' => null,
+            ],
+        ]);
+
+        if ($settings['retention'] === 'never_expire') {
+            // Pin the file: retention never deletes it. The pivot row stays
+            // so the group budget still counts it.
+            $file->forceFill(['managed_by' => null])->save();
+        }
+    }
+
+    /**
+     * Stamp dropped_at for files that just left the group's scope, then
+     * hand the counts back.
+     *
+     * @param  array<string, int>  $counts
+     * @return array<string, int>
+     */
+    private function finishGroupDispatch(DynamicGroup $group, array $counts): array
+    {
+        app(CachedContentRetentionService::class)->markDroppedForGroup($group);
+
+        return $counts;
+    }
+
+    /**
      * Reset a Failed (or missing-file Completed) row to Pending and queue it
      * again. Returns false when the row's source item no longer exists or
      * can't be cached.
@@ -276,6 +482,14 @@ class CachedContentDispatchService
                 ->body($isEpisode
                     ? __('This episode has no cacheable source URL.')
                     : __('This VOD has no cacheable source URL.')),
+            CacheDispatchResult::CoolingDown => Notification::make()
+                ->info()
+                ->title(__('Recently failed'))
+                ->body(__('This item failed recently; automatic caching will retry it later.')),
+            CacheDispatchResult::MediaServerAvailable => Notification::make()
+                ->info()
+                ->title(__('Available on your media server'))
+                ->body(__('This item already exists on your media server, so it was not cached.')),
         };
     }
 
@@ -296,7 +510,9 @@ class CachedContentDispatchService
 
         $queued = $counts[CacheDispatchResult::Queued->value] ?? 0;
         $skipped = ($counts[CacheDispatchResult::AlreadyCached->value] ?? 0)
-            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0);
+            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0)
+            + ($counts[CacheDispatchResult::CoolingDown->value] ?? 0)
+            + ($counts[CacheDispatchResult::MediaServerAvailable->value] ?? 0);
         $unavailable = $counts[CacheDispatchResult::Unavailable->value] ?? 0;
 
         $notification = Notification::make();

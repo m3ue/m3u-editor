@@ -3,6 +3,7 @@
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Enums\SyncRunStatus;
+use App\Jobs\QueueDynamicGroupCacheDownloads;
 use App\Jobs\SyncDynamicGroups;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
@@ -414,4 +415,83 @@ it('keeps the existing DynamicGroup and membership when TMDB transiently returns
         ->and($group->channels()->count())->toBe(1)
         ->and($group->channels()->first()->id)->toBe($chan->id)
         ->and($group->last_synced_at->eq($firstSyncAt))->toBeTrue();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Job: auto-cache hook (QueueDynamicGroupCacheDownloads)
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('dispatches QueueDynamicGroupCacheDownloads when the rule has caching enabled', function () {
+    // The hook checks CachedContentDispatchService::isEnabled() before
+    // dispatching, so the global toggle must be on.
+    app(GeneralSettings::class)->enable_cache = true;
+
+    Http::fake([
+        'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([
+            'results' => [
+                ['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie', 'release_date' => '2024-01-01'],
+            ],
+        ], 200),
+    ]);
+
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'tmdb_id' => '100',
+    ]);
+
+    $this->playlist->update([
+        'dynamic_groups_config' => [[
+            'enabled' => true,
+            'type' => 'vod',
+            'source' => 'trending',
+            'name' => 'Trending Now',
+            'tmdb_params' => ['time_window' => 'week'],
+            'cache_enabled' => true,
+        ]],
+    ]);
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    $group = DynamicGroup::where('playlist_id', $this->playlist->id)->first();
+    expect($group)->not->toBeNull();
+
+    Bus::assertDispatched(QueueDynamicGroupCacheDownloads::class, fn (QueueDynamicGroupCacheDownloads $job) => $job->dynamicGroupId === $group->id);
+});
+
+it('does not dispatch QueueDynamicGroupCacheDownloads when the rule has caching off', function () {
+    app(GeneralSettings::class)->enable_cache = true;
+
+    Http::fake([
+        'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([
+            'results' => [
+                ['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie', 'release_date' => '2024-01-01'],
+            ],
+        ], 200),
+    ]);
+
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'tmdb_id' => '100',
+    ]);
+
+    $this->playlist->update([
+        'dynamic_groups_config' => [[
+            'enabled' => true,
+            'type' => 'vod',
+            'source' => 'trending',
+            'name' => 'Trending Now',
+            'tmdb_params' => ['time_window' => 'week'],
+        ]],
+    ]);
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    expect(DynamicGroup::where('playlist_id', $this->playlist->id)->count())->toBe(1);
+    Bus::assertNotDispatched(QueueDynamicGroupCacheDownloads::class);
 });

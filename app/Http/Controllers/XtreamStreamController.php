@@ -592,6 +592,21 @@ class XtreamStreamController extends Controller
             return null;
         }
 
+        // Local media always wins over a cached copy: when the playlist
+        // prefers media-server sources and the matched media item wins
+        // (eligible AND reachable), skip the cache so the normal path below
+        // performs the swap. An unreachable media server resolves back to
+        // the provider item here, so playback order stays
+        // local -> cached -> provider. The match is resolved a second time
+        // on the swap path when media wins; the reachability result is
+        // cached for 60s, so the duplicate probe is acceptable. Toggle off
+        // = zero extra queries (reads the already-loaded relation).
+        if ($item->playlist?->prefer_media_server_sources
+            && app(MediaSourcePreferenceService::class)->resolveForStreaming($item) !== $item
+        ) {
+            return null;
+        }
+
         $cached = CachedContentFile::findServableFor($item);
 
         if ($cached === null || ! $cached->isPlayable()) {

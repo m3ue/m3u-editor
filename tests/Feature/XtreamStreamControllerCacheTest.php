@@ -4,13 +4,16 @@ use App\Jobs\DownloadCachedContentFile;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\Episode;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\MediaSourceMatchService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -333,4 +336,81 @@ it('does not serve a same-TMDB release cached for a different channel in the sam
 
     $response->assertRedirect();
     expect($response->headers->get('Location') ?? '')->not->toContain('/cached-content/');
+});
+
+// ── Local media always wins over a cached copy ──────────────────────────────
+
+/**
+ * A provider VOD channel with a playable cached file AND an eligible
+ * emby media match. Returns [$playlist, $channel, $cached, $integration].
+ */
+function xscMediaMatchedWithCache(bool $preferMedia): array
+{
+    $user = User::factory()->create(['name' => 'testuser'.uniqid()]);
+    $playlist = Playlist::factory()->for($user)->create([
+        'prefer_media_server_sources' => $preferMedia,
+    ]);
+    $channel = Channel::factory()->for($playlist)->create([
+        'tmdb_id' => '550',
+        'enabled' => true,
+        'is_vod' => true,
+        'url' => 'https://provider.example.com/movie/550.mkv',
+    ]);
+
+    $cached = CachedContentFile::factory()->completed()->forItem($channel)->create();
+    Storage::disk(CachedContentFile::DISK)->put($cached->file_path, 'bytes');
+
+    $media = Playlist::factory()->for($user)->create();
+    $mediaChannel = Channel::factory()->for($media)->create([
+        'tmdb_id' => '550',
+        'enabled' => true,
+        'is_vod' => true,
+        'url' => 'https://media.example.com/library/550.mkv',
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->create([
+        'type' => 'emby',
+        'enabled' => true,
+        'playlist_id' => $media->id,
+    ]);
+
+    app(MediaSourceMatchService::class)->rebuildForPlaylist($playlist->refresh());
+
+    return [$playlist, $channel, $cached, $integration, $mediaChannel, $user];
+}
+
+it('serves the media item, not the cached file, when an eligible match is reachable', function () {
+    setEnableCache(true);
+
+    [$playlist, $channel, $cached, $integration, $mediaChannel, $user] = xscMediaMatchedWithCache(preferMedia: true);
+    Cache::put("media-server-reachable:{$integration->id}", true, 60);
+
+    $response = $this->get("/movie/{$user->name}/{$playlist->uuid}/{$channel->id}.mp4");
+
+    // The swap path redirects to the media item's URL, never the cache route.
+    $response->assertRedirect();
+    $location = $response->headers->get('Location') ?? '';
+    expect($location)->toContain('media.example.com')
+        ->and($location)->not->toContain('/cached-content/');
+});
+
+it('serves the cached file when the eligible media match is unreachable', function () {
+    setEnableCache(true);
+
+    [$playlist, $channel, $cached, $integration, , $user] = xscMediaMatchedWithCache(preferMedia: true);
+    // A recently failed reachability probe: local -> cached -> provider.
+    Cache::put("media-server-reachable:{$integration->id}", false, 60);
+
+    $response = $this->get("/movie/{$user->name}/{$playlist->uuid}/{$channel->id}.mp4");
+
+    $response->assertRedirectContains("/cached-content/{$user->name}/{$playlist->uuid}/{$cached->uuid}.mp4");
+});
+
+it('serves the cached file when the playlist does not prefer media sources', function () {
+    setEnableCache(true);
+
+    [$playlist, $channel, $cached, , , $user] = xscMediaMatchedWithCache(preferMedia: false);
+
+    $response = $this->get("/movie/{$user->name}/{$playlist->uuid}/{$channel->id}.mp4");
+
+    $response->assertRedirectContains("/cached-content/{$user->name}/{$playlist->uuid}/{$cached->uuid}.mp4");
 });

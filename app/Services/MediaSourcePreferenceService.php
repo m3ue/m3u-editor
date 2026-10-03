@@ -49,16 +49,13 @@ class MediaSourcePreferenceService
      */
     public function resolveChannel(Channel $channel): ?Channel
     {
-        if (! $channel->playlist?->prefer_media_server_sources || ! $channel->is_vod) {
+        if (! $this->preferenceEnabled($channel)) {
             return null;
         }
 
-        $match = $channel->mediaSourceMatch()->with(['mediaChannel.playlist', 'integration'])->first();
-        if (! $match) {
-            return null;
-        }
+        [$mediaItem, $integration] = $this->matchedMediaFor($channel);
 
-        return $this->resolve($match->mediaChannel, $match->integration);
+        return $this->resolve($mediaItem, $integration);
     }
 
     /**
@@ -67,22 +64,78 @@ class MediaSourcePreferenceService
      */
     public function resolveEpisode(Episode $episode): ?Episode
     {
-        if (! $episode->playlist?->prefer_media_server_sources) {
+        if (! $this->preferenceEnabled($episode)) {
             return null;
         }
 
-        $match = $episode->mediaSourceMatch()->with(['mediaEpisode.playlist', 'integration'])->first();
-        if (! $match) {
-            return null;
-        }
+        [$mediaItem, $integration] = $this->matchedMediaFor($episode);
 
-        return $this->resolve($match->mediaEpisode, $match->integration);
+        return $this->resolve($mediaItem, $integration);
     }
 
     /**
-     * Shared eligibility gate for a resolved media item + its integration.
+     * Whether $item's playlist prefers media-server sources and the item
+     * type is substitutable (only VOD channels; live TV never swaps).
      */
-    private function resolve(Channel|Episode|null $mediaItem, ?MediaServerIntegration $integration): Channel|Episode|null
+    private function preferenceEnabled(Channel|Episode $item): bool
+    {
+        if (! $item->playlist?->prefer_media_server_sources) {
+            return false;
+        }
+
+        return ! ($item instanceof Channel) || $item->is_vod;
+    }
+
+    /**
+     * The media item + integration behind $item's media-source match, or
+     * nulls when there is no match row. Shared by the resolve* methods and
+     * hasEligibleMatch() so they all load the match identically.
+     *
+     * @return array{0: Channel|Episode|null, 1: ?MediaServerIntegration}
+     */
+    private function matchedMediaFor(Channel|Episode $item): array
+    {
+        if ($item instanceof Channel) {
+            $match = $item->mediaSourceMatch()->with(['mediaChannel.playlist', 'integration'])->first();
+
+            return [$match?->mediaChannel, $match?->integration];
+        }
+
+        $match = $item->mediaSourceMatch()->with(['mediaEpisode.playlist', 'integration'])->first();
+
+        return [$match?->mediaEpisode, $match?->integration];
+    }
+
+    /**
+     * Whether $item has an ELIGIBLE media-server match (see
+     * eligibleMediaItem()). Local media always wins, so auto-cache skips
+     * these items and retention releases their redundant group-cached
+     * copies — the item itself stays in its dynamic group and plays from
+     * the media server.
+     *
+     * Deliberately does NO reachability check: a media server that's
+     * briefly down during a group refresh must not trigger a burst of
+     * provider downloads. Playback still falls back cached → provider
+     * while the server is unreachable.
+     */
+    public function hasEligibleMatch(Channel|Episode $item): bool
+    {
+        if (! $this->preferenceEnabled($item)) {
+            return false;
+        }
+
+        [$mediaItem, $integration] = $this->matchedMediaFor($item);
+
+        return $this->eligibleMediaItem($mediaItem, $integration) !== null;
+    }
+
+    /**
+     * Eligibility gate for a resolved media item + its integration: the
+     * media item must exist and be enabled, and the integration must
+     * exist, be enabled, and be of a supported type. No reachability
+     * check — callers decide whether "reachable right now" matters.
+     */
+    public function eligibleMediaItem(Channel|Episode|null $mediaItem, ?MediaServerIntegration $integration): Channel|Episode|null
     {
         if ($mediaItem === null || ! $mediaItem->enabled) {
             return null;
@@ -96,10 +149,24 @@ class MediaSourcePreferenceService
             return null;
         }
 
-        if (! $this->isAvailable($mediaItem, $integration)) {
+        return $mediaItem;
+    }
+
+    /**
+     * Shared eligibility + reachability gate for a resolved media item and
+     * its integration.
+     */
+    private function resolve(Channel|Episode|null $mediaItem, ?MediaServerIntegration $integration): Channel|Episode|null
+    {
+        $eligible = $this->eligibleMediaItem($mediaItem, $integration);
+        if ($eligible === null || $integration === null) {
+            return null;
+        }
+
+        if (! $this->isAvailable($eligible, $integration)) {
             Log::info('MediaSourcePreferenceService: media source unavailable, keeping provider stream', [
-                'media_item_type' => $mediaItem::class,
-                'media_item_id' => $mediaItem->id,
+                'media_item_type' => $eligible::class,
+                'media_item_id' => $eligible->id,
                 'integration_id' => $integration->id,
                 'integration_type' => $integration->type,
             ]);
@@ -107,7 +174,7 @@ class MediaSourcePreferenceService
             return null;
         }
 
-        return $mediaItem;
+        return $eligible;
     }
 
     /**

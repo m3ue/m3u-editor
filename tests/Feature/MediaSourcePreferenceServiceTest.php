@@ -192,3 +192,46 @@ it('keeps the provider stream when the Plex probe fails', function () {
 
     expect($resolved)->toBeNull();
 });
+
+// ── hasEligibleMatch() ──────────────────────────────────────────────────────
+
+it('hasEligibleMatch is true for an eligible match even when the server is unreachable', function () {
+    $f = makeMatchedMovieFixture();
+
+    // Prime a failed reachability probe: eligibility deliberately ignores
+    // reachability so a briefly-down server doesn't trigger provider
+    // downloads during a group refresh.
+    Cache::put("media-server-reachable:{$f['integration']->id}", false, 60);
+
+    expect(app(MediaSourcePreferenceService::class)->hasEligibleMatch($f['providerMovie']))->toBeTrue();
+});
+
+it('hasEligibleMatch is false when the toggle is off', function () {
+    $f = makeMatchedMovieFixture(providerToggle: false);
+
+    expect(app(MediaSourcePreferenceService::class)->hasEligibleMatch($f['providerMovie']))->toBeFalse();
+});
+
+it('hasEligibleMatch is false when the media item is disabled', function () {
+    $f = makeMatchedMovieFixture();
+    $f['mediaMovie']->update(['enabled' => false]);
+
+    expect(app(MediaSourcePreferenceService::class)->hasEligibleMatch($f['providerMovie']->refresh()))->toBeFalse();
+});
+
+it('hasEligibleMatch is false when the integration is disabled', function () {
+    $f = makeMatchedMovieFixture();
+    $f['integration']->update(['enabled' => false]);
+
+    expect(app(MediaSourcePreferenceService::class)->hasEligibleMatch($f['providerMovie']))->toBeFalse();
+});
+
+it('hasEligibleMatch is false when there is no match row', function () {
+    $user = User::factory()->create();
+    $provider = Playlist::factory()->for($user)->create(['prefer_media_server_sources' => true]);
+    $providerMovie = Channel::factory()->for($provider)->for($user)->create([
+        'enabled' => true, 'is_vod' => true, 'tmdb_id' => 603,
+    ]);
+
+    expect(app(MediaSourcePreferenceService::class)->hasEligibleMatch($providerMovie))->toBeFalse();
+});

@@ -50,6 +50,7 @@ use App\Rules\Cron;
 use App\Rules\UrlIsAllowed;
 use App\Rules\UrlSafeCredential;
 use App\Rules\ValidRegexPattern;
+use App\Services\CachedContentDispatchService;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
@@ -1991,7 +1992,10 @@ class PlaylistResource extends Resource implements CopilotResource
                     Repeater::make('dynamic_groups_config')
                         ->label(__('Dynamic Groups Configuration'))
                         ->columnSpanFull()
-                        ->schema(self::getDynamicGroupRuleSchema())
+                        ->schema([
+                            ...self::getDynamicGroupRuleSchema(),
+                            ...self::getDynamicGroupCacheSchema(),
+                        ])
                         ->columns(12)
                         ->reorderable()
                         ->reorderableWithButtons()
@@ -3698,6 +3702,76 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
                 ->required()
                 ->columnSpan(3),
+        ];
+    }
+
+    /**
+     * Per-rule cache options appended to getDynamicGroupRuleSchema() inside
+     * the `dynamic_groups_config` Repeater on the Playlist form ONLY — per
+     * the docblock above, these fields intentionally do not ship on the
+     * VOD / Series Dynamic Groups listing CreateAction.
+     *
+     * All options default to off; the global `enable_cache` setting still
+     * gates everything at dispatch time.
+     *
+     * @return array<int, Component>
+     */
+    public static function getDynamicGroupCacheSchema(): array
+    {
+        return [
+            Fieldset::make(__('Caching'))
+                ->columnSpanFull()
+                ->columns(12)
+                ->schema([
+                    Toggle::make(DynamicGroup::CACHE_ENABLED_KEY)
+                        ->label(__('Cache group members'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __("Automatically download this group's members via Cached Downloads. Series rules cache only each series' latest season."),
+                        )
+                        ->helperText(fn (): string => app(CachedContentDispatchService::class)->isEnabled()
+                            ? ''
+                            : __('Caching is currently disabled in Settings.'))
+                        ->live()
+                        ->default(false)
+                        ->inline(false)
+                        ->columnSpan(2),
+                    Select::make(DynamicGroup::CACHE_RETENTION_KEY)
+                        ->label(__('Retention'))
+                        ->options([
+                            'in_group' => __('While in group'),
+                            'in_group_plus_days' => __('While in group + N days'),
+                            'never_expire' => __('Never expire'),
+                        ])
+                        ->default('in_group')
+                        ->live()
+                        ->visible(fn (Get $get): bool => (bool) $get(DynamicGroup::CACHE_ENABLED_KEY))
+                        ->columnSpan(4),
+                    TextInput::make(DynamicGroup::CACHE_RETENTION_DAYS_KEY)
+                        ->label(__('Extra days'))
+                        ->numeric()
+                        ->minValue(1)
+                        ->default(7)
+                        ->visible(fn (Get $get): bool => (bool) $get(DynamicGroup::CACHE_ENABLED_KEY)
+                            && $get(DynamicGroup::CACHE_RETENTION_KEY) === 'in_group_plus_days')
+                        ->columnSpan(2),
+                    TextInput::make(DynamicGroup::CACHE_MAX_ITEMS_KEY)
+                        ->label(__('Top N members'))
+                        ->numeric()
+                        ->minValue(1)
+                        ->placeholder(__('No limit'))
+                        ->visible(fn (Get $get): bool => (bool) $get(DynamicGroup::CACHE_ENABLED_KEY))
+                        ->columnSpan(2),
+                    TextInput::make(DynamicGroup::CACHE_MAX_GB_KEY)
+                        ->label(__('Max size'))
+                        ->numeric()
+                        ->minValue(0.1)
+                        ->step(0.1)
+                        ->placeholder(__('No limit'))
+                        ->suffix('GB')
+                        ->visible(fn (Get $get): bool => (bool) $get(DynamicGroup::CACHE_ENABLED_KEY))
+                        ->columnSpan(2),
+                ]),
         ];
     }
 

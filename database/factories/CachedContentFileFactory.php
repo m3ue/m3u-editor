@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\Episode;
@@ -87,6 +88,17 @@ class CachedContentFileFactory extends Factory
             'status' => CachedContentFileStatus::Failed,
             'failure_count' => $this->faker->numberBetween(1, 5),
             'last_failed_at' => now(),
+        ]);
+    }
+
+    /**
+     * A file a dynamic group's auto-cache created (group retention may
+     * release it once its provenance rows are gone).
+     */
+    public function dynamicGroupManaged(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'managed_by' => CachedContentManagedBy::DynamicGroup,
         ]);
     }
 

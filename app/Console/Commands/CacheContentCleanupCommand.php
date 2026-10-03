@@ -28,6 +28,13 @@ class CacheContentCleanupCommand extends Command
     {
         $isDryRun = (bool) $this->option('dry-run');
 
+        if (! $isDryRun) {
+            // Group retention runs first: its evictions remove rows the
+            // evaluate() sweep below shouldn't also try to process.
+            $released = $service->releaseDynamicGroupCaches();
+            $this->info("Released {$released} dynamic-group cached files.");
+        }
+
         $ids = $service->evaluate();
 
         $this->line(sprintf(

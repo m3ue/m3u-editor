@@ -3,10 +3,12 @@
 namespace App\Models;
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -46,6 +48,7 @@ use Illuminate\Support\Str;
  * @property Carbon|null $last_failed_at
  * @property string|null $last_error_message
  * @property int $failure_count
+ * @property CachedContentManagedBy|null $managed_by
  * @property Carbon $created_at
  * @property Carbon $updated_at
  *
@@ -87,6 +90,7 @@ class CachedContentFile extends Model
         'last_failed_at',
         'last_error_message',
         'failure_count',
+        'managed_by',
     ];
 
     /**
@@ -106,6 +110,7 @@ class CachedContentFile extends Model
             'bytes_per_second' => 'integer',
             'season_number' => 'integer',
             'episode_number' => 'integer',
+            'managed_by' => CachedContentManagedBy::class,
         ];
     }
 
@@ -191,6 +196,20 @@ class CachedContentFile extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    /**
+     * Dynamic groups that queued this file, carrying the retention
+     * snapshot taken at attach time (see the pivot table migration).
+     * Group retention only ever deletes files whose `managed_by` is
+     * `CachedContentManagedBy::DynamicGroup`, so files cached manually are
+     * never affected by these rows.
+     */
+    public function dynamicGroups(): BelongsToMany
+    {
+        return $this->belongsToMany(DynamicGroup::class, 'cached_content_file_dynamic_groups')
+            ->withPivot(['retention', 'retention_days', 'dropped_at'])
+            ->withTimestamps();
     }
 
     /**
