@@ -926,10 +926,14 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                 ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
                                                 ->schema([
                                                     TagsInput::make('auto_merge_config.regex_patterns')
-                                                        ->label(__('Regex patterns (optional)'))
-                                                        ->placeholder(__('e.g. ^(?:US[:\-\s])?(.*?)(?:\s+(?:HD|FHD|UHD|4K))?$'))
+                                                        ->label(__('Regex merge patterns'))
+                                                        ->placeholder('/^BBC\\s*One$/i')
                                                         ->columnSpanFull()
-                                                        ->helperText(__('Optional regex patterns used to group channels by name for merging (applied after stream ID merging).')),
+                                                        ->hintIcon(
+                                                            'heroicon-m-question-mark-circle',
+                                                            tooltip: __('Each pattern matches channels by title or name, grouping them as master + failovers. The highest-scoring match becomes the master. Use PHP regex syntax, e.g. /^CCTV[-]?1$/i')
+                                                        )
+                                                        ->helperText(__('Regex patterns for failover grouping. Useful when the same channel has different names within and across providers.')),
                                                     Select::make('auto_merge_config.merge_key')
                                                         ->label(__('Merge key'))
                                                         ->options([
