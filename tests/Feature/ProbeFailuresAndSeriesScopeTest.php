@@ -401,6 +401,74 @@ it('fills new episodes of an already measured season without probing them', func
     ]);
 });
 
+it('samples later seasons once the scope narrows from series to season', function () {
+    Bus::fake();
+    $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Season]);
+
+    $series = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $seasonOne = probeSeason($this->playlist, $series, 1);
+    $seasonTwo = probeSeason($this->playlist, $series, 2);
+    $source = probeEpisode($this->playlist, $series, $seasonOne, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(10)]);
+    $copiedFromSeries = ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(10), 'stream_stats_inferred_from_id' => $source->id];
+    $s1e2 = probeEpisode($this->playlist, $series, $seasonOne, 2, $copiedFromSeries);
+    $s2e1 = probeEpisode($this->playlist, $series, $seasonTwo, 1, $copiedFromSeries);
+    $s2e2 = probeEpisode($this->playlist, $series, $seasonTwo, 2, $copiedFromSeries);
+
+    (new ProbeStreams(playlistId: $this->playlist->id, isSeriesProbe: true))->handle();
+
+    Bus::assertChained([
+        fn (ProbeStreamsChunk $job) => $job->episodeIds === [$s2e1->id]
+            && $job->episodeSiblings[$s2e1->id] === [$s2e2->id],
+        ProbeStreamsComplete::class,
+    ]);
+    expect($s1e2->fresh()->stream_stats_probed_at->lt(now()->subDays(9)))->toBeTrue();
+});
+
+it('refreshes inferred copies once their source is re-probed', function () {
+    Bus::fake();
+    $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Season]);
+
+    $series = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $season = probeSeason($this->playlist, $series, 1);
+    $source = probeEpisode($this->playlist, $series, $season, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()]);
+    $copy = probeEpisode($this->playlist, $series, $season, 2, [
+        'stream_stats' => [['stream' => ['codec_type' => 'video', 'codec_name' => 'h264', 'width' => 1920, 'height' => 1080]]],
+        'stream_stats_probed_at' => now()->subDay(),
+        'stream_stats_inferred_from_id' => $source->id,
+    ]);
+
+    (new ProbeStreams(playlistId: $this->playlist->id, isSeriesProbe: true))->handle();
+
+    Bus::assertNothingDispatched();
+    $copy->refresh();
+    expect($copy->stream_stats)->toBe(sampleStats())
+        ->and($copy->stream_stats_inferred_from_id)->toBe($source->id);
+});
+
+it('leaves up to date inferred copies alone', function () {
+    Bus::fake();
+    $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Series]);
+
+    $series = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $seasonOne = probeSeason($this->playlist, $series, 1);
+    $seasonTwo = probeSeason($this->playlist, $series, 2);
+    $source = probeEpisode($this->playlist, $series, $seasonOne, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(10)]);
+    $copy = probeEpisode($this->playlist, $series, $seasonTwo, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(5), 'stream_stats_inferred_from_id' => $source->id]);
+
+    // A specials-only series is sampled from a special, which never counts as a series-wide
+    // source, so its copies must not send it back for probing every run.
+    $specialsOnly = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $specials = probeSeason($this->playlist, $specialsOnly, 0);
+    $special = probeEpisode($this->playlist, $specialsOnly, $specials, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(10)]);
+    $specialCopy = probeEpisode($this->playlist, $specialsOnly, $specials, 2, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()->subDays(5), 'stream_stats_inferred_from_id' => $special->id]);
+
+    (new ProbeStreams(playlistId: $this->playlist->id, isSeriesProbe: true))->handle();
+
+    Bus::assertNothingDispatched();
+    expect($copy->fresh()->stream_stats_probed_at->lt(now()->subDays(4)))->toBeTrue()
+        ->and($specialCopy->fresh()->stream_stats_probed_at->lt(now()->subDays(4)))->toBeTrue();
+});
+
 it('never samples a special when probing one episode per series', function () {
     Bus::fake();
     $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Series]);

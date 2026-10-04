@@ -102,7 +102,19 @@ class ProbeStreams implements ShouldQueue
                 $episodeIds = $episodeQuery->pluck('id')->toArray();
             } else {
                 if ($onlyUnprobed) {
-                    $episodeQuery->dueForProbe($retryFailedAfterDays);
+                    // Inferred copies are revisited once stale: their source is gone, sits
+                    // outside the current group (scope narrowed from series to season), or
+                    // was re-probed after the copy was made.
+                    $episodeQuery->where(fn (Builder $q) => $q
+                        ->dueForProbe($retryFailedAfterDays)
+                        ->orWhere(fn (Builder $q) => $q
+                            ->whereNotNull('stream_stats_inferred_from_id')
+                            ->whereNotExists(fn ($source) => $source
+                                ->selectRaw('1')
+                                ->from('episodes as sources')
+                                ->whereColumn('sources.id', 'episodes.stream_stats_inferred_from_id')
+                                ->whereColumn("sources.{$groupColumn}", "episodes.{$groupColumn}")
+                                ->whereColumn('sources.stream_stats_probed_at', '<=', 'episodes.stream_stats_probed_at'))));
                 }
 
                 [$episodeIds, $episodeSiblings, $inferredCount] = $this->planSampledEpisodes($episodeQuery, $seriesScope, $onlyUnprobed);
@@ -211,7 +223,7 @@ class ProbeStreams implements ShouldQueue
      * The sample is the group's first regular episode. Specials (season 0) and episodes without
      * a season number are only sampled when the group has nothing else, so a Season 0 extra is
      * never the measurement a whole series inherits. In incremental mode, groups that already
-     * have a measured episode need no probe at all; their new or due candidates inherit that
+     * have a measured episode need no probe at all; their new, due or stale candidates inherit that
      * measurement right here.
      *
      * Measured sources for the whole playlist come from one grouped query up front, since the

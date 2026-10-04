@@ -44,25 +44,6 @@ class ProbeStreamsChunk implements ShouldQueue
         public array $episodeSiblings = [],
     ) {}
 
-    public function __wakeup(): void
-    {
-        if (! isset($this->probeTimeout)) {
-            $this->probeTimeout = 15;
-        }
-
-        if (! isset($this->probeRunKey)) {
-            $this->probeRunKey = null;
-        }
-
-        if (! isset($this->failureThreshold)) {
-            $this->failureThreshold = 0;
-        }
-
-        if (! isset($this->episodeSiblings)) {
-            $this->episodeSiblings = [];
-        }
-    }
-
     public function handle(): void
     {
         $breaker = ProbeCircuitBreaker::forRun($this->probeRunKey, $this->failureThreshold);

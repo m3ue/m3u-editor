@@ -37,17 +37,6 @@ class ProbeStreamsComplete implements ShouldQueue
         public int $failureThreshold = 0,
     ) {}
 
-    public function __wakeup(): void
-    {
-        if (! isset($this->probeRunKey)) {
-            $this->probeRunKey = null;
-        }
-
-        if (! isset($this->failureThreshold)) {
-            $this->failureThreshold = 0;
-        }
-    }
-
     public function handle(): void
     {
         $channelQuery = Channel::query()->where('stream_stats_probed_at', '>=', $this->start);
