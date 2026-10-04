@@ -989,6 +989,20 @@ class Channel extends Model
         return $query->notAioManaged()->where('probe_enabled', true);
     }
 
+    /**
+     * Channels that incremental probing should pick up: never probed, or a failed probe
+     * (probed_at set, no stream_stats) whose last attempt is at least $retryFailedAfterDays old.
+     * A retry window of 0 retries failures on every run.
+     */
+    public function scopeDueForProbe(Builder $query, int $retryFailedAfterDays): Builder
+    {
+        return $query->where(fn (Builder $q) => $q
+            ->whereNull('stream_stats_probed_at')
+            ->orWhere(fn (Builder $q) => $q
+                ->whereNull('stream_stats')
+                ->where('stream_stats_probed_at', '<=', now()->subDays($retryFailedAfterDays))));
+    }
+
     public function scopeHasMovieId(Builder $query): Builder
     {
         $isPgsql = config('database.connections.'.config('database.default').'.driver') === 'pgsql';

@@ -15,15 +15,21 @@ class ProbeStatusColumn
                     return 'never';
                 }
 
-                return empty($record->stream_stats) ? 'failed' : 'ok';
+                if (empty($record->stream_stats)) {
+                    return 'failed';
+                }
+
+                return $record->stream_stats_inferred_from_id ? 'inferred' : 'ok';
             })
             ->icon(fn (string $state): string => match ($state) {
                 'ok' => 'heroicon-o-check-circle',
+                'inferred' => 'heroicon-o-document-duplicate',
                 'failed' => 'heroicon-o-exclamation-triangle',
                 default => 'heroicon-o-x-circle',
             })
             ->color(fn (string $state): string => match ($state) {
                 'ok' => 'success',
+                'inferred' => 'info',
                 'failed' => 'warning',
                 default => 'gray',
             })
@@ -34,6 +40,10 @@ class ProbeStatusColumn
 
                 if (empty($record->stream_stats)) {
                     return __('Probe ran but returned no stream info').' ('.$record->stream_stats_probed_at->diffForHumans().')';
+                }
+
+                if ($record->stream_stats_inferred_from_id) {
+                    return __('Stream info reused from a probed episode of the same season or series').' ('.$record->stream_stats_probed_at->diffForHumans().')';
                 }
 
                 return __('Probed').' '.$record->stream_stats_probed_at->diffForHumans();

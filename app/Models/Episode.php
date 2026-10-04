@@ -47,6 +47,7 @@ class Episode extends Model
         'info' => 'array',
         'stream_stats' => 'array',
         'stream_stats_probed_at' => 'datetime',
+        'stream_stats_inferred_from_id' => 'integer',
         'probe_enabled' => 'boolean',
         'is_custom' => 'boolean',
         'aio_last_resolved_at' => 'datetime',
@@ -302,6 +303,51 @@ class Episode extends Model
     public function scopeEligibleForProbe(Builder $query): Builder
     {
         return $query->notAioManaged()->where('probe_enabled', true);
+    }
+
+    /**
+     * Episodes that incremental probing should pick up: never probed, or a failed probe
+     * (probed_at set, no stream_stats) whose last attempt is at least $retryFailedAfterDays old.
+     * A retry window of 0 retries failures on every run.
+     */
+    public function scopeDueForProbe(Builder $query, int $retryFailedAfterDays): Builder
+    {
+        return $query->where(fn (Builder $q) => $q
+            ->whereNull('stream_stats_probed_at')
+            ->orWhere(fn (Builder $q) => $q
+                ->whereNull('stream_stats')
+                ->where('stream_stats_probed_at', '<=', now()->subDays($retryFailedAfterDays))));
+    }
+
+    /**
+     * Copy this episode's measured stream stats onto sibling episodes that have no measurement
+     * of their own (unprobed, failed, or previously inferred), marking each copy as inferred
+     * from this episode. Used by sampled series probing, see SeriesProbeScope.
+     *
+     * @param  array<int>  $siblingIds
+     */
+    public function shareStreamStatsWith(array $siblingIds): int
+    {
+        if (empty($siblingIds) || empty($this->stream_stats) || $this->stream_stats_inferred_from_id) {
+            return 0;
+        }
+
+        $updated = 0;
+        foreach (array_chunk($siblingIds, 500) as $chunk) {
+            $updated += static::query()
+                ->whereKey($chunk)
+                ->whereKeyNot($this->id)
+                ->where(fn (Builder $q) => $q
+                    ->whereNull('stream_stats')
+                    ->orWhereNotNull('stream_stats_inferred_from_id'))
+                ->update([
+                    'stream_stats' => json_encode($this->stream_stats),
+                    'stream_stats_probed_at' => now(),
+                    'stream_stats_inferred_from_id' => $this->id,
+                ]);
+        }
+
+        return $updated;
     }
 
     public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Playlists;
 
 use App\Enums\PlaylistSourceType;
+use App\Enums\SeriesProbeScope;
 use App\Enums\Status;
 use App\Facades\PlaylistFacade;
 use App\Filament\Actions\CronHelperAction;
@@ -58,6 +59,7 @@ use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\ProbeCircuitBreaker;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
@@ -2120,64 +2122,133 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_probe_streams')
-                        ->label(__('Probe Live streams after sync'))
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: __('Required for fast channel switching when using the emby-xtream plugin.')
-                        )
-                        ->helperText(__('When enabled, live channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.'))
-                        ->live()
+                    Fieldset::make(__('Live'))
                         ->columnSpanFull()
-                        ->inline(true)
-                        ->default(false),
+                        ->schema([
+                            Toggle::make('auto_probe_streams')
+                                ->label(__('Probe Live streams after sync'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('When enabled, live channels will be probed with ffprobe after sync to collect stream metadata (codec, resolution, bitrate) and store it to the database for fast retrieval.').' '.__('Required for fast channel switching when using the emby-xtream plugin.')
+                                )
+                                ->live()
+                                ->columnSpanFull()
+                                ->inline(true)
+                                ->default(false),
 
-                    Toggle::make('auto_probe_streams_only_unprobed')
-                        ->label(__('Only probe Live streams that have not been probed before'))
-                        ->helperText(__('Keeps automatic Live stream probing incremental by skipping streams that already have stored stream metadata.'))
-                        ->inline(true)
-                        ->default(true)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+                            Toggle::make('auto_probe_streams_only_unprobed')
+                                ->label(__('Only probe Live streams that have not been probed before'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Keeps automatic Live stream probing incremental by skipping streams that already have stored stream metadata.')
+                                )
+                                ->inline(true)
+                                ->default(true)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
 
-                    Toggle::make('auto_probe_streams_include_disabled')
-                        ->label(__('Include disabled Live streams'))
-                        ->helperText(__('Also probes disabled Live streams after sync while still respecting the per-channel probe opt-out setting.'))
-                        ->inline(true)
-                        ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+                            Toggle::make('auto_probe_streams_include_disabled')
+                                ->label(__('Include disabled Live streams'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Also probes disabled Live streams after sync while still respecting the per-channel probe opt-out setting.')
+                                )
+                                ->inline(true)
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams')),
+                        ]),
 
-                    Toggle::make('auto_probe_vod_streams')
-                        ->label(__('Probe VOD & series streams after sync'))
-                        ->helperText(__('When enabled, both VOD movies and series episodes are automatically probed after each sync. This significantly increases sync time but enables Trash Guide naming with stream-stat-based quality/codec/HDR detection. It falls back to existing TMDB metadata where probing is not possible.'))
-                        ->live()
+                    Fieldset::make(__('VOD & Series'))
                         ->columnSpanFull()
-                        ->inline(true)
-                        ->default(false),
+                        ->schema([
+                            Toggle::make('auto_probe_vod_streams')
+                                ->label(__('Probe VOD & series streams after sync'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('When enabled, both VOD movies and series episodes are automatically probed after each sync. This significantly increases sync time but enables Trash Guide naming with stream-stat-based quality/codec/HDR detection. It falls back to existing TMDB metadata where probing is not possible.')
+                                )
+                                ->live()
+                                ->columnSpanFull()
+                                ->inline(true)
+                                ->default(false),
 
-                    Toggle::make('auto_probe_vod_streams_only_unprobed')
-                        ->label(__('Only probe VOD and series streams that have not been probed before'))
-                        ->helperText(__('Keeps automatic VOD and series probing incremental by skipping streams that already have stored stream metadata.'))
-                        ->inline(true)
-                        ->default(true)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+                            Toggle::make('auto_probe_vod_streams_only_unprobed')
+                                ->label(__('Only probe VOD and series streams that have not been probed before'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Keeps automatic VOD and series probing incremental by skipping streams that already have stored stream metadata.')
+                                )
+                                ->inline(true)
+                                ->default(true)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
 
-                    Toggle::make('auto_probe_vod_streams_include_disabled')
-                        ->label(__('Include disabled VOD and series streams'))
-                        ->helperText(__('Also probes disabled VOD streams and series episodes after sync while still respecting the per-stream probe opt-out setting.'))
-                        ->inline(true)
-                        ->default(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+                            Toggle::make('auto_probe_vod_streams_include_disabled')
+                                ->label(__('Include disabled VOD and series streams'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Also probes disabled VOD streams and series episodes after sync while still respecting the per-stream probe opt-out setting.')
+                                )
+                                ->inline(true)
+                                ->default(false)
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+
+                            TextInput::make('auto_probe_vod_streams_retry_failed_days')
+                                ->label(__('Retry failed probes after (days)'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('When only probing streams that have not been probed before, VOD streams and episodes whose probe failed are skipped until this many days have passed.')
+                                )
+                                ->helperText(__('Set to 0 to retry on every sync.'))
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(365)
+                                ->default(7)
+                                ->required()
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+
+                            TextInput::make('auto_probe_vod_streams_failure_threshold')
+                                ->label(__('Pause probing when failures exceed (%)'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Stops an automatic VOD and series probe run once at least :count streams have been probed and more than this share of them failed, which usually means the provider is unreachable.', ['count' => ProbeCircuitBreaker::MIN_SAMPLE])
+                                )
+                                ->helperText(__('Set to 0 to never pause.'))
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(100)
+                                ->default(80)
+                                ->required()
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+
+                            Select::make('auto_probe_series_scope')
+                                ->label(__('Series episodes to probe'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Episodes of a season usually share codec, resolution, HDR and audio tracks. Probing only the first episode of each season or series and reusing its stream info for the others makes series probing much faster on large catalogs.')
+                                )
+                                ->options(SeriesProbeScope::class)
+                                ->default(SeriesProbeScope::All->value)
+                                ->selectablePlaceholder(false)
+                                ->required()
+                                ->columnSpanFull()
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+                        ]),
 
                     Toggle::make('probe_use_batching')
                         ->label(__('Parallel processing'))
-                        ->helperText(__('Process in parallel rather than one-at-a-time for significantly faster results.'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('Process in parallel rather than one-at-a-time for significantly faster results.')
+                        )
                         ->inline(true)
                         ->default(false)
                         ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams') || (bool) $get('auto_probe_vod_streams')),
 
                     TextInput::make('probe_timeout')
                         ->label(__('Probe timeout (seconds)'))
-                        ->helperText(__('Seconds to wait per stream (5 to 60). Streams that do not respond within this window will be skipped.'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('Seconds to wait per stream (5 to 60). Streams that do not respond within this window will be skipped.')
+                        )
                         ->numeric()
                         ->minValue(5)
                         ->maxValue(60)

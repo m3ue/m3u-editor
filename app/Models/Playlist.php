@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\EpgSourceType;
 use App\Enums\PlaylistChannelId;
 use App\Enums\PlaylistSourceType;
+use App\Enums\SeriesProbeScope;
 use App\Enums\Status;
 use App\Jobs\MatchMediaServerSources;
 use App\Jobs\UpdateXtreamStats;
@@ -77,6 +78,9 @@ class Playlist extends Model
         'auto_probe_vod_streams' => 'boolean',
         'auto_probe_vod_streams_only_unprobed' => 'boolean',
         'auto_probe_vod_streams_include_disabled' => 'boolean',
+        'auto_probe_vod_streams_retry_failed_days' => 'integer',
+        'auto_probe_vod_streams_failure_threshold' => 'integer',
+        'auto_probe_series_scope' => SeriesProbeScope::class,
         'probe_use_batching' => 'boolean',
         'probe_timeout' => 'integer',
         'find_replace_rules' => 'array',
