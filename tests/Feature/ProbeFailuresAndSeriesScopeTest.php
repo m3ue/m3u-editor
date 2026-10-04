@@ -401,6 +401,61 @@ it('fills new episodes of an already measured season without probing them', func
     ]);
 });
 
+it('never samples a special when probing one episode per series', function () {
+    Bus::fake();
+    $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Series]);
+
+    $series = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $specials = probeSeason($this->playlist, $series, 0);
+    $seasonOne = probeSeason($this->playlist, $series, 1);
+    $special = probeEpisode($this->playlist, $series, $specials, 1);
+    $s1e1 = probeEpisode($this->playlist, $series, $seasonOne, 1);
+    $s1e2 = probeEpisode($this->playlist, $series, $seasonOne, 2);
+
+    (new ProbeStreams(playlistId: $this->playlist->id, isSeriesProbe: true))->handle();
+
+    Bus::assertChained([
+        fn (ProbeStreamsChunk $job) => $job->episodeIds === [$s1e1->id]
+            && $job->episodeSiblings[$s1e1->id] === [$special->id, $s1e2->id],
+        ProbeStreamsComplete::class,
+    ]);
+});
+
+it('does not let a measured special stand in for a whole series', function () {
+    Bus::fake();
+    $this->playlist->update(['auto_probe_series_scope' => SeriesProbeScope::Series]);
+
+    $series = Series::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $specials = probeSeason($this->playlist, $series, 0);
+    $seasonOne = probeSeason($this->playlist, $series, 1);
+    probeEpisode($this->playlist, $series, $specials, 1, ['stream_stats' => sampleStats(), 'stream_stats_probed_at' => now()]);
+    $s1e1 = probeEpisode($this->playlist, $series, $seasonOne, 1);
+    $s1e2 = probeEpisode($this->playlist, $series, $seasonOne, 2);
+
+    (new ProbeStreams(playlistId: $this->playlist->id, isSeriesProbe: true))->handle();
+
+    expect($s1e2->fresh()->stream_stats_inferred_from_id)->toBeNull();
+
+    Bus::assertChained([
+        fn (ProbeStreamsChunk $job) => $job->episodeIds === [$s1e1->id]
+            && $job->episodeSiblings[$s1e1->id] === [$s1e2->id],
+        ProbeStreamsComplete::class,
+    ]);
+});
+
+it('skips a chunk entirely once its run breaker has tripped', function () {
+    Cache::put('probe-run:tripped-run:tripped', true);
+    $channel = probeVod($this->playlist, ['url' => 'http://provider.test/movie-ok.mkv']);
+
+    (new ProbeStreamsChunk(
+        channelIds: [$channel->id],
+        probeRunKey: 'tripped-run',
+        failureThreshold: 80,
+    ))->handle();
+
+    expect($channel->fresh()->stream_stats_probed_at)->toBeNull();
+});
+
 // ── Playlist form ──────────────────────────────────────────────────────────
 
 it('saves the probe retry, breaker and series scope settings from the playlist form', function () {
@@ -422,4 +477,38 @@ it('saves the probe retry, breaker and series scope settings from the playlist f
     expect($playlist->auto_probe_series_scope)->toBe(SeriesProbeScope::Season)
         ->and($playlist->auto_probe_vod_streams_retry_failed_days)->toBe(14)
         ->and($playlist->auto_probe_vod_streams_failure_threshold)->toBe(50);
+});
+
+it('rejects fractional probe settings', function () {
+    $this->actingAs($this->user);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'user_agent' => 'Test Agent',
+            'sync_interval' => '0 0 * * *',
+            'auto_probe_vod_streams' => true,
+            'auto_probe_vod_streams_only_unprobed' => true,
+            'auto_probe_vod_streams_retry_failed_days' => 7.5,
+            'auto_probe_vod_streams_failure_threshold' => 50.5,
+            'probe_timeout' => 12.5,
+        ])
+        ->call('save')
+        ->assertHasFormErrors([
+            'auto_probe_vod_streams_retry_failed_days' => 'integer',
+            'auto_probe_vod_streams_failure_threshold' => 'integer',
+            'probe_timeout' => 'integer',
+        ]);
+});
+
+it('only shows the retry window when incremental vod probing is on', function () {
+    $this->actingAs($this->user);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'auto_probe_vod_streams' => true,
+            'auto_probe_vod_streams_only_unprobed' => false,
+        ])
+        ->assertFormFieldIsHidden('auto_probe_vod_streams_retry_failed_days')
+        ->fillForm(['auto_probe_vod_streams_only_unprobed' => true])
+        ->assertFormFieldVisible('auto_probe_vod_streams_retry_failed_days');
 });

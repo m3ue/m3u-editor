@@ -2177,6 +2177,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     'heroicon-m-question-mark-circle',
                                     tooltip: __('Keeps automatic VOD and series probing incremental by skipping streams that already have stored stream metadata.')
                                 )
+                                ->live()
                                 ->inline(true)
                                 ->default(true)
                                 ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
@@ -2198,12 +2199,12 @@ class PlaylistResource extends Resource implements CopilotResource
                                     tooltip: __('When only probing streams that have not been probed before, VOD streams and episodes whose probe failed are skipped until this many days have passed.')
                                 )
                                 ->helperText(__('Set to 0 to retry on every sync.'))
-                                ->numeric()
+                                ->integer()
                                 ->minValue(0)
                                 ->maxValue(365)
                                 ->default(7)
                                 ->required()
-                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams')),
+                                ->visible(fn (Get $get): bool => (bool) $get('auto_probe_vod_streams') && (bool) $get('auto_probe_vod_streams_only_unprobed')),
 
                             TextInput::make('auto_probe_vod_streams_failure_threshold')
                                 ->label(__('Pause probing when failures exceed (%)'))
@@ -2212,7 +2213,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     tooltip: __('Stops an automatic VOD and series probe run once at least :count streams have been probed and more than this share of them failed, which usually means the provider is unreachable.', ['count' => ProbeCircuitBreaker::MIN_SAMPLE])
                                 )
                                 ->helperText(__('Set to 0 to never pause.'))
-                                ->numeric()
+                                ->integer()
                                 ->minValue(0)
                                 ->maxValue(100)
                                 ->default(80)
@@ -2249,10 +2250,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             'heroicon-m-question-mark-circle',
                             tooltip: __('Seconds to wait per stream (5 to 60). Streams that do not respond within this window will be skipped.')
                         )
-                        ->numeric()
+                        ->integer()
                         ->minValue(5)
                         ->maxValue(60)
                         ->default(15)
+                        ->required()
                         ->visible(fn (Get $get): bool => (bool) $get('auto_probe_streams') || (bool) $get('auto_probe_vod_streams')),
                 ]),
 

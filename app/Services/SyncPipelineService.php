@@ -648,19 +648,34 @@ class SyncPipelineService
         // 1. Enabled items exist → metadata + probe via resolvePreStrmPhases (tmdbEnabled: false).
         // 2. No enabled items, but new disabled items were imported → no metadata/probe needed;
         //    TMDB-only path is handled in Group 3 below.
-        if ($hasVod) {
+        //
+        // Each probe phase only probes its own content type (ProbeStreams::$isSeriesProbe). When
+        // only one type has enabled items, the other type's probe phase still runs if it has
+        // probe-eligible items (disabled ones under "include disabled", or enabled episodes of
+        // disabled series), which is what a single combined probe used to cover.
+        $autoProbeVod = (bool) $playlist->auto_probe_vod_streams;
+        $probeIncludesDisabled = (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false);
+
+        $probeVod = $autoProbeVod && ($hasVod || ($hasSeries && $probeIncludesDisabled
+            && $playlist->channels()->where('is_vod', true)->exists()));
+
+        $probeSeries = $autoProbeVod && ($hasSeries || ($hasVod && $playlist->episodes()
+            ->when(! $probeIncludesDisabled, fn ($query) => $query->where('enabled', true))
+            ->exists()));
+
+        if ($hasVod || $probeVod) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
-                metadataEnabled: (bool) $playlist->auto_fetch_vod_metadata,
-                probeEnabled: (bool) $playlist->auto_probe_vod_streams,
+                metadataEnabled: $hasVod && (bool) $playlist->auto_fetch_vod_metadata,
+                probeEnabled: $probeVod,
                 metadataPhase: SyncRunPhase::VodMetadata,
                 probePhase: SyncRunPhase::VodProbe,
             ));
         }
 
-        if ($hasSeries) {
+        if ($hasSeries || $probeSeries) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
-                metadataEnabled: (bool) $playlist->auto_fetch_series_metadata,
-                probeEnabled: (bool) $playlist->auto_probe_vod_streams,
+                metadataEnabled: $hasSeries && (bool) $playlist->auto_fetch_series_metadata,
+                probeEnabled: $probeSeries,
                 metadataPhase: SyncRunPhase::SeriesMetadata,
                 probePhase: SyncRunPhase::SeriesProbe,
             ));

@@ -65,6 +65,13 @@ class ProbeStreamsChunk implements ShouldQueue
 
     public function handle(): void
     {
+        $breaker = ProbeCircuitBreaker::forRun($this->probeRunKey, $this->failureThreshold);
+
+        // Chunks queued behind a tripped breaker exit before loading anything.
+        if ($breaker?->isTripped()) {
+            return;
+        }
+
         // notAioManaged() only, not eligibleForProbe(): explicit IDs here can come from a manual
         // bulk "Probe Streams" action that intentionally bypasses probe_enabled — the automatic/
         // playlist-driven callers (ProbeStreams) already pre-filter by probe_enabled themselves
@@ -72,7 +79,6 @@ class ProbeStreamsChunk implements ShouldQueue
         $channels = $this->channelIds ? Channel::whereIn('id', $this->channelIds)->notAioManaged()->get() : collect();
         $episodes = $this->episodeIds ? Episode::whereIn('id', $this->episodeIds)->notAioManaged()->get() : collect();
 
-        $breaker = ProbeCircuitBreaker::forRun($this->probeRunKey, $this->failureThreshold);
         $probedCount = 0;
 
         foreach ($channels as $channel) {

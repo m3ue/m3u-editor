@@ -14,6 +14,7 @@ use App\Jobs\ProcessVodChannels;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
 use App\Models\Channel;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\SyncRun;
@@ -1010,4 +1011,50 @@ it('dispatchProbe forwards playlist vod and series probe scope settings', functi
             && $job->includeDisabled === true
             && $job->isSeriesProbe === true,
     );
+});
+
+// ── Probe phases cover each content type on their own ──────────────────────
+
+it('plans SeriesProbe without SeriesMetadata when only vod is enabled but enabled episodes exist', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithVod($this->user, [
+        'auto_probe_vod_streams' => true,
+        'auto_fetch_series_metadata' => true,
+    ]);
+    $disabledSeries = Series::factory()->for($playlist)->for($this->user)->create(['enabled' => false]);
+    Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+        'series_id' => $disabledSeries->id,
+        'enabled' => true,
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::VodProbe->value)
+        ->toContain(SyncRunPhase::SeriesProbe->value)
+        ->not->toContain(SyncRunPhase::SeriesMetadata->value)
+        ->not->toContain(SyncRunPhase::SeriesStrmPostProbe->value);
+});
+
+it('plans VodProbe without VodMetadata for disabled vod only when include disabled is on', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithSeries($this->user, [
+        'auto_probe_vod_streams' => true,
+        'auto_probe_vod_streams_include_disabled' => true,
+        'auto_fetch_vod_metadata' => true,
+    ]);
+    Channel::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'is_vod' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::VodProbe->value)
+        ->toContain(SyncRunPhase::SeriesProbe->value)
+        ->not->toContain(SyncRunPhase::VodMetadata->value);
+
+    $playlist->update(['auto_probe_vod_streams_include_disabled' => false]);
+    $run = $this->service->buildPipeline($playlist->fresh(), app(GeneralSettings::class));
+
+    expect($run->phases)->not->toContain(SyncRunPhase::VodProbe->value)
+        ->toContain(SyncRunPhase::SeriesProbe->value);
 });

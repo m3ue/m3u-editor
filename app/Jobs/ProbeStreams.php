@@ -30,9 +30,10 @@ class ProbeStreams implements ShouldQueue
     public $deleteWhenMissingModels = true;
 
     /**
-     * @param  ?bool  $onlyUnprobed  When true, only probe VOD channels and episodes that have
-     *                               never been probed (stream_stats_probed_at IS NULL). Null
-     *                               defers to the playlist's auto_probe_vod_streams_only_unprobed
+     * @param  ?bool  $onlyUnprobed  When true, only probe VOD channels and episodes that are due
+     *                               (see dueForProbe(): never probed, or a failed probe older
+     *                               than the playlist's auto_probe_vod_streams_retry_failed_days).
+     *                               Null defers to the playlist's auto_probe_vod_streams_only_unprobed
      *                               setting (default true). Manual re-probe via UI bulk actions
      *                               bypasses this filter by dispatching ProbeStreamsChunk
      *                               directly with explicit IDs.
@@ -40,6 +41,8 @@ class ProbeStreams implements ShouldQueue
      *                                  while still honoring probe_enabled. Null defers to the
      *                                  playlist's auto_probe_vod_streams_include_disabled setting
      *                                  (default false).
+     * @param  bool  $isSeriesProbe  False probes the playlist's VOD channels, true probes its
+     *                               series episodes (honoring auto_probe_series_scope).
      */
     public function __construct(
         public int $playlistId,
@@ -102,7 +105,7 @@ class ProbeStreams implements ShouldQueue
                     $episodeQuery->dueForProbe($retryFailedAfterDays);
                 }
 
-                [$episodeIds, $episodeSiblings, $inferredCount] = $this->planSampledEpisodes($episodeQuery, $groupColumn, $onlyUnprobed);
+                [$episodeIds, $episodeSiblings, $inferredCount] = $this->planSampledEpisodes($episodeQuery, $seriesScope, $onlyUnprobed);
             }
         } else {
             $vodChannelQuery = Channel::where('playlist_id', $this->playlistId)
@@ -203,57 +206,59 @@ class ProbeStreams implements ShouldQueue
     }
 
     /**
-     * Sampled series probing (SeriesProbeScope::Season / ::Series): probe only the first
-     * candidate episode of each group and let ProbeStreamsChunk copy its stats to the rest of
-     * the group's candidates. In incremental mode, groups that already have a measured episode
-     * need no probe at all; their new or due candidates inherit that measurement right here.
+     * Sampled series probing (SeriesProbeScope::Season / ::Series): probe one candidate episode
+     * per group and let ProbeStreamsChunk copy its stats to the rest of the group's candidates.
+     * The sample is the group's first regular episode. Specials (season 0) and episodes without
+     * a season number are only sampled when the group has nothing else, so a Season 0 extra is
+     * never the measurement a whole series inherits. In incremental mode, groups that already
+     * have a measured episode need no probe at all; their new or due candidates inherit that
+     * measurement right here.
      *
-     * Candidates are streamed in group order and resolved in batches of groups, so memory stays
-     * bounded by one batch plus the id lists the chunk jobs carry anyway.
+     * Measured sources for the whole playlist come from one grouped query up front, since the
+     * group columns are not indexed and a lookup per batch of groups would scan episodes each
+     * time. Candidates are then streamed in group order and resolved in batches of groups.
      *
      * @param  Builder<Episode>  $candidateQuery
      * @return array{0: array<int>, 1: array<int, array<int>>, 2: int} [sample ids, sample id => sibling ids, inferred count]
      */
-    private function planSampledEpisodes(Builder $candidateQuery, string $groupColumn, bool $onlyUnprobed): array
+    private function planSampledEpisodes(Builder $candidateQuery, SeriesProbeScope $scope, bool $onlyUnprobed): array
     {
+        $groupColumn = $scope->groupColumn();
         $sampleIds = [];
         $siblings = [];
         $inferredCount = 0;
         $groups = [];
 
-        $flush = function () use (&$groups, &$sampleIds, &$siblings, &$inferredCount, $groupColumn, $onlyUnprobed): void {
-            if ($groups === []) {
-                return;
-            }
+        // Any episode with stats of its own is a valid source for its group; MIN(id) picks one
+        // deterministically without loading every measured row. A series-wide source must be a
+        // regular episode for the same reason the sample is.
+        $sourceIds = $onlyUnprobed
+            ? Episode::query()
+                ->where('playlist_id', $this->playlistId)
+                ->whereNotNull('stream_stats')
+                ->whereNull('stream_stats_inferred_from_id')
+                ->when($scope === SeriesProbeScope::Series, fn (Builder $q) => $q->where('season', '>', 0))
+                ->groupBy($groupColumn)
+                ->select($groupColumn)
+                ->selectRaw('MIN(id) as source_id')
+                ->pluck('source_id', $groupColumn)
+                ->all()
+            : [];
 
-            // Any episode with stats of its own is a valid source for its group; MIN(id) just
-            // picks one deterministically without loading every measured row.
-            $sourceIds = $onlyUnprobed
-                ? Episode::query()
-                    ->where('playlist_id', $this->playlistId)
-                    ->whereIn($groupColumn, array_keys($groups))
-                    ->whereNotNull('stream_stats')
-                    ->whereNull('stream_stats_inferred_from_id')
-                    ->groupBy($groupColumn)
-                    ->select($groupColumn)
-                    ->selectRaw('MIN(id) as source_id')
-                    ->pluck('source_id', $groupColumn)
-                    ->all()
-                : [];
-
+        $flush = function () use (&$groups, &$sampleIds, &$siblings, &$inferredCount, $sourceIds): void {
             $inheritFromSource = [];
-            foreach ($groups as $groupId => $candidateIds) {
+            foreach ($groups as $groupId => $group) {
                 $sourceId = $sourceIds[$groupId] ?? null;
 
                 if ($sourceId !== null) {
-                    $inheritFromSource[(int) $sourceId] = $candidateIds;
+                    $inheritFromSource[(int) $sourceId] = $group['ids'];
 
                     continue;
                 }
 
-                $sampleId = array_shift($candidateIds);
+                $sampleId = $group['firstRegular'] ?? $group['ids'][0];
                 $sampleIds[] = $sampleId;
-                $siblings[$sampleId] = $candidateIds;
+                $siblings[$sampleId] = array_values(array_diff($group['ids'], [$sampleId]));
             }
 
             if ($inheritFromSource !== []) {
@@ -274,7 +279,7 @@ class ProbeStreams implements ShouldQueue
             ->orderBy('episode_num')
             ->orderBy('id')
             ->toBase()
-            ->select(['id', $groupColumn])
+            ->select(['id', 'season', $groupColumn])
             ->cursor();
 
         foreach ($candidates as $row) {
@@ -284,7 +289,11 @@ class ProbeStreams implements ShouldQueue
                 $flush();
             }
 
-            $groups[$groupId][] = (int) $row->id;
+            $groups[$groupId]['ids'][] = (int) $row->id;
+
+            if ((int) $row->season > 0) {
+                $groups[$groupId]['firstRegular'] ??= (int) $row->id;
+            }
         }
 
         $flush();
