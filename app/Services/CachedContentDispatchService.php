@@ -168,7 +168,9 @@ class CachedContentDispatchService
             return $counts;
         }
 
-        $seasons = $series->episodes()->whereNotNull('season')->distinct()->pluck('season')
+        // reorder(): the relation sorts by episode_num, which Postgres
+        // rejects alongside DISTINCT.
+        $seasons = $series->episodes()->reorder()->whereNotNull('season')->distinct()->pluck('season')
             ->map(fn ($season): int => (int) $season)
             ->all();
 
