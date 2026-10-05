@@ -14,6 +14,7 @@ use Illuminate\Console\Command;
  * in a playlist (or every playlist). Not scheduled: on a large catalog this
  * can queue thousands of multi-GB downloads, so it's an explicit operator
  * action. Use `--dry-run` first to see how many items would be queued.
+ * Always downloads from the provider, never through Radarr/Sonarr.
  */
 class CacheContentCommand extends Command
 {
@@ -56,7 +57,7 @@ class CacheContentCommand extends Command
 
                     $wouldQueue = $isDryRun
                         ? $dispatchService->canCache($item) && ! $item->cachedContentFile()->exists()
-                        : $dispatchService->dispatch($item) === CacheDispatchResult::Queued;
+                        : $dispatchService->dispatch($item, viaArr: false) === CacheDispatchResult::Queued;
 
                     $counts[$wouldQueue ? 'queued' : 'skipped']++;
                 }

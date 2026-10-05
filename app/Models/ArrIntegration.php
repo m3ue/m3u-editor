@@ -19,6 +19,7 @@ class ArrIntegration extends Model
         return [
             'enabled' => 'boolean',
             'guest_enabled' => 'boolean',
+            'cache_enabled' => 'boolean',
             'api_key' => 'encrypted',
             'last_test_at' => 'datetime',
             'quality_profile_id' => 'integer',
@@ -84,5 +85,10 @@ class ArrIntegration extends Model
     public function scopeGuestEnabled($query)
     {
         return $query->where('guest_enabled', true);
+    }
+
+    public function scopeCacheEnabled($query)
+    {
+        return $query->where('cache_enabled', true);
     }
 }

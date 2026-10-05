@@ -66,6 +66,12 @@ class ManageCacheSettings extends BaseSettingsPage
                             ->helperText(__('Default for the "Share cache across playlists" option on new playlists.'))
                             ->default(false),
                     ]),
+                Callout::make(__('Cache through Radarr or Sonarr'))
+                    ->icon('heroicon-o-information-circle')
+                    ->color('info')
+                    ->columnSpanFull()
+                    ->visible(fn (Get $get): bool => (bool) $get('enable_cache'))
+                    ->description(__('Turn on "Use for caching" on a Radarr or Sonarr integration to send new titles there instead of downloading them from the provider. This applies to playlists that prefer media server sources. Those titles are managed in Radarr or Sonarr and cache retention never removes them.')),
             ]);
     }
 

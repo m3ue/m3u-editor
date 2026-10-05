@@ -188,6 +188,11 @@ class ArrIntegrationResource extends Resource
                             ->label(__('Allow Guest Requests'))
                             ->helperText(__('Allow guests to request content via this integration on any playlist that has content requests enabled.'))
                             ->default(false),
+
+                        Toggle::make('cache_enabled')
+                            ->label(__('Use for caching'))
+                            ->helperText(__('On playlists that prefer media server sources, Cache Now and dynamic group caching add new titles here instead of downloading them from the provider. Titles already in the library are never changed or removed.'))
+                            ->default(false),
                     ]),
 
                 Section::make(__('Webhook'))

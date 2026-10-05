@@ -12,4 +12,6 @@ enum CacheDispatchResult: string
     case AlreadyQueued = 'already_queued';
     case Unavailable = 'unavailable';
     case Disabled = 'disabled';
+    case SentToArr = 'sent_to_arr';
+    case InArrLibrary = 'in_arr_library';
 }

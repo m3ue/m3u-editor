@@ -30,9 +30,12 @@ use Illuminate\Database\UniqueConstraintViolationException;
  *    re-queued rather than reported as done.
  *  - A playable copy shared by another of the same user's playlists
  *    (`share_cache_across_playlists`) counts as already cached.
+ *  - New items can go to Radarr/Sonarr instead (CachedContentArrService).
  */
 class CachedContentDispatchService
 {
+    public function __construct(private CachedContentArrService $arr) {}
+
     /**
      * Whether the global `enable_cache` toggle is on.
      */
@@ -72,8 +75,11 @@ class CachedContentDispatchService
      * group-managed, and Failed rows are left alone (the download job
      * already retried for a day). A manual call on a group-managed row
      * makes it manual, so group retention never deletes it.
+     *
+     * `$viaArr` false keeps the provider even when a caching Radarr/Sonarr
+     * is set up.
      */
-    public function dispatch(Channel|Episode $item, bool $automatic = false): CacheDispatchResult
+    public function dispatch(Channel|Episode $item, bool $automatic = false, bool $viaArr = true): CacheDispatchResult
     {
         if (! $this->isEnabled()) {
             return CacheDispatchResult::Disabled;
@@ -111,6 +117,11 @@ class CachedContentDispatchService
             return CacheDispatchResult::AlreadyCached;
         }
 
+        $sent = $viaArr ? $this->arr->request($item, $automatic) : null;
+        if ($sent !== null) {
+            return $sent;
+        }
+
         /** @var Playlist $playlist */
         $playlist = $item->playlist;
 
@@ -141,8 +152,9 @@ class CachedContentDispatchService
     }
 
     /**
-     * Queue every episode of a series. Returns how many items ended up in
-     * each result bucket.
+     * Queue every episode of a series, or add the whole series to Sonarr
+     * when it handles caching. Returns how many items ended up in each
+     * result bucket.
      *
      * @return array<string, int> keyed by CacheDispatchResult value
      */
@@ -152,6 +164,16 @@ class CachedContentDispatchService
 
         if (! $this->isEnabled()) {
             $counts[CacheDispatchResult::Disabled->value] = 1;
+
+            return $counts;
+        }
+
+        $seasons = $series->episodes()->whereNotNull('season')->distinct()->pluck('season')
+            ->map(fn ($season): int => (int) $season)
+            ->all();
+
+        if ($this->arr->requestSeries($series, $seasons)) {
+            $counts[CacheDispatchResult::SentToArr->value] = $series->episodes()->count();
 
             return $counts;
         }
@@ -368,6 +390,14 @@ class CachedContentDispatchService
                 ->body($isEpisode
                     ? __('This episode has no cacheable source URL.')
                     : __('This VOD has no cacheable source URL.')),
+            CacheDispatchResult::SentToArr => Notification::make()
+                ->success()
+                ->title($isEpisode ? __('Sent to Sonarr') : __('Sent to Radarr'))
+                ->body(__('Track progress on the Download Queue page. If it can\'t be found, run Cache Now again to download it from the provider instead.')),
+            CacheDispatchResult::InArrLibrary => Notification::make()
+                ->info()
+                ->title($isEpisode ? __('Already in Sonarr') : __('Already in Radarr'))
+                ->body(__('It\'s already downloaded there and plays from your media server once the server has synced it.')),
         };
     }
 
@@ -386,9 +416,11 @@ class CachedContentDispatchService
                 ->body(__('Caching is disabled in Settings.'));
         }
 
-        $queued = $counts[CacheDispatchResult::Queued->value] ?? 0;
+        $sent = $counts[CacheDispatchResult::SentToArr->value] ?? 0;
+        $queued = ($counts[CacheDispatchResult::Queued->value] ?? 0) + $sent;
         $skipped = ($counts[CacheDispatchResult::AlreadyCached->value] ?? 0)
-            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0);
+            + ($counts[CacheDispatchResult::AlreadyQueued->value] ?? 0)
+            + ($counts[CacheDispatchResult::InArrLibrary->value] ?? 0);
         $unavailable = $counts[CacheDispatchResult::Unavailable->value] ?? 0;
 
         $notification = Notification::make();
@@ -408,10 +440,17 @@ class CachedContentDispatchService
 
         return $notification
             ->title($title)
-            ->body(__(':skipped already cached or queued, :unavailable without a cacheable source.', [
-                'skipped' => $skipped,
-                'unavailable' => $unavailable,
-            ]));
+            ->body($sent > 0
+                ? __(':sent sent to :arr, :skipped already cached or queued, :unavailable without a cacheable source.', [
+                    'sent' => $sent,
+                    'arr' => $episodes ? 'Sonarr' : 'Radarr',
+                    'skipped' => $skipped,
+                    'unavailable' => $unavailable,
+                ])
+                : __(':skipped already cached or queued, :unavailable without a cacheable source.', [
+                    'skipped' => $skipped,
+                    'unavailable' => $unavailable,
+                ]));
     }
 
     /**
