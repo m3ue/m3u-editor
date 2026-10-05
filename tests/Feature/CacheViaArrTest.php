@@ -201,6 +201,20 @@ it('falls back to the provider when Radarr rejects the add', function () {
     expect(cvaService()->dispatch(cvaChannel($playlist)))->toBe(CacheDispatchResult::Queued);
 });
 
+it('counts a rejected add as sent when another run just added the movie', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr');
+    Http::fake([
+        'radarr.test/api/v3/movie/lookup*' => Http::sequence()
+            ->push(cvaMovieLookup())
+            ->push(cvaMovieLookup(libraryId: 7)),
+        'radarr.test/api/v3/movie' => Http::response(['message' => 'This movie has already been added'], 400),
+    ]);
+
+    expect(cvaService()->dispatch(cvaChannel($playlist), automatic: true))->toBe(CacheDispatchResult::SentToArr)
+        ->and(CachedContentFile::query()->count())->toBe(0);
+});
+
 it('falls back to the provider when Radarr is unreachable and stops asking it for the rest of the run', function () {
     $playlist = cvaPlaylist();
     cvaArr($playlist, 'radarr');

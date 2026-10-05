@@ -85,7 +85,7 @@ class CachedContentArrService
             return $movie['hasFile'] || $automatic ? CacheDispatchResult::InArrLibrary : null;
         }
 
-        return $this->add($radarr, [
+        return $this->add($radarr, $tmdbId, [
             'tmdbId' => $tmdbId,
             'title' => $movie['title'],
             'titleSlug' => $movie['titleSlug'],
@@ -160,7 +160,7 @@ class CachedContentArrService
                     'monitored' => in_array((int) $season['seasonNumber'], $addSeasons, true),
                 ]);
 
-            $added = $seasons->contains('monitored', true) && $this->add($sonarr, [
+            $added = $seasons->contains('monitored', true) && $this->add($sonarr, $tvdbId, [
                 'tvdbId' => $tvdbId,
                 'title' => $lookup['title'],
                 'titleSlug' => $lookup['titleSlug'],
@@ -226,20 +226,24 @@ class CachedContentArrService
     }
 
     /**
+     * Add a title. A rejected add still counts when the title is in the
+     * library now: two dynamic groups sharing a member can race to add it.
+     *
      * @param  array<string, mixed>  $payload
      */
-    private function add(ArrIntegration $integration, array $payload): bool
+    private function add(ArrIntegration $integration, int $externalId, array $payload): bool
     {
         $result = ArrService::make($integration)->add($payload);
-
-        if (! $result['ok']) {
-            Log::warning('Cache request could not be added, using the provider', [
-                'integration_id' => $integration->id,
-                'error' => $result['error'] ?? null,
-            ]);
+        if ($result['ok'] || ($this->lookup($integration, $externalId)['existsInLibrary'] ?? false)) {
+            return true;
         }
 
-        return $result['ok'];
+        Log::warning('Cache request could not be added, using the provider', [
+            'integration_id' => $integration->id,
+            'error' => $result['error'] ?? null,
+        ]);
+
+        return false;
     }
 
     /**
