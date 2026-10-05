@@ -46,9 +46,9 @@ jobs:
         id: proxy
         run: |
           PROXY_COMMIT=$(git ls-remote https://github.com/${{ github.repository_owner }}/m3u-proxy.git refs/heads/master | cut -f1)
-          if [ -z "$PROXY_COMMIT" ]; then
-            echo "::warning::Could not fetch m3u-proxy commit, using timestamp for cache bust"
-            PROXY_COMMIT=$(date +%s)
+          if ! echo "$PROXY_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Could not resolve m3u-proxy master to a commit SHA (got: '$PROXY_COMMIT')"
+            exit 1
           fi
           echo "commit=$PROXY_COMMIT" >> $GITHUB_OUTPUT
           echo "📦 m3u-proxy commit: $PROXY_COMMIT"
