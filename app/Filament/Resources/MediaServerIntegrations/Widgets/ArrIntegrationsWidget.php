@@ -81,6 +81,11 @@ class ArrIntegrationsWidget extends BaseWidget
                     ->label(__('Guest'))
                     ->sortable(),
 
+                ToggleColumn::make('cache_enabled')
+                    ->label(__('Caching'))
+                    ->tooltip(__('On playlists that prefer media server sources, Cache Now and dynamic group caching add new titles here instead of downloading them from the provider. Titles already in the library are never changed or removed.'))
+                    ->sortable(),
+
                 TextColumn::make('type')
                     ->badge()
                     ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'warning')

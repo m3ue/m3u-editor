@@ -4,6 +4,7 @@ use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
 use App\Filament\Resources\ArrIntegrations\Pages\CreateArrIntegration;
 use App\Filament\Resources\ArrIntegrations\Pages\EditArrIntegration;
 use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
+use App\Filament\Resources\MediaServerIntegrations\Widgets\ArrIntegrationsWidget;
 use App\Models\ArrIntegration;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -103,6 +104,16 @@ it('saves the Use for caching toggle', function () {
         ->fillForm(['cache_enabled' => true])
         ->call('save')
         ->assertHasNoFormErrors();
+
+    expect($integration->refresh()->cache_enabled)->toBeTrue();
+});
+
+it('flips Use for caching from the integrations table', function () {
+    $integration = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
+
+    Livewire::test(ArrIntegrationsWidget::class)
+        ->assertSee('instead of downloading them from the provider')
+        ->call('updateTableColumnState', 'cache_enabled', (string) $integration->id, true);
 
     expect($integration->refresh()->cache_enabled)->toBeTrue();
 });
