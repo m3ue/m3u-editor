@@ -330,7 +330,7 @@ class SeriesResource extends Resource implements CopilotResource
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-arrow-down-tray')
             ->modalHeading(__('Cache all episodes?'))
-            ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
+            ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage, or add the series to Sonarr if Sonarr is set up for caching. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
             ->modalSubmitActionLabel(__('Cache all episodes'))
             ->action(function (Series $record): void {
                 $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
@@ -353,7 +353,7 @@ class SeriesResource extends Resource implements CopilotResource
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-arrow-down-tray')
             ->modalHeading(__('Cache all episodes from selected series?'))
-            ->modalDescription(__('Queue background downloads of every episode of every selected series to local storage. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
+            ->modalDescription(__('Queue background downloads of every episode of every selected series to local storage, or add each series to Sonarr if Sonarr is set up for caching. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache all episodes'))
             ->action(function (Collection $records): void {
                 QueueCachedContentDownloads::dispatch('series', $records->modelKeys(), auth()->id());

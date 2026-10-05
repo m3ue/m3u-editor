@@ -199,7 +199,7 @@ class EpisodesRelationManager extends RelationManager
                     })
                     ->requiresConfirmation()
                     ->modalHeading(__('Cache this episode?'))
-                    ->modalDescription(fn (Episode $record): string => __('Dispatch a background job to download ":title" to local storage for offline playback.', [
+                    ->modalDescription(fn (Episode $record): string => __('Dispatch a background job to download ":title" to local storage for offline playback, or request it from Sonarr if Sonarr is set up for caching.', [
                         'title' => $record->title ?: __('Episode :seasonx:episode', [
                             'season' => (int) ($record->season ?? 0),
                             'episode' => (int) ($record->episode_num ?? 0),

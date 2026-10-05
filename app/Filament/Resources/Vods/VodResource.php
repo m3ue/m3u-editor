@@ -538,7 +538,7 @@ class VodResource extends Resource implements CopilotResource
             })
             ->requiresConfirmation()
             ->modalHeading(__('Cache this VOD?'))
-            ->modalDescription(fn (Channel $record): string => __('Dispatch a background job to download ":title" to local storage for offline playback.', ['title' => $record->display_title]))
+            ->modalDescription(fn (Channel $record): string => __('Dispatch a background job to download ":title" to local storage for offline playback, or add it to Radarr if Radarr is set up for caching.', ['title' => $record->display_title]))
             ->modalSubmitActionLabel(__('Cache now'))
             ->action(function (Channel $record): void {
                 $result = app(CachedContentDispatchService::class)->dispatch($record);
@@ -561,7 +561,7 @@ class VodResource extends Resource implements CopilotResource
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-arrow-down-tray')
             ->modalHeading(__('Cache selected VODs?'))
-            ->modalDescription(__('Queue background downloads of every selected VOD to local storage. VODs that are already cached, queued, or have no cacheable source URL are skipped.'))
+            ->modalDescription(__('Queue background downloads of every selected VOD to local storage, or add them to Radarr if Radarr is set up for caching. VODs that are already cached, queued, or have no cacheable source URL are skipped.'))
             ->modalSubmitActionLabel(__('Cache now'))
             ->action(function (Collection $records): void {
                 QueueCachedContentDownloads::dispatch('vod', $records->modelKeys(), auth()->id());
