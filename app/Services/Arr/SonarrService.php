@@ -396,8 +396,10 @@ class SonarrService extends BaseArrService
         return $this->safeCall(function () use ($sonarrSeriesId, $seasonNumber, $episodeNumber) {
             $episodeId = $this->resolveEpisodeId($sonarrSeriesId, $seasonNumber, $episodeNumber);
 
+            // Thrown (not returned) so safeCall reports ok=false and the
+            // RequestArrEpisode job retries instead of treating it as done.
             if (! $episodeId) {
-                return ['ok' => false, 'error' => "Episode S{$seasonNumber}E{$episodeNumber} not yet indexed."];
+                throw new \RuntimeException("Episode S{$seasonNumber}E{$episodeNumber} not yet indexed.");
             }
 
             $this->client()
@@ -408,7 +410,7 @@ class SonarrService extends BaseArrService
                 ->post('/command', ['name' => 'EpisodeSearch', 'episodeIds' => [$episodeId]])
                 ->throw();
 
-            return ['ok' => true, 'data' => $episodeId];
+            return $episodeId;
         }, "monitor and search episode S{$seasonNumber}E{$episodeNumber}");
     }
 

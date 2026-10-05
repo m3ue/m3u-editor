@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\RequestArrEpisode;
 use App\Models\ArrIntegration;
 use App\Models\Playlist;
 use App\Models\User;
@@ -454,4 +455,32 @@ it('base url strips trailing slash for client requests', function () {
         return str_contains($request->url(), 'http://sonarr.example.com:8989/api/v3/system/status')
             && ! str_contains($request->url(), '//api');
     });
+});
+
+it('monitorAndSearchEpisode reports a not-yet-indexed episode as a failure so RequestArrEpisode retries', function () {
+    Http::fake(['*/api/v3/episode*' => Http::response([], 200)]);
+
+    $integration = ArrIntegration::factory()->sonarr()->create(['user_id' => $this->user->id]);
+
+    expect(ArrService::make($integration)->monitorAndSearchEpisode(77, 1, 1))
+        ->toMatchArray(['ok' => false, 'error' => 'Episode S1E1 not yet indexed.']);
+
+    expect(fn () => (new RequestArrEpisode($integration->id, 77, 1, 1, $this->user->id, 'Dark'))->handle())
+        ->toThrow(RuntimeException::class);
+    Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/api/v3/command'));
+});
+
+it('monitorAndSearchEpisode monitors and searches the episode once it is indexed', function () {
+    Http::fake([
+        '*/api/v3/episode/monitor' => Http::response([], 202),
+        '*/api/v3/episode*' => Http::response([['id' => 501, 'seasonNumber' => 1, 'episodeNumber' => 1]], 200),
+        '*/api/v3/command' => Http::response(['id' => 1], 201),
+    ]);
+
+    $integration = ArrIntegration::factory()->sonarr()->create(['user_id' => $this->user->id]);
+
+    expect(ArrService::make($integration)->monitorAndSearchEpisode(77, 1, 1))->toBe(['ok' => true, 'data' => 501]);
+
+    Http::assertSent(fn ($request) => $request->method() === 'PUT' && $request['episodeIds'] === [501] && $request['monitored'] === true);
+    Http::assertSent(fn ($request) => $request->method() === 'POST' && $request['name'] === 'EpisodeSearch' && $request['episodeIds'] === [501]);
 });
