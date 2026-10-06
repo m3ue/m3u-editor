@@ -5,6 +5,7 @@ namespace App\Filament\Resources\MediaServerIntegrations;
 use App\Exceptions\MediaServerException;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
+use App\Filament\Clusters\MediaServers\MediaServersCluster;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
@@ -78,27 +79,25 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
     protected static ?string $recordTitleAttribute = 'name';
 
+    protected static ?string $cluster = MediaServersCluster::class;
+
+    // Prefixed by the cluster: the admin URL is /media-server-integrations/servers.
+    protected static ?string $slug = 'servers';
+
     public static function getNavigationLabel(): string
     {
-        return __('Servers');
+        return __('Media Servers');
     }
 
     public static function getModelLabel(): string
     {
-        return __('Server');
+        return __('Media Server');
     }
 
     public static function getPluralModelLabel(): string
     {
-        return __('Servers');
+        return __('Media Servers');
     }
-
-    public static function getNavigationGroup(): ?string
-    {
-        return __('Integrations');
-    }
-
-    protected static ?int $navigationSort = 100;
 
     /**
      * Check if the user can access this page.
@@ -241,14 +240,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                             Select::make('type')
                                 ->label(__('Server Type'))
-                                ->options([
-                                    'emby' => 'Emby',
-                                    'jellyfin' => 'Jellyfin',
-                                    'plex' => 'Plex',
-                                    'local' => 'Local Media',
-                                    'webdav' => 'WebDAV',
-                                    'aiostreams' => 'AIOStreams',
-                                ])
+                                ->options(self::typeOptions())
                                 ->required()
                                 ->default('emby')
                                 ->live()
@@ -1261,10 +1253,27 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
         ];
     }
 
+    /**
+     * Integration types and their labels, shared by the form, the table's
+     * type badge and its filter so the three can't drift apart.
+     *
+     * @return array<string, string>
+     */
+    public static function typeOptions(): array
+    {
+        return [
+            'emby' => 'Emby',
+            'jellyfin' => 'Jellyfin',
+            'plex' => 'Plex',
+            'local' => 'Local Media',
+            'webdav' => 'WebDAV',
+            'aiostreams' => 'AIOStreams',
+        ];
+    }
+
     public static function table(Table $table): Table
     {
         return $table
-            ->heading(__('Media Servers'))
             ->headerActions([
                 CreateAction::make()
                     ->label(__('Add Media Server')),
@@ -1314,12 +1323,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                 TextColumn::make('type')
                     ->label(__('Type'))
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'local' => 'Local Media',
-                        'webdav' => 'WebDAV',
-                        'aiostreams' => 'AIOStreams',
-                        default => ucfirst($state),
-                    })
+                    ->formatStateUsing(fn (string $state): string => self::typeOptions()[$state] ?? ucfirst($state))
                     ->color(fn (string $state): string => match ($state) {
                         'emby' => 'success',
                         'jellyfin' => 'info',
@@ -1427,12 +1431,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('type')
-                    ->options([
-                        'emby' => 'Emby',
-                        'jellyfin' => 'Jellyfin',
-                        'plex' => 'Plex',
-                        'local' => 'Local Media',
-                    ]),
+                    ->options(self::typeOptions()),
                 Tables\Filters\TernaryFilter::make('enabled')
                     ->label(__('Enabled')),
             ])

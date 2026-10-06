@@ -69,7 +69,8 @@ class SyncTranslations extends Command
         // array_merge() would renumber purely-numeric-string keys (e.g. "9", "10")
         // instead of treating them as translation keys, corrupting their values.
         $merged = $existing + $this->newKeys;
-        ksort($merged);
+        // SORT_STRING matches lang:merge-conflicts, so the two never reorder each other's output.
+        ksort($merged, SORT_STRING);
         $after = count($merged);
         $addedCount = $after - $before;
 

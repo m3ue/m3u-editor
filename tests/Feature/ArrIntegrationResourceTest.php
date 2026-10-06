@@ -1,14 +1,12 @@
 <?php
 
 use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
-use App\Filament\Resources\ArrIntegrations\Pages\CreateArrIntegration;
-use App\Filament\Resources\ArrIntegrations\Pages\EditArrIntegration;
 use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
-use App\Filament\Resources\MediaServerIntegrations\Widgets\ArrIntegrationsWidget;
 use App\Models\ArrIntegration;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Filament\Actions\Testing\TestAction;
+use Filament\Forms\Components\Select;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
@@ -51,8 +49,8 @@ it('scopes table query to current user', function () {
 });
 
 it('can create an integration', function () {
-    Livewire::test(CreateArrIntegration::class)
-        ->fillForm([
+    Livewire::test(ListArrIntegrations::class)
+        ->callAction(TestAction::make('create')->table(), data: [
             'name' => 'Sonarr 1080p',
             'type' => 'sonarr',
             'url' => 'http://192.168.1.42:8989',
@@ -60,7 +58,6 @@ it('can create an integration', function () {
             'enabled' => true,
             'guest_enabled' => false,
         ])
-        ->call('create')
         ->assertHasNoFormErrors()
         ->assertNotified();
 
@@ -72,13 +69,12 @@ it('can create an integration', function () {
 });
 
 it('requires type on create', function () {
-    Livewire::test(CreateArrIntegration::class)
-        ->fillForm([
+    Livewire::test(ListArrIntegrations::class)
+        ->callAction(TestAction::make('create')->table(), data: [
             'name' => 'No Type',
             'url' => 'http://192.168.1.42:8989',
             'api_key' => 'secret',
         ])
-        ->call('create')
         ->assertHasFormErrors(['type' => 'required']);
 });
 
@@ -88,11 +84,8 @@ it('can edit an existing integration', function () {
         'name' => 'Old Name',
     ]);
 
-    Livewire::test(EditArrIntegration::class, [
-        'record' => $integration->id,
-    ])
-        ->fillForm(['name' => 'New Name', 'guest_enabled' => true])
-        ->call('save')
+    Livewire::test(ListArrIntegrations::class)
+        ->callAction(TestAction::make('edit')->table($integration), data: ['name' => 'New Name', 'guest_enabled' => true])
         ->assertHasNoFormErrors()
         ->assertNotified();
 
@@ -108,9 +101,8 @@ it('saves the Use for caching toggle', function () {
 
     $integration = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
-        ->fillForm(['cache_enabled' => true])
-        ->call('save')
+    Livewire::test(ListArrIntegrations::class)
+        ->callAction(TestAction::make('edit')->table($integration), data: ['cache_enabled' => true])
         ->assertHasNoFormErrors();
 
     expect($integration->refresh()->cache_enabled)->toBeTrue();
@@ -123,7 +115,7 @@ it('flips Use for caching from the integrations table', function () {
 
     $integration = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
 
-    Livewire::test(ArrIntegrationsWidget::class)
+    Livewire::test(ListArrIntegrations::class)
         ->assertSee('instead of downloading them from the provider')
         ->call('updateTableColumnState', 'cache_enabled', (string) $integration->id, true);
 
@@ -136,11 +128,8 @@ it('preserves api_key on edit when left blank', function () {
         'api_key' => 'original-key',
     ]);
 
-    Livewire::test(EditArrIntegration::class, [
-        'record' => $integration->id,
-    ])
-        ->fillForm(['name' => 'New Name'])
-        ->call('save')
+    Livewire::test(ListArrIntegrations::class)
+        ->callAction(TestAction::make('edit')->table($integration), data: ['name' => 'New Name'])
         ->assertHasNoFormErrors();
 
     $integration->refresh();
@@ -165,10 +154,11 @@ it('lists the page without error', function () {
         ->assertOk();
 });
 
-it('shows the webhook URL on the edit page', function () {
+it('shows the webhook URL when editing', function () {
     $integration = ArrIntegration::factory()->create(['user_id' => $this->user->id]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->assertSchemaStateSet(['webhook_url' => url('/api/webhooks/arr/'.$integration->webhook_secret)]);
 });
 
@@ -210,7 +200,8 @@ it('registers the webhook in Radarr with the events the app handles', function (
             : Http::response(['id' => 9], 201),
     ]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->callAction(TestAction::make('registerWebhook')->schemaComponent('webhook'))
         ->assertNotified('Webhook registered');
 
@@ -235,7 +226,8 @@ it('updates an existing webhook connection instead of adding a second one', func
         'radarr.test/api/v3/notification/5' => Http::response(['id' => 5], 202),
     ]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->callAction(TestAction::make('registerWebhook')->schemaComponent('webhook'))
         ->assertNotified('Webhook registered');
 
@@ -256,7 +248,8 @@ it('shows the arr error when the webhook cannot be registered', function () {
             : Http::response([['propertyName' => '', 'errorMessage' => 'Unable to post to webhook: Connection refused']], 400),
     ]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->callAction(TestAction::make('registerWebhook')->schemaComponent('webhook'))
         ->assertNotified('Could not register the webhook');
 });
@@ -270,7 +263,8 @@ it('tests the webhook through Radarr with one attempt', function (int $status, s
         'radarr.test/api/v3/notification' => Http::response([]),
     ]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->callAction(TestAction::make('testWebhook')->schemaComponent('webhook'))
         ->assertNotified($title);
 
@@ -295,10 +289,91 @@ it('tests the registered webhook connection itself, so its name does not clash',
         ]]),
     ]);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
         ->callAction(TestAction::make('testWebhook')->schemaComponent('webhook'))
         ->assertNotified('Webhook test succeeded');
 
     Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/notification/test')
         && $request['id'] === 5);
+});
+
+it('discovers profiles in the edit slide-over with the saved API key', function () {
+    $integration = ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'url' => 'http://radarr.test',
+        'api_key' => 'saved-key',
+        'quality_profile_id' => null,
+        'root_folder_path' => null,
+        'last_test_at' => null,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'radarr.test/api/v3/system/status' => Http::response(['version' => '6.0.4']),
+        'radarr.test/api/v3/qualityprofile' => Http::response([['id' => 7, 'name' => 'HD-1080p']]),
+        'radarr.test/api/v3/rootfolder' => Http::response([['path' => '/media/Movies']]),
+    ]);
+
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
+        ->callAction(TestAction::make('testAndDiscover')->schemaComponent())
+        ->assertNotified('Connection Successful')
+        ->assertSchemaStateSet(['quality_profile_id' => 7, 'root_folder_path' => '/media/Movies']);
+
+    Http::assertSent(fn (Request $request): bool => $request->hasHeader('X-Api-Key', 'saved-key'));
+    expect($integration->refresh()->last_test_at)->not->toBeNull();
+});
+
+it('shows the saved profile and folder locked until Discover loads the server choices', function () {
+    $integration = ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'url' => 'http://radarr.test',
+        'quality_profile_id' => 4,
+        'quality_profile_name' => 'Ultra-HD',
+        'root_folder_path' => '/media/4K',
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'radarr.test/api/v3/system/status' => Http::response(['version' => '6.0.4']),
+        'radarr.test/api/v3/qualityprofile' => Http::response([['id' => 7, 'name' => 'HD-1080p'], ['id' => 4, 'name' => 'Ultra-HD']]),
+        'radarr.test/api/v3/rootfolder' => Http::response([['path' => '/media/Movies'], ['path' => '/media/4K']]),
+    ]);
+
+    // Saving without Discover keeps the saved choices.
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
+        ->assertSchemaComponentVisible('quality_profile_id')
+        ->assertSchemaComponentVisible('root_folder_path')
+        ->assertFormFieldDisabled('quality_profile_id')
+        ->assertFormFieldDisabled('root_folder_path')
+        ->assertFormFieldExists('quality_profile_id', fn (Select $field): bool => $field->getOptions() === [4 => 'Ultra-HD'])
+        ->assertFormFieldExists('root_folder_path', fn (Select $field): bool => $field->getOptions() === ['/media/4K' => '/media/4K'])
+        ->assertMountedActionModalSee('Click "Test Connection & Discover" above to load the options from the server.')
+        ->fillForm(['name' => 'Radarr 4K'])
+        ->callMountedAction()
+        ->assertHasNoFormErrors();
+
+    expect($integration->refresh())
+        ->name->toBe('Radarr 4K')
+        ->quality_profile_id->toBe(4)
+        ->root_folder_path->toBe('/media/4K');
+
+    // Discover unlocks every choice and leaves the saved ones selected.
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($integration))
+        ->callAction(TestAction::make('testAndDiscover')->schemaComponent())
+        ->assertFormFieldEnabled('quality_profile_id')
+        ->assertFormFieldEnabled('root_folder_path')
+        ->assertFormFieldExists('quality_profile_id', fn (Select $field): bool => $field->getOptions() === [7 => 'HD-1080p', 4 => 'Ultra-HD'])
+        ->assertMountedActionModalDontSee('Click "Test Connection & Discover" above to load the options from the server.')
+        ->assertSchemaStateSet(['quality_profile_id' => 4, 'root_folder_path' => '/media/4K']);
+});
+
+it('shows the profile and folder fields locked on create until Discover runs', function () {
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('create')->table())
+        ->assertSchemaComponentVisible('quality_profile_id')
+        ->assertFormFieldDisabled('quality_profile_id')
+        ->assertSchemaComponentVisible('root_folder_path')
+        ->assertFormFieldDisabled('root_folder_path');
 });

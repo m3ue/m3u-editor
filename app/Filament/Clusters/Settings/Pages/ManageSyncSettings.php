@@ -3,15 +3,18 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Jobs\RestartQueue;
 use App\Models\StreamFileSetting;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\Bus\Dispatcher;
 
 class ManageSyncSettings extends BaseSettingsPage
 {
@@ -29,6 +32,31 @@ class ManageSyncSettings extends BaseSettingsPage
     public function getTitle(): string
     {
         return __('Sync Options');
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('reset_queue')
+                ->label(__('Reset Queue'))
+                ->action(function (Dispatcher $dispatcher): void {
+                    $dispatcher->dispatch(new RestartQueue);
+                })
+                ->after(function () {
+                    Notification::make()
+                        ->success()
+                        ->title(__('Queue reset'))
+                        ->body(__('The queue workers have been restarted and any pending jobs flushed. You may need to manually sync any Playlists or EPGs that were in progress.'))
+                        ->duration(10000)
+                        ->send();
+                })
+                ->color('danger')
+                ->requiresConfirmation()
+                ->icon('heroicon-o-exclamation-triangle')
+                ->modalIcon('heroicon-o-exclamation-triangle')
+                ->modalDescription(__('Resetting the queue will restart the queue workers and flush any pending jobs. Any syncs or background processes will be stopped and removed. Only perform this action if you are having sync issues.'))
+                ->modalSubmitActionLabel(__('I understand, reset now')),
+        ];
     }
 
     public function form(Schema $schema): Schema

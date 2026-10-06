@@ -20,6 +20,7 @@ class ArrIntegration extends Model
             'enabled' => 'boolean',
             'guest_enabled' => 'boolean',
             'cache_enabled' => 'boolean',
+            'cache_cleanup' => 'boolean',
             'api_key' => 'encrypted',
             'last_test_at' => 'datetime',
             'quality_profile_id' => 'integer',

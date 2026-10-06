@@ -2,6 +2,7 @@
 
 namespace App\Services\Arr;
 
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 
 class RadarrService extends BaseArrService
@@ -280,6 +281,45 @@ class RadarrService extends BaseArrService
     public function supportsEpisodes(): bool
     {
         return false;
+    }
+
+    /**
+     * One library movie, or null when it's gone. Throws when Radarr can't be
+     * reached.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fetchMovie(int $movieId): ?array
+    {
+        try {
+            return $this->client()->get('/movie/'.$movieId)->throw()->json();
+        } catch (RequestException $e) {
+            if ($e->response->status() === 404) {
+                return null;
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Remove a movie and its files from Radarr, without an import exclusion
+     * so it can be added again later.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function deleteMovie(int $movieId): array
+    {
+        return $this->safeCall(
+            function () use ($movieId) {
+                $this->client()
+                    ->delete('/movie/'.$movieId.'?deleteFiles=true&addImportExclusion=false')
+                    ->throw();
+
+                return true;
+            },
+            'delete movie'
+        );
     }
 
     /**

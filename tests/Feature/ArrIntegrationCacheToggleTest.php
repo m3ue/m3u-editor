@@ -1,10 +1,10 @@
 <?php
 
-use App\Filament\Resources\ArrIntegrations\Pages\EditArrIntegration;
-use App\Filament\Resources\MediaServerIntegrations\Widgets\ArrIntegrationsWidget;
+use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
 use App\Models\ArrIntegration;
 use App\Models\User;
 use App\Settings\GeneralSettings;
+use Filament\Actions\Testing\TestAction;
 use Filament\Tables\Columns\ToggleColumn;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -29,28 +29,54 @@ beforeEach(function () {
 it('disables the Caching toggle while the cache feature is off', function () {
     arrWidgetCacheSetting(false);
 
-    Livewire::test(ArrIntegrationsWidget::class)
+    Livewire::test(ListArrIntegrations::class)
         ->assertTableColumnExists('cache_enabled', fn (ToggleColumn $column): bool => $column->isDisabled(), $this->integration);
 });
 
 it('enables the Caching toggle while the cache feature is on', function () {
     arrWidgetCacheSetting(true);
 
-    Livewire::test(ArrIntegrationsWidget::class)
+    Livewire::test(ListArrIntegrations::class)
         ->assertTableColumnExists('cache_enabled', fn (ToggleColumn $column): bool => ! $column->isDisabled(), $this->integration);
 });
 
-it('disables Use for caching on the edit form while the cache feature is off', function () {
+it('disables Use for caching in the edit slide-over while the cache feature is off', function () {
     arrWidgetCacheSetting(false);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $this->integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($this->integration))
         ->assertFormFieldDisabled('cache_enabled')
-        ->assertSee('Turn on &quot;Enable cache&quot; in Settings', false);
+        ->assertMountedActionModalSee('Turn on "Enable cache" in Settings');
 });
 
-it('enables Use for caching on the edit form while the cache feature is on', function () {
+it('enables Use for caching in the edit slide-over while the cache feature is on', function () {
     arrWidgetCacheSetting(true);
 
-    Livewire::test(EditArrIntegration::class, ['record' => $this->integration->id])
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($this->integration))
         ->assertFormFieldEnabled('cache_enabled');
+});
+
+it('shows Remove after leaving dynamic groups on a Radarr used for caching, and saves it', function () {
+    arrWidgetCacheSetting(true);
+
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($this->integration))
+        ->assertFormFieldHidden('cache_cleanup')
+        ->fillForm(['cache_enabled' => true])
+        ->assertFormFieldVisible('cache_cleanup')
+        ->fillForm(['cache_cleanup' => true])
+        ->callMountedAction()
+        ->assertHasNoFormErrors();
+
+    expect($this->integration->refresh()->cache_cleanup)->toBeTrue();
+});
+
+it('hides Remove after leaving dynamic groups on Sonarr', function () {
+    arrWidgetCacheSetting(true);
+    $sonarr = ArrIntegration::factory()->sonarr()->cacheEnabled()->create(['user_id' => $this->user->id]);
+
+    Livewire::test(ListArrIntegrations::class)
+        ->mountAction(TestAction::make('edit')->table($sonarr))
+        ->assertFormFieldHidden('cache_cleanup');
 });

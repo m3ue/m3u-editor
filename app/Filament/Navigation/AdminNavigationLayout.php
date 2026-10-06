@@ -62,7 +62,6 @@ final class AdminNavigationLayout
             'channel_scrubbers',
         ],
         'integrations' => [
-            'request_content',
             'networks',
         ],
         'epg' => [

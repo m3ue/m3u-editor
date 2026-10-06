@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CacheDispatchResult;
+use App\Models\ArrCacheMovie;
 use App\Models\ArrIntegration;
 use App\Models\Channel;
 use App\Models\Episode;
@@ -19,11 +20,15 @@ use Throwable;
  * the arr downloads the title and playback picks it up from the media
  * server. Only integrations with "Use for caching" on are used.
  *
- * Only titles the arr doesn't have yet are sent, and nothing in its library
- * is changed or removed. A title it already has counts as cached when the
- * file is there. Without a file, Cache Now downloads it from the provider
- * (so running Cache Now again gets past an arr that can't find it), while
- * dynamic-group auto-cache leaves it to the arr.
+ * Only titles the arr doesn't have yet are sent, and nothing already in its
+ * library is changed or removed. A title it already has counts as cached
+ * when the file is there. Without a file, Cache Now downloads it from the
+ * provider (so running Cache Now again gets past an arr that can't find
+ * it), while dynamic-group auto-cache leaves it to the arr.
+ *
+ * Movies dynamic-group auto-cache adds to a Radarr with "Remove after
+ * leaving dynamic groups" on are recorded (ArrCacheMovie) for
+ * ArrCacheCleanupService to remove later. Cache Now on one stops that.
  *
  * Methods return null (or false) when the provider should be used instead,
  * including when the arr is unreachable or rejects the title.
@@ -79,6 +84,10 @@ class CachedContentArrService
             return null;
         }
 
+        if (! $automatic) {
+            ArrCacheMovie::keep($radarr->user_id, $tmdbId);
+        }
+
         $movie = $this->lookup($radarr, $tmdbId);
         if ($movie === null) {
             return null;
@@ -88,12 +97,24 @@ class CachedContentArrService
             return $movie['hasFile'] || $automatic ? CacheDispatchResult::InArrLibrary : null;
         }
 
-        return $this->add($radarr, $tmdbId, [
+        $added = $this->add($radarr, $tmdbId, [
             'tmdbId' => $tmdbId,
             'title' => $movie['title'],
             'titleSlug' => $movie['titleSlug'],
             'images' => $movie['images'],
-        ]) ? CacheDispatchResult::SentToArr : null;
+        ]);
+        if ($added === null) {
+            return null;
+        }
+
+        if ($automatic && $radarr->cache_cleanup && isset($added['id'])) {
+            ArrCacheMovie::query()->updateOrCreate(
+                ['arr_integration_id' => $radarr->id, 'tmdb_id' => $tmdbId],
+                ['arr_movie_id' => (int) $added['id'], 'left_at' => null],
+            );
+        }
+
+        return CacheDispatchResult::SentToArr;
     }
 
     private function requestEpisode(Episode $episode, bool $automatic): ?CacheDispatchResult
@@ -168,7 +189,7 @@ class CachedContentArrService
                 'title' => $lookup['title'],
                 'titleSlug' => $lookup['titleSlug'],
                 'seasons' => $seasons->values()->all(),
-            ]);
+            ]) !== null;
 
             $state = $added ? [...$state, 'added' => true] : null;
         }
@@ -247,16 +268,23 @@ class CachedContentArrService
     }
 
     /**
-     * Add a title. A rejected add still counts when the title is in the
-     * library now: two dynamic groups sharing a member can race to add it.
+     * Add a title, returning what the arr created, or null when it couldn't
+     * be added. A rejected add still counts (as an empty array) when the
+     * title is in the library now: two dynamic groups sharing a member can
+     * race to add it.
      *
      * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>|null
      */
-    private function add(ArrIntegration $integration, int $externalId, array $payload): bool
+    private function add(ArrIntegration $integration, int $externalId, array $payload): ?array
     {
         $result = ArrService::make($integration)->add($payload);
-        if ($result['ok'] || ($this->lookup($integration, $externalId)['existsInLibrary'] ?? false)) {
-            return true;
+        if ($result['ok']) {
+            return (array) ($result['data'] ?? []);
+        }
+
+        if ($this->lookup($integration, $externalId)['existsInLibrary'] ?? false) {
+            return [];
         }
 
         Log::warning('Cache request could not be added, using the provider', [
@@ -264,7 +292,7 @@ class CachedContentArrService
             'error' => $result['error'] ?? null,
         ]);
 
-        return false;
+        return null;
     }
 
     /**

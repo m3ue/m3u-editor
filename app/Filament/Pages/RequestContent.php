@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\MediaServers\MediaServersCluster;
+use App\Models\ArrIntegration;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Support\Htmlable;
 
@@ -9,17 +11,24 @@ class RequestContent extends Page
 {
     protected string $view = 'filament.pages.request-content';
 
+    protected static ?string $cluster = MediaServersCluster::class;
+
     public static function getNavigationLabel(): string
     {
         return __('Request Content');
     }
 
-    public static function getNavigationGroup(): ?string
+    /**
+     * Listed under Sonarr & Radarr only once one of the user's integrations
+     * is enabled, since there's nothing to search before that.
+     */
+    public static function shouldRegisterNavigation(): bool
     {
-        return __('Integrations');
+        return ArrIntegration::query()
+            ->where('user_id', auth()->id())
+            ->enabled()
+            ->exists();
     }
-
-    protected static ?int $navigationSort = 106;
 
     public function getTitle(): string|Htmlable
     {

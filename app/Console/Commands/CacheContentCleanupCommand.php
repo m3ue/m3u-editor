@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\ArrCacheCleanupService;
 use App\Services\CachedContentRetentionService;
 use Illuminate\Console\Command;
 
@@ -15,7 +16,8 @@ use Illuminate\Console\Command;
  *
  * `--dry-run` reports the count of rows that WOULD be deleted without
  * actually touching the DB or storage - useful for sanity-checking
- * retention policy after a playlist change.
+ * retention policy after a playlist change. It also lists the Radarr
+ * movies dynamic-group cleanup would remove (ArrCacheCleanupService).
  */
 class CacheContentCleanupCommand extends Command
 {
@@ -24,7 +26,7 @@ class CacheContentCleanupCommand extends Command
 
     protected $description = 'Delete cached files whose channel or episode is no longer in its playlist';
 
-    public function handle(CachedContentRetentionService $service): int
+    public function handle(CachedContentRetentionService $service, ArrCacheCleanupService $arrCleanup): int
     {
         $isDryRun = (bool) $this->option('dry-run');
 
@@ -34,6 +36,16 @@ class CacheContentCleanupCommand extends Command
             $released = $service->releaseDynamicGroupCaches();
             $this->info("Released {$released} dynamic-group cached files.");
         }
+
+        $removedMovies = $arrCleanup->sweep($isDryRun);
+        foreach ($removedMovies as $movie) {
+            $this->line("  {$movie['title']} (TMDB {$movie['tmdb_id']}) from {$movie['integration']}");
+        }
+        $this->info(sprintf(
+            '%s %d dynamic-group movies from Radarr.',
+            $isDryRun ? '[DRY RUN] Would remove' : 'Removed',
+            count($removedMovies),
+        ));
 
         $ids = $service->evaluate();
 

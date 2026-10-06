@@ -273,7 +273,8 @@ class ExtractTranslations extends Command
         // array_merge() would renumber purely-numeric-string keys (e.g. "9", "10")
         // instead of treating them as translation keys, corrupting their values.
         $merged = $this->strings + $existing;
-        ksort($merged);
+        // SORT_STRING matches lang:merge-conflicts, so the two never reorder each other's output.
+        ksort($merged, SORT_STRING);
 
         $path = lang_path('en.json');
         file_put_contents($path, json_encode($merged, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n");

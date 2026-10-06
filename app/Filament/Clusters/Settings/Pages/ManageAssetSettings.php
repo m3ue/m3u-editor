@@ -10,9 +10,11 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\HtmlString;
 
 class ManageAssetSettings extends BaseSettingsPage
@@ -33,6 +35,51 @@ class ManageAssetSettings extends BaseSettingsPage
         return __('Assets');
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('manage_assets')
+                ->label(__('Manage Assets'))
+                ->color('gray')
+                ->icon('heroicon-o-photo')
+                ->url(AssetResource::getUrl('index')),
+            Action::make('clear_expired_logo_cache')
+                ->label(__('Clear Expired Logo Cache'))
+                ->action(fn () => Artisan::call('app:logo-cleanup --force'))
+                ->after(function () {
+                    Notification::make()
+                        ->success()
+                        ->title(__('Expired logo cache cleared'))
+                        ->body(__('Expired logo cache files were removed successfully.'))
+                        ->duration(10000)
+                        ->send();
+                })
+                ->color('warning')
+                ->requiresConfirmation()
+                ->icon('heroicon-o-trash')
+                ->modalIcon('heroicon-o-trash')
+                ->modalDescription(__('Only expired logo cache entries (those older than 30 days). If permanent cache is enabled, nothing will be removed.'))
+                ->modalSubmitActionLabel(__('Clear expired cache')),
+            Action::make('clear_logo_cache')
+                ->label(__('Clear All Logo Cache'))
+                ->action(fn () => Artisan::call('app:logo-cleanup --force --all'))
+                ->after(function () {
+                    Notification::make()
+                        ->success()
+                        ->title(__('Logo cache cleared'))
+                        ->body(__('The logo cache has been cleared. Logos will be fetched again on next request wherever logo proxy is enabled.'))
+                        ->duration(10000)
+                        ->send();
+                })
+                ->color('danger')
+                ->requiresConfirmation()
+                ->icon('heroicon-o-exclamation-triangle')
+                ->modalIcon('heroicon-o-exclamation-triangle')
+                ->modalDescription(__('Clearing the logo cache will remove all cached logo images. If permanent cache is enabled, it will be ignored. This action cannot be undone.'))
+                ->modalSubmitActionLabel(__('I understand, clear now')),
+        ];
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -41,12 +88,6 @@ class ManageAssetSettings extends BaseSettingsPage
                     ->description(__('Manage logo cache behavior and storage used by logo proxy URLs.'))
                     ->columns(1)
                     ->headerActions([
-                        Action::make('manage_assets')
-                            ->label(__('Manage Assets'))
-                            ->color('gray')
-                            ->iconPosition('after')
-                            ->size('sm')
-                            ->url(AssetResource::getUrl('index')),
                         Action::make('view_repo')
                             ->label(__('View Logo Repository'))
                             ->icon('heroicon-o-arrow-top-right-on-square')

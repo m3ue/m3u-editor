@@ -98,52 +98,52 @@
             "hash": "tree-v2:5bf08ea1a28ca2559ae1b79a9e99cb3bfd5c33cf13a4b8ce7cc943461473e4e3"
         },
         "filament/actions": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:0e5c0d766a2d02fbef2f346aece4f42cb5b61b069f4958d50bdb4e6480f5320c"
+            "version": "v5.8.4",
+            "hash": "tree-v2:e68a719a10b0a901e7921b937259aeb64cc7298ef5847d15d9140b172dfe49e8"
         },
         "filament/filament": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:305947f83f0bd4526fb9ddeb3660bbb7aeff4ed19ae19ddf7b4c80ab17b91682"
+            "version": "v5.8.4",
+            "hash": "tree-v2:88ca33ccf74e3082919053e0791f18c54bbf6819b24d6a853c331e2ddf09e799"
         },
         "filament/forms": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:ee058a51dfd34473fbdeabf8340e112a856f050263642fe300430e96ab817dd9"
+            "version": "v5.8.4",
+            "hash": "tree-v2:db5aa2d15e7337eafbe06a9fec43434deb9d6850c8e0947cfa910e24aa9161a7"
         },
         "filament/infolists": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:41cb41989f14f21c75e6eca316cef0772db545c8707172beb2473f46bd08a1b3"
+            "version": "v5.8.4",
+            "hash": "tree-v2:2ce96073260e0f52f2e6e0a5910a08379d57344e3d452bfd1f965f3bcb1def3a"
         },
         "filament/notifications": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:86a255acd7e8291d1295feb685036b9eabe183e5c0a02449e48530e60abbcac6"
+            "version": "v5.8.4",
+            "hash": "tree-v2:cc6d7bd7899c5babf3c08a6ff80f997ed0ebc9835dbef20f3e5efdb3eaf05011"
         },
         "filament/query-builder": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:78958081c1a34bb20431c4d0468cfbac9396aad1ea49a4d0605035dde11ec818"
+            "version": "v5.8.4",
+            "hash": "tree-v2:0a57f44f3b822e743bb625ab60be44cdead3b82ac2c5e2ba97d259b4051fa568"
         },
         "filament/schemas": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:83b28c615c703db988b67888daec7110d8b5761bb996329f148433cac226cbee"
+            "version": "v5.8.4",
+            "hash": "tree-v2:6ff22b37a5c40459b774c6288c5ec4c73cb8f5f3c67bd5f0b5b77b2f33d92631"
         },
         "filament/spatie-laravel-settings-plugin": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:b1106dafec4a7c8de9144b4317b9a23d852392c0bef631d2f06ad4c994a8f843"
+            "version": "v5.8.4",
+            "hash": "tree-v2:92dd7ba080593fd99c6da6e09342532910f74c2bfefb0363a22595456b034a39"
         },
         "filament/spatie-laravel-tags-plugin": {
             "version": "v5.7.6",
             "hash": "tree-v2:b226ed01e3f648f84805934ae664246561a17b740f67b1d4ac17fbd8614f13d4"
         },
         "filament/support": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:5ca9ddd4e7a78c15a61d57a36e5c0fe71d00b5ee5cea9be93c5656f63e534421"
+            "version": "v5.8.4",
+            "hash": "tree-v2:5e2825ea16ab47c1327202727fe0dbe79578f3b111e424c778bdd81e0a5a30ec"
         },
         "filament/tables": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:1dc8e4ee527da3017669fb55a10578bd14b8ec7f15bd6d92fc074ab141cf477a"
+            "version": "v5.8.4",
+            "hash": "tree-v2:f5b0425441cfe362348d9fe3de6f480694fa9e98ce011708c1f34a1e76eb570a"
         },
         "filament/widgets": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:156db3a39b81732b9e2907ace8a8cca5c90fb4eeec3225c17dfe92fbb8d407b5"
+            "version": "v5.8.4",
+            "hash": "tree-v2:1c8662655397237c42068a6791c84e0c447b51a27f5fd8516ad07d93c3662e1d"
         },
         "firebase/php-jwt": {
             "version": "v7.1.0",
@@ -708,8 +708,8 @@
             "hash": "tree-v2:c33bdd2e0430e4110e6ee218701bdee1b422acb2510dd198836519b9a8fcc58d"
         },
         "filament/upgrade": {
-            "version": "v5.7.6",
-            "hash": "tree-v2:b6080200c01e008bcf185ac9c6dac75148b4c5e6489d066f60ecd62a590bb8d4"
+            "version": "v5.9.0",
+            "hash": "tree-v2:7f15dcd31aafad08c8affffdd4bbdb7793e74214b057efb646153ef377a68776"
         },
         "filp/whoops": {
             "version": "2.18.4",

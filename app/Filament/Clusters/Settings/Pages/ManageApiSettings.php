@@ -27,27 +27,29 @@ class ManageApiSettings extends BaseSettingsPage
         return __('API');
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('manage_api_keys')
+                ->label(__('Manage API Tokens'))
+                ->color('gray')
+                ->icon('heroicon-s-key')
+                ->url('/personal-access-tokens'),
+            Action::make('view_api_docs')
+                ->label(__('API Docs'))
+                ->color('gray')
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->url('/docs/api')
+                ->openUrlInNewTab(true),
+        ];
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema
             ->components([
                 Section::make(__('API Settings'))
-                    ->headerActions([
-                        Action::make('manage_api_keys')
-                            ->label(__('Manage API Tokens'))
-                            ->color('gray')
-                            ->icon('heroicon-s-key')
-                            ->iconPosition('before')
-                            ->size('sm')
-                            ->url('/personal-access-tokens'),
-                        Action::make('view_api_docs')
-                            ->label(__('API Docs'))
-                            ->icon('heroicon-o-arrow-top-right-on-square')
-                            ->iconPosition('after')
-                            ->size('sm')
-                            ->url('/docs/api')
-                            ->openUrlInNewTab(true),
-                    ])->schema([
+                    ->schema([
                         Toggle::make('show_api_docs')
                             ->label(__('Allow access to API docs'))
                             ->helperText(__('When enabled you can access the API documentation using the "API Docs" button. When disabled, the docs endpoint will return a 403 (Unauthorized). NOTE: The API will respond regardless of this setting. You do not need to enable it to use the API.')),

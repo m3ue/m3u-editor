@@ -6,6 +6,7 @@ use App\Enums\CachedContentFileStatus;
 use App\Enums\CachedContentManagedBy;
 use App\Enums\CacheDispatchResult;
 use App\Jobs\DownloadCachedContentFile;
+use App\Models\ArrCacheMovie;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
@@ -239,7 +240,8 @@ class CachedContentDispatchService
      * season of each series member, top-ranked first. Members already on
      * the user's media server are skipped (local media wins), and a copy
      * the group cached before the match appeared is marked dropped so
-     * retention releases it.
+     * retention releases it. A Never expire rule also keeps its movies out
+     * of Radarr cleanup, like Cache Now.
      *
      * @return array<string, int> keyed by CacheDispatchResult value
      */
@@ -261,6 +263,10 @@ class CachedContentDispatchService
 
             if ($member instanceof Channel) {
                 $this->dispatchGroupItem($member, $group, $settings['never_expire'], $counts);
+
+                if ($settings['never_expire']) {
+                    ArrCacheMovie::keep($playlist->user_id, (int) $member->getTmdbId());
+                }
 
                 continue;
             }

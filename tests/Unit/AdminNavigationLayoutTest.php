@@ -71,7 +71,7 @@ it('ships a simplified default that hides the curated groups and items', functio
         ->and(array_search('integrations', $simplified['groups']['order'], true))
         ->toBeGreaterThan(array_search('epg', $simplified['groups']['order'], true))
         ->and($simplified['items']['playlist']['hidden'])->toContain('channel_scrubbers', 'merged_playlists')
-        ->and($simplified['items']['integrations']['hidden'])->toContain('request_content', 'networks')
+        ->and($simplified['items']['integrations']['hidden'])->toContain('networks')
         ->and($simplified['items']['epg']['hidden'])->toContain('merged_epgs', 'epg_channels')
         ->and($simplified['items']['tools']['hidden'])->toContain('api_docs', 'queue_monitor')
         // Groups/items not named in the curated preset stay visible.

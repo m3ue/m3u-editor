@@ -31,6 +31,8 @@
         "video.js": "^8.23.3"
     },
     "overrides": {
-        "@xmldom/xmldom": "^0.8.15"
+        "@xmldom/xmldom": "^0.8.15",
+        "postcss-selector-parser": "^7.1.6",
+        "shell-quote": "^1.12.0"
     }
 }

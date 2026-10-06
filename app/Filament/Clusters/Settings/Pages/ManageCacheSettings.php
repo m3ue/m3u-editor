@@ -3,7 +3,9 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Callout;
@@ -30,6 +32,18 @@ class ManageCacheSettings extends BaseSettingsPage
         return __('Cache');
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('manage_cached_items')
+                ->label(__('Manage Cached Items'))
+                ->color('gray')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->url(CachedContentFileResource::getUrl())
+                ->visible(fn (): bool => CachedContentFileResource::canAccess()),
+        ];
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -49,7 +63,7 @@ class ManageCacheSettings extends BaseSettingsPage
                     ->color('info')
                     ->columnSpanFull()
                     ->visible(fn (Get $get): bool => (bool) $get('enable_cache'))
-                    ->description(__('Turn on "Use for caching" on a Radarr or Sonarr integration to send new titles there instead of downloading them from the provider. This applies to playlists that prefer media server sources. Those titles are managed in Radarr or Sonarr and cache retention never removes them.')),
+                    ->description(__('Turn on "Use for caching" on a Radarr or Sonarr integration to send new titles there instead of downloading them from the provider. This applies to playlists that prefer media server sources. Those titles are managed in Radarr or Sonarr, and cache retention never removes them unless a Radarr integration has "Remove after leaving dynamic groups" on.')),
                 Section::make(__('Cached Content'))
                     ->description(__('Download VOD movies and series episodes to local storage with the "Cache Now" actions. Once a download completes, playback uses the local copy instead of the provider.'))
                     ->columnSpanFull()
