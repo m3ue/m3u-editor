@@ -203,7 +203,7 @@ it('fails closed without state changes for rejected or partial managed setup res
     ], 200, 'The Emby companion does not support managed setup version 1. Update the companion, then retry.'],
     'wrong integration binding' => [[
         'CapabilityVersion' => 1,
-        'IntegrationId' => 999,
+        'IntegrationId' => 0,
         'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
         'Ready' => true,
         'Result' => 'Ready',

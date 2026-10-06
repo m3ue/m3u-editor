@@ -77,8 +77,7 @@ class EmbyManagedSetupService
             return $this->failure(self::INVALID_RESPONSE_MESSAGE);
         }
 
-        if (! is_int($data['CapabilityVersion'] ?? null)
-            || $data['CapabilityVersion'] !== self::CONTRACT_VERSION) {
+        if (($data['CapabilityVersion'] ?? null) !== self::CONTRACT_VERSION) {
             return $this->failure(self::UNSUPPORTED_VERSION_MESSAGE);
         }
 
