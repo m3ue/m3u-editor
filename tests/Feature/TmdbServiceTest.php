@@ -1108,6 +1108,73 @@ it('picks the US content rating and reshapes networks from series details', func
     'no content ratings or networks' => [[], null, []],
 ]);
 
+it('extracts, normalises and blocklists movie keywords', function (array $rawKeywords, array $expected) {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/603*' => Http::response([
+            'id' => 603,
+            'title' => 'The Matrix',
+            'keywords' => ['keywords' => $rawKeywords],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetails(603);
+
+    expect($details['keywords'])->toBe($expected);
+
+    Http::assertSent(fn ($request) => str_contains($request['append_to_response'] ?? '', 'keywords'));
+})->with([
+    'lowercases, trims and de-duplicates real themes' => [[
+        ['id' => 1, 'name' => '  Christmas '],
+        ['id' => 2, 'name' => 'HEIST'],
+        ['id' => 3, 'name' => 'Christmas'],
+        ['id' => 4, 'name' => 'based on novel or book'],
+        ['id' => 5, 'name' => 'sequel'],
+    ], ['christmas', 'heist', 'based on novel or book', 'sequel']],
+    'drops production / format meta-tags from the blocklist' => [[
+        ['id' => 1, 'name' => 'duringcreditsstinger'],
+        ['id' => 2, 'name' => 'AfterCreditsStinger'],
+        ['id' => 3, 'name' => 'woman director'],
+        ['id' => 4, 'name' => '3D'],
+        ['id' => 5, 'name' => 'IMAX'],
+        ['id' => 6, 'name' => 'halloween'],
+    ], ['halloween']],
+    'skips blank names' => [[
+        ['id' => 1, 'name' => ''],
+        ['id' => 2, 'name' => '   '],
+        ['id' => 3, 'name' => 'heist'],
+    ], ['heist']],
+    'no keywords' => [[], []],
+]);
+
+it('extracts and normalises TV keywords using the `results` payload shape', function (array $rawKeywords, array $expected) {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/1396*' => Http::response([
+            'id' => 1396,
+            'name' => 'Breaking Bad',
+            // TV returns keywords under `results`, not `keywords` like movies.
+            'keywords' => ['results' => $rawKeywords],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getTvSeriesDetails(1396);
+
+    expect($details['keywords'])->toBe($expected);
+
+    Http::assertSent(fn ($request) => str_contains($request['append_to_response'] ?? '', 'keywords'));
+})->with([
+    'lowercases and de-duplicates themes' => [[
+        ['id' => 1, 'name' => 'Christmas'],
+        ['id' => 2, 'name' => 'drug dealer'],
+        ['id' => 3, 'name' => 'christmas'],
+    ], ['christmas', 'drug dealer']],
+    'drops blocklisted meta-tags' => [[
+        ['id' => 1, 'name' => '3d'],
+        ['id' => 2, 'name' => 'imax'],
+        ['id' => 3, 'name' => 'halloween'],
+    ], ['halloween']],
+    'missing keywords payload' => [[], []],
+]);
+
 it('reshapes movie production companies into studios', function (array $companies, array $expected) {
     Http::fake([
         'https://api.themoviedb.org/3/movie/603*' => Http::response([

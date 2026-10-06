@@ -60,10 +60,12 @@ use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\DynamicGroupThemes;
 use App\Support\ProbeCircuitBreaker;
 use App\Tables\Columns\ProgressColumn;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
+use Closure;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Exception;
 use Filament\Actions\Action;
@@ -1201,7 +1203,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                     }
                                 })
                                 ->rules([
-                                    fn (): \Closure => function (string $attribute, $value, \Closure $fail) {
+                                    fn (): Closure => function (string $attribute, $value, Closure $fail) {
                                         if ($value && ! config('proxy.m3u_proxy_token')) {
                                             $fail('Provider Profiles require the m3u-proxy to be configured. Please ensure M3U_PROXY_TOKEN is set.');
                                         }
@@ -2054,6 +2056,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 'top_genre' => 'Top Genre',
                                 'tmdb_network' => 'By Network',
                                 'provider' => 'By Provider',
+                                'theme' => 'Holiday / Theme',
                                 default => $source,
                             };
                             $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
@@ -3688,6 +3691,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             'top_genre' => __('Top Genre'),
                             'tmdb_network' => __('By TV Network'),
                             'provider' => __('By Streaming Service'),
+                            'theme' => __('Holiday / Theme'),
                         ];
                     }
 
@@ -3698,11 +3702,78 @@ class PlaylistResource extends Resource implements CopilotResource
                         'upcoming' => __('Coming Soon'),
                         'top_genre' => __('Top Genre'),
                         'provider' => __('By Streaming Service'),
+                        'theme' => __('Holiday / Theme'),
                     ];
                 })
                 ->live()
                 ->required()
                 ->columnSpan(3),
+            Select::make('tmdb_params.preset')
+                ->label(__('Preset'))
+                ->options(DynamicGroupThemes::options())
+                ->placeholder(__('Select a preset'))
+                ->live()
+                ->visible(fn (Get $get): bool => $get('source') === 'theme')
+                ->afterStateUpdated(function (Set $set, ?string $state): void {
+                    // Picking a preset fills the seasonal window fields; the
+                    // keywords/terms are looked up at sync time from the
+                    // preset catalogue, never copied into the rule's
+                    // own lists (a custom rule uses its own keywords/terms
+                    // instead).
+                    $preset = $state !== null ? DynamicGroupThemes::preset($state) : null;
+                    if ($preset === null) {
+                        return;
+                    }
+                    $set('tmdb_params.active_from', $preset['active_from']);
+                    $set('tmdb_params.active_until', $preset['active_until']);
+                })
+                ->columnSpan(3),
+            TagsInput::make('tmdb_params.keywords')
+                ->label(__('Keywords'))
+                ->placeholder(__('e.g. christmas'))
+                ->helperText(__('Match against each item\'s stored TMDB theme keywords. Leave empty to fall back to the text terms only.'))
+                ->visible(fn (Get $get): bool => $get('source') === 'theme' && $get('tmdb_params.preset') === DynamicGroupThemes::CUSTOM_KEY)
+                ->columnSpan(3),
+            TagsInput::make('tmdb_params.terms')
+                ->label(__('Search Terms'))
+                ->placeholder(__('e.g. christmas'))
+                ->helperText(__('Match (case-insensitive) against each item\'s title and plot. Covers items not yet enriched with TMDB keywords.'))
+                ->visible(fn (Get $get): bool => $get('source') === 'theme' && $get('tmdb_params.preset') === DynamicGroupThemes::CUSTOM_KEY)
+                ->columnSpan(3),
+            TextInput::make('tmdb_params.active_from')
+                ->label(__('Active From'))
+                ->placeholder('MM-DD')
+                ->maxLength(5)
+                ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                    // Validation rules skip empty values, so a one-sided window is
+                    // flagged on the endpoint that IS filled.
+                    if (! DynamicGroupThemes::isValidMonthDay((string) $value)) {
+                        $fail(__('Use a real date in MM-DD format, e.g. 11-15.'));
+                    } elseif (blank($get('tmdb_params.active_until'))) {
+                        $fail(__('Set both the start and end of the seasonal window, or neither.'));
+                    }
+                })
+                ->live(onBlur: true)
+                ->visible(fn (Get $get): bool => $get('source') === 'theme')
+                ->helperText(__('Optional. Leave empty to stay active year-round. Use MM-DD (e.g. 11-15).'))
+                ->columnSpan(2),
+            TextInput::make('tmdb_params.active_until')
+                ->label(__('Active Until'))
+                ->placeholder('MM-DD')
+                ->maxLength(5)
+                ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                    // Validation rules skip empty values, so a one-sided window is
+                    // flagged on the endpoint that IS filled.
+                    if (! DynamicGroupThemes::isValidMonthDay((string) $value)) {
+                        $fail(__('Use a real date in MM-DD format, e.g. 11-15.'));
+                    } elseif (blank($get('tmdb_params.active_from'))) {
+                        $fail(__('Set both the start and end of the seasonal window, or neither.'));
+                    }
+                })
+                ->live(onBlur: true)
+                ->visible(fn (Get $get): bool => $get('source') === 'theme')
+                ->helperText(__('Optional. Set both endpoints for a recurring seasonal window; if the end is earlier in the year than the start, the window wraps around the year end (e.g. 12-26 to 01-02).'))
+                ->columnSpan(2),
             Select::make('tmdb_params.genre_id')
                 ->label(__('Genre'))
                 ->options(function (Get $get): array {
@@ -3769,6 +3840,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ])->all())
                 ->default(3)
                 ->native(false)
+                ->visible(fn (Get $get): bool => $get('source') !== 'theme')
                 ->columnSpan(3),
             TextInput::make('name')
                 ->label(__('Category Name'))
@@ -3848,8 +3920,14 @@ class PlaylistResource extends Resource implements CopilotResource
      * SyncDynamicGroups job, so the preview always shows exactly what a sync
      * would attach.
      *
+     * Theme rules skip TMDB entirely — membership comes from
+     * DynamicGroup::itemsMatchingTheme(), which runs against the playlist's
+     * own library (stored TMDB keywords + title/plot text). Out-of-season
+     * rules still match locally but the modal annotates them so the user
+     * isn't surprised when the group hides itself on the next sync.
+     *
      * @param  array<string, mixed>  $rule  Raw (unvalidated) repeater item state
-     * @return array{error: ?string, type: string, tmdbTotal: int, matched: array<int, string>, matchedTotal: int, unmatched: array<int, array<string, mixed>>, unmatchedTotal: int}
+     * @return array{error: ?string, type: string, tmdbTotal: int, matched: array<int, string>, matchedTotal: int, unmatched: array<int, array<string, mixed>>, unmatchedTotal: int, outOfSeason?: bool, isTheme?: bool}
      */
     public static function getDynamicGroupPreviewData(array $rule, ?Playlist $record): array
     {
@@ -3872,6 +3950,10 @@ class PlaylistResource extends Resource implements CopilotResource
 
         if (! in_array($type, ['vod', 'series'], true) || $source === '') {
             return ['error' => __('Select a content type and source first.')] + $base;
+        }
+
+        if ($source === 'theme') {
+            return self::getThemePreviewData($type, (array) ($rule['tmdb_params'] ?? []), $record) + $base;
         }
 
         $tmdb = app(TmdbService::class);
@@ -3916,6 +3998,51 @@ class PlaylistResource extends Resource implements CopilotResource
             'matchedTotal' => count($matched),
             'unmatched' => array_slice($unmatched, 0, 50),
             'unmatchedTotal' => count($unmatched),
+        ];
+    }
+
+    /**
+     * Theme-source preview: drives the same modal layout as the TMDB path
+     * but resolves membership against the playlist's own rows, and
+     * annotates out-of-season rules. The blade view already keys off the
+     * standard `matched` / `matchedTotal` keys; we add an optional
+     * `outOfSeason` flag the view reads to show a small banner.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array{error: null, matched: array<int, string>, matchedTotal: int, unmatched: array<int, array<string, mixed>>, unmatchedTotal: int, tmdbTotal: int, outOfSeason: bool, isTheme: bool}
+     */
+    private static function getThemePreviewData(string $type, array $params, Playlist $record): array
+    {
+        $lists = DynamicGroupThemes::resolveLists($params);
+        $from = $params['active_from'] ?? null;
+        $until = $params['active_until'] ?? null;
+        $inSeason = DynamicGroupThemes::isWithinWindow(
+            is_string($from) ? $from : null,
+            is_string($until) ? $until : null,
+            now(),
+        );
+
+        $query = DynamicGroup::itemsMatchingTheme($type, $record->id, $lists['keywords'], $lists['terms']);
+        $matchedTotal = (clone $query)->count();
+
+        $matched = $query
+            ->orderBy('name')
+            ->limit(50)
+            ->get($type === 'vod' ? ['id', 'name', 'title', 'title_custom'] : ['id', 'name'])
+            ->map(fn (Model $item): string => $type === 'vod'
+                ? ($item->title_custom ?: $item->title ?: $item->name)
+                : $item->name)
+            ->all();
+
+        return [
+            'error' => null,
+            'matched' => $matched,
+            'matchedTotal' => $matchedTotal,
+            'unmatched' => [],
+            'unmatchedTotal' => 0,
+            'tmdbTotal' => $matchedTotal,
+            'outOfSeason' => ! $inSeason,
+            'isTheme' => true,
         ];
     }
 

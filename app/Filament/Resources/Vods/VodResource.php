@@ -2005,6 +2005,14 @@ class VodResource extends Resource implements CopilotResource
                         ->helperText(__('MPAA rating classification.'))
                         ->placeholder(__('PG, PG-13, R, NC-17'))
                         ->rules(['nullable', 'string', 'max:10']),
+                    // Read-only: TMDB owns these, so an edit would be overwritten on the next fetch.
+                    TextEntry::make('tmdb_keywords')
+                        ->label(__('TMDB Keywords'))
+                        ->helperText(__('Themes from TMDB, used to match holiday / theme dynamic groups.'))
+                        ->badge()
+                        ->state(fn (?Channel $record): array => $record?->info['tmdb_keywords'] ?? [])
+                        ->visible(fn (?Channel $record): bool => filled($record?->info['tmdb_keywords'] ?? null))
+                        ->columnSpanFull(),
 
                     // Ratings and Reviews
                     TextInput::make('info.rating_count_kinopoisk')

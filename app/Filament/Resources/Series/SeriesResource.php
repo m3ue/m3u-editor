@@ -51,6 +51,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
@@ -1205,6 +1206,20 @@ class SeriesResource extends Resource implements CopilotResource
                                         ->label(__('YouTube Trailer ID'))
                                         ->maxLength(255),
                                 ]),
+                        ]),
+                    Section::make(__('TMDB Keywords'))
+                        ->columnSpan(2)
+                        ->icon('heroicon-o-film')
+                        ->description(__('Themes from TMDB, used to match holiday / theme dynamic groups.'))
+                        ->collapsible()
+                        ->collapsed()
+                        ->visible(fn (?Series $record): bool => filled($record?->metadata['tmdb_keywords'] ?? null))
+                        ->schema([
+                            TextEntry::make('tmdb_keywords')
+                                ->hiddenLabel()
+                                ->badge()
+                                ->placeholder('-')
+                                ->state(fn (?Series $record): array => $record?->metadata['tmdb_keywords'] ?? []),
                         ]),
                     Section::make(__('Stream file settings'))
                         ->columnSpan(2)

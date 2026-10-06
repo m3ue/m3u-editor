@@ -417,6 +417,29 @@ it('keeps the existing DynamicGroup and membership when TMDB transiently returns
         ->and($group->last_synced_at->eq($firstSyncAt))->toBeTrue();
 });
 
+it('calls TMDB only once per rule when resolving membership', function () {
+    $tmdbCalls = 0;
+    Http::fake(function () use (&$tmdbCalls) {
+        $tmdbCalls++;
+
+        return Http::response([
+            'results' => [['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie']],
+        ], 200);
+    });
+
+    $this->playlist->updateQuietly(['dynamic_groups_config' => [[
+        'enabled' => true,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending',
+        'tmdb_params' => ['time_window' => 'week', 'pages' => 1],
+    ]]]);
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    expect($tmdbCalls)->toBe(1);
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Job: auto-cache hook (QueueDynamicGroupCacheDownloads)
 // ──────────────────────────────────────────────────────────────────────────────
