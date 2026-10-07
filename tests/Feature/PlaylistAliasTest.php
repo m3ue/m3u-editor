@@ -134,6 +134,29 @@ describe('PlaylistService::authenticate() with aliases', function () {
     });
 });
 
+// ── Xtream stream routes ──────────────────────────────────────────────────────
+
+describe('Xtream stream routes with alias credentials', function () {
+    it('stops streaming with alias direct credentials once the alias expires', function () {
+        $user = User::factory()->create();
+        $playlist = Playlist::factory()->for($user)->create(['enable_proxy' => false]);
+        $channel = Channel::factory()->for($user)->for($playlist)->create([
+            'enabled' => true,
+            'url' => 'http://provider.example.com/live/u/p/1234.ts',
+        ]);
+        $alias = makeAlias($user, $playlist, [
+            'username' => 'aliasuser',
+            'password' => 'aliaspass',
+        ]);
+
+        $this->get("/live/aliasuser/aliaspass/{$channel->id}.ts")->assertRedirect();
+
+        $alias->update(['expires_at' => now()->subMinute()]);
+
+        $this->get("/live/aliasuser/aliaspass/{$channel->id}.ts")->assertForbidden();
+    });
+});
+
 // ── Xtream API panel action ───────────────────────────────────────────────────
 
 describe('Xtream API panel action with aliases', function () {

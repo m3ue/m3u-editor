@@ -103,12 +103,14 @@ class XtreamStreamController extends Controller
 
         // Method 2: Fall back to the owner's default login (username = playlist owner,
         // password = playlist UUID or custom password, per playlist), then an alias' own credentials
+        // unless the alias has expired (matching PlaylistService::authenticate())
         if (! $playlist) {
             $playlist = app(PlaylistCredentialResolver::class)->resolveDefaultLogin($username, $password)
                 ?? PlaylistAlias::with(['user'])
                     ->where('username', $username)
                     ->where('password', $password)
-                    ->first();
+                    ->get()
+                    ->first(fn (PlaylistAlias $alias): bool => ! $alias->isExpired());
         }
 
         // If no authentication method worked, return null
