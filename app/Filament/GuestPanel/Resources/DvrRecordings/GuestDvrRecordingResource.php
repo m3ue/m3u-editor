@@ -61,20 +61,6 @@ class GuestDvrRecordingResource extends Resource
     }
 
     /**
-     * The floating player payload for a recording, built with the session's own
-     * credentials so the stream URL never carries the playlist owner's login.
-     */
-    public static function playerAttributes(DvrRecording $record): array
-    {
-        $credentials = static::getCurrentAuth();
-
-        return $record->getFloatingPlayerAttributes(
-            username: $credentials['username'] ?? null,
-            password: $credentials['password'] ?? null,
-        );
-    }
-
-    /**
      * Whether the given session may cancel the given recording.
      *
      * Single source of truth for the cancel authorization, mirroring

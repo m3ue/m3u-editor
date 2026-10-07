@@ -194,8 +194,8 @@ class PlaylistService
             }
         }
 
-        if ($playlist instanceof PlaylistAlias && $playlist->username && $playlist->password) {
-            return (object) ['username' => $playlist->username, 'password' => $playlist->password];
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+            return $playlist->authObject;
         }
 
         return $playlist->getDefaultAuthMode() === DefaultAuthMode::Custom
@@ -218,15 +218,13 @@ class PlaylistService
             'password' => $playlist->getDefaultAuthPassword(),
             'mode' => $playlist->getDefaultAuthMode(),
         ];
-        if ($playlist instanceof PlaylistAlias) {
-            // For PlaylistAlias, override default auth if set
-            if ($playlist->username && $playlist->password) {
-                $auth = [
-                    'username' => $playlist->username,
-                    'password' => $playlist->password,
-                    'mode' => null,
-                ];
-            }
+        // For PlaylistAlias, override default auth if set
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+            $auth = [
+                'username' => $playlist->authObject->username,
+                'password' => $playlist->authObject->password,
+                'mode' => null,
+            ];
         }
 
         // Return the results
