@@ -42,6 +42,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 uses(RefreshDatabase::class);
 
@@ -124,12 +125,10 @@ it('sets the VOD channel URL to the authenticated dvr stream route', function ()
 
     $channel = Channel::where('dvr_recording_id', $recording->id)->firstOrFail();
     $setting = $recording->dvrSetting;
-    $expectedUrl = route('dvr.recording.stream', [
-        'username' => $recording->user->name,
-        'password' => $setting->playlist->uuid,
+    $expectedUrl = url(URL::signedRoute('dvr.recording.stream.signed', [
         'uuid' => $recording->uuid,
         'format' => $setting->dvr_output_format ?? 'ts',
-    ]);
+    ], absolute: false));
 
     expect($channel->url)->toBe($expectedUrl);
 });
@@ -250,12 +249,10 @@ it('sets the episode URL to the authenticated dvr stream route', function () {
 
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
     $setting = $recording->dvrSetting;
-    $expectedUrl = route('dvr.recording.stream', [
-        'username' => $recording->user->name,
-        'password' => $setting->playlist->uuid,
+    $expectedUrl = url(URL::signedRoute('dvr.recording.stream.signed', [
         'uuid' => $recording->uuid,
         'format' => $setting->dvr_output_format ?? 'ts',
-    ]);
+    ], absolute: false));
 
     expect($episode->url)->toBe($expectedUrl);
 });
@@ -1127,12 +1124,10 @@ it('integrates through the channel when the setting has merged_playlist_id (play
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
     expect($episode->playlist_id)->toBe($sourcePlaylist->id);
 
-    $expectedUrl = route('dvr.recording.stream', [
-        'username' => $user->name,
-        'password' => $sourcePlaylist->uuid,
+    $expectedUrl = url(URL::signedRoute('dvr.recording.stream.signed', [
         'uuid' => $recording->uuid,
         'format' => $setting->dvr_output_format ?? 'ts',
-    ]);
+    ], absolute: false));
     expect($episode->url)->toBe($expectedUrl);
 });
 

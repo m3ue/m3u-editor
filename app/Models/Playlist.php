@@ -8,6 +8,8 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\SeriesProbeScope;
 use App\Enums\Status;
 use App\Jobs\MatchMediaServerSources;
+use App\Jobs\SyncSeriesStrmFiles;
+use App\Jobs\SyncVodStrmFiles;
 use App\Jobs\UpdateXtreamStats;
 use App\Services\DvrVodIntegrationService;
 use App\Settings\GeneralSettings;
@@ -128,12 +130,33 @@ class Playlist extends Model
                 MatchMediaServerSources::dispatch($playlist->id);
             }
 
-            // DVR VOD entries store their stream URL with the internal password,
-            // which follows the default login mode.
-            if ($playlist->wasChanged('default_auth_mode')) {
+            // Stored links follow the default login: legacy DVR VOD URLs carrying the
+            // owner login are re-signed, and STRM files are rewritten with the new
+            // internal password (HasDefaultAuth rotates the secret on every change).
+            if ($playlist->wasChanged(['default_auth_mode', 'internal_auth_secret'])) {
                 app(DvrVodIntegrationService::class)->refreshStreamUrls($playlist);
+                $playlist->dispatchStrmRefresh();
             }
         });
+    }
+
+    /**
+     * Rewrite this playlist's STRM files outside a sync run, for whichever of its
+     * VOD/series STRM syncs are enabled.
+     */
+    public function dispatchStrmRefresh(): void
+    {
+        if ($this->auto_sync_vod_stream_files) {
+            dispatch(new SyncVodStrmFiles(notify: false, playlist: $this));
+        }
+
+        if ($this->auto_sync_series_stream_files) {
+            dispatch(new SyncSeriesStrmFiles(
+                notify: false,
+                playlist_id: $this->id,
+                user_id: $this->user_id,
+            ));
+        }
     }
 
     public function getFolderPathAttribute(): string

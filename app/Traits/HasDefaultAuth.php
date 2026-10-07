@@ -4,6 +4,8 @@ namespace App\Traits;
 
 use App\Enums\DefaultAuthMode;
 use App\Services\PlaylistCredentialResolver;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 /**
  * The playlist owner's "default" login: username = the owner's name, and the
@@ -12,9 +14,35 @@ use App\Services\PlaylistCredentialResolver;
  */
 trait HasDefaultAuth
 {
+    public static function bootHasDefaultAuth(): void
+    {
+        // Changing the default login rotates the internal token, so links issued
+        // with the old one (copied proxy URLs, STRM files) stop working. Registered on
+        // "saving" rather than "updating": AppServiceProvider's Playlist::updating
+        // listener returns the model, which halts the updating chain before trait
+        // listeners run.
+        static::saving(function (Model $playlist): void {
+            if ($playlist->exists && $playlist->isDirty(['default_auth_mode', 'default_auth_password'])) {
+                $playlist->internal_auth_secret = Str::random(40);
+            }
+        });
+
+        // Two of an owner's playlists can't share a custom password, so a copy never
+        // takes it: a Custom Password copy starts with the default login disabled
+        // rather than silently falling back to UUID login.
+        static::replicating(function (Model $copy): void {
+            if ($copy->getDefaultAuthMode() === DefaultAuthMode::Custom) {
+                $copy->default_auth_mode = DefaultAuthMode::Disabled;
+            }
+            $copy->default_auth_password = null;
+            $copy->internal_auth_secret = null;
+        });
+    }
+
     public function initializeHasDefaultAuth(): void
     {
         $this->mergeCasts(['default_auth_mode' => DefaultAuthMode::class]);
+        $this->makeHidden('internal_auth_secret');
     }
 
     public function getDefaultAuthMode(): DefaultAuthMode
@@ -54,15 +82,23 @@ trait HasDefaultAuth
     }
 
     /**
-     * Password for URLs the app builds for itself (in-app player, DVR, EPG viewer,
-     * proxy). While UUID login is on this is the UUID, so those URLs are unchanged.
-     * Otherwise it is a private token that only the owner's login accepts, so
-     * disabling the default login or changing the custom password doesn't break them.
+     * Password for URLs the app builds for itself (in-app player, EPG viewer,
+     * proxy, STRM files). While UUID login is on this is the UUID, so those URLs
+     * are unchanged. Otherwise it is the internal token, which only the owner's
+     * login accepts and which rotates whenever the default login changes.
      */
     public function getInternalAuthPassword(): string
     {
         return $this->getDefaultAuthMode() === DefaultAuthMode::Uuid
             ? $this->uuid
-            : PlaylistCredentialResolver::internalToken($this->uuid);
+            : $this->getInternalAuthToken();
+    }
+
+    /**
+     * The current internal token, accepted with the owner's name in every mode.
+     */
+    public function getInternalAuthToken(): string
+    {
+        return PlaylistCredentialResolver::internalToken($this->uuid, $this->internal_auth_secret);
     }
 }

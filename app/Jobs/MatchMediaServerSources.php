@@ -133,22 +133,7 @@ class MatchMediaServerSources implements ShouldBeUnique, ShouldQueue
         // "original"-url STRM files pointing at the old source until the
         // playlist's next sync.
         if ($this->syncRunId === null && $result['changed']) {
-            $this->refreshStrmFiles($playlist);
-        }
-    }
-
-    private function refreshStrmFiles(Playlist $playlist): void
-    {
-        if ($playlist->auto_sync_vod_stream_files) {
-            dispatch(new SyncVodStrmFiles(notify: false, playlist: $playlist));
-        }
-
-        if ($playlist->auto_sync_series_stream_files) {
-            dispatch(new SyncSeriesStrmFiles(
-                notify: false,
-                playlist_id: $playlist->id,
-                user_id: $playlist->user_id,
-            ));
+            $playlist->dispatchStrmRefresh();
         }
     }
 

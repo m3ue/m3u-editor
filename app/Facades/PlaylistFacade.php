@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static array getUrls(\App\Models\Playlist|\App\Models\MergedPlaylist|\App\Models\CustomPlaylist|\App\Models\PlaylistAlias $playlist)
  * @method static array{url: string, username: string, password: ?string, mode: ?\App\Enums\DefaultAuthMode} getXtreamInfo(\App\Models\Playlist|\App\Models\MergedPlaylist|\App\Models\CustomPlaylist|\App\Models\PlaylistAlias $playlist)
+ * @method static object|null getOutputCredentials(\App\Models\Playlist|\App\Models\MergedPlaylist|\App\Models\CustomPlaylist|\App\Models\PlaylistAlias $playlist)
  * @method static boolean mediaFlowProxyEnabled()
  * @method static array{m3u: string, epg: string, xtream: array{server: string, default: array{username: string, password: string}|null, default_mode: ?\App\Enums\DefaultAuthMode, auths: list<array{name: string, username: string, password: string}>}, authEnabled: bool} getMediaFlowProxyUrls(\App\Models\Playlist|\App\Models\MergedPlaylist|\App\Models\CustomPlaylist|\App\Models\PlaylistAlias $playlist)
  * @method static array getMediaFlowSettings()

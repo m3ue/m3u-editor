@@ -120,7 +120,8 @@ class PlaylistCredentialResolver
                 })
                 ->get()
                 ->first(fn (Model $candidate): bool => $candidate->user?->name === $username
-                    && ($candidate->uuid === $tokenUuid || $candidate->getDefaultAuthPassword() === $password));
+                    && ($candidate->getDefaultAuthPassword() === $password
+                        || ($tokenUuid !== null && hash_equals($candidate->getInternalAuthToken(), $password))));
 
             if ($playlist) {
                 return $playlist;
@@ -132,33 +133,21 @@ class PlaylistCredentialResolver
 
     /**
      * The private password the app puts in URLs it builds for itself when the
-     * playlist's UUID login is off: "{uuid}_{signature}", where the signature is
-     * an APP_KEY HMAC of the UUID, so it can't be derived from the UUID alone.
+     * playlist's UUID login is off: "{uuid}_{signature}", where the signature is an
+     * APP_KEY HMAC of the UUID and the playlist's internal_auth_secret. It can't be
+     * derived from the UUID alone, and rotating the secret revokes it.
      */
-    public static function internalToken(string $uuid): string
+    public static function internalToken(string $uuid, ?string $secret): string
     {
-        return $uuid.'_'.self::internalTokenSignature($uuid);
+        return $uuid.'_'.substr(hash_hmac('sha256', 'default-auth:'.$uuid.':'.$secret, (string) config('app.key')), 0, 32);
     }
 
     /**
-     * The playlist UUID carried by a valid internal token, or null when the
-     * password isn't one.
+     * The playlist UUID a password in internal-token format carries, or null when
+     * it isn't one. The signature is checked against the playlist's own secret.
      */
     private static function uuidFromInternalToken(string $password): ?string
     {
-        $separator = strrpos($password, '_');
-        if ($separator === false || $separator === 0) {
-            return null;
-        }
-
-        $uuid = substr($password, 0, $separator);
-        $signature = substr($password, $separator + 1);
-
-        return hash_equals(self::internalTokenSignature($uuid), $signature) ? $uuid : null;
-    }
-
-    private static function internalTokenSignature(string $uuid): string
-    {
-        return substr(hash_hmac('sha256', 'default-auth:'.$uuid, (string) config('app.key')), 0, 32);
+        return preg_match('/^(.+)_[0-9a-f]{32}$/', $password, $matches) === 1 ? $matches[1] : null;
     }
 }

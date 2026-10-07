@@ -952,11 +952,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                                     $baseUrl = ProxyFacade::getBaseUrl();
                                                     $uuid = $playlist->uuid;
 
-                                                    $playlistAuth = method_exists($playlist, 'playlistAuths')
-                                                        ? $playlist->playlistAuths()->where('enabled', true)->first()
-                                                        : null;
-                                                    $hdhrAuthPath = $playlistAuth
-                                                        ? '/'.rawurlencode($playlistAuth->username).'/'.rawurlencode($playlistAuth->password)
+                                                    // Same credentials the playlist's own HDHR URL carries
+                                                    // (a Playlist Auth, or the Custom Password login)
+                                                    $credentials = PlaylistFacade::getOutputCredentials($playlist);
+                                                    $hdhrAuthPath = $credentials
+                                                        ? '/'.rawurlencode($credentials->username).'/'.rawurlencode($credentials->password)
                                                         : '';
 
                                                     $set('hdhr_base_url', $baseUrl."/{$uuid}/hdhr{$hdhrAuthPath}");

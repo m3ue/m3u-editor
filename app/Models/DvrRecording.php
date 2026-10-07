@@ -492,21 +492,20 @@ class DvrRecording extends Model
 
     /**
      * Build the attribute array used to open this recording in the floating player.
-     * Mirrors Episode::getFloatingPlayerAttributes() for consistent dispatch shape.
+     * Mirrors Episode::getFloatingPlayerAttributes() for consistent dispatch shape:
+     * the given credentials (e.g. a guest's) when set, otherwise the owner's.
      */
-    public function getFloatingPlayerAttributes(): array
+    public function getFloatingPlayerAttributes(?string $username = null, ?string $password = null): array
     {
         $playlist = $this->dvrSetting?->owner();
-        $username = $this->user->name;
         $format = $this->status === DvrRecordingStatus::Completed
             ? ($this->dvrSetting?->dvr_output_format ?? 'mp4')
             : 'm3u8';
 
-        $routeParams = [
-            'username' => $username,
-            'password' => $playlist?->getInternalAuthPassword(),
-            'uuid' => $this->uuid,
-        ];
+        $routeParams = $username && $password
+            ? ['username' => $username, 'password' => $password]
+            : ['username' => $this->user->name, 'password' => $playlist?->getInternalAuthPassword()];
+        $routeParams['uuid'] = $this->uuid;
 
         return [
             'id' => 'dvr-recording-'.$this->id,

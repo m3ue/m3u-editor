@@ -658,9 +658,9 @@ class SyncSeriesStrmFiles implements ShouldQueue
             $seriesReleaseDate = $series->release_date;
             $seriesMetadata = $series->metadata ?? [];
             $playlistUser = $playlist?->user;
-            $playlistUuid = $playlist?->uuid;
+            $playlistPassword = $playlist?->getInternalAuthPassword();
 
-            if (! $playlistUser || ! $playlistUuid) {
+            if (! $playlistUser || ! $playlistPassword) {
                 Log::warning('STRM Sync: Series has no associated playlist user, skipping episode URL generation', [
                     'series_id' => $series->id,
                     'playlist_id' => $series->playlist_id,
@@ -771,7 +771,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     }
                 } else {
                     $containerExtension = $ep->container_extension ?? 'mp4';
-                    $url = rtrim("/series/{$playlistUser->name}/{$playlistUuid}/".$ep->id.'.'.$containerExtension, '.');
+                    $url = rtrim("/series/{$playlistUser->name}/{$playlistPassword}/".$ep->id.'.'.$containerExtension, '.');
                     $url = PlaylistService::getBaseUrl($url);
                 }
 

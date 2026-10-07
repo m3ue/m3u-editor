@@ -59,6 +59,20 @@ class VodResource extends Resource
         return null;
     }
 
+    /**
+     * The floating player payload for a VOD channel, built with the session's own
+     * credentials so the stream URL never carries the playlist owner's login.
+     */
+    public static function playerAttributes(Channel $record): array
+    {
+        $credentials = static::getCurrentAuth();
+
+        return $record->getFloatingPlayerAttributes(
+            username: $credentials['username'] ?? null,
+            password: $credentials['password'] ?? null,
+        );
+    }
+
     public static function getUrl(
         ?string $name = null,
         array $parameters = [],
@@ -303,7 +317,7 @@ class VodResource extends Resource
                 Action::make('play')
                     ->tooltip(__('Play Video'))
                     ->action(function ($record, $livewire) {
-                        $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
+                        $livewire->dispatch('openFloatingStream', static::playerAttributes($record));
                     })
                     ->icon('heroicon-s-play-circle')
                     ->button()

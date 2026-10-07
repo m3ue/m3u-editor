@@ -205,7 +205,8 @@ class DvrStreamController extends Controller
      * M3uProxyService hands this URL to anyone watching a channel while it is being
      * recorded, so they share the existing broadcast. The signature (checked by route
      * middleware) authorizes this one recording only, so the redirect never exposes
-     * the owner's credentials to a guest.
+     * the owner's credentials to a guest. The DVR capability check matches the
+     * owner-credential route this replaces.
      */
     public function signedHlsPlaylist(Request $request, string $uuid): Response
     {
@@ -214,11 +215,31 @@ class DvrStreamController extends Controller
             ->whereNotNull('proxy_network_id')
             ->first();
 
-        if (! $recording) {
+        if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {
             abort(404, 'Recording not found or not in progress');
         }
 
         return $this->serveLivePlaylist($request, $recording);
+    }
+
+    /**
+     * Stream a DVR recording via a signed URL.
+     *
+     * GET /dvr/signed/{uuid}.{format?}
+     *
+     * DVR VOD entries store this URL, and it reaches guests unchanged (raw M3U
+     * output, or the Xtream redirect when the proxy is off), so it authorizes this
+     * one recording by signature instead of carrying the owner's credentials.
+     */
+    public function signedStream(Request $request, string $uuid): Response|StreamedResponse|RedirectResponse
+    {
+        $recording = DvrRecording::where('uuid', $uuid)->first();
+
+        if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {
+            abort(404, 'Recording not found');
+        }
+
+        return $this->serveRecording($request, $recording);
     }
 
     /**

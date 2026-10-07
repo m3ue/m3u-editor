@@ -14,9 +14,11 @@ return new class extends Migration
     /**
      * Run the migrations.
      *
-     * A constant default and a nullable column with no index are metadata-only on
-     * Postgres 11+, so neither rewrites nor long-locks the tables the sync jobs write to.
+     * A constant default and nullable columns with no index are metadata-only on
+     * Postgres 11+, so none rewrites or long-locks the tables the sync jobs write to.
      * The 'uuid' default keeps the existing owner + UUID login for every playlist.
+     * internal_auth_secret is mixed into the internal token and rotated whenever the
+     * default login changes, so links built with an older token stop working.
      */
     public function up(): void
     {
@@ -24,6 +26,7 @@ return new class extends Migration
             Schema::table($table, function (Blueprint $table) {
                 $table->string('default_auth_mode')->default('uuid');
                 $table->string('default_auth_password')->nullable();
+                $table->string('internal_auth_secret')->nullable();
             });
         }
     }
@@ -35,7 +38,7 @@ return new class extends Migration
     {
         foreach (self::TABLES as $table) {
             Schema::table($table, function (Blueprint $table) {
-                $table->dropColumn(['default_auth_mode', 'default_auth_password']);
+                $table->dropColumn(['default_auth_mode', 'default_auth_password', 'internal_auth_secret']);
             });
         }
     }
