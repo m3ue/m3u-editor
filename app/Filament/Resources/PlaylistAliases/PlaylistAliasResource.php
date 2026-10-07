@@ -9,6 +9,7 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
+use App\Filament\Support\DefaultAuthFields;
 use App\Filament\Tables\CustomPlaylistCategoriesTable;
 use App\Filament\Tables\CustomPlaylistGroupsTable;
 use App\Filament\Tables\SourceCategoriesTable;
@@ -787,6 +788,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                         ->nullable()
                         ->columnSpan(2),
                 ]),
+
+            ...DefaultAuthFields::schema(),
 
             Fieldset::make(__('Channel Filter (optional)'))
                 ->columnSpanFull()

@@ -278,7 +278,7 @@ class EpgApiController extends Controller
 
         if (Auth::check() && Auth::id() === $playlist->user_id) {
             $username = $user->name ?? 'admin';
-            $password = $playlist->uuid;
+            $password = $playlist->getInternalAuthPassword();
         } elseif ($requestedUsername && $requestedPassword) {
             $authResult = PlaylistFacade::authenticate($requestedUsername, $requestedPassword);
             $resolvedPlaylist = $authResult[0] ?? null;

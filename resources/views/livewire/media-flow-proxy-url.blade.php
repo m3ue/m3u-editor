@@ -64,36 +64,51 @@
                             :text="$xtream['server']"
                         />
                     </div>
-                    <div class="mb-4 flex items-center justify-start gap-2">
-                        <x-filament::input.wrapper suffix-icon="heroicon-m-user">
-                            <x-slot name="prefix">
-                                <x-copy-to-clipboard :text="$xtream['default']['username']" />
-                            </x-slot>
-                            <x-filament::input type="text" :value="$xtream['default']['username']" readonly />
-                        </x-filament::input.wrapper>
-                        <x-qr-modal
-                            :title="$this->record->name"
-                            body="MediaFlow Proxy - Username"
-                            :text="$xtream['default']['username']"
-                        />
-                    </div>
-                    <div class="flex items-center justify-start gap-2">
-                        <x-filament::input.wrapper suffix-icon="heroicon-m-lock-closed">
-                            <x-slot name="prefix">
-                                <x-copy-to-clipboard :text="$xtream['default']['password']" />
-                            </x-slot>
-                            <x-filament::input type="text" :value="$xtream['default']['password']" readonly />
-                        </x-filament::input.wrapper>
-                        <x-qr-modal
-                            :title="$this->record->name"
-                            body="MediaFlow Proxy - Password"
-                            :text="$xtream['default']['password']"
-                        />
-                    </div>
-                    <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
-                        The default username is your <strong>m3u editor</strong> username and the Playlist
-                        <strong>unique identifier</strong> is the password, encoded for MediaFlow Proxy.
-                    </p>
+                    @if ($xtream['default'] === null)
+                        <div class="flex items-center gap-2">
+                            <x-filament::badge color="danger" size="sm">{{ __('Disabled') }}</x-filament::badge>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">
+                                {{ __('The default login is disabled for this playlist. Use one of its Playlist Auths to log in.') }}
+                            </span>
+                        </div>
+                    @else
+                        <div class="mb-4 flex items-center justify-start gap-2">
+                            <x-filament::input.wrapper suffix-icon="heroicon-m-user">
+                                <x-slot name="prefix">
+                                    <x-copy-to-clipboard :text="$xtream['default']['username']" />
+                                </x-slot>
+                                <x-filament::input type="text" :value="$xtream['default']['username']" readonly />
+                            </x-filament::input.wrapper>
+                            <x-qr-modal
+                                :title="$this->record->name"
+                                body="MediaFlow Proxy - Username"
+                                :text="$xtream['default']['username']"
+                            />
+                        </div>
+                        <div class="flex items-center justify-start gap-2">
+                            <x-filament::input.wrapper suffix-icon="heroicon-m-lock-closed">
+                                <x-slot name="prefix">
+                                    <x-copy-to-clipboard :text="$xtream['default']['password']" />
+                                </x-slot>
+                                <x-filament::input type="text" :value="$xtream['default']['password']" readonly />
+                            </x-filament::input.wrapper>
+                            <x-qr-modal
+                                :title="$this->record->name"
+                                body="MediaFlow Proxy - Password"
+                                :text="$xtream['default']['password']"
+                            />
+                        </div>
+                        @if ($xtream['default_mode'] === \App\Enums\DefaultAuthMode::Uuid)
+                            <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
+                                The default username is your <strong>m3u editor</strong> username and the Playlist
+                                <strong>unique identifier</strong> is the password, encoded for MediaFlow Proxy.
+                            </p>
+                        @elseif ($xtream['default_mode'] === \App\Enums\DefaultAuthMode::Custom)
+                            <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
+                                {{ __('The default username is your m3u editor username, encoded for MediaFlow Proxy, and the password is the custom password set in this playlist\'s Auth settings.') }}
+                            </p>
+                        @endif
+                    @endif
                 </div>
 
                 {{-- Right: per-auth credentials --}}

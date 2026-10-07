@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
+use App\Traits\HasDefaultAuth;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -23,6 +24,7 @@ use Spatie\Tags\Tag;
 
 class CustomPlaylist extends Model
 {
+    use HasDefaultAuth;
     use HasFactory;
     use HasTags;
     use ShortUrlTrait;

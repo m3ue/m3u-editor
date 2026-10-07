@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
 use App\Pivots\MergedPlaylistPivot;
+use App\Traits\HasDefaultAuth;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 
 class MergedPlaylist extends Model
 {
+    use HasDefaultAuth;
     use HasFactory;
     use ShortUrlTrait;
 

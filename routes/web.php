@@ -173,10 +173,17 @@ Route::get('/timeshift/{username}/{password}/{duration}/{date}/{streamId}.{forma
     ->name('xtream.stream.timeshift.root');
 
 // DVR file streaming routes - also declared before the HDHR /{uuid}/... catch-all.
-// Stream auth mirrors the Xtream stream pattern: username + password (playlist UUID)
-// or PlaylistAuth credentials embedded in the URL. Keep the more specific
+// Stream auth mirrors the Xtream stream pattern: the owner's default login (username +
+// playlist UUID or custom password) or PlaylistAuth credentials embedded in the URL. Keep the more specific
 // live.m3u8 and edl routes ahead of the generic {uuid}.{format?} stream route so
 // Laravel does not consume "live.m3u8" as {uuid}.{format?}.
+// The signed live playlist is where viewers of a channel that is being recorded
+// (guests included) are redirected, so it is scoped to one recording by signature
+// rather than carrying the owner's credentials. `client_id` is appended by the
+// player redirect after signing.
+Route::get('/dvr/signed/{uuid}/live.m3u8', [DvrStreamController::class, 'signedHlsPlaylist'])
+    ->middleware(ValidateSignature::relative(['client_id']))
+    ->name('dvr.recording.hls.signed');
 Route::get('/dvr/{username}/{password}/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
     ->name('dvr.recording.hls.playlist');
 Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class, 'edl'])
@@ -184,8 +191,8 @@ Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class,
 Route::get('/dvr/{username}/{password}/{uuid}.{format?}', [DvrStreamController::class, 'stream'])
     ->name('dvr.recording.stream');
 
-// Cached VOD/episode files. Auth matches the DVR route: owner name + playlist
-// UUID, or PlaylistAuth credentials.
+// Cached VOD/episode files. Auth matches the DVR route: the owner's default login,
+// or PlaylistAuth credentials.
 Route::get('/cached-content/{username}/{password}/{uuid}.{format?}', [CachedContentStreamController::class, 'stream'])
     ->name('cached-content.stream');
 

@@ -165,13 +165,35 @@ class DvrVodIntegrationService
     }
 
     /**
+     * Re-point a playlist's DVR VOD entries at its current internal password. Their
+     * stream URLs are stored with it, and it changes with the playlist's default login
+     * mode (the UUID while UUID login is on, a private token otherwise).
+     */
+    public function refreshStreamUrls(Playlist $playlist): void
+    {
+        foreach ([Channel::class, Episode::class] as $model) {
+            $model::query()
+                ->where('playlist_id', $playlist->id)
+                ->whereNotNull('dvr_recording_id')
+                ->with(['dvrRecording.dvrSetting', 'dvrRecording.user'])
+                ->lazyById()
+                ->each(function (Channel|Episode $item): void {
+                    if ($item->dvrRecording) {
+                        $item->updateQuietly(['url' => $this->buildStreamUrl($item->dvrRecording)]);
+                    }
+                });
+        }
+    }
+
+    /**
      * Build the authenticated stream URL for a DVR recording.
      *
      * Generates the same URL format as the "Watch" action:
-     *   /dvr/{username}/{playlist-uuid}/{recording-uuid}.{ext}
+     *   /dvr/{username}/{internal-password}/{recording-uuid}.{ext}
      *
-     * DvrStreamController authenticates via the playlist UUID (no session required),
-     * so this URL works in any media player without additional login.
+     * DvrStreamController authenticates via the playlist's internal password (the
+     * UUID, or a private token when UUID login is off; no session required), so this
+     * URL works in any media player without additional login.
      */
     private function buildStreamUrl(DvrRecording $recording): string
     {
@@ -185,7 +207,7 @@ class DvrVodIntegrationService
 
             $params = [
                 'username' => $user->name,
-                'password' => $playlist->uuid,
+                'password' => $playlist->getInternalAuthPassword(),
                 'uuid' => $recording->uuid,
                 'format' => $ext,
             ];

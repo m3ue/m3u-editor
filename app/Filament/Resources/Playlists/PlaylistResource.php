@@ -20,6 +20,7 @@ use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Filament\Resources\Playlists\Pages\ListPlaylists;
 use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Filament\Resources\Playlists\Pages\ViewPlaylist;
+use App\Filament\Support\DefaultAuthFields;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
@@ -3584,6 +3585,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         }
                     }
                 })->dehydrated(false), // Don't save this field directly
+            ...DefaultAuthFields::schema(),
         ];
 
         $sections = ['Name' => $nameFields];

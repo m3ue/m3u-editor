@@ -9,7 +9,9 @@ use App\Enums\SeriesProbeScope;
 use App\Enums\Status;
 use App\Jobs\MatchMediaServerSources;
 use App\Jobs\UpdateXtreamStats;
+use App\Services\DvrVodIntegrationService;
 use App\Settings\GeneralSettings;
+use App\Traits\HasDefaultAuth;
 use App\Traits\ShortUrlTrait;
 use Carbon\CarbonInterface;
 use Cron\CronExpression;
@@ -27,6 +29,7 @@ use Illuminate\Support\Facades\Cache;
 
 class Playlist extends Model
 {
+    use HasDefaultAuth;
     use HasFactory;
     use ShortUrlTrait;
 
@@ -123,6 +126,12 @@ class Playlist extends Model
         static::updated(function (Playlist $playlist): void {
             if ($playlist->wasChanged('prefer_media_server_sources')) {
                 MatchMediaServerSources::dispatch($playlist->id);
+            }
+
+            // DVR VOD entries store their stream URL with the internal password,
+            // which follows the default login mode.
+            if ($playlist->wasChanged('default_auth_mode')) {
+                app(DvrVodIntegrationService::class)->refreshStreamUrls($playlist);
             }
         });
     }

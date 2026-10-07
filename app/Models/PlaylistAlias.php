@@ -6,6 +6,7 @@ use App\Enums\PlaylistChannelId;
 use App\Jobs\UpdateXtreamStats;
 use App\Pivots\BouquetPlaylistAlias;
 use App\Pivots\MergedPlaylistPivot;
+use App\Traits\HasDefaultAuth;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Collection;
@@ -21,6 +22,7 @@ use Spatie\Tags\Tag;
 
 class PlaylistAlias extends Model
 {
+    use HasDefaultAuth;
     use HasFactory;
     use ShortUrlTrait;
 

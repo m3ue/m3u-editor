@@ -504,7 +504,7 @@ class DvrRecording extends Model
 
         $routeParams = [
             'username' => $username,
-            'password' => $playlist->uuid,
+            'password' => $playlist?->getInternalAuthPassword(),
             'uuid' => $this->uuid,
         ];
 

@@ -13,12 +13,12 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Services\MediaSourcePreferenceService;
+use App\Services\PlaylistCredentialResolver;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
 use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -70,10 +70,9 @@ class XtreamStreamController extends Controller
     }
 
     /**
-     * Authenticates a playlist using either PlaylistAuth credentials or the original method
-     * (username = playlist owner's name, password = playlist UUID).
-     */
-    /**
+     * Authenticates a playlist using either PlaylistAuth credentials or the owner's default
+     * login (username = playlist owner's name, password = playlist UUID or custom password).
+     *
      * Returns [$playlist, $streamModel, $playlistAuth] where $playlistAuth is non-null
      * only when authentication succeeded via PlaylistAuth credentials.
      */
@@ -102,54 +101,14 @@ class XtreamStreamController extends Controller
             }
         }
 
-        // Method 2: Fall back to original authentication (username = playlist owner, password = playlist UUID)
+        // Method 2: Fall back to the owner's default login (username = playlist owner,
+        // password = playlist UUID or custom password, per playlist), then an alias' own credentials
         if (! $playlist) {
-            // Try to find playlist by UUID (password parameter)
-            try {
-                $playlist = Playlist::with(['user'])->where('uuid', $password)->firstOrFail();
-
-                // Verify username matches playlist owner's name
-                if ($playlist->user->name !== $username) {
-                    $playlist = null;
-                }
-            } catch (ModelNotFoundException $e) {
-                try {
-                    $playlist = MergedPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
-
-                    // Verify username matches playlist owner's name
-                    if ($playlist->user->name !== $username) {
-                        $playlist = null;
-                    }
-                } catch (ModelNotFoundException $e) {
-                    try {
-                        $playlist = CustomPlaylist::with(['user'])->where('uuid', $password)->firstOrFail();
-
-                        // Verify username matches playlist owner's name
-                        if ($playlist->user->name !== $username) {
-                            $playlist = null;
-                        }
-                    } catch (ModelNotFoundException $e) {
-                        try {
-                            $playlist = PlaylistAlias::with(['user'])
-                                ->where('uuid', $password)
-                                ->orWhere(fn ($query) => $query->where([
-                                    ['username', $username],
-                                    ['password', $password],
-                                ]))->firstOrFail();
-
-                            // If username and password do not match directly, then username must match playlist owner's name
-                            if (! ($playlist->username === $username && $playlist->password === $password)) {
-                                // Verify username matches playlist owner's name
-                                if ($playlist->user->name !== $username) {
-                                    $playlist = null;
-                                }
-                            }
-                        } catch (ModelNotFoundException $e) {
-                            return [null, null, null];
-                        }
-                    }
-                }
-            }
+            $playlist = app(PlaylistCredentialResolver::class)->resolveDefaultLogin($username, $password)
+                ?? PlaylistAlias::with(['user'])
+                    ->where('username', $username)
+                    ->where('password', $password)
+                    ->first();
         }
 
         // If no authentication method worked, return null

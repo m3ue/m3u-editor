@@ -29,35 +29,50 @@
                 </x-filament::input.wrapper>
                 <x-qr-modal :title="$this->record->name" body="Xtream API URL" :text="$url" />
             </div>
-            <div class="mb-4 flex items-center justify-start gap-2">
-                <x-filament::input.wrapper suffix-icon="heroicon-m-user">
-                    <x-slot name="prefix">
-                        <x-copy-to-clipboard :text="$username" />
-                    </x-slot>
-                    <x-filament::input type="text" :value="$username" readonly />
-                </x-filament::input.wrapper>
-                <x-qr-modal :title="$this->record->name" body="Xtream API Username" :text="$username" />
-            </div>
-            <div class="flex items-center justify-start gap-2">
-                <x-filament::input.wrapper suffix-icon="heroicon-m-lock-closed">
-                    <x-slot name="prefix">
-                        <x-copy-to-clipboard :text="$password" />
-                    </x-slot>
-                    <x-filament::input
-                        type="text"
-                        :value="$password === 'YOUR_M3U_EDITOR_PASSWORD' ? '' : $password"
-                        :placeholder="$password === 'YOUR_M3U_EDITOR_PASSWORD' ? $password : ''"
-                        readonly
-                    />
-                </x-filament::input.wrapper>
-                @if ($password !== 'YOUR_M3U_EDITOR_PASSWORD')
-                    <x-qr-modal :title="$this->record->name" body="Xtream API Password" :text="$password" />
+            @if ($password === null)
+                <div class="flex items-center gap-2">
+                    <x-filament::badge color="danger" size="sm">{{ __('Disabled') }}</x-filament::badge>
+                    <span class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ __('The default login is disabled for this playlist. Use one of its Playlist Auths to log in.') }}
+                    </span>
+                </div>
+            @else
+                <div class="mb-4 flex items-center justify-start gap-2">
+                    <x-filament::input.wrapper suffix-icon="heroicon-m-user">
+                        <x-slot name="prefix">
+                            <x-copy-to-clipboard :text="$username" />
+                        </x-slot>
+                        <x-filament::input type="text" :value="$username" readonly />
+                    </x-filament::input.wrapper>
+                    <x-qr-modal :title="$this->record->name" body="Xtream API Username" :text="$username" />
+                </div>
+                <div class="flex items-center justify-start gap-2">
+                    <x-filament::input.wrapper suffix-icon="heroicon-m-lock-closed">
+                        <x-slot name="prefix">
+                            <x-copy-to-clipboard :text="$password" />
+                        </x-slot>
+                        <x-filament::input
+                            type="text"
+                            :value="$password === 'YOUR_M3U_EDITOR_PASSWORD' ? '' : $password"
+                            :placeholder="$password === 'YOUR_M3U_EDITOR_PASSWORD' ? $password : ''"
+                            readonly
+                        />
+                    </x-filament::input.wrapper>
+                    @if ($password !== 'YOUR_M3U_EDITOR_PASSWORD')
+                        <x-qr-modal :title="$this->record->name" body="Xtream API Password" :text="$password" />
+                    @endif
+                </div>
+                @if ($info['mode'] === \App\Enums\DefaultAuthMode::Uuid)
+                    <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
+                        The default username is your <strong>m3u editor</strong> username and the Playlist
+                        <strong>unique identifier</strong> is the password.
+                    </p>
+                @elseif ($info['mode'] === \App\Enums\DefaultAuthMode::Custom)
+                    <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
+                        {{ __('The default username is your m3u editor username and the password is the custom password set in this playlist\'s Auth settings.') }}
+                    </p>
                 @endif
-            </div>
-            <p class="mt-4 mb-2 text-sm text-gray-500 dark:text-gray-400">
-                The default username is your <strong>m3u editor</strong> username and the Playlist
-                <strong>unique identifier</strong> is the password.
-            </p>
+            @endif
         </div>
         <div>
             <p class="mb-2 text-sm text-gray-500 dark:text-gray-400">

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\DefaultAuthMode;
+use App\Services\PlaylistCredentialResolver;
 use App\Services\PlaylistUrlService;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -299,7 +301,12 @@ class PlaylistProfile extends Model
             return null;
         }
 
-        $targetPlaylist = Playlist::where('uuid', $this->password)->first();
+        // The target's default login: its UUID while UUID login is on (matched on the
+        // password alone, as before), otherwise its owner's name + custom password.
+        $targetPlaylist = Playlist::where('uuid', $this->password)
+            ->where('default_auth_mode', DefaultAuthMode::Uuid)
+            ->first()
+            ?? app(PlaylistCredentialResolver::class)->resolveDefaultLogin((string) $this->username, (string) $this->password, [Playlist::class]);
         if (! $targetPlaylist || $targetPlaylist->id === $this->playlist_id) {
             return null;
         }

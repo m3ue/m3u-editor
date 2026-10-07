@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ChannelLogoType;
+use App\Enums\DefaultAuthMode;
 use App\Enums\PlaylistChannelId;
 use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -54,35 +56,9 @@ class PlaylistGenerateController extends Controller
         }
 
         // Check auth
-        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        // For PlaylistAlias, also check direct alias credentials as fallback
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
-
-        $usedAuth = null;
-        if ($auths->isNotEmpty()) {
-            $authenticated = false;
-            foreach ($auths as $auth) {
-                $authUsername = $auth->username;
-                $authPassword = $auth->password;
-
-                if (
-                    $request->get('username') === $authUsername &&
-                    $request->get('password') === $authPassword
-                ) {
-                    $authenticated = true;
-                    $usedAuth = $auth;
-                    break;
-                }
-            }
-
-            if (! $authenticated) {
-                return response()->json(['Error' => 'Unauthorized'], 401);
-            }
+        [$authorized, $usedAuth] = $this->resolveOutputAuth($playlist, $request->get('username'), $request->get('password'));
+        if (! $authorized) {
+            return response()->json(['Error' => 'Unauthorized'], 401);
         }
 
         // Check if proxy enabled
@@ -117,7 +93,7 @@ class PlaylistGenerateController extends Controller
         // Get all active channels
         return response()->stream(
             function () use ($cursor, $baseUrl, $playlist, $proxyEnabled, $logoProxyEnabled, $type, $tvgTypeoutputEnabled, $usedAuth, $mediaFlowRewriteStreamUrls) {
-                // Set the auth details
+                // Set the auth details (no matched credentials means the public UUID login applies)
                 if ($usedAuth) {
                     $username = urlencode($usedAuth->username);
                     $password = urlencode($usedAuth->password);
@@ -455,36 +431,9 @@ class PlaylistGenerateController extends Controller
         }
 
         // Check auth (prefer path-based auth if present)
-        $providedUsername = $username ?? $request->get('username');
-        $providedPassword = $password ?? $request->get('password');
-
-        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
-
-        if ($auths->isNotEmpty()) {
-            $authenticated = false;
-            foreach ($auths as $auth) {
-                $authUsername = $auth->username;
-                $authPassword = $auth->password;
-
-                if (
-                    $providedUsername === $authUsername &&
-                    $providedPassword === $authPassword
-                ) {
-                    $authenticated = true;
-                    $usedAuth = $auth;
-                    break;
-                }
-            }
-
-            if (! $authenticated) {
-                return response()->json(['Error' => 'Unauthorized'], 401);
-            }
+        [$authorized] = $this->resolveOutputAuth($playlist, $username ?? $request->get('username'), $password ?? $request->get('password'));
+        if (! $authorized) {
+            return response()->json(['Error' => 'Unauthorized'], 401);
         }
 
         return view('hdhr', [
@@ -526,40 +475,12 @@ class PlaylistGenerateController extends Controller
         $channels = self::getChannelQuery($playlist);
 
         // Check auth (prefer path-based auth if present)
-        $providedUsername = $username ?? $request->get('username');
-        $providedPassword = $password ?? $request->get('password');
-
-        $usedAuth = null;
-        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
+        [$authorized, $usedAuth] = $this->resolveOutputAuth($playlist, $username ?? $request->get('username'), $password ?? $request->get('password'));
+        if (! $authorized) {
+            return response()->json(['Error' => 'Unauthorized'], 401);
         }
 
-        if ($auths->isNotEmpty()) {
-            $authenticated = false;
-            foreach ($auths as $auth) {
-                $authUsername = $auth->username;
-                $authPassword = $auth->password;
-
-                if (
-                    $providedUsername === $authUsername &&
-                    $providedPassword === $authPassword
-                ) {
-                    $authenticated = true;
-                    $usedAuth = $auth;
-                    break;
-                }
-            }
-
-            if (! $authenticated) {
-                return response()->json(['Error' => 'Unauthorized'], 401);
-            }
-        }
-
-        // Set the auth details
+        // Set the auth details (no matched credentials means the public UUID login applies)
         if ($usedAuth) {
             $username = $usedAuth->username;
             $password = $usedAuth->password;
@@ -694,35 +615,48 @@ class PlaylistGenerateController extends Controller
         return response()->json(['Error' => 'Output disabled'], 403);
     }
 
+    /**
+     * Check the credentials sent to an M3U/HDHR output. Playlist Auths (or an alias'
+     * own credentials) always work. Otherwise the playlist's default login decides:
+     * UUID login keeps the output public while no auths are assigned, Custom Password
+     * requires the owner's name and custom password, and Disabled requires an auth.
+     *
+     * Returns whether access is allowed, and the matched credentials (null for the
+     * public UUID login).
+     *
+     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
+     * @return array{0: bool, 1: object{username: string, password: string}|null}
+     */
+    private function resolveOutputAuth($playlist, mixed $username, mixed $password): array
+    {
+        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
+        // For PlaylistAlias, also check direct alias credentials as fallback
+        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias && $playlist->authObject) {
+            $auths = collect([$playlist->authObject]);
+        }
+
+        $matchedAuth = $auths->first(fn ($auth) => $username === $auth->username && $password === $auth->password);
+        if ($matchedAuth) {
+            return [true, $matchedAuth];
+        }
+
+        if ($playlist->getDefaultAuthMode() === DefaultAuthMode::Uuid) {
+            return [$auths->isEmpty(), null];
+        }
+
+        // Custom Password login (null when the default login is disabled)
+        $defaultCredentials = $playlist->getDefaultAuthCredentials();
+        if ($defaultCredentials && $username === $defaultCredentials->username && $password === $defaultCredentials->password) {
+            return [true, $defaultCredentials];
+        }
+
+        return [false, null];
+    }
+
     private function getDeviceInfo(Request $request, $playlist, ?string $username = null, ?string $password = null)
     {
         // Check auth (prefer path-based auth if present)
-        $usedAuth = null;
-        $providedUsername = $username ?? $request->get('username');
-        $providedPassword = $password ?? $request->get('password');
-
-        $auths = $playlist->playlistAuths()->where('enabled', true)->get();
-        if ($auths->isEmpty() && $playlist instanceof PlaylistAlias) {
-            $auth = $playlist->authObject;
-            if ($auth) {
-                $auths = collect([$auth]);
-            }
-        }
-
-        if ($auths->isNotEmpty()) {
-            foreach ($auths as $auth) {
-                $authUsername = $auth->username;
-                $authPassword = $auth->password;
-
-                if (
-                    $providedUsername === $authUsername &&
-                    $providedPassword === $authPassword
-                ) {
-                    $usedAuth = $auth;
-                    break;
-                }
-            }
-        }
+        [, $usedAuth] = $this->resolveOutputAuth($playlist, $username ?? $request->get('username'), $password ?? $request->get('password'));
 
         // Return the HDHR device info
         $uuid = $playlist->uuid;

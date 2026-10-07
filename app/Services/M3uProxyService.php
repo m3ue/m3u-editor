@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\URL;
 
 class M3uProxyService
 {
@@ -1217,13 +1218,9 @@ class M3uProxyService
                     'proxy_network_id' => $dvrRecording->proxy_network_id,
                 ]);
 
-                $playlist->loadMissing('user');
-
-                return route('dvr.recording.hls.playlist', [
-                    'username' => $playlist->user->name,
-                    'password' => $playlist->uuid,
-                    'uuid' => $dvrRecording->uuid,
-                ]);
+                // Signed for this recording only: the viewer may be a Playlist Auth guest, so
+                // the redirect must not carry the owner's credentials.
+                return url(URL::signedRoute('dvr.recording.hls.signed', ['uuid' => $dvrRecording->uuid], absolute: false));
             }
         }
 
