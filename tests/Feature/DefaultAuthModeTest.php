@@ -45,12 +45,12 @@ beforeEach(function () {
     $this->resolver = new PlaylistCredentialResolver;
 });
 
-function setDefaultAuth(Playlist $playlist, DefaultAuthMode $mode, ?string $password = null): void
+function defaultAuthSetMode(Playlist $playlist, DefaultAuthMode $mode, ?string $password = null): void
 {
     $playlist->update(['default_auth_mode' => $mode, 'default_auth_password' => $password]);
 }
 
-function attachGuestAuth(Playlist $playlist): PlaylistAuth
+function defaultAuthAttachGuest(Playlist $playlist): PlaylistAuth
 {
     $auth = PlaylistAuth::create([
         'name' => 'Guest',
@@ -67,7 +67,7 @@ function attachGuestAuth(Playlist $playlist): PlaylistAuth
 /**
  * Sign the session into the guest panel for the playlist, the way HasGuestAuth stores it.
  */
-function setGuestSession(Playlist $playlist, string $username, string $password): void
+function defaultAuthGuestSession(Playlist $playlist, string $username, string $password): void
 {
     request()->attributes->set('playlist_uuid', $playlist->uuid);
 
@@ -85,7 +85,7 @@ it('keeps the owner + UUID login by default', function () {
 });
 
 it('accepts only the custom password in Custom Password mode', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
 
     expect($this->resolver->resolveDefaultLogin('owner', 'tv-pass-123')?->is($this->playlist))->toBeTrue()
         ->and(PlaylistFacade::authenticate('owner', 'tv-pass-123')[1])->toBe('owner_auth')
@@ -96,8 +96,8 @@ it('accepts only the custom password in Custom Password mode', function () {
 });
 
 it('rejects the owner login when the default login is disabled but keeps Playlist Auths working', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
-    attachGuestAuth($this->playlist);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthAttachGuest($this->playlist);
 
     $guestLogin = PlaylistFacade::authenticate('guest-1', 'guest-pass');
 
@@ -107,7 +107,7 @@ it('rejects the owner login when the default login is disabled but keeps Playlis
 });
 
 it('tells the owners apart when two users pick the same custom password', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'same-pass');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'same-pass');
     $otherUser = User::factory()->create(['name' => 'other']);
     $otherPlaylist = CustomPlaylist::factory()->for($otherUser)->create([
         'default_auth_mode' => DefaultAuthMode::Custom,
@@ -119,7 +119,7 @@ it('tells the owners apart when two users pick the same custom password', functi
 });
 
 it('accepts the current internal token in every mode, but not a forged one', function (DefaultAuthMode $mode) {
-    setDefaultAuth($this->playlist, $mode, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, $mode, 'tv-pass-123');
     $token = $this->playlist->fresh()->getInternalAuthToken();
 
     expect($this->resolver->resolveDefaultLogin('owner', $token)?->is($this->playlist))->toBeTrue()
@@ -128,7 +128,7 @@ it('accepts the current internal token in every mode, but not a forged one', fun
 })->with([DefaultAuthMode::Uuid, DefaultAuthMode::Custom, DefaultAuthMode::Disabled]);
 
 it('rotates the internal token when the default login changes, and keeps it on unrelated saves', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
     $playlist = $this->playlist->fresh();
     $oldToken = $playlist->getInternalAuthToken();
 
@@ -142,7 +142,7 @@ it('rotates the internal token when the default login changes, and keeps it on u
 });
 
 it('never copies the custom password or token secret when a playlist is duplicated', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
 
     $copy = $this->playlist->fresh()->replicate(except: ['id', 'uuid']);
 
@@ -159,7 +159,7 @@ it('uses the UUID in in-app stream URLs while UUID login is on, and the internal
 
     expect($channel->getProxyUrl())->toContain("/owner/{$this->playlist->uuid}/{$channel->id}");
 
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     $token = $this->playlist->fresh()->getInternalAuthToken();
 
     expect($channel->fresh()->getProxyUrl())->toContain('/owner/'.urlencode($token)."/{$channel->id}");
@@ -179,7 +179,7 @@ it('re-signs legacy DVR VOD stream URLs without owner credentials when the defau
         'url' => "http://localhost/dvr/owner/{$this->playlist->uuid}/{$recording->uuid}.ts",
     ]);
 
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     $url = $vodChannel->fresh()->url;
 
     expect($url)
@@ -221,7 +221,7 @@ it('requires the owner credentials for the M3U in Custom Password mode and embed
         'enable_proxy' => true,
         'url' => 'http://provider.example.com/live/u/p/1234.ts',
     ]);
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
 
     $this->get("/{$this->playlist->uuid}/playlist.m3u")->assertUnauthorized();
     $this->get("/{$this->playlist->uuid}/playlist.m3u?username=owner&password={$this->playlist->uuid}")->assertUnauthorized();
@@ -235,19 +235,19 @@ it('requires the owner credentials for the M3U in Custom Password mode and embed
 });
 
 it('requires a Playlist Auth for the M3U and HDHR lineup when the default login is disabled', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
 
     $this->get("/{$this->playlist->uuid}/playlist.m3u")->assertUnauthorized();
     $this->get("/{$this->playlist->uuid}/hdhr/lineup.json")->assertUnauthorized();
 
-    attachGuestAuth($this->playlist);
+    defaultAuthAttachGuest($this->playlist);
 
     $this->get("/{$this->playlist->uuid}/playlist.m3u?username=guest-1&password=guest-pass")->assertOk();
     $this->get("/{$this->playlist->uuid}/hdhr/guest-1/guest-pass/lineup.json")->assertOk();
 });
 
 it('accepts the owner credentials on the HDHR path in Custom Password mode', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
 
     $this->get("/{$this->playlist->uuid}/hdhr/lineup.json")->assertUnauthorized();
     $this->get("/{$this->playlist->uuid}/hdhr/owner/tv-pass-123/lineup.json")->assertOk();
@@ -261,18 +261,18 @@ it('reports the default login per mode in the Xtream info and output URLs', func
         ->and($uuidInfo['mode'])->toBe(DefaultAuthMode::Uuid)
         ->and(PlaylistFacade::getUrls($this->playlist->fresh())['m3u'])->not->toContain('password=');
 
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
     $urls = PlaylistFacade::getUrls($this->playlist->fresh());
     expect(PlaylistFacade::getXtreamInfo($this->playlist->fresh())['password'])->toBe('tv-pass-123')
         ->and($urls['m3u'])->toEndWith('?username=owner&password=tv-pass-123')
         ->and($urls['hdhr'])->toEndWith('/owner/tv-pass-123');
 
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     expect(PlaylistFacade::getXtreamInfo($this->playlist->fresh())['password'])->toBeNull();
 });
 
 it('shows a disabled notice instead of credentials in the Xtream API panel', function () {
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
 
     Livewire::test(XtreamApiInfo::class, ['record' => $this->playlist->fresh()])
         ->assertSee(__('The default login is disabled for this playlist. Use one of its Playlist Auths to log in.'))
@@ -326,7 +326,7 @@ it('rejects a custom password another of the owner\'s playlists already uses', f
 
 it('keeps the internal token when the playlist form is saved without login changes', function () {
     $this->actingAs($this->user);
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
     $token = $this->playlist->fresh()->getInternalAuthToken();
 
     Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
@@ -340,11 +340,11 @@ it('keeps the internal token when the playlist form is saved without login chang
 // --- Guest panel playback ---
 
 it('plays guest VOD with the guest\'s own credentials, never the owner\'s', function () {
-    attachGuestAuth($this->playlist);
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthAttachGuest($this->playlist);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     $group = Group::factory()->for($this->playlist)->for($this->user)->create();
     $movie = Channel::factory()->for($this->user)->for($this->playlist)->for($group)->create(['enabled' => true, 'is_vod' => true]);
-    setGuestSession($this->playlist, 'guest-1', 'guest-pass');
+    defaultAuthGuestSession($this->playlist, 'guest-1', 'guest-pass');
 
     expect(GuestVodResource::playerAttributes($movie)['url'])
         ->toContain("/movie/guest-1/guest-pass/{$movie->id}")
@@ -354,14 +354,14 @@ it('plays guest VOD with the guest\'s own credentials, never the owner\'s', func
 it('plays a guest\'s own DVR recording with the guest\'s credentials, never the owner\'s', function () {
     Storage::fake('dvr');
     Storage::disk('dvr')->put('recordings/show/episode.ts', str_repeat('x', 1024));
-    attachGuestAuth($this->playlist)->update(['dvr_enabled' => true]);
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthAttachGuest($this->playlist)->update(['dvr_enabled' => true]);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     $setting = DvrSetting::factory()->enabled()->for($this->user)->for($this->playlist)->create();
     $recording = DvrRecording::factory()->completed()->for($setting, 'dvrSetting')->for($this->user)->create([
         'playlist_auth_id' => PlaylistAuth::where('username', 'guest-1')->value('id'),
         'file_path' => 'recordings/show/episode.ts',
     ]);
-    setGuestSession($this->playlist, 'guest-1', 'guest-pass');
+    defaultAuthGuestSession($this->playlist, 'guest-1', 'guest-pass');
 
     $url = GuestDvrRecordingResource::playerAttributes($recording)['url'];
 
@@ -380,7 +380,7 @@ it('writes the internal password into proxy STRM files', function () {
         'location' => $syncDir,
         'url_type' => 'proxy',
     ]);
-    setDefaultAuth($this->playlist, DefaultAuthMode::Disabled);
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
     $movie = Channel::factory()->for($this->playlist)->for($this->user)->create([
         'enabled' => true,
         'is_vod' => true,
@@ -406,7 +406,7 @@ it('writes the internal password into proxy STRM files', function () {
 it('queues STRM rewrites when the playlist\'s internal password changes', function () {
     $this->playlist->update(['auto_sync_vod_stream_files' => true, 'auto_sync_series_stream_files' => true]);
 
-    setDefaultAuth($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
+    defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'tv-pass-123');
 
     Bus::assertDispatched(SyncVodStrmFiles::class, fn (SyncVodStrmFiles $job): bool => $job->playlist?->is($this->playlist) === true);
     Bus::assertDispatched(SyncSeriesStrmFiles::class, fn (SyncSeriesStrmFiles $job): bool => $job->playlist_id === $this->playlist->id);
