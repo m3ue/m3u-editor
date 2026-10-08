@@ -3987,11 +3987,13 @@ class M3uProxyService
 
         $networkId = $recording->uuid;
 
+        // Record from now (a late start or a resume) to the scheduled end plus the
+        // end-late buffer, so a restarted capture doesn't overrun the airing window.
         $durationSeconds = 0;
         if ($recording->scheduled_start && $recording->scheduled_end) {
-            $durationSeconds = (int) abs($recording->scheduled_end->diffInSeconds($recording->scheduled_start));
-            // Add end-late buffer
-            $durationSeconds += (int) $setting->resolveEndLateSeconds(null);
+            $endsAt = $recording->scheduled_end->copy()->addSeconds((int) $setting->resolveEndLateSeconds(null));
+            $startsAt = now()->max($recording->scheduled_start);
+            $durationSeconds = max(0, (int) $startsAt->diffInSeconds($endsAt, false));
         }
 
         // When transcoding is enabled the proxy runs FFmpeg for the DVR broadcast
@@ -4028,6 +4030,38 @@ class M3uProxyService
         }
 
         return $networkId;
+    }
+
+    /**
+     * Network ids of every broadcast the proxy currently knows about, across all
+     * users (unlike fetchBroadcasts(), which is scoped to the logged-in user).
+     *
+     * @return list<string>|null null when the proxy could not be asked, so callers
+     *                           never act on "missing" when the answer is unknown
+     */
+    public function activeBroadcastIds(): ?array
+    {
+        if (empty($this->apiBaseUrl)) {
+            return null;
+        }
+
+        try {
+            $response = Http::connectTimeout(2)
+                ->timeout(5)
+                ->acceptJson()
+                ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : [])
+                ->get($this->apiBaseUrl.'/broadcast');
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            return array_values(array_filter(array_column($response->json('broadcasts') ?? [], 'network_id')));
+        } catch (Exception $e) {
+            Log::warning('Unable to list proxy broadcasts: '.$e->getMessage());
+
+            return null;
+        }
     }
 
     /**

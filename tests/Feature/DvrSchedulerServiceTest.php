@@ -34,6 +34,7 @@ use App\Models\EpgProgramme;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\DvrSchedulerService;
+use App\Services\M3uProxyService;
 use App\Support\SeriesKey;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -1992,4 +1993,68 @@ it('immediately schedules a recording when a manual rule is created', function (
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->first()->status)
         ->toBe(DvrRecordingStatus::Scheduled);
+});
+
+// --- Resume recordings the proxy lost ---
+
+function makeLostRecording(DvrSetting $setting, User $user): DvrRecording
+{
+    return DvrRecording::factory()
+        ->recording()
+        ->for($setting, 'dvrSetting')
+        ->for($user)
+        ->create([
+            'proxy_network_id' => 'lost-net',
+            'actual_start' => now()->subMinutes(10),
+            'scheduled_start' => now()->subMinutes(10),
+            'scheduled_end' => now()->addMinutes(20),
+        ]);
+}
+
+/**
+ * @param  list<string>|null  $activeIds
+ */
+function fakeActiveBroadcastIds(?array $activeIds): void
+{
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('activeBroadcastIds')->once()->andReturn($activeIds);
+    app()->instance(M3uProxyService::class, $proxy);
+}
+
+it('resumes an in-progress recording the proxy no longer has a broadcast for', function () {
+    $recording = makeLostRecording($this->setting, $this->user);
+    fakeActiveBroadcastIds(['some-other-net']);
+
+    $this->service->tick();
+
+    Queue::assertPushed(StartDvrRecording::class, fn ($job) => $job->recordingId === $recording->id && $job->resume);
+});
+
+it('leaves a recording alone while the proxy still has its broadcast', function () {
+    makeLostRecording($this->setting, $this->user);
+    fakeActiveBroadcastIds(['lost-net']);
+
+    $this->service->tick();
+
+    Queue::assertNotPushed(StartDvrRecording::class);
+});
+
+it('does not resume anything when the proxy cannot be asked', function () {
+    makeLostRecording($this->setting, $this->user);
+    fakeActiveBroadcastIds(null);
+
+    $this->service->tick();
+
+    Queue::assertNotPushed(StartDvrRecording::class);
+});
+
+it('does not resume a recording that only just started', function () {
+    makeLostRecording($this->setting, $this->user)->update(['actual_start' => now()->subSeconds(10)]);
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldNotReceive('activeBroadcastIds');
+    app()->instance(M3uProxyService::class, $proxy);
+
+    $this->service->tick();
+
+    Queue::assertNotPushed(StartDvrRecording::class);
 });
