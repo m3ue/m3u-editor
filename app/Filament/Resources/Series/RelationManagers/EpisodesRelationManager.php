@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series\RelationManagers;
 
+use App\Filament\Tables\CacheStateColumn;
 use App\Filament\Tables\ProbeStatusColumn;
 use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
@@ -17,7 +18,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -147,19 +147,7 @@ class EpisodesRelationManager extends RelationManager
                     ->tooltip(fn ($record): ?string => $record->aio_item_id ? __('AIOStreams-added episodes cannot be probed.') : null)
                     ->toggleable()
                     ->sortable(),
-                IconColumn::make('is_cached')
-                    ->label(__('Cached'))
-                    ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
-                    ->getStateUsing(fn (Episode $record): bool => $record->isCached())
-                    ->boolean()
-                    ->trueIcon('heroicon-o-circle-stack')
-                    ->falseIcon('heroicon-o-circle-stack')
-                    ->trueColor('success')
-                    ->falseColor('gray')
-                    ->tooltip(fn (?bool $state): string => $state
-                        ? __('Cached file available. Playback will use the local cache.')
-                        : __('Not cached. Use "Cache Now" to download the file for offline playback.'))
-                    ->toggleable(),
+                CacheStateColumn::make(),
 
                 ProbeStatusColumn::make(),
             ])

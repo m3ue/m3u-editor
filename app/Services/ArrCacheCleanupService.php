@@ -40,10 +40,7 @@ class ArrCacheCleanupService
         $removed = [];
 
         $integrations = ArrIntegration::query()
-            ->whereIn('id', ArrCacheMovie::query()->select('arr_integration_id'))
-            ->enabled()
-            ->cacheEnabled()
-            ->where('cache_cleanup', true)
+            ->whereIn('id', ArrCacheMovie::query()->awaitingCleanup()->select('arr_integration_id'))
             ->cursor();
 
         foreach ($integrations as $integration) {
