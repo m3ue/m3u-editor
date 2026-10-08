@@ -106,6 +106,20 @@ it('loads assigned bouquets in the order they were assigned', function () {
         ->assertSchemaStateSet(['bouquets' => [(string) $second->id, (string) $first->id]]);
 });
 
+it('does not load a leftover pivot row for another target into the bouquets state', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $own = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->attach($own->id);
+
+    // A stale row from before the target-switch cleanup, written past the pivot guard.
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $foreign = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $otherPlaylist->id]);
+    DB::table('bouquet_playlist_alias')->insert(['bouquet_id' => $foreign->id, 'playlist_alias_id' => $alias->id]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSchemaStateSet(['bouquets' => [(string) $own->id]]);
+});
+
 it('saves newly assigned bouquets in the order they were picked', function () {
     $alias = makeFormAlias($this->user, $this->playlist);
     $bouquets = collect(['France', 'Belgium', 'Africa'])->map(fn (string $name) => Bouquet::factory()->create([

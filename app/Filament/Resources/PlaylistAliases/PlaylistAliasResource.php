@@ -701,15 +701,12 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         ->relationship(
                                                             name: 'bouquets',
                                                             titleAttribute: 'name',
-                                                            modifyQueryUsing: function (Builder $query, Get $get): Builder {
-                                                                $query->where('user_id', auth()->id());
-
-                                                                return match (true) {
-                                                                    (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
-                                                                    (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
-                                                                    default => $query->where('playlist_id', (int) $get('playlist_id')),
-                                                                };
-                                                            },
+                                                            modifyQueryUsing: fn (Builder $query, Get $get): Builder => self::scopeBouquetsToTarget(
+                                                                $query,
+                                                                (int) $get('playlist_id'),
+                                                                (int) $get('custom_playlist_id'),
+                                                                (int) $get('merged_playlist_id'),
+                                                            ),
                                                         )
                                                         ->multiple()
                                                         ->searchable()
@@ -720,12 +717,18 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             // Show the bouquets in the order they were assigned (pivot id
                                                             // order, see saveRelationshipsUsing) rather than whatever order
                                                             // the database returns them in.
-                                                            $component->state($record?->bouquets()
-                                                                ->where('bouquets.user_id', auth()->id())
-                                                                ->orderByPivot('id')
+                                                            // Scoped like the options query so a pivot row for another target
+                                                            // never lands in the state without a matching option.
+                                                            $component->state($record ? self::scopeBouquetsToTarget(
+                                                                $record->bouquets()->getQuery(),
+                                                                (int) $record->playlist_id,
+                                                                (int) $record->custom_playlist_id,
+                                                                (int) $record->merged_playlist_id,
+                                                            )
+                                                                ->orderBy('bouquet_playlist_alias.id')
                                                                 ->pluck('bouquets.id')
                                                                 ->map(fn ($id): string => (string) $id)
-                                                                ->all() ?? []);
+                                                                ->all() : []);
                                                         })
                                                         ->hintAction(
                                                             Action::make('clear_bouquets')
@@ -1554,13 +1557,12 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         // forged Livewire request with another user's bouquet IDs) can never leak
         // another user's bouquet contents through the picker badges, the
         // contribution callout or the sort pane.
-        $bouquets = Bouquet::whereIn('id', $bouquetIds)
-            ->where('user_id', auth()->id())
-            ->where(fn (Builder $query) => match (true) {
-                (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
-                (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
-                default => $query->where('playlist_id', (int) $get('playlist_id')),
-            })
+        $bouquets = self::scopeBouquetsToTarget(
+            Bouquet::whereIn('id', $bouquetIds),
+            (int) $get('playlist_id'),
+            (int) $get('custom_playlist_id'),
+            (int) $get('merged_playlist_id'),
+        )
             ->get()
             ->keyBy('id');
 
@@ -1568,6 +1570,22 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         return new EloquentCollection(array_values(array_filter(
             array_map(fn ($id): ?Bouquet => $bouquets->get((int) $id), array_values(array_unique($bouquetIds))),
         )));
+    }
+
+    /**
+     * Limit a bouquet query to the current user's bouquets for the alias's active
+     * target. Shared by the Select's options, its state loader and
+     * assignedBouquets() so loading, picking and saving all agree.
+     */
+    protected static function scopeBouquetsToTarget(Builder $query, int $playlistId, int $customPlaylistId, int $mergedPlaylistId): Builder
+    {
+        $query->where($query->qualifyColumn('user_id'), auth()->id());
+
+        return match (true) {
+            $customPlaylistId > 0 => $query->where($query->qualifyColumn('custom_playlist_id'), $customPlaylistId),
+            $mergedPlaylistId > 0 => $query->where($query->qualifyColumn('merged_playlist_id'), $mergedPlaylistId),
+            default => $query->where($query->qualifyColumn('playlist_id'), $playlistId),
+        };
     }
 
     /**
