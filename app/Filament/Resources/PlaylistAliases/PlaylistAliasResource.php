@@ -50,6 +50,8 @@ use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -331,7 +333,6 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                     Actions\DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),
                 Actions\EditAction::make()
-                    ->slideOver()
                     ->button()->hiddenLabel()->size('sm'),
                 Actions\ViewAction::make('view')
                     ->slideOver()
@@ -355,924 +356,961 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     {
         return [
             'index' => Pages\ListPlaylistAliases::route('/'),
-            // 'create' => Pages\CreatePlaylistAlias::route('/create'),
-            // 'edit' => Pages\EditPlaylistAlias::route('/{record}/edit'),
+            'create' => Pages\CreatePlaylistAlias::route('/create'),
+            'edit' => Pages\EditPlaylistAlias::route('/{record}/edit'),
         ];
     }
 
     public static function getForm(): array
     {
         return [
-            Grid::make()
-                ->columns(2)
-                ->columnSpan('full')
-                ->schema([
-                    Forms\Components\TextInput::make('name')
-                        ->required()
-                        ->helperText(__('Enter the name of the alias. Internal use only.')),
-                    Forms\Components\TextInput::make('user_agent')
-                        ->helperText(__('User agent string to use for making requests.'))
-                        ->default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36')
-                        ->required(),
-                ]),
-
-            Grid::make()
-                ->columns(2)
-                ->columnSpan('full')
-                ->schema([
-                    Forms\Components\Textarea::make('description')
-                        ->helperText(__('Optional description for your reference.')),
-                    Forms\Components\Toggle::make('edit_uuid')
-                        ->label(__('View/Update Unique Identifier'))
-                        ->inline(false)
-                        ->live()
-                        ->dehydrated(false)
-                        ->default(false)
-                        ->hiddenOn('create'),
-                ]),
-            Forms\Components\TextInput::make('uuid')
-                ->label(__('Unique Identifier'))
+            Tabs::make('tabs')
                 ->columnSpanFull()
-                ->rules(fn ($record) => [
-                    'required',
-                    'min:3',
-                    'max:36',
-                    'regex:/^[a-zA-Z0-9_\-]+$/',
-                    Rule::unique('playlists', 'uuid'), // Ensure UUID is unique across both playlists and aliases
-                    Rule::unique('playlist_aliases', 'uuid')->ignore($record?->id),
-                ])
-                ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
-                ->hintIcon(
-                    'heroicon-m-exclamation-triangle',
-                    tooltip: __('Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.')
-                )
-                ->hidden(fn ($get): bool => ! $get('edit_uuid'))
-                ->required(),
-
-            Fieldset::make(__('Source Playlist'))
-                ->schema([
-                    // The alias persists to one of three FK columns (playlist_id /
-                    // custom_playlist_id / merged_playlist_id). The form presents that as a
-                    // type + playlist pair (matching the notification-target picker in
-                    // Preferences). source_type / source_id are UI-only (never dehydrated);
-                    // the hidden FK fields below are the persisted state and are kept in sync
-                    // by afterStateUpdated on the way in, and by formatStateUsing on the way out.
-                    Forms\Components\Select::make('source_type')
-                        ->label(__('Playlist type'))
-                        ->options([
-                            'playlist' => __('Standard Playlist'),
-                            'custom_playlist' => __('Custom Playlist'),
-                            'merged_playlist' => __('Merged Playlist'),
-                        ])
-                        ->default('playlist')
-                        ->selectablePlaceholder(false)
-                        ->required()
-                        ->dehydrated(false)
-                        ->live()
-                        ->formatStateUsing(fn (?PlaylistAlias $record): string => match (true) {
-                            $record?->custom_playlist_id !== null => 'custom_playlist',
-                            $record?->merged_playlist_id !== null => 'merged_playlist',
-                            default => 'playlist',
-                        })
-                        ->afterStateUpdated(function (Set $set): void {
-                            // Switching type clears the chosen playlist and any type-specific state.
-                            $set('source_id', null);
-                            $set('playlist_id', null);
-                            $set('custom_playlist_id', null);
-                            $set('merged_playlist_id', null);
-                            $set('group', null);
-                            $set('group_id', null);
-                            self::resetGroupFilter($set);
-                            self::setProviderEntries($set, []);
-                        })
-                        ->helperText(__('Choose the kind of playlist this alias points at. Changing it clears the selected playlist.')),
-                    Forms\Components\Select::make('source_id')
-                        ->label(__('Playlist'))
-                        ->options(fn (Get $get): array => self::sourcePlaylistOptions($get('source_type')))
-                        ->searchable()
-                        ->preload()
-                        ->required()
-                        ->dehydrated(false)
-                        ->live()
-                        ->formatStateUsing(fn (?PlaylistAlias $record): ?int => $record?->custom_playlist_id
-                            ?? $record?->merged_playlist_id
-                            ?? $record?->playlist_id)
-                        ->afterStateUpdated(function (Set $set, Get $get, $state): void {
-                            $type = $get('source_type') ?: 'playlist';
-                            $id = $state ? (int) $state : null;
-
-                            // Mirror the selection into the concrete FK field that is actually
-                            // persisted and that the rest of the form (group filter, credential
-                            // repeater) still reads.
-                            $set('playlist_id', $type === 'playlist' ? $id : null);
-                            $set('custom_playlist_id', $type === 'custom_playlist' ? $id : null);
-                            $set('merged_playlist_id', $type === 'merged_playlist' ? $id : null);
-                            $set('group', null);
-                            $set('group_id', null);
-                            self::resetGroupFilter($set);
-
-                            match ($type) {
-                                'custom_playlist' => self::initializeXtreamConfigForCustomPlaylist($set, $id),
-                                'merged_playlist' => self::initializeXtreamConfigForMergedPlaylist($set, $id),
-                                default => self::initializeXtreamConfigForPlaylist($set, $id),
-                            };
-                        })
-                        ->helperText(fn (Get $get): string => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true)
-                            ? __('Multiple provider credentials can be configured to match source providers.')
-                            : __('Only one set of alternative credentials can be configured.')),
-                    self::ownedSourceIdField('playlist_id', 'playlists'),
-                    self::ownedSourceIdField('custom_playlist_id', 'custom_playlists'),
-                    self::ownedSourceIdField('merged_playlist_id', 'merged_playlists'),
-                ]),
-
-            ...PlaylistFacade::getOutputTogglesSchema(),
-
-            Fieldset::make(__('Provider Credentials'))
-                ->columnSpanFull()
-                ->schema([
-                    Forms\Components\Toggle::make('inherit_dns_failover')
-                        ->label(__('Inherit DNS failover from source playlist'))
-                        ->helperText(__('When enabled, if the source playlist fails over to a new URL, this alias will automatically follow the new URL while keeping its own credentials.'))
-                        ->default(true)
-                        ->columnSpanFull(),
-                    Forms\Components\Repeater::make('xtream_config')
-                        ->label(__('Providers'))
-                        ->helperText(__('Each entry applies to the streams from its provider URL. Swap in different credentials, replace the provider URL clients receive, or both.'))
-                        ->columns(2)
-                        ->defaultItems(0)
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: __('The provider URL decides which streams an entry applies to: the Xtream API URL for Xtream playlists, or the start of the stream URLs (e.g. http://provider.com:8080) for M3U playlists. Streams that match no entry are left unchanged.')
-                        )
-                        ->maxItems(fn (Get $get) => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true) ? null : 1)
-                        ->minItems(1)
-                        ->collapsible()
-                        ->itemLabel(fn (array $state): ?string => 'Provider: '.parse_url($state['url'] ?? '', PHP_URL_HOST)
-                            .(PlaylistAlias::entryReplacesUrl($state) ? ' -> '.parse_url($state['replace_url'], PHP_URL_HOST) : ''))
+                ->contained(false)
+                ->persistTabInQueryString()
+                ->tabs([
+                    Tab::make(__('General'))
+                        ->icon('heroicon-m-cog')
                         ->schema([
-                            Forms\Components\TextInput::make('url')
-                                ->label(__('Provider URL'))
-                                ->live()
-                                ->helperText(__('The provider URL the source streams use, in <url>:<port> format - without trailing slash (/).'))
-                                ->prefixIcon('heroicon-m-globe-alt')
-                                ->maxLength(4000)
-                                ->url()
-                                ->rules([new UrlIsAllowed])
-                                ->columnSpan(2)
-                                ->required()
-                                ->suffixAction(
-                                    Action::make('test_xtream_connection')
-                                        ->label(__('Test connection'))
-                                        ->icon('heroicon-m-signal')
-                                        ->tooltip(__('Test Xtream API connection using the credentials below'))
-                                        ->action(function (Get $get): void {
-                                            $url = $get('url');
-                                            $username = $get('username');
-                                            $password = $get('password');
-
-                                            if (empty($url) || empty($username) || empty($password)) {
-                                                Notification::make()
-                                                    ->title(__('Missing Credentials'))
-                                                    ->body(__('Please fill in the Xtream API URL, username, and password before testing.'))
-                                                    ->warning()
-                                                    ->send();
-
-                                                return;
-                                            }
-
-                                            try {
-                                                $xtream = XtreamService::make(xtream_config: [
-                                                    'url' => $url,
-                                                    'username' => $username,
-                                                    'password' => $password,
-                                                ]);
-
-                                                $result = $xtream->userInfo(timeout: 10);
-
-                                                if (empty($result) || ! isset($result['user_info'])) {
-                                                    Notification::make()
-                                                        ->title(__('Connection Failed'))
-                                                        ->body(__('No valid response from the Xtream API. Check your URL, username, and password.'))
-                                                        ->danger()
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                $userInfo = $result['user_info'];
-                                                $serverInfo = $result['server_info'] ?? [];
-
-                                                $status = $userInfo['status'] ?? 'Unknown';
-                                                $maxConnections = $userInfo['max_connections'] ?? '?';
-                                                $activeCons = $userInfo['active_cons'] ?? '0';
-                                                $expDate = ! empty($userInfo['exp_date'])
-                                                    ? date('Y-m-d', (int) $userInfo['exp_date'])
-                                                    : 'Never';
-                                                $serverUrl = $serverInfo['url'] ?? $url;
-                                                $serverTime = ! empty($serverInfo['time_now'])
-                                                    ? $serverInfo['time_now']
-                                                    : 'Unknown';
-
-                                                $isActive = $status === 'Active';
-                                                $statusIcon = $isActive ? '✅' : '⚠️';
-
-                                                $details = "{$statusIcon} **Status:** {$status}\n\n";
-                                                $details .= "**Max Connections:** {$maxConnections}\n\n";
-                                                $details .= "**Active Connections:** {$activeCons}\n\n";
-                                                $details .= "**Expires:** {$expDate}\n\n";
-                                                $details .= "**Server:** {$serverUrl}\n\n";
-                                                $details .= "**Server Time:** {$serverTime}";
-
-                                                Notification::make()
-                                                    ->title(__('Connection Successful'))
-                                                    ->body(Str::markdown($details))
-                                                    ->success()
-                                                    ->persistent()
-                                                    ->send();
-                                            } catch (Exception $e) {
-                                                Notification::make()
-                                                    ->title(__('Connection Failed'))
-                                                    ->body($e->getMessage())
-                                                    ->danger()
-                                                    ->send();
-                                            }
-                                        }),
-                                ),
-                            // Credentials are optional only when the entry replaces the provider
-                            // URL, and must be given as a pair (empty keeps the provider's own).
-                            Forms\Components\TextInput::make('username')
-                                ->label(__('Xtream API Username'))
-                                ->live(onBlur: true)
-                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('password'))),
-                            Forms\Components\TextInput::make('password')
-                                ->label(__('Xtream API Password'))
-                                ->live(onBlur: true)
-                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('username')))
-                                ->password()
-                                ->revealable(),
-                            Forms\Components\Toggle::make('replace_url_enabled')
-                                ->label(__('Replace provider URL'))
-                                ->helperText(__('Send streams from this provider to a different URL, e.g. a VPN-only address. The rest of the stream URL is kept. Credentials are optional when enabled - leave them empty to keep the provider\'s own.'))
-                                ->default(false)
-                                ->live()
-                                ->columnSpan(2),
-                            Forms\Components\TextInput::make('replace_url')
-                                ->label(__('Replacement URL'))
-                                ->helperText(__('Clients receive this URL in place of the provider URL. When the proxy is enabled, the proxy fetches from it instead, so it must be reachable from the proxy server.'))
-                                ->prefixIcon('heroicon-m-arrows-right-left')
-                                ->maxLength(4000)
-                                ->url()
-                                ->rules([new UrlIsAllowed])
-                                ->visible(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
-                                ->required(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
-                                ->columnSpan(2),
-                        ])->columnSpanFull(),
-                ]),
-
-            Fieldset::make(__('Streaming Output'))
-                ->columns(2)
-                ->schema([
-                    Forms\Components\Toggle::make('enable_proxy')
-                        ->label(__('Enable Stream Proxy'))
-                        ->hint(fn (Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn (Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
-                        ->live()
-                        ->helperText(__('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.'))
-                        ->inline(false)
-                        ->default(false)
-                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
-                    Forms\Components\Toggle::make('enable_logo_proxy')
-                        ->label(__('Enable Logo Proxy'))
-                        ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
-                        ->hintIcon(fn (Get $get): string => ! $get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
-                        ->live()
-                        ->helperText(__('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.'))
-                        ->inline(false)
-                        ->default(false)
-                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
-                    Forms\Components\TextInput::make('streams')
-                        ->label(__('HDHR/Xtream API Streams'))
-                        ->helperText(__('Number of streams available for HDHR and Xtream API service (if using).'))
-                        ->columnSpanfull()
-                        ->hintIcon(
-                            'heroicon-m-question-mark-circle',
-                            tooltip: __('Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.')
-                        )
-                        ->rules(['min:0'])
-                        ->type('number')
-                        ->default(0) // Default to 0 streams (unlimited)
-                        ->required(),
-                    Grid::make()
-                        ->columns(1)
-                        ->schema([
-                            Forms\Components\TextInput::make('available_streams')
-                                ->label(__('Available Streams'))
-                                ->hint(__('Set to 0 for unlimited streams.'))
-                                ->helperText(__('Number of streams available for this provider. If set to a value other than 0, will prevent any streams from starting if the number of active streams exceeds this value.'))
-                                ->columnSpan(1)
-                                ->rules(['min:1'])
-                                ->type('number')
-                                ->default(0) // Default to 0 streams (for unlimted)
-                                ->required(),
-                            Forms\Components\Toggle::make('strict_live_ts')
-                                ->label(__('Enable Strict Live TS Handling'))
-                                ->hintAction(
-                                    Action::make('learn_more_strict_live_ts')
-                                        ->label(__('Learn More'))
-                                        ->icon('heroicon-o-arrow-top-right-on-square')
-                                        ->iconPosition('after')
-                                        ->size('sm')
-                                        ->url('https://m3ue.sparkison.dev/docs/proxy/strict-live-ts')
-                                        ->openUrlInNewTab(true)
-                                )
-                                ->helperText(__('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).'))
-                                ->inline(false)
-                                ->default(false),
-                            Forms\Components\Toggle::make('use_sticky_session')
-                                ->label(__('Enable Sticky Session Handler'))
-                                ->hintAction(
-                                    Action::make('learn_more_sticky_session')
-                                        ->label(__('Learn More'))
-                                        ->icon('heroicon-o-arrow-top-right-on-square')
-                                        ->iconPosition('after')
-                                        ->size('sm')
-                                        ->url('https://m3ue.sparkison.dev/docs/proxy/sticky-sessions')
-                                        ->openUrlInNewTab(true)
-                                )
-                                ->helperText('')
-                                ->inline(false)
-                                ->default(false)
-                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
-                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-
-                    Fieldset::make(__('Transcoding Settings (optional)'))
-                        ->columnSpanFull()
-                        ->schema([
-                            Forms\Components\Select::make('stream_profile_id')
-                                ->label(__('Live Streaming Profile'))
-                                ->relationship('streamProfile', 'name')
-                                ->options(function () {
-                                    return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
-                                })
-                                ->searchable()
-                                ->preload()
-                                ->nullable()
-                                ->helperText(__('Select a transcoding profile to apply to Live streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
-                                ->placeholder(__('Leave empty for direct stream proxying')),
-                            Forms\Components\Select::make('vod_stream_profile_id')
-                                ->label(__('VOD and Series Streaming Profile'))
-                                ->relationship('vodStreamProfile', 'name')
-                                ->options(function () {
-                                    return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
-                                })
-                                ->searchable()
-                                ->preload()
-                                ->nullable()
-                                ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: __('Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.')
-                                )
-                                ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
-                                ->placeholder(__('Leave empty for direct stream proxying')),
-                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                    Fieldset::make(__('HTTP Headers (optional)'))
-                        ->columnSpanFull()
-                        ->schema([
-                            Forms\Components\Repeater::make('custom_headers')
-                                ->hiddenLabel()
-                                ->helperText(__('Add any custom headers to include when streaming a channel/episode.'))
-                                ->columnSpanFull()
-                                ->columns(2)
-                                ->default([])
+                            Section::make(__('General'))
+                                ->icon('heroicon-m-cog')
                                 ->schema([
-                                    Forms\Components\TextInput::make('header')
-                                        ->label(__('Header'))
-                                        ->required()
-                                        ->placeholder(__('e.g. Authorization')),
-                                    Forms\Components\TextInput::make('value')
-                                        ->label(__('Value'))
-                                        ->required()
-                                        ->placeholder(__('e.g. Bearer abc123')),
+                                    Grid::make()
+                                        ->columns(2)
+                                        ->columnSpan('full')
+                                        ->schema([
+                                            Forms\Components\TextInput::make('name')
+                                                ->required()
+                                                ->helperText(__('Enter the name of the alias. Internal use only.')),
+                                            Forms\Components\TextInput::make('user_agent')
+                                                ->helperText(__('User agent string to use for making requests.'))
+                                                ->default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36')
+                                                ->required(),
+                                        ]),
+
+                                    Grid::make()
+                                        ->columns(2)
+                                        ->columnSpan('full')
+                                        ->schema([
+                                            Forms\Components\Textarea::make('description')
+                                                ->columnSpanFull()
+                                                ->helperText(__('Optional description for your reference.')),
+                                            Forms\Components\Toggle::make('edit_uuid')
+                                                ->label(__('View/Update Unique Identifier'))
+                                                ->inline(false)
+                                                ->live()
+                                                ->dehydrated(false)
+                                                ->default(false)
+                                                ->hiddenOn('create'),
+                                        ]),
+                                    Forms\Components\TextInput::make('uuid')
+                                        ->label(__('Unique Identifier'))
+                                        ->columnSpanFull()
+                                        ->rules(fn ($record) => [
+                                            'required',
+                                            'min:3',
+                                            'max:36',
+                                            'regex:/^[a-zA-Z0-9_\-]+$/',
+                                            Rule::unique('playlists', 'uuid'), // Ensure UUID is unique across both playlists and aliases
+                                            Rule::unique('playlist_aliases', 'uuid')->ignore($record?->id),
+                                        ])
+                                        ->helperText(__('3-36 characters. Only letters, numbers, hyphens, and underscores are allowed.'))
+                                        ->hintIcon(
+                                            'heroicon-m-exclamation-triangle',
+                                            tooltip: __('Be careful changing this value as this will change the URLs for the Playlist, its EPG, and HDHR.')
+                                        )
+                                        ->hidden(fn ($get): bool => ! $get('edit_uuid'))
+                                        ->required(),
+
+                                    Fieldset::make(__('Source Playlist'))
+                                        ->schema([
+                                            // The alias persists to one of three FK columns (playlist_id /
+                                            // custom_playlist_id / merged_playlist_id). The form presents that as a
+                                            // type + playlist pair (matching the notification-target picker in
+                                            // Preferences). source_type / source_id are UI-only (never dehydrated);
+                                            // the hidden FK fields below are the persisted state and are kept in sync
+                                            // by afterStateUpdated on the way in, and by formatStateUsing on the way out.
+                                            Forms\Components\Select::make('source_type')
+                                                ->label(__('Playlist type'))
+                                                ->options([
+                                                    'playlist' => __('Standard Playlist'),
+                                                    'custom_playlist' => __('Custom Playlist'),
+                                                    'merged_playlist' => __('Merged Playlist'),
+                                                ])
+                                                ->default('playlist')
+                                                ->selectablePlaceholder(false)
+                                                ->required()
+                                                ->dehydrated(false)
+                                                ->live()
+                                                ->formatStateUsing(fn (?PlaylistAlias $record): string => match (true) {
+                                                    $record?->custom_playlist_id !== null => 'custom_playlist',
+                                                    $record?->merged_playlist_id !== null => 'merged_playlist',
+                                                    default => 'playlist',
+                                                })
+                                                ->afterStateUpdated(function (Set $set): void {
+                                                    // Switching type clears the chosen playlist and any type-specific state.
+                                                    $set('source_id', null);
+                                                    $set('playlist_id', null);
+                                                    $set('custom_playlist_id', null);
+                                                    $set('merged_playlist_id', null);
+                                                    $set('group', null);
+                                                    $set('group_id', null);
+                                                    self::resetGroupFilter($set);
+                                                    self::setProviderEntries($set, []);
+                                                })
+                                                ->helperText(__('Choose the kind of playlist this alias points at. Changing it clears the selected playlist.')),
+                                            Forms\Components\Select::make('source_id')
+                                                ->label(__('Playlist'))
+                                                ->options(fn (Get $get): array => self::sourcePlaylistOptions($get('source_type')))
+                                                ->searchable()
+                                                ->preload()
+                                                ->required()
+                                                ->dehydrated(false)
+                                                ->live()
+                                                ->formatStateUsing(fn (?PlaylistAlias $record): ?int => $record?->custom_playlist_id
+                                                    ?? $record?->merged_playlist_id
+                                                    ?? $record?->playlist_id)
+                                                ->afterStateUpdated(function (Set $set, Get $get, $state): void {
+                                                    $type = $get('source_type') ?: 'playlist';
+                                                    $id = $state ? (int) $state : null;
+
+                                                    // Mirror the selection into the concrete FK field that is actually
+                                                    // persisted and that the rest of the form (group filter, credential
+                                                    // repeater) still reads.
+                                                    $set('playlist_id', $type === 'playlist' ? $id : null);
+                                                    $set('custom_playlist_id', $type === 'custom_playlist' ? $id : null);
+                                                    $set('merged_playlist_id', $type === 'merged_playlist' ? $id : null);
+                                                    $set('group', null);
+                                                    $set('group_id', null);
+                                                    self::resetGroupFilter($set);
+
+                                                    match ($type) {
+                                                        'custom_playlist' => self::initializeXtreamConfigForCustomPlaylist($set, $id),
+                                                        'merged_playlist' => self::initializeXtreamConfigForMergedPlaylist($set, $id),
+                                                        default => self::initializeXtreamConfigForPlaylist($set, $id),
+                                                    };
+                                                })
+                                                ->helperText(fn (Get $get): string => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true)
+                                                    ? __('Multiple provider credentials can be configured to match source providers.')
+                                                    : __('Only one set of alternative credentials can be configured.')),
+                                            self::ownedSourceIdField('playlist_id', 'playlists'),
+                                            self::ownedSourceIdField('custom_playlist_id', 'custom_playlists'),
+                                            self::ownedSourceIdField('merged_playlist_id', 'merged_playlists'),
+                                        ]),
                                 ]),
-                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
-                ])->columnSpanFull(),
-
-            Fieldset::make(__('Auth (optional)'))
-                ->columns(2)
-                ->schema([
-                    Forms\Components\TextInput::make('username')
-                        ->label(__('Username'))
-                        ->helperText(__('Optional: Set credentials to access this alias via Xtream API. Must be unique across all aliases and playlist auths.'))
-                        ->rules(function ($record) {
-                            return [
-                                'nullable',
-                                Rule::unique('playlist_aliases', 'username')->ignore($record?->id),
-                                Rule::unique('playlist_auths', 'username'),
-                                new UrlSafeCredential,
-                            ];
-                        })
-                        ->columnSpan(1),
-                    Forms\Components\TextInput::make('password')
-                        ->label(__('Password'))
-                        ->columnSpan(1)
-                        ->password()
-                        ->rules(['nullable', new UrlSafeCredential])
-                        ->revealable()
-                        ->suffixAction(GeneratePasswordAction::make()),
-                    Forms\Components\DateTimePicker::make('expires_at')
-                        ->label(__('Expiration (date & time)'))
-                        ->seconds(false)
-                        ->native(false)
-                        ->prefixIcon('heroicon-o-calendar')
-                        ->helperText(__('If set, this alias credentials will stop working at that exact time.'))
-                        ->nullable()
-                        ->columnSpan(2),
-                ]),
-
-            ...DefaultAuthFields::schema(),
-
-            Fieldset::make(__('Channel Filter (optional)'))
-                ->columnSpanFull()
-                ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id') && ! $get('merged_playlist_id'))
-                ->schema([
-                    Fieldset::make(__('Bouquets'))
-                        ->columnSpanFull()
-                        ->schema([
-                            Forms\Components\Select::make('bouquets')
-                                ->label(__('Assigned bouquets'))
-                                ->relationship(
-                                    name: 'bouquets',
-                                    titleAttribute: 'name',
-                                    modifyQueryUsing: function (Builder $query, Get $get): Builder {
-                                        $query->where('user_id', auth()->id());
-
-                                        return match (true) {
-                                            (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
-                                            (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
-                                            default => $query->where('playlist_id', (int) $get('playlist_id')),
-                                        };
-                                    },
-                                )
-                                ->multiple()
-                                ->searchable()
-                                ->preload()
-                                ->live()
-                                ->afterStateUpdated(fn (Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set))
-                                ->loadStateFromRelationshipsUsing(function (Forms\Components\Select $component, ?PlaylistAlias $record): void {
-                                    // Show the bouquets in the order they were assigned (pivot id
-                                    // order, see saveRelationshipsUsing) rather than whatever order
-                                    // the database returns them in.
-                                    $component->state($record?->bouquets()
-                                        ->where('bouquets.user_id', auth()->id())
-                                        ->orderByPivot('id')
-                                        ->pluck('bouquets.id')
-                                        ->map(fn ($id): string => (string) $id)
-                                        ->all() ?? []);
-                                })
-                                ->hintAction(
-                                    Action::make('clear_bouquets')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
-                                        ->action(function (Get $get, Set $set): void {
-                                            $set('bouquets', []);
-                                            self::syncLiveGroupSortItems($get, $set);
-                                        })
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to remove all assigned bouquets? Changes are saved when you save the alias.'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->saveRelationshipsUsing(function (PlaylistAlias $record, Get $get): void {
-                                    // Filament saves relationships before the record itself, and its
-                                    // default save only detaches within the options query (the new
-                                    // target's bouquets). Persist a playlist switch first - the pivot
-                                    // guard checks the stored target, and the alias updating hook drops
-                                    // the previous target's bouquets - then sync the validated picks.
-                                    // assignedBouquets() keeps the picked order, so newly attached
-                                    // bouquets get ascending pivot ids in the order they were picked.
-                                    $record->update([
-                                        'playlist_id' => $get('playlist_id') ?: null,
-                                        'custom_playlist_id' => $get('custom_playlist_id') ?: null,
-                                        'merged_playlist_id' => $get('merged_playlist_id') ?: null,
-                                    ]);
-                                    $record->bouquets()->sync(self::assignedBouquets($get)->modelKeys());
-                                    $record->unsetRelation('bouquets');
-                                })
-                                ->columnSpanFull()
-                                ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine - assigning a bouquet never removes anything the manual pickers allow.'))
-                                ->createOptionForm([
-                                    Forms\Components\TextInput::make('name')->required(),
-                                    Forms\Components\Textarea::make('description'),
-                                ])
-                                ->createOptionUsing(function (array $data, Get $get): int {
-                                    $bouquet = Bouquet::create([
-                                        'name' => $data['name'],
-                                        'description' => $data['description'] ?? null,
-                                        'user_id' => auth()->id(),
-                                        'playlist_id' => (! $get('custom_playlist_id') && ! $get('merged_playlist_id')) ? ((int) $get('playlist_id') ?: null) : null,
-                                        'custom_playlist_id' => $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
-                                        'merged_playlist_id' => $get('merged_playlist_id') ? (int) $get('merged_playlist_id') : null,
-                                    ]);
-
-                                    Notification::make()
-                                        ->success()
-                                        ->title(__('Bouquet created'))
-                                        ->body(__('Select its groups under Playlist Bouquets.'))
-                                        ->send();
-
-                                    return $bouquet->getKey();
-                                }),
-                            Schemas\Components\Callout::make(__('Bouquet contributions'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
-                                ->description(fn (Get $get): string => __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
-                                    'live' => count(self::bouquetContributedNames($get, 'live')),
-                                    'vod' => count(self::bouquetContributedNames($get, 'vod')),
-                                    'series' => count(self::bouquetContributedNames($get, 'categories')),
-                                ])),
                         ]),
+                    Tab::make(__('Auth'))
+                        ->icon('heroicon-m-key')
+                        ->schema([Section::make(__('Auth'))
+                            ->icon('heroicon-m-key')
+                            ->schema([
+                                Fieldset::make(__('Auth (optional)'))
+                                    ->columns(2)
+                                    ->schema([
+                                        Forms\Components\TextInput::make('username')
+                                            ->label(__('Username'))
+                                            ->helperText(__('Optional: Set credentials to access this alias via Xtream API. Must be unique across all aliases and playlist auths.'))
+                                            ->rules(function ($record) {
+                                                return [
+                                                    'nullable',
+                                                    Rule::unique('playlist_aliases', 'username')->ignore($record?->id),
+                                                    Rule::unique('playlist_auths', 'username'),
+                                                    new UrlSafeCredential,
+                                                ];
+                                            })
+                                            ->columnSpan(1),
+                                        Forms\Components\TextInput::make('password')
+                                            ->label(__('Password'))
+                                            ->columnSpan(1)
+                                            ->password()
+                                            ->rules(['nullable', new UrlSafeCredential])
+                                            ->revealable()
+                                            ->suffixAction(GeneratePasswordAction::make()),
+                                        Forms\Components\DateTimePicker::make('expires_at')
+                                            ->label(__('Expiration (date & time)'))
+                                            ->seconds(false)
+                                            ->native(false)
+                                            ->prefixIcon('heroicon-o-calendar')
+                                            ->helperText(__('If set, this alias credentials will stop working at that exact time.'))
+                                            ->nullable()
+                                            ->columnSpan(2),
+                                    ]),
 
-                    Schemas\Components\Callout::make(__('What you can select'))
-                        ->columnSpanFull()
-                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') || (bool) $get('merged_playlist_id'))
-                        ->description(fn (Get $get): string => $get('merged_playlist_id')
-                            ? __('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.')
-                            : __('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
-
-                    Fieldset::make(__('Live channel groups'))
+                                ...DefaultAuthFields::schema(),
+                            ]),
+                        ]),
+                    Tab::make(__('Providers'))
+                        ->icon('heroicon-m-server-stack')
                         ->schema([
-                            ModalTableSelect::make('group_filter.selected_groups')
-                                ->tableConfiguration(SourceGroupsTable::class)
-                                ->label(__('Allowed live groups'))
+                            Section::make(__('Provider Credentials'))
                                 ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
-                                ->multiple()
-                                ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'playlist_ids' => self::sourcePlaylistIds($get, 'live'),
-                                    'type' => 'live',
-                                    'selected' => $get('group_filter.selected_groups') ?? [],
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select live groups'))
-                                        ->modalHeading(__('Search live groups'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_live_groups')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(function (Get $get, Set $set): void {
-                                            $set('group_filter.selected_groups', []);
-                                            self::syncLiveGroupSortItems($get, $set, []);
-                                        })
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
-                                ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceGroup::displayLabelsForIds(
-                                    self::sourcePlaylistIds($get, 'live', $record),
-                                    'live',
-                                    $values,
-                                    includePlaylistName: self::isMergedAliasForm($get, $record),
-                                ))
-                                ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
-                                    // Hidden components are still hydrated, so bail out for aliases of a
-                                    // custom playlist — their selection is names from the custom playlist's
-                                    // groups, which the Select below owns and no SourceGroup would match.
-                                    // The persisted selection is read from the record rather than $state:
-                                    // the multi-select normalises state to scalars first, which would drop
-                                    // the {playlist_id, name} pairs a merged alias stores.
-                                    $selection = self::persistedSourceSelection($record, 'selected_groups');
-                                    if ($selection === null) {
-                                        return;
-                                    }
-                                    $component->state(self::selectionToSourceIds(
-                                        SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'live'))->where('type', 'live'),
-                                        $selection,
-                                        merged: (bool) $record->merged_playlist_id,
-                                    ));
-                                })
-                                ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                    if (! is_array($state) || empty($state)) {
-                                        return $state;
-                                    }
-
-                                    return self::sourceIdsToSelection(
-                                        SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'live', $record))->where('type', 'live'),
-                                        $state,
-                                        merged: self::isMergedAliasForm($get, $record),
-                                    );
-                                })
-                                ->live()
-                                ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
-
-                            // Custom playlist equivalent. Its records are keyed by name, which is
-                            // exactly what group_filter stores, so no id/name translation is needed.
-                            ModalTableSelect::make('group_filter.selected_groups')
-                                ->tableConfiguration(CustomPlaylistGroupsTable::class)
-                                ->label(__('Allowed live groups'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
-                                ->multiple()
-                                ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
-                                    'type' => 'live',
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select live groups'))
-                                        ->modalHeading(__('Search live groups'))
-                                        ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_custom_live_groups')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(function (Get $get, Set $set): void {
-                                            $set('group_filter.selected_groups', []);
-                                            self::syncLiveGroupSortItems($get, $set, []);
-                                        })
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
-                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values))
-                                ->live()
-                                ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
-
-                            Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
-                                ->label(__('Sort groups in custom order'))
-                                ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
-                                ->default(false)
-                                ->columnSpanFull()
-                                ->live()
-                                ->afterStateUpdated(function ($state, Get $get, Set $set): void {
-                                    // Seed (or reconcile) the order list from the current selection and bouquets.
-                                    if ($state) {
-                                        self::syncLiveGroupSortItems($get, $set);
-                                    }
-                                }),
-
-                            Forms\Components\Repeater::make('group_filter.live_group_order')
-                                ->hiddenLabel()
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
-                                ->dehydrated(true)
-                                ->table([
-                                    Forms\Components\Repeater\TableColumn::make(__('Group Name')),
-                                    Forms\Components\Repeater\TableColumn::make(__('Bouquet')),
-                                ])
                                 ->schema([
-                                    Forms\Components\TextInput::make('label')
-                                        ->hiddenLabel()
-                                        ->readOnly()
-                                        ->dehydrated(false),
-                                    TextEntry::make('bouquets')
-                                        ->hiddenLabel()
-                                        ->badge()
-                                        ->color('info'),
-                                    Forms\Components\Hidden::make('name'),
-                                ])
-                                ->addable(false)
-                                ->deletable(false)
-                                ->reorderable(true)
-                                ->compact()
-                                ->helperText(__('Drag the groups into the order you want them delivered to the client. Includes groups from assigned bouquets.'))
-                                ->hintAction(
-                                    Action::make('reset_live_group_order')
-                                        ->label(__('Reset to playlist order'))
-                                        ->icon('heroicon-o-arrow-path')
-                                        ->color('gray')
-                                        ->action(function (Get $get, Set $set): void {
-                                            // Forget the saved order and rebuild it from the playlist's own group order.
-                                            $set('group_filter.live_group_order', []);
-                                            self::syncLiveGroupSortItems($get, $set);
-                                        })
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Reset to playlist order'))
-                                        ->modalDescription(__('Replace the custom order with the group order of the source playlist? Changes are saved when you save the alias.'))
-                                        ->modalSubmitActionLabel(__('Reset'))
-                                )
-                                ->afterStateHydrated(function (Forms\Components\Repeater $component, $state, ?PlaylistAlias $record): void {
-                                    $playlistIds = self::sourcePlaylistIdsForRecord($record, 'live');
-                                    $orderedNames = self::liveGroupSortNames($state);
-                                    $bouquetSources = self::bouquetLiveGroupSources($record?->bouquets ?? []);
-                                    $selectedNames = array_values(array_unique(array_merge(
-                                        PlaylistAlias::selectionNames($record?->group_filter['selected_groups'] ?? []),
-                                        array_keys($bouquetSources),
-                                    )));
-                                    $component->state(self::buildLiveGroupSortItems($orderedNames, $selectedNames, $playlistIds, $bouquetSources));
-                                })
-                                ->dehydrateStateUsing(fn ($state): array => self::liveGroupSortNames($state)),
+                                    Forms\Components\Toggle::make('inherit_dns_failover')
+                                        ->label(__('Inherit DNS failover from source playlist'))
+                                        ->helperText(__('When enabled, if the source playlist fails over to a new URL, this alias will automatically follow the new URL while keeping its own credentials.'))
+                                        ->default(true)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Repeater::make('xtream_config')
+                                        ->label(__('Providers'))
+                                        ->helperText(__('Each entry applies to the streams from its provider URL. Swap in different credentials, replace the provider URL clients receive, or both.'))
+                                        ->columns(2)
+                                        ->defaultItems(0)
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: __('The provider URL decides which streams an entry applies to: the Xtream API URL for Xtream playlists, or the start of the stream URLs (e.g. http://provider.com:8080) for M3U playlists. Streams that match no entry are left unchanged.')
+                                        )
+                                        ->maxItems(fn (Get $get) => in_array($get('source_type'), ['custom_playlist', 'merged_playlist'], true) ? null : 1)
+                                        ->minItems(1)
+                                        ->collapsible()
+                                        ->itemLabel(fn (array $state): ?string => 'Provider: '.parse_url($state['url'] ?? '', PHP_URL_HOST)
+                                            .(PlaylistAlias::entryReplacesUrl($state) ? ' -> '.parse_url($state['replace_url'], PHP_URL_HOST) : ''))
+                                        ->schema([
+                                            Forms\Components\TextInput::make('url')
+                                                ->label(__('Provider URL'))
+                                                ->live()
+                                                ->helperText(__('The provider URL the source streams use, in <url>:<port> format - without trailing slash (/).'))
+                                                ->prefixIcon('heroicon-m-globe-alt')
+                                                ->maxLength(4000)
+                                                ->url()
+                                                ->rules([new UrlIsAllowed])
+                                                ->columnSpan(2)
+                                                ->required()
+                                                ->suffixAction(
+                                                    Action::make('test_xtream_connection')
+                                                        ->label(__('Test connection'))
+                                                        ->icon('heroicon-m-signal')
+                                                        ->tooltip(__('Test Xtream API connection using the credentials below'))
+                                                        ->action(function (Get $get): void {
+                                                            $url = $get('url');
+                                                            $username = $get('username');
+                                                            $password = $get('password');
+
+                                                            if (empty($url) || empty($username) || empty($password)) {
+                                                                Notification::make()
+                                                                    ->title(__('Missing Credentials'))
+                                                                    ->body(__('Please fill in the Xtream API URL, username, and password before testing.'))
+                                                                    ->warning()
+                                                                    ->send();
+
+                                                                return;
+                                                            }
+
+                                                            try {
+                                                                $xtream = XtreamService::make(xtream_config: [
+                                                                    'url' => $url,
+                                                                    'username' => $username,
+                                                                    'password' => $password,
+                                                                ]);
+
+                                                                $result = $xtream->userInfo(timeout: 10);
+
+                                                                if (empty($result) || ! isset($result['user_info'])) {
+                                                                    Notification::make()
+                                                                        ->title(__('Connection Failed'))
+                                                                        ->body(__('No valid response from the Xtream API. Check your URL, username, and password.'))
+                                                                        ->danger()
+                                                                        ->send();
+
+                                                                    return;
+                                                                }
+
+                                                                $userInfo = $result['user_info'];
+                                                                $serverInfo = $result['server_info'] ?? [];
+
+                                                                $status = $userInfo['status'] ?? 'Unknown';
+                                                                $maxConnections = $userInfo['max_connections'] ?? '?';
+                                                                $activeCons = $userInfo['active_cons'] ?? '0';
+                                                                $expDate = ! empty($userInfo['exp_date'])
+                                                                    ? date('Y-m-d', (int) $userInfo['exp_date'])
+                                                                    : 'Never';
+                                                                $serverUrl = $serverInfo['url'] ?? $url;
+                                                                $serverTime = ! empty($serverInfo['time_now'])
+                                                                    ? $serverInfo['time_now']
+                                                                    : 'Unknown';
+
+                                                                $isActive = $status === 'Active';
+                                                                $statusIcon = $isActive ? '✅' : '⚠️';
+
+                                                                $details = "{$statusIcon} **Status:** {$status}\n\n";
+                                                                $details .= "**Max Connections:** {$maxConnections}\n\n";
+                                                                $details .= "**Active Connections:** {$activeCons}\n\n";
+                                                                $details .= "**Expires:** {$expDate}\n\n";
+                                                                $details .= "**Server:** {$serverUrl}\n\n";
+                                                                $details .= "**Server Time:** {$serverTime}";
+
+                                                                Notification::make()
+                                                                    ->title(__('Connection Successful'))
+                                                                    ->body(Str::markdown($details))
+                                                                    ->success()
+                                                                    ->persistent()
+                                                                    ->send();
+                                                            } catch (Exception $e) {
+                                                                Notification::make()
+                                                                    ->title(__('Connection Failed'))
+                                                                    ->body($e->getMessage())
+                                                                    ->danger()
+                                                                    ->send();
+                                                            }
+                                                        }),
+                                                ),
+                                            // Credentials are optional only when the entry replaces the provider
+                                            // URL, and must be given as a pair (empty keeps the provider's own).
+                                            Forms\Components\TextInput::make('username')
+                                                ->label(__('Xtream API Username'))
+                                                ->live(onBlur: true)
+                                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('password'))),
+                                            Forms\Components\TextInput::make('password')
+                                                ->label(__('Xtream API Password'))
+                                                ->live(onBlur: true)
+                                                ->required(fn (Get $get): bool => ! $get('replace_url_enabled') || filled($get('username')))
+                                                ->password()
+                                                ->revealable(),
+                                            Forms\Components\Toggle::make('replace_url_enabled')
+                                                ->label(__('Replace provider URL'))
+                                                ->helperText(__('Send streams from this provider to a different URL, e.g. a VPN-only address. The rest of the stream URL is kept. Credentials are optional when enabled - leave them empty to keep the provider\'s own.'))
+                                                ->default(false)
+                                                ->live()
+                                                ->columnSpan(2),
+                                            Forms\Components\TextInput::make('replace_url')
+                                                ->label(__('Replacement URL'))
+                                                ->helperText(__('Clients receive this URL in place of the provider URL. When the proxy is enabled, the proxy fetches from it instead, so it must be reachable from the proxy server.'))
+                                                ->prefixIcon('heroicon-m-arrows-right-left')
+                                                ->maxLength(4000)
+                                                ->url()
+                                                ->rules([new UrlIsAllowed])
+                                                ->visible(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
+                                                ->required(fn (Get $get): bool => (bool) $get('replace_url_enabled'))
+                                                ->columnSpan(2),
+                                        ])->columnSpanFull(),
+                                ]),
                         ]),
-
-                    Fieldset::make(__('VOD groups'))
+                    Tab::make(__('Channel Filter'))
+                        ->icon('heroicon-m-funnel')
+                        ->hidden(fn (Get $get): bool => ! $get('playlist_id') && ! $get('custom_playlist_id') && ! $get('merged_playlist_id'))
                         ->schema([
-                            ModalTableSelect::make('group_filter.selected_vod_groups')
-                                ->tableConfiguration(SourceGroupsTable::class)
-                                ->label(__('Allowed VOD groups'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
-                                ->multiple()
-                                ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'playlist_ids' => self::sourcePlaylistIds($get, 'vod'),
-                                    'type' => 'vod',
-                                    'selected' => $get('group_filter.selected_vod_groups') ?? [],
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select VOD groups'))
-                                        ->modalHeading(__('Search VOD groups'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_vod_groups')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
-                                ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceGroup::displayLabelsForIds(
-                                    self::sourcePlaylistIds($get, 'vod', $record),
-                                    'vod',
-                                    $values,
-                                    includePlaylistName: self::isMergedAliasForm($get, $record),
-                                ))
-                                ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
-                                    $selection = self::persistedSourceSelection($record, 'selected_vod_groups');
-                                    if ($selection === null) {
-                                        return;
-                                    }
-                                    $component->state(self::selectionToSourceIds(
-                                        SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'vod'))->where('type', 'vod'),
-                                        $selection,
-                                        merged: (bool) $record->merged_playlist_id,
-                                    ));
-                                })
-                                ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                    if (! is_array($state) || empty($state)) {
-                                        return $state;
-                                    }
+                            Section::make(__('Channel Filter'))
+                                ->schema([
+                                    Grid::make()
+                                        ->columnSpanFull()
+                                        ->schema([
+                                            Fieldset::make(__('Bouquets'))
+                                                ->columnSpanFull()
+                                                ->schema([
+                                                    Forms\Components\Select::make('bouquets')
+                                                        ->label(__('Assigned bouquets'))
+                                                        ->relationship(
+                                                            name: 'bouquets',
+                                                            titleAttribute: 'name',
+                                                            modifyQueryUsing: function (Builder $query, Get $get): Builder {
+                                                                $query->where('user_id', auth()->id());
 
-                                    return self::sourceIdsToSelection(
-                                        SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'vod', $record))->where('type', 'vod'),
-                                        $state,
-                                        merged: self::isMergedAliasForm($get, $record),
-                                    );
-                                }),
+                                                                return match (true) {
+                                                                    (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
+                                                                    (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
+                                                                    default => $query->where('playlist_id', (int) $get('playlist_id')),
+                                                                };
+                                                            },
+                                                        )
+                                                        ->multiple()
+                                                        ->searchable()
+                                                        ->preload()
+                                                        ->live()
+                                                        ->afterStateUpdated(fn (Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set))
+                                                        ->loadStateFromRelationshipsUsing(function (Forms\Components\Select $component, ?PlaylistAlias $record): void {
+                                                            // Show the bouquets in the order they were assigned (pivot id
+                                                            // order, see saveRelationshipsUsing) rather than whatever order
+                                                            // the database returns them in.
+                                                            $component->state($record?->bouquets()
+                                                                ->where('bouquets.user_id', auth()->id())
+                                                                ->orderByPivot('id')
+                                                                ->pluck('bouquets.id')
+                                                                ->map(fn ($id): string => (string) $id)
+                                                                ->all() ?? []);
+                                                        })
+                                                        ->hintAction(
+                                                            Action::make('clear_bouquets')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
+                                                                ->action(function (Get $get, Set $set): void {
+                                                                    $set('bouquets', []);
+                                                                    self::syncLiveGroupSortItems($get, $set);
+                                                                })
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to remove all assigned bouquets? Changes are saved when you save the alias.'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->saveRelationshipsUsing(function (PlaylistAlias $record, Get $get): void {
+                                                            // Filament saves relationships before the record itself, and its
+                                                            // default save only detaches within the options query (the new
+                                                            // target's bouquets). Persist a playlist switch first - the pivot
+                                                            // guard checks the stored target, and the alias updating hook drops
+                                                            // the previous target's bouquets - then sync the validated picks.
+                                                            // assignedBouquets() keeps the picked order, so newly attached
+                                                            // bouquets get ascending pivot ids in the order they were picked.
+                                                            $record->update([
+                                                                'playlist_id' => $get('playlist_id') ?: null,
+                                                                'custom_playlist_id' => $get('custom_playlist_id') ?: null,
+                                                                'merged_playlist_id' => $get('merged_playlist_id') ?: null,
+                                                            ]);
+                                                            $record->bouquets()->sync(self::assignedBouquets($get)->modelKeys());
+                                                            $record->unsetRelation('bouquets');
+                                                        })
+                                                        ->columnSpanFull()
+                                                        ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine - assigning a bouquet never removes anything the manual pickers allow.'))
+                                                        ->createOptionForm([
+                                                            Forms\Components\TextInput::make('name')->required(),
+                                                            Forms\Components\Textarea::make('description'),
+                                                        ])
+                                                        ->createOptionUsing(function (array $data, Get $get): int {
+                                                            $bouquet = Bouquet::create([
+                                                                'name' => $data['name'],
+                                                                'description' => $data['description'] ?? null,
+                                                                'user_id' => auth()->id(),
+                                                                'playlist_id' => (! $get('custom_playlist_id') && ! $get('merged_playlist_id')) ? ((int) $get('playlist_id') ?: null) : null,
+                                                                'custom_playlist_id' => $get('custom_playlist_id') ? (int) $get('custom_playlist_id') : null,
+                                                                'merged_playlist_id' => $get('merged_playlist_id') ? (int) $get('merged_playlist_id') : null,
+                                                            ]);
 
-                            ModalTableSelect::make('group_filter.selected_vod_groups')
-                                ->tableConfiguration(CustomPlaylistGroupsTable::class)
-                                ->label(__('Allowed VOD groups'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
-                                ->multiple()
-                                ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
-                                    'type' => 'vod',
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select VOD groups'))
-                                        ->modalHeading(__('Search VOD groups'))
-                                        ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_custom_vod_groups')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
-                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+                                                            Notification::make()
+                                                                ->success()
+                                                                ->title(__('Bouquet created'))
+                                                                ->body(__('Select its groups under Playlist Bouquets.'))
+                                                                ->send();
+
+                                                            return $bouquet->getKey();
+                                                        }),
+                                                    Schemas\Components\Callout::make(__('Bouquet contributions'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
+                                                        ->description(fn (Get $get): string => __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
+                                                            'live' => count(self::bouquetContributedNames($get, 'live')),
+                                                            'vod' => count(self::bouquetContributedNames($get, 'vod')),
+                                                            'series' => count(self::bouquetContributedNames($get, 'categories')),
+                                                        ])),
+                                                ]),
+
+                                            Schemas\Components\Callout::make(__('What you can select'))
+                                                ->columnSpanFull()
+                                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') || (bool) $get('merged_playlist_id'))
+                                                ->description(fn (Get $get): string => $get('merged_playlist_id')
+                                                    ? __('Groups and categories are listed per source playlist. A selection only allows that group from the playlist it was picked from, so a same-named group in another source stays filtered out unless you select it too.')
+                                                    : __('The lists below combine any groups you created in the custom playlist with the original source playlist groups.')),
+
+                                            Fieldset::make(__('Live channel groups'))
+                                                ->schema([
+                                                    ModalTableSelect::make('group_filter.selected_groups')
+                                                        ->tableConfiguration(SourceGroupsTable::class)
+                                                        ->label(__('Allowed live groups'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->multiple()
+                                                        ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'playlist_ids' => self::sourcePlaylistIds($get, 'live'),
+                                                            'type' => 'live',
+                                                            'selected' => $get('group_filter.selected_groups') ?? [],
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select live groups'))
+                                                                ->modalHeading(__('Search live groups'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_live_groups')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(function (Get $get, Set $set): void {
+                                                                    $set('group_filter.selected_groups', []);
+                                                                    self::syncLiveGroupSortItems($get, $set, []);
+                                                                })
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceGroup::displayLabelsForIds(
+                                                            self::sourcePlaylistIds($get, 'live', $record),
+                                                            'live',
+                                                            $values,
+                                                            includePlaylistName: self::isMergedAliasForm($get, $record),
+                                                        ))
+                                                        ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
+                                                            // Hidden components are still hydrated, so bail out for aliases of a
+                                                            // custom playlist - their selection is names from the custom playlist's
+                                                            // groups, which the Select below owns and no SourceGroup would match.
+                                                            // The persisted selection is read from the record rather than $state:
+                                                            // the multi-select normalises state to scalars first, which would drop
+                                                            // the {playlist_id, name} pairs a merged alias stores.
+                                                            $selection = self::persistedSourceSelection($record, 'selected_groups');
+                                                            if ($selection === null) {
+                                                                return;
+                                                            }
+                                                            $component->state(self::selectionToSourceIds(
+                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'live'))->where('type', 'live'),
+                                                                $selection,
+                                                                merged: (bool) $record->merged_playlist_id,
+                                                            ));
+                                                        })
+                                                        ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
+                                                            if (! is_array($state) || empty($state)) {
+                                                                return $state;
+                                                            }
+
+                                                            return self::sourceIdsToSelection(
+                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'live', $record))->where('type', 'live'),
+                                                                $state,
+                                                                merged: self::isMergedAliasForm($get, $record),
+                                                            );
+                                                        })
+                                                        ->live()
+                                                        ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
+
+                                                    // Custom playlist equivalent. Its records are keyed by name, which is
+                                                    // exactly what group_filter stores, so no id/name translation is needed.
+                                                    ModalTableSelect::make('group_filter.selected_groups')
+                                                        ->tableConfiguration(CustomPlaylistGroupsTable::class)
+                                                        ->label(__('Allowed live groups'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->multiple()
+                                                        ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                                            'type' => 'live',
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'live'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select live groups'))
+                                                                ->modalHeading(__('Search live groups'))
+                                                                ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_custom_live_groups')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(function (Get $get, Set $set): void {
+                                                                    $set('group_filter.selected_groups', []);
+                                                                    self::syncLiveGroupSortItems($get, $set, []);
+                                                                })
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected live groups?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values))
+                                                        ->live()
+                                                        ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
+
+                                                    Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
+                                                        ->label(__('Sort groups in custom order'))
+                                                        ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
+                                                        ->default(false)
+                                                        ->columnSpanFull()
+                                                        ->live()
+                                                        ->afterStateUpdated(function ($state, Get $get, Set $set): void {
+                                                            // Seed (or reconcile) the order list from the current selection and bouquets.
+                                                            if ($state) {
+                                                                self::syncLiveGroupSortItems($get, $set);
+                                                            }
+                                                        }),
+
+                                                    Forms\Components\Repeater::make('group_filter.live_group_order')
+                                                        ->hiddenLabel()
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
+                                                        ->dehydrated(true)
+                                                        ->table([
+                                                            Forms\Components\Repeater\TableColumn::make(__('Group Name')),
+                                                            Forms\Components\Repeater\TableColumn::make(__('Bouquet')),
+                                                        ])
+                                                        ->schema([
+                                                            Forms\Components\TextInput::make('label')
+                                                                ->hiddenLabel()
+                                                                ->readOnly()
+                                                                ->dehydrated(false),
+                                                            TextEntry::make('bouquets')
+                                                                ->hiddenLabel()
+                                                                ->badge()
+                                                                ->color('info'),
+                                                            Forms\Components\Hidden::make('name'),
+                                                        ])
+                                                        ->addable(false)
+                                                        ->deletable(false)
+                                                        ->reorderable(true)
+                                                        ->compact()
+                                                        ->helperText(__('Drag the groups into the order you want them delivered to the client. Includes groups from assigned bouquets.'))
+                                                        ->hintAction(
+                                                            Action::make('reset_live_group_order')
+                                                                ->label(__('Reset to playlist order'))
+                                                                ->icon('heroicon-o-arrow-path')
+                                                                ->color('gray')
+                                                                ->action(function (Get $get, Set $set): void {
+                                                                    // Forget the saved order and rebuild it from the playlist's own group order.
+                                                                    $set('group_filter.live_group_order', []);
+                                                                    self::syncLiveGroupSortItems($get, $set);
+                                                                })
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Reset to playlist order'))
+                                                                ->modalDescription(__('Replace the custom order with the group order of the source playlist? Changes are saved when you save the alias.'))
+                                                                ->modalSubmitActionLabel(__('Reset'))
+                                                        )
+                                                        ->afterStateHydrated(function (Forms\Components\Repeater $component, $state, ?PlaylistAlias $record): void {
+                                                            $playlistIds = self::sourcePlaylistIdsForRecord($record, 'live');
+                                                            $orderedNames = self::liveGroupSortNames($state);
+                                                            $bouquetSources = self::bouquetLiveGroupSources($record?->bouquets ?? []);
+                                                            $selectedNames = array_values(array_unique(array_merge(
+                                                                PlaylistAlias::selectionNames($record?->group_filter['selected_groups'] ?? []),
+                                                                array_keys($bouquetSources),
+                                                            )));
+                                                            $component->state(self::buildLiveGroupSortItems($orderedNames, $selectedNames, $playlistIds, $bouquetSources));
+                                                        })
+                                                        ->dehydrateStateUsing(fn ($state): array => self::liveGroupSortNames($state)),
+                                                ]),
+
+                                            Fieldset::make(__('VOD groups'))
+                                                ->schema([
+                                                    ModalTableSelect::make('group_filter.selected_vod_groups')
+                                                        ->tableConfiguration(SourceGroupsTable::class)
+                                                        ->label(__('Allowed VOD groups'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->multiple()
+                                                        ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'playlist_ids' => self::sourcePlaylistIds($get, 'vod'),
+                                                            'type' => 'vod',
+                                                            'selected' => $get('group_filter.selected_vod_groups') ?? [],
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select VOD groups'))
+                                                                ->modalHeading(__('Search VOD groups'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_vod_groups')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record) => $record->display_name ?? $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceGroup::displayLabelsForIds(
+                                                            self::sourcePlaylistIds($get, 'vod', $record),
+                                                            'vod',
+                                                            $values,
+                                                            includePlaylistName: self::isMergedAliasForm($get, $record),
+                                                        ))
+                                                        ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
+                                                            $selection = self::persistedSourceSelection($record, 'selected_vod_groups');
+                                                            if ($selection === null) {
+                                                                return;
+                                                            }
+                                                            $component->state(self::selectionToSourceIds(
+                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'vod'))->where('type', 'vod'),
+                                                                $selection,
+                                                                merged: (bool) $record->merged_playlist_id,
+                                                            ));
+                                                        })
+                                                        ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
+                                                            if (! is_array($state) || empty($state)) {
+                                                                return $state;
+                                                            }
+
+                                                            return self::sourceIdsToSelection(
+                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'vod', $record))->where('type', 'vod'),
+                                                                $state,
+                                                                merged: self::isMergedAliasForm($get, $record),
+                                                            );
+                                                        }),
+
+                                                    ModalTableSelect::make('group_filter.selected_vod_groups')
+                                                        ->tableConfiguration(CustomPlaylistGroupsTable::class)
+                                                        ->label(__('Allowed VOD groups'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->multiple()
+                                                        ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                                            'type' => 'vod',
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'vod'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select VOD groups'))
+                                                                ->modalHeading(__('Search VOD groups'))
+                                                                ->modalDescription(__('Includes groups you created in this custom playlist and the original source playlist groups.'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_custom_vod_groups')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(fn (Set $set) => $set('group_filter.selected_vod_groups', []))
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected VOD groups?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+                                                ]),
+
+                                            Fieldset::make(__('Series categories'))
+                                                ->schema([
+                                                    ModalTableSelect::make('group_filter.selected_categories')
+                                                        ->tableConfiguration(SourceCategoriesTable::class)
+                                                        ->label(__('Allowed series categories'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->multiple()
+                                                        ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'playlist_ids' => self::sourcePlaylistIds($get, 'series'),
+                                                            'selected' => $get('group_filter.selected_categories') ?? [],
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select series categories'))
+                                                                ->modalHeading(__('Search series categories'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_categories')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceCategory::displayLabelsForIds(
+                                                            self::sourcePlaylistIds($get, 'series', $record),
+                                                            $values,
+                                                            includePlaylistName: self::isMergedAliasForm($get, $record),
+                                                        ))
+                                                        ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
+                                                            $selection = self::persistedSourceSelection($record, 'selected_categories');
+                                                            if ($selection === null) {
+                                                                return;
+                                                            }
+                                                            $component->state(self::selectionToSourceIds(
+                                                                SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'series')),
+                                                                $selection,
+                                                                merged: (bool) $record->merged_playlist_id,
+                                                            ));
+                                                        })
+                                                        ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
+                                                            if (! is_array($state) || empty($state)) {
+                                                                return $state;
+                                                            }
+
+                                                            return self::sourceIdsToSelection(
+                                                                SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'series', $record)),
+                                                                $state,
+                                                                merged: self::isMergedAliasForm($get, $record),
+                                                            );
+                                                        }),
+
+                                                    ModalTableSelect::make('group_filter.selected_categories')
+                                                        ->tableConfiguration(CustomPlaylistCategoriesTable::class)
+                                                        ->label(__('Allowed series categories'))
+                                                        ->columnSpanFull()
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->multiple()
+                                                        ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                                        ->tableArguments(fn (Get $get): array => [
+                                                            'custom_playlist_id' => (int) $get('custom_playlist_id'),
+                                                            'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
+                                                        ])
+                                                        ->selectAction(
+                                                            fn (Action $action) => $action
+                                                                ->label(__('Select series categories'))
+                                                                ->modalHeading(__('Search series categories'))
+                                                                ->modalDescription(__('Includes categories you created in this custom playlist and the original source playlist categories.'))
+                                                                ->modalSubmitActionLabel(__('Confirm selection'))
+                                                                ->button(),
+                                                        )
+                                                        ->hintAction(
+                                                            Action::make('clear_custom_categories')
+                                                                ->label(__('Clear all'))
+                                                                ->icon('heroicon-o-x-mark')
+                                                                ->color('danger')
+                                                                ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
+                                                                ->requiresConfirmation()
+                                                                ->modalHeading(__('Clear selection'))
+                                                                ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
+                                                                ->modalSubmitActionLabel(__('Clear'))
+                                                        )
+                                                        ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
+                                                        ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+                                                ]),
+                                        ]),
+                                ]),
                         ]),
-
-                    Fieldset::make(__('Series categories'))
+                    Tab::make(__('Output'))
+                        ->icon('heroicon-m-arrow-up-right')
                         ->schema([
-                            ModalTableSelect::make('group_filter.selected_categories')
-                                ->tableConfiguration(SourceCategoriesTable::class)
-                                ->label(__('Allowed series categories'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
-                                ->multiple()
-                                ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'playlist_ids' => self::sourcePlaylistIds($get, 'series'),
-                                    'selected' => $get('group_filter.selected_categories') ?? [],
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select series categories'))
-                                        ->modalHeading(__('Search series categories'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_categories')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
-                                ->getOptionLabelsUsing(fn (array $values, ?PlaylistAlias $record, Get $get): array => SourceCategory::displayLabelsForIds(
-                                    self::sourcePlaylistIds($get, 'series', $record),
-                                    $values,
-                                    includePlaylistName: self::isMergedAliasForm($get, $record),
-                                ))
-                                ->afterStateHydrated(function ($component, ?PlaylistAlias $record): void {
-                                    $selection = self::persistedSourceSelection($record, 'selected_categories');
-                                    if ($selection === null) {
-                                        return;
-                                    }
-                                    $component->state(self::selectionToSourceIds(
-                                        SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIdsForRecord($record, 'series')),
-                                        $selection,
-                                        merged: (bool) $record->merged_playlist_id,
-                                    ));
-                                })
-                                ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                    if (! is_array($state) || empty($state)) {
-                                        return $state;
-                                    }
+                            Section::make(__('Playlist Output'))
+                                ->description(__('Determines how the playlist is output'))
+                                ->collapsible()
+                                ->schema(PlaylistFacade::getOutputTogglesSchema()),
+                            Section::make(__('Streaming Output'))
+                                ->description(__('Output processing options'))
+                                ->collapsible()
+                                ->columns(2)
+                                ->schema([
+                                    Forms\Components\Toggle::make('enable_proxy')
+                                        ->label(__('Enable Stream Proxy'))
+                                        ->hint(fn (Get $get): string => $get('enable_proxy') ? 'Proxied' : 'Not proxied')
+                                        ->hintIcon(fn (Get $get): string => ! $get('enable_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                                        ->live()
+                                        ->helperText(__('When enabled, all streams will be proxied through the application. This allows for better compatibility with various clients and enables features such as stream limiting and output format selection.'))
+                                        ->inline(false)
+                                        ->default(false)
+                                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
+                                    Forms\Components\Toggle::make('enable_logo_proxy')
+                                        ->label(__('Enable Logo Proxy'))
+                                        ->hint(fn (Get $get): string => $get('enable_logo_proxy') ? 'Proxied' : 'Not proxied')
+                                        ->hintIcon(fn (Get $get): string => ! $get('enable_logo_proxy') ? 'heroicon-m-lock-open' : 'heroicon-m-lock-closed')
+                                        ->live()
+                                        ->helperText(__('When enabled, channel logos will be proxied through the application. Logos will be cached for up to 30 days to reduce bandwidth and speed up loading times.'))
+                                        ->inline(false)
+                                        ->default(false)
+                                        ->hidden(fn () => ! auth()->user()->canUseProxy()),
+                                    Forms\Components\TextInput::make('streams')
+                                        ->label(__('HDHR/Xtream API Streams'))
+                                        ->helperText(__('Number of streams available for HDHR and Xtream API service (if using).'))
+                                        ->columnSpanfull()
+                                        ->hintIcon(
+                                            'heroicon-m-question-mark-circle',
+                                            tooltip: __('Enter 0 to use to use provider defined value. This value is also used when generating the Xtream API user info response.')
+                                        )
+                                        ->rules(['min:0'])
+                                        ->type('number')
+                                        ->default(0) // Default to 0 streams (unlimited)
+                                        ->required(),
+                                    Grid::make()
+                                        ->columns(3)
+                                        ->schema([
+                                            Forms\Components\TextInput::make('available_streams')
+                                                ->label(__('Available Streams'))
+                                                ->hint(__('Set to 0 for unlimited streams.'))
+                                                ->helperText(__('Number of streams available for this provider. If set to a value other than 0, will prevent any streams from starting if the number of active streams exceeds this value.'))
+                                                ->columnSpan(1)
+                                                ->rules(['min:1'])
+                                                ->type('number')
+                                                ->default(0) // Default to 0 streams (for unlimted)
+                                                ->required(),
+                                            Forms\Components\Toggle::make('strict_live_ts')
+                                                ->label(__('Enable Strict Live TS Handling'))
+                                                ->hintAction(
+                                                    Action::make('learn_more_strict_live_ts')
+                                                        ->label(__('Learn More'))
+                                                        ->icon('heroicon-o-arrow-top-right-on-square')
+                                                        ->iconPosition('after')
+                                                        ->size('sm')
+                                                        ->url('https://m3ue.sparkison.dev/docs/proxy/strict-live-ts')
+                                                        ->openUrlInNewTab(true)
+                                                )
+                                                ->helperText(__('Enhanced stability for live MPEG-TS streams with PVR clients like Kodi and HDHomeRun (only used when not using transcoding profiles).'))
+                                                ->inline(false)
+                                                ->default(false),
+                                            Forms\Components\Toggle::make('use_sticky_session')
+                                                ->label(__('Enable Sticky Session Handler'))
+                                                ->hintAction(
+                                                    Action::make('learn_more_sticky_session')
+                                                        ->label(__('Learn More'))
+                                                        ->icon('heroicon-o-arrow-top-right-on-square')
+                                                        ->iconPosition('after')
+                                                        ->size('sm')
+                                                        ->url('https://m3ue.sparkison.dev/docs/proxy/sticky-sessions')
+                                                        ->openUrlInNewTab(true)
+                                                )
+                                                ->helperText('')
+                                                ->inline(false)
+                                                ->default(false)
+                                                ->helperText(__('Lock clients to specific backend origins after redirects to prevent playback loops when load balancers bounce between origins. Disable if your provider doesn\'t use load balancing.')),
+                                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
 
-                                    return self::sourceIdsToSelection(
-                                        SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'series', $record)),
-                                        $state,
-                                        merged: self::isMergedAliasForm($get, $record),
-                                    );
-                                }),
-
-                            ModalTableSelect::make('group_filter.selected_categories')
-                                ->tableConfiguration(CustomPlaylistCategoriesTable::class)
-                                ->label(__('Allowed series categories'))
-                                ->columnSpanFull()
-                                ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
-                                ->multiple()
-                                ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
-                                ->tableArguments(fn (Get $get): array => [
-                                    'custom_playlist_id' => (int) $get('custom_playlist_id'),
-                                    'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
-                                ])
-                                ->selectAction(
-                                    fn (Action $action) => $action
-                                        ->label(__('Select series categories'))
-                                        ->modalHeading(__('Search series categories'))
-                                        ->modalDescription(__('Includes categories you created in this custom playlist and the original source playlist categories.'))
-                                        ->modalSubmitActionLabel(__('Confirm selection'))
-                                        ->button(),
-                                )
-                                ->hintAction(
-                                    Action::make('clear_custom_categories')
-                                        ->label(__('Clear all'))
-                                        ->icon('heroicon-o-x-mark')
-                                        ->color('danger')
-                                        ->action(fn (Set $set) => $set('group_filter.selected_categories', []))
-                                        ->requiresConfirmation()
-                                        ->modalHeading(__('Clear selection'))
-                                        ->modalDescription(__('Are you sure you want to clear all selected series categories?'))
-                                        ->modalSubmitActionLabel(__('Clear'))
-                                )
-                                ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
-                                ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+                                    Fieldset::make(__('Transcoding Settings (optional)'))
+                                        ->columnSpanFull()
+                                        ->schema([
+                                            Forms\Components\Select::make('stream_profile_id')
+                                                ->label(__('Live Streaming Profile'))
+                                                ->relationship('streamProfile', 'name')
+                                                ->options(function () {
+                                                    return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
+                                                })
+                                                ->searchable()
+                                                ->preload()
+                                                ->nullable()
+                                                ->helperText(__('Select a transcoding profile to apply to Live streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
+                                                ->placeholder(__('Leave empty for direct stream proxying')),
+                                            Forms\Components\Select::make('vod_stream_profile_id')
+                                                ->label(__('VOD and Series Streaming Profile'))
+                                                ->relationship('vodStreamProfile', 'name')
+                                                ->options(function () {
+                                                    return StreamProfile::where('user_id', auth()->id())->pluck('name', 'id');
+                                                })
+                                                ->searchable()
+                                                ->preload()
+                                                ->nullable()
+                                                ->hintIcon(
+                                                    'heroicon-m-question-mark-circle',
+                                                    tooltip: __('Time seeking is not supported when transcoding VOD or Series streams. This is a limitation of live-transcoding. Leave empty to allow time seeking.')
+                                                )
+                                                ->helperText(__('Select a transcoding profile to apply to VOD and Series streams for external clients (VLC, Kodi, etc.). Does not affect the in-app player. Leave empty for direct stream proxying.'))
+                                                ->placeholder(__('Leave empty for direct stream proxying')),
+                                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                                    Fieldset::make(__('HTTP Headers (optional)'))
+                                        ->columnSpanFull()
+                                        ->schema([
+                                            Forms\Components\Repeater::make('custom_headers')
+                                                ->hiddenLabel()
+                                                ->helperText(__('Add any custom headers to include when streaming a channel/episode.'))
+                                                ->columnSpanFull()
+                                                ->columns(2)
+                                                ->default([])
+                                                ->schema([
+                                                    Forms\Components\TextInput::make('header')
+                                                        ->label(__('Header'))
+                                                        ->required()
+                                                        ->placeholder(__('e.g. Authorization')),
+                                                    Forms\Components\TextInput::make('value')
+                                                        ->label(__('Value'))
+                                                        ->required()
+                                                        ->placeholder(__('e.g. Bearer abc123')),
+                                                ]),
+                                        ])->hidden(fn (Get $get): bool => ! $get('enable_proxy')),
+                                ])->columnSpanFull(),
                         ]),
                 ]),
         ];

@@ -113,14 +113,13 @@ it('saves newly assigned bouquets in the order they were picked', function () {
     ]));
     $picked = [(string) $bouquets[2]->id, (string) $bouquets[0]->id, (string) $bouquets[1]->id];
 
-    Livewire::test(ListPlaylistAliases::class)
-        ->mountTableAction('edit', $alias)
-        ->setTableActionData([
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->fillForm([
             'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
             'bouquets' => $picked,
         ])
-        ->callMountedTableAction()
-        ->assertHasNoTableActionErrors();
+        ->call('save')
+        ->assertHasNoFormErrors();
 
     expect($alias->bouquets()->orderByPivot('id')->pluck('bouquets.id')->map(fn ($id) => (string) $id)->all())->toBe($picked);
 
@@ -170,16 +169,15 @@ it('detaches the previous playlist\'s bouquets when the alias is saved against a
         'group_selections' => ['selected_groups' => ['News']],
     ]);
 
-    Livewire::test(ListPlaylistAliases::class)
-        ->mountTableAction('edit', $alias)
-        ->setTableActionData(['source_id' => $otherPlaylist->id])
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->fillForm(['source_id' => $otherPlaylist->id])
         // The switch seeds a blank provider credentials row; fill it so the save validates.
-        ->setTableActionData([
+        ->fillForm([
             'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
             'bouquets' => [(string) $newBouquet->id],
         ])
-        ->callMountedTableAction()
-        ->assertHasNoTableActionErrors();
+        ->call('save')
+        ->assertHasNoFormErrors();
 
     $alias->refresh();
 
