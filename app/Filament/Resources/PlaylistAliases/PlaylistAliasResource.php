@@ -818,12 +818,40 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->preload()
                                 ->live()
                                 ->afterStateUpdated(fn (Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set))
+                                ->loadStateFromRelationshipsUsing(function (Forms\Components\Select $component, ?PlaylistAlias $record): void {
+                                    // Show the bouquets in the order they were assigned (pivot id
+                                    // order, see saveRelationshipsUsing) rather than whatever order
+                                    // the database returns them in.
+                                    $component->state($record?->bouquets()
+                                        ->where('bouquets.user_id', auth()->id())
+                                        ->orderByPivot('id')
+                                        ->pluck('bouquets.id')
+                                        ->map(fn ($id): string => (string) $id)
+                                        ->all() ?? []);
+                                })
+                                ->hintAction(
+                                    Action::make('clear_bouquets')
+                                        ->label(__('Clear all'))
+                                        ->icon('heroicon-o-x-mark')
+                                        ->color('danger')
+                                        ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
+                                        ->action(function (Get $get, Set $set): void {
+                                            $set('bouquets', []);
+                                            self::syncLiveGroupSortItems($get, $set);
+                                        })
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Clear selection'))
+                                        ->modalDescription(__('Are you sure you want to remove all assigned bouquets? Changes are saved when you save the alias.'))
+                                        ->modalSubmitActionLabel(__('Clear'))
+                                )
                                 ->saveRelationshipsUsing(function (PlaylistAlias $record, Get $get): void {
                                     // Filament saves relationships before the record itself, and its
                                     // default save only detaches within the options query (the new
                                     // target's bouquets). Persist a playlist switch first - the pivot
                                     // guard checks the stored target, and the alias updating hook drops
                                     // the previous target's bouquets - then sync the validated picks.
+                                    // assignedBouquets() keeps the picked order, so newly attached
+                                    // bouquets get ascending pivot ids in the order they were picked.
                                     $record->update([
                                         'playlist_id' => $get('playlist_id') ?: null,
                                         'custom_playlist_id' => $get('custom_playlist_id') ?: null,
@@ -1026,6 +1054,21 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                 ->reorderable(true)
                                 ->compact()
                                 ->helperText(__('Drag the groups into the order you want them delivered to the client. Includes groups from assigned bouquets.'))
+                                ->hintAction(
+                                    Action::make('reset_live_group_order')
+                                        ->label(__('Reset to playlist order'))
+                                        ->icon('heroicon-o-arrow-path')
+                                        ->color('gray')
+                                        ->action(function (Get $get, Set $set): void {
+                                            // Forget the saved order and rebuild it from the playlist's own group order.
+                                            $set('group_filter.live_group_order', []);
+                                            self::syncLiveGroupSortItems($get, $set);
+                                        })
+                                        ->requiresConfirmation()
+                                        ->modalHeading(__('Reset to playlist order'))
+                                        ->modalDescription(__('Replace the custom order with the group order of the source playlist? Changes are saved when you save the alias.'))
+                                        ->modalSubmitActionLabel(__('Reset'))
+                                )
                                 ->afterStateHydrated(function (Forms\Components\Repeater $component, $state, ?PlaylistAlias $record): void {
                                     $playlistIds = self::sourcePlaylistIdsForRecord($record, 'live');
                                     $orderedNames = self::liveGroupSortNames($state);
@@ -1473,14 +1516,20 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         // forged Livewire request with another user's bouquet IDs) can never leak
         // another user's bouquet contents through the picker badges, the
         // contribution callout or the sort pane.
-        return Bouquet::whereIn('id', $bouquetIds)
+        $bouquets = Bouquet::whereIn('id', $bouquetIds)
             ->where('user_id', auth()->id())
             ->where(fn (Builder $query) => match (true) {
                 (bool) $get('custom_playlist_id') => $query->where('custom_playlist_id', (int) $get('custom_playlist_id')),
                 (bool) $get('merged_playlist_id') => $query->where('merged_playlist_id', (int) $get('merged_playlist_id')),
                 default => $query->where('playlist_id', (int) $get('playlist_id')),
             })
-            ->get();
+            ->get()
+            ->keyBy('id');
+
+        // Return them in the order they appear in the Select (the pick order).
+        return new EloquentCollection(array_values(array_filter(
+            array_map(fn ($id): ?Bouquet => $bouquets->get((int) $id), array_values(array_unique($bouquetIds))),
+        )));
     }
 
     /**
@@ -1618,25 +1667,42 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
         // …then append any newly-selected groups not already present.
         $appended = array_values(array_filter($selectedNames, fn ($name): bool => ! isset($keptSet[$name])));
-        $finalNames = array_merge($kept, $appended);
 
-        if (empty($finalNames)) {
+        if (empty($kept) && empty($appended)) {
             return [];
         }
 
-        // Resolve display (custom) names in a single query to avoid N+1. Constrain
-        // to live groups (this pane is live-only) so a VOD group sharing a
-        // name_internal can't supply the label; soft-deleted rows are excluded by
-        // the Group model's SoftDeletes global scope.
+        // Resolve display (custom) names and playlist positions in a single query
+        // to avoid N+1. Constrain to live groups (this pane is live-only) so a VOD
+        // group sharing a name_internal can't supply the label; soft-deleted rows
+        // are excluded by the Group model's SoftDeletes global scope.
         $labels = [];
+        $positions = [];
         $playlistIds = self::numericPlaylistIds($playlistIds);
         if (! empty($playlistIds)) {
-            $labels = Group::whereIn('playlist_id', $playlistIds)
+            $playlistRank = array_flip($playlistIds);
+            $groups = Group::whereIn('playlist_id', $playlistIds)
                 ->where('type', 'live')
-                ->whereIn('name_internal', $finalNames)
-                ->pluck('name', 'name_internal')
-                ->toArray();
+                ->whereIn('name_internal', array_merge($kept, $appended))
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(['name', 'name_internal', 'playlist_id', 'sort_order']);
+
+            foreach ($groups as $group) {
+                $labels[$group->name_internal] ??= $group->name;
+                // Merged aliases: source playlists in their merged order, then the group's own position.
+                $positions[$group->name_internal] ??= [$playlistRank[$group->playlist_id] ?? PHP_INT_MAX, (float) $group->sort_order];
+            }
         }
+
+        // Newly added groups follow the playlist's own group order (what the client
+        // sees without custom sorting) instead of the order they were picked or
+        // contributed by bouquets. Unknown names keep their relative order at the end.
+        $appendIndex = array_flip($appended);
+        usort($appended, fn (string $a, string $b): int => ($positions[$a] ?? [PHP_INT_MAX, PHP_INT_MAX]) <=> ($positions[$b] ?? [PHP_INT_MAX, PHP_INT_MAX])
+            ?: $appendIndex[$a] <=> $appendIndex[$b]);
+
+        $finalNames = array_merge($kept, $appended);
 
         $items = [];
         foreach ($finalNames as $name) {

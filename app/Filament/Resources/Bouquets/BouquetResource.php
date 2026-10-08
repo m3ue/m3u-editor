@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Bouquets;
 
+use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Forms\Components\CustomPlaylistGroupModalSelect;
 use App\Filament\Forms\Components\MergedSourceGroupModalSelect;
@@ -14,6 +15,7 @@ use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
+use App\Rules\ValidRegexPattern;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -174,7 +176,17 @@ class BouquetResource extends Resource
                         ->label(__('Automatically include new live groups'))
                         ->default(false)
                         ->visible(fn (Get $get): bool => (bool) $get('playlist_id') || (bool) $get('merged_playlist_id'))
-                        ->helperText(__('Newly appearing live groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.')),
+                        ->helperText(__('Newly appearing live groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.'))
+                        ->live(),
+                    Forms\Components\TagsInput::make('auto_include_live_patterns')
+                        ->label(__('Only include new live groups matching'))
+                        ->placeholder(__('e.g. ^FR\\|'))
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_include_new_live'))
+                        ->splitKeys(['Tab', 'Return'])
+                        ->rules([new ValidRegexPattern])
+                        ->helperText(__('Optional regex patterns (case-sensitive, no delimiters). When set, only new groups whose name matches at least one pattern are added. Leave empty to add every new group. Press [tab] or [return] to add item.'))
+                        ->hintAction(RegexTesterAction::make(name: 'test-auto-include-live', flags: 'u', samplesContext: 'groups'))
+                        ->columnSpanFull(),
                 ]),
 
             Schemas\Components\Fieldset::make(__('VOD groups'))
@@ -191,7 +203,17 @@ class BouquetResource extends Resource
                         ->label(__('Automatically include new VOD groups'))
                         ->default(false)
                         ->visible(fn (Get $get): bool => (bool) $get('playlist_id') || (bool) $get('merged_playlist_id'))
-                        ->helperText(__('Newly appearing VOD groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.')),
+                        ->helperText(__('Newly appearing VOD groups from the provider are automatically added to this bouquet on sync, in addition to the groups selected above.'))
+                        ->live(),
+                    Forms\Components\TagsInput::make('auto_include_vod_patterns')
+                        ->label(__('Only include new VOD groups matching'))
+                        ->placeholder(__('e.g. ^FR\\|'))
+                        ->visible(fn (Get $get): bool => (bool) $get('auto_include_new_vod'))
+                        ->splitKeys(['Tab', 'Return'])
+                        ->rules([new ValidRegexPattern])
+                        ->helperText(__('Optional regex patterns (case-sensitive, no delimiters). When set, only new groups whose name matches at least one pattern are added. Leave empty to add every new group. Press [tab] or [return] to add item.'))
+                        ->hintAction(RegexTesterAction::make(name: 'test-auto-include-vod', flags: 'u', samplesContext: 'vod_groups'))
+                        ->columnSpanFull(),
                 ]),
 
             Schemas\Components\Fieldset::make(__('Series categories'))
@@ -235,6 +257,8 @@ class BouquetResource extends Resource
         $set('group_selections.selected_categories', []);
         $set('auto_include_new_live', false);
         $set('auto_include_new_vod', false);
+        $set('auto_include_live_patterns', []);
+        $set('auto_include_vod_patterns', []);
     }
 
     public static function table(Table $table): Table

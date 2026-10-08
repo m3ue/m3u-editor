@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Pivots\BouquetPlaylistAlias;
+use App\Rules\ValidRegexPattern;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +19,8 @@ class Bouquet extends Model
         'group_selections' => 'array',
         'auto_include_new_live' => 'boolean',
         'auto_include_new_vod' => 'boolean',
+        'auto_include_live_patterns' => 'array',
+        'auto_include_vod_patterns' => 'array',
     ];
 
     public function user(): BelongsTo
@@ -213,7 +216,8 @@ class Bouquet extends Model
      * Append newly-appeared provider group names to bouquets that opted in via
      * the per-type auto-include flag: bare names for standard-target bouquets of
      * the playlist, {playlist_id, name} pairs for merged-target bouquets whose
-     * merged playlist lists it as a source.
+     * merged playlist lists it as a source. A bouquet with auto-include patterns
+     * only receives the new names matching one of them.
      *
      * @param  array<string>  $newNames
      */
@@ -226,24 +230,66 @@ class Bouquet extends Model
         $flag = $type === 'vod' ? 'auto_include_new_vod' : 'auto_include_new_live';
         $key = $type === 'vod' ? 'selected_vod_groups' : 'selected_groups';
 
-        self::where('playlist_id', $playlistId)->where($flag, true)->cursor()->each(function (self $bouquet) use ($key, $newNames): void {
+        self::where('playlist_id', $playlistId)->where($flag, true)->cursor()->each(function (self $bouquet) use ($key, $type, $newNames): void {
+            $matching = $bouquet->filterAutoIncludeNames($type, $newNames);
+            if (empty($matching)) {
+                return;
+            }
+
             $current = $bouquet->group_selections[$key] ?? [];
 
-            $bouquet->replaceSelections($key, $current, array_values(array_unique(array_merge($current, $newNames))));
+            $bouquet->replaceSelections($key, $current, array_values(array_unique(array_merge($current, $matching))));
         });
-
-        $newPairs = array_map(fn (string $name): array => ['playlist_id' => $playlistId, 'name' => $name], $newNames);
 
         self::query()
             ->whereNotNull('merged_playlist_id')
             ->where($flag, true)
             ->whereHas('mergedPlaylist.playlists', fn ($query) => $query->whereKey($playlistId))
             ->cursor()
-            ->each(function (self $bouquet) use ($key, $newPairs): void {
+            ->each(function (self $bouquet) use ($key, $type, $playlistId, $newNames): void {
+                $matching = $bouquet->filterAutoIncludeNames($type, $newNames);
+                if (empty($matching)) {
+                    return;
+                }
+
                 $current = PlaylistAlias::selectionPairs($bouquet->group_selections[$key] ?? []);
+                $newPairs = array_map(fn (string $name): array => ['playlist_id' => $playlistId, 'name' => $name], $matching);
 
                 $bouquet->replaceSelections($key, $current, PlaylistAlias::selectionPairs(array_merge($current, $newPairs)));
             });
+    }
+
+    /**
+     * The new group names this bouquet should auto-include: all of them when no
+     * patterns are set, otherwise only names matching at least one pattern.
+     * Patterns are validated on save; one that still fails to compile matches
+     * nothing rather than letting every new group through.
+     *
+     * @param  array<string>  $names
+     * @return array<string>
+     */
+    public function filterAutoIncludeNames(string $type, array $names): array
+    {
+        $patterns = array_values(array_filter(
+            (array) ($type === 'vod' ? $this->auto_include_vod_patterns : $this->auto_include_live_patterns),
+            fn ($pattern): bool => is_string($pattern) && $pattern !== '',
+        ));
+
+        if (empty($patterns)) {
+            return $names;
+        }
+
+        $compiled = array_map(fn (string $pattern): string => ValidRegexPattern::compile($pattern), $patterns);
+
+        return array_values(array_filter($names, function (string $name) use ($compiled): bool {
+            foreach ($compiled as $pattern) {
+                if (@preg_match($pattern, $name) === 1) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
     }
 
     /**

@@ -35,10 +35,16 @@ class ValidRegexPattern implements ValidationRule
 
     protected static function compiles(string $pattern): bool
     {
-        $delimiter = '/';
-        $escaped = str_replace($delimiter, '\\'.$delimiter, $pattern);
-        $finalPattern = $delimiter.$escaped.$delimiter.'u';
+        return @preg_match(self::compile($pattern), '') !== false;
+    }
 
-        return @preg_match($finalPattern, '') !== false;
+    /**
+     * Wrap a delimiter-less user pattern the same way the import pipeline does.
+     */
+    public static function compile(string $pattern, string $flags = 'u'): string
+    {
+        $delimiter = '/';
+
+        return $delimiter.str_replace($delimiter, '\\'.$delimiter, $pattern).$delimiter.$flags;
     }
 }

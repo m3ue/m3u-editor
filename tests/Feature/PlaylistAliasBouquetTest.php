@@ -25,6 +25,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\SourceGroup;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
@@ -91,6 +92,50 @@ it('renders the alias edit form with an attached bouquet', function () {
 
     Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
         ->assertSuccessful();
+});
+
+it('loads assigned bouquets in the order they were assigned', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $first = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => 'Alpha']);
+    $second = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => 'Beta']);
+    $alias->bouquets()->attach($second->id);
+    $alias->bouquets()->attach($first->id);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSuccessful()
+        ->assertSchemaStateSet(['bouquets' => [(string) $second->id, (string) $first->id]]);
+});
+
+it('saves newly assigned bouquets in the order they were picked', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $bouquets = collect(['France', 'Belgium', 'Africa'])->map(fn (string $name) => Bouquet::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => $name,
+    ]));
+    $picked = [(string) $bouquets[2]->id, (string) $bouquets[0]->id, (string) $bouquets[1]->id];
+
+    Livewire::test(ListPlaylistAliases::class)
+        ->mountTableAction('edit', $alias)
+        ->setTableActionData([
+            'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
+            'bouquets' => $picked,
+        ])
+        ->callMountedTableAction()
+        ->assertHasNoTableActionErrors();
+
+    expect($alias->bouquets()->orderByPivot('id')->pluck('bouquets.id')->map(fn ($id) => (string) $id)->all())->toBe($picked);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSchemaStateSet(['bouquets' => $picked]);
+});
+
+it('clears all assigned bouquets from the hint action', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->attach($bouquet->id);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->callAction(TestAction::make('clear_bouquets')->schemaComponent('bouquets'))
+        ->assertSchemaStateSet(['bouquets' => []]);
 });
 
 it('resets the bouquets form state when the source playlist changes', function () {

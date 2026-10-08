@@ -1659,6 +1659,15 @@ class ProcessM3uImport implements ShouldQueue
         $categoryIds = $groups->pluck('category_id')->filter(fn ($id) => $id !== null)->unique();
         $currentNames = $groups->pluck('category_name');
 
+        // Names known before this sync, captured ahead of the prune: a category the
+        // provider re-issued under a new category_id loses its row to the prune, and
+        // must not then count as "new" and be re-appended to auto-include bouquets
+        // (undoing a user's manual removal on every such sync).
+        $namesBeforeSync = SourceGroup::where('playlist_id', $playlistId)
+            ->where('type', $type)
+            ->pluck('name')
+            ->flip();
+
         // Prune stale rows *before* rename/upsert runs, not after. Doing this first frees up
         // any name a doomed row is squatting on, so a genuine rename below can claim it directly
         // instead of hitting a same-run name collision (issue #1530: a renamed category colliding
@@ -1782,7 +1791,7 @@ class ProcessM3uImport implements ShouldQueue
 
         $newNames = $groups->pluck('category_name')
             ->unique()
-            ->reject(fn ($name) => $name === null || $nameIndex->has($name))
+            ->reject(fn ($name) => $name === null || $nameIndex->has($name) || $namesBeforeSync->has($name))
             ->values()
             ->all();
         Bouquet::appendNewGroupNames($playlistId, $type, $newNames);
