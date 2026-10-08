@@ -217,6 +217,12 @@ class ArrIntegrationResource extends Resource
                                     ->helperText(__('Movies dynamic group caching adds here are removed, files included, once they have been out of every dynamic group for the longest "Keep after leaving (days)" among your caching rules (at least 1 day). Only movies added while this is on are removed, never ones already in the library. Use Cache Now on a movie to keep it.'))
                                     ->visible(fn (Get $get): bool => $get('type') === 'radarr' && (bool) $get('cache_enabled'))
                                     ->default(false),
+
+                                Toggle::make('cache_failback')
+                                    ->label(__('Fail back to the provider'))
+                                    ->helperText(__('When a movie or episode sent here fails to download, or still isn\'t downloaded or downloading after 24 hours, it is downloaded from the playlist provider instead and unmonitored here. Nothing is ever deleted from the arr.'))
+                                    ->visible(fn (Get $get): bool => (bool) $get('cache_enabled'))
+                                    ->default(false),
                             ]),
                     ]),
 

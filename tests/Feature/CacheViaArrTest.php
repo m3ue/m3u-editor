@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CachedContentFileStatus;
 use App\Enums\CacheDispatchResult;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Jobs\DownloadCachedContentFile;
@@ -470,6 +471,95 @@ it('leaves a dynamic group series Sonarr already has to Sonarr', function () {
     expect($counts[CacheDispatchResult::InArrLibrary->value])->toBe(2)
         ->and(CachedContentFile::query()->count())->toBe(0)
         ->and(cvaSentTo('GET', '/episode'))->toBe(0);
+});
+
+// --- Failback tracking rows ---
+
+it('tracks a movie sent to Radarr on integrations with failback on', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr', ['cache_failback' => true]);
+    Http::fake([
+        'radarr.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup()),
+        'radarr.test/api/v3/movie' => Http::response(['id' => 7]),
+    ]);
+
+    $channel = cvaChannel($playlist);
+
+    expect(cvaService()->dispatch($channel))->toBe(CacheDispatchResult::SentToArr);
+
+    $row = CachedContentFile::query()->sole();
+
+    expect($row->source)->toBe('arr')
+        ->and($row->arr_integration_id)->not->toBeNull()
+        ->and($row->arr_requested_at)->not->toBeNull()
+        ->and($row->status)->toBe(CachedContentFileStatus::Pending);
+});
+
+it('falls back to the provider on Cache Now for a title waiting on the arr', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr', ['cache_failback' => true]);
+    Http::fake([
+        'radarr.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup()),
+        'radarr.test/api/v3/movie?tmdbId=550' => Http::response([['id' => 7, 'tmdbId' => 550, 'hasFile' => false]]),
+        'radarr.test/api/v3/movie/7' => Http::response(['id' => 7, 'monitored' => true]),
+        'radarr.test/api/v3/movie' => Http::response(['id' => 7]),
+    ]);
+
+    $channel = cvaChannel($playlist);
+
+    expect(cvaService()->dispatch($channel, automatic: true))->toBe(CacheDispatchResult::SentToArr)
+        // Auto-cache leaves it to the arr.
+        ->and(cvaService()->dispatch($channel, automatic: true))->toBe(CacheDispatchResult::AlreadyQueued);
+    Bus::assertNotDispatched(DownloadCachedContentFile::class);
+
+    expect(cvaService()->dispatch($channel))->toBe(CacheDispatchResult::Queued)
+        ->and(CachedContentFile::query()->sole()->source)->toBe('provider')
+        ->and(cvaSentTo('PUT', '/movie/7'))->toBe(1);
+    Bus::assertDispatched(DownloadCachedContentFile::class);
+});
+
+it('does not track arr requests without the failback flag', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr');
+    Http::fake([
+        'radarr.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup()),
+        'radarr.test/api/v3/movie' => Http::response(['id' => 7]),
+    ]);
+
+    expect(cvaService()->dispatch(cvaChannel($playlist)))->toBe(CacheDispatchResult::SentToArr)
+        ->and(CachedContentFile::query()->count())->toBe(0);
+});
+
+it('does not track titles already in the arr library', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr', ['cache_failback' => true]);
+    Http::fake(['radarr.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup(libraryId: 7))]);
+
+    expect(cvaService()->dispatch(cvaChannel($playlist), automatic: true))->toBe(CacheDispatchResult::InArrLibrary)
+        ->and(CachedContentFile::query()->count())->toBe(0);
+});
+
+it('tracks single episodes sent to Sonarr but not whole-series requests', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'sonarr', ['cache_failback' => true]);
+    Http::fake([
+        'sonarr.test/api/v3/series/lookup*' => Http::response(cvaSeriesLookup()),
+        'sonarr.test/api/v3/series' => Http::response(['id' => 9]),
+    ]);
+
+    $series = cvaSeries($playlist);
+
+    expect(cvaService()->dispatch(cvaEpisode($series, 2, 3)))->toBe(CacheDispatchResult::SentToArr)
+        ->and(CachedContentFile::query()->where('source', 'arr')->count())->toBe(1);
+
+    cvaEpisode($series, 1, 1);
+    cvaEpisode($series, 2, 1);
+
+    $counts = cvaService()->dispatchSeries($series);
+
+    expect($counts[CacheDispatchResult::SentToArr->value])->toBe(3)
+        // Only the single-episode row from the first dispatch exists.
+        ->and(CachedContentFile::query()->where('source', 'arr')->count())->toBe(1);
 });
 
 // --- Notifications ---

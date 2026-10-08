@@ -316,6 +316,8 @@ class DownloadCachedContentFile implements ShouldQueue
 
         $claimed = DB::table('cached_content_files')
             ->where('id', $file->id)
+            // Arr-tracked rows are still the arr's to deliver.
+            ->where('source', '!=', 'arr')
             ->where(function ($q) use ($staleBefore): void {
                 $q->whereIn('status', [CachedContentFileStatus::Pending->value, CachedContentFileStatus::Failed->value])
                     ->orWhere(function ($stale) use ($staleBefore): void {

@@ -175,7 +175,7 @@ class RadarrService extends BaseArrService
     }
 
     /**
-     * @return array{exists: bool, id?: int}
+     * @return array{exists: bool, id?: int, hasFile?: bool}
      */
     public function checkExists(int $externalId): array
     {
@@ -192,7 +192,7 @@ class RadarrService extends BaseArrService
             return ['exists' => false];
         }
 
-        return ['exists' => true, 'id' => (int) $first['id']];
+        return ['exists' => true, 'id' => (int) $first['id'], 'hasFile' => ($first['hasFile'] ?? false) === true];
     }
 
     /**
@@ -300,6 +300,29 @@ class RadarrService extends BaseArrService
 
             throw $e;
         }
+    }
+
+    /**
+     * Unmonitor a movie without touching its files. Unlike deleteMovie(),
+     * this never deletes anything from disk.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function unmonitorMovie(int $movieId): array
+    {
+        return $this->safeCall(function () use ($movieId) {
+            $movie = $this->fetchMovie($movieId);
+
+            if ($movie === null) {
+                return true; // Already gone; nothing to unmonitor.
+            }
+
+            $this->client()
+                ->put('/movie/'.$movieId, [...$movie, 'monitored' => false])
+                ->throw();
+
+            return true;
+        }, 'unmonitor movie');
     }
 
     /**

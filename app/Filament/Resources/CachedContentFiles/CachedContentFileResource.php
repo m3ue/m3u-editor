@@ -7,6 +7,7 @@ use App\Filament\Resources\CachedContentFiles\Pages\ListCachedContentFiles;
 use App\Filament\Resources\CachedContentFiles\Widgets\CachedContentStatsOverview;
 use App\Livewire\ArrQueueMonitor;
 use App\Models\CachedContentFile;
+use App\Services\ArrCacheFailbackService;
 use App\Services\CachedContentDispatchService;
 use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
@@ -261,10 +262,12 @@ class CachedContentFileResource extends Resource
             ->defaultPaginationPageOption(25)
             ->paginated([10, 25, 50, 100])
             // 5s while anything visible is in flight, otherwise 60s so newly
-            // queued downloads still show up without a reload.
+            // queued downloads still show up without a reload. Rows waiting
+            // on Radarr/Sonarr can sit for a day, so they don't count.
             ->poll(
                 fn (): string => static::getEloquentQuery()
                     ->whereIn('status', [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading])
+                    ->where('source', '!=', 'arr')
                     ->exists() ? '5s' : '60s',
             )
             ->columns([
@@ -580,7 +583,7 @@ class CachedContentFileResource extends Resource
         $status = $record->status;
 
         if ($status === CachedContentFileStatus::Pending) {
-            return $status->getLabel();
+            return $record->source === 'arr' ? __('Waiting on Radarr/Sonarr') : $status->getLabel();
         }
 
         if ($status === CachedContentFileStatus::Downloading) {
@@ -741,6 +744,12 @@ class CachedContentFileResource extends Resource
     {
         if (! self::canActOnRecord($record)) {
             return;
+        }
+
+        // A row still waiting on the arr: canceling also stops the arr
+        // looking for the title (unmonitor only, its files are never touched).
+        if ($record->source === 'arr') {
+            app(ArrCacheFailbackService::class)->unmonitor($record);
         }
 
         if (in_array($record->status, [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading], true)) {

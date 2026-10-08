@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class ArrIntegration extends Model
@@ -21,6 +22,7 @@ class ArrIntegration extends Model
             'guest_enabled' => 'boolean',
             'cache_enabled' => 'boolean',
             'cache_cleanup' => 'boolean',
+            'cache_failback' => 'boolean',
             'api_key' => 'encrypted',
             'last_test_at' => 'datetime',
             'quality_profile_id' => 'integer',
@@ -46,6 +48,15 @@ class ArrIntegration extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Cache requests tracking this integration (arr-sourced rows awaiting
+     * failback or delivery).
+     */
+    public function cachedContentFiles(): HasMany
+    {
+        return $this->hasMany(CachedContentFile::class);
     }
 
     public function isSonarr(): bool
@@ -91,5 +102,10 @@ class ArrIntegration extends Model
     public function scopeCacheEnabled($query)
     {
         return $query->where('cache_enabled', true);
+    }
+
+    public function scopeCacheFailback($query)
+    {
+        return $query->where('cache_failback', true);
     }
 }

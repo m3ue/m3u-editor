@@ -35,7 +35,10 @@ use Illuminate\Database\UniqueConstraintViolationException;
  */
 class CachedContentDispatchService
 {
-    public function __construct(private CachedContentArrService $arr) {}
+    public function __construct(
+        private CachedContentArrService $arr,
+        private ArrCacheFailbackService $failback,
+    ) {}
 
     /**
      * Whether the global `enable_cache` toggle is on.
@@ -95,6 +98,12 @@ class CachedContentDispatchService
         if ($existing) {
             if (! $automatic) {
                 $existing->keep();
+
+                // Cache Now on a title still waiting on the arr uses the
+                // provider now, like Cache Now on an arr title without a file.
+                if ($existing->source === 'arr') {
+                    return $this->failback->fallBack($existing) ? CacheDispatchResult::Queued : CacheDispatchResult::AlreadyQueued;
+                }
             }
 
             if (in_array($existing->status, [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading], true)) {
@@ -130,17 +139,8 @@ class CachedContentDispatchService
             $file = CachedContentFile::create([
                 'user_id' => $playlist->user_id,
                 'playlist_id' => $playlist->id,
-                'cacheable_type' => $item->getMorphClass(),
-                'cacheable_id' => $item->getKey(),
-                'content_type' => $item instanceof Channel ? 'movie' : 'episode',
-                'tmdb_id' => $this->identityValue($item, 'tmdb_id'),
-                'tvdb_id' => $this->identityValue($item, 'tvdb_id'),
-                'season_number' => $item instanceof Episode ? $item->season : null,
-                'episode_number' => $item instanceof Episode ? $item->episode_num : null,
-                'content_fingerprint' => $item->cacheFingerprint(),
-                'title' => $this->resolveTitle($item),
+                ...CachedContentFile::buildAttributes($item, $automatic),
                 'status' => CachedContentFileStatus::Pending,
-                'managed_by' => $automatic ? CachedContentManagedBy::DynamicGroup : null,
             ]);
         } catch (UniqueConstraintViolationException) {
             // A concurrent dispatch created the row first.
@@ -459,34 +459,5 @@ class CachedContentDispatchService
                     'skipped' => $skipped,
                     'unavailable' => $unavailable,
                 ]));
-    }
-
-    /**
-     * TMDB/TVDB id stored on the row. Episodes carry their series' ids.
-     */
-    private function identityValue(Channel|Episode $item, string $column): ?string
-    {
-        $value = $item instanceof Episode
-            ? ($item->series?->{$column} ?? ($column === 'tmdb_id' ? $item->tmdb_id : null))
-            : $item->{$column};
-
-        return $value !== null && $value !== '' ? (string) $value : null;
-    }
-
-    /**
-     * Display title persisted on the row so the downloads table never has to
-     * look it up again.
-     */
-    private function resolveTitle(Channel|Episode $item): ?string
-    {
-        $title = trim((string) $item->display_title);
-
-        if ($item instanceof Episode) {
-            $seriesName = trim((string) $item->series?->name);
-            $code = sprintf('S%02dE%02d', (int) $item->season, (int) $item->episode_num);
-            $title = trim(implode(' - ', array_filter([$seriesName, $code, $title])));
-        }
-
-        return $title === '' ? null : mb_substr($title, 0, 500);
     }
 }

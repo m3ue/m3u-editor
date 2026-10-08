@@ -41,7 +41,7 @@ class CachedContentStatsOverview extends StatsOverviewWidget
             ->selectRaw('COALESCE(SUM(CASE WHEN status = ? THEN file_size_bytes END), 0) AS storage_bytes', [$completed])
             ->selectRaw('COALESCE(SUM(CASE WHEN status = ? AND managed_by IS NOT NULL THEN file_size_bytes END), 0) AS auto_bytes', [$completed])
             ->selectRaw('COUNT(CASE WHEN status = ? THEN 1 END) AS downloading', [CachedContentFileStatus::Downloading->value])
-            ->selectRaw('COUNT(CASE WHEN status = ? THEN 1 END) AS pending', [CachedContentFileStatus::Pending->value])
+            ->selectRaw("COUNT(CASE WHEN status = ? AND source <> 'arr' THEN 1 END) AS pending", [CachedContentFileStatus::Pending->value])
             ->selectRaw('COUNT(CASE WHEN status = ? THEN 1 END) AS failed', [CachedContentFileStatus::Failed->value])
             ->first();
 

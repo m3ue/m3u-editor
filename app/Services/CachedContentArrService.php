@@ -2,15 +2,18 @@
 
 namespace App\Services;
 
+use App\Enums\CachedContentFileStatus;
 use App\Enums\CacheDispatchResult;
 use App\Models\ArrCacheMovie;
 use App\Models\ArrIntegration;
+use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Services\Arr\ArrService;
 use App\Services\Arr\SonarrService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -114,6 +117,8 @@ class CachedContentArrService
             );
         }
 
+        $this->trackForFailback($channel, $radarr, $automatic);
+
         return CacheDispatchResult::SentToArr;
     }
 
@@ -127,16 +132,23 @@ class CachedContentArrService
         }
 
         if ($state['added']) {
+            $this->trackForFailback($episode, $state['integration'], $automatic);
+
             return CacheDispatchResult::SentToArr;
         }
 
         if ($state['library_id'] === null) {
             /** @var SonarrService $sonarr */
             $sonarr = ArrService::make($state['integration']);
+            $requested = $sonarr->requestEpisode($state['tvdb_id'], $season, (int) $episode->episode_num)['ok'];
 
-            return $sonarr->requestEpisode($state['tvdb_id'], $season, (int) $episode->episode_num)['ok']
-                ? CacheDispatchResult::SentToArr
-                : null;
+            if ($requested) {
+                $this->trackForFailback($episode, $state['integration'], $automatic);
+
+                return CacheDispatchResult::SentToArr;
+            }
+
+            return null;
         }
 
         if ($automatic) {
@@ -239,6 +251,33 @@ class CachedContentArrService
         return $this->routablePlaylists[$playlist->getKey()] ??= Playlist::query()
             ->select(['id', 'user_id', 'prefer_media_server_sources'])
             ->findOrFail($playlist->getKey());
+    }
+
+    /**
+     * Record an arr-sourced cache request on an integration with "Fail back
+     * to the provider" on, so SweepArrCacheFailback can hand the title to
+     * the provider when the arr can't deliver. A row for the same item is
+     * never created twice (the (cacheable_type, cacheable_id) unique key).
+     */
+    private function trackForFailback(Channel|Episode $item, ArrIntegration $integration, bool $automatic): void
+    {
+        if (! $integration->cache_failback || ! $item->playlist_id || ! $item->playlist instanceof Playlist) {
+            return;
+        }
+
+        try {
+            CachedContentFile::create([
+                'user_id' => $item->playlist->user_id,
+                'playlist_id' => $item->playlist->id,
+                ...CachedContentFile::buildAttributes($item, $automatic),
+                'status' => CachedContentFileStatus::Pending,
+                'source' => 'arr',
+                'arr_integration_id' => $integration->id,
+                'arr_requested_at' => now(),
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            // A concurrent dispatch created the row first.
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\DvrRetentionCleanup;
+use App\Jobs\SweepArrCacheFailback;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -74,6 +75,12 @@ Schedule::command('cache:cleanup')
 
 Schedule::command('cache:cleanup-orphans')
     ->dailyAt('03:30')
+    ->withoutOverlapping();
+
+// Arr cache failback: hand arr-sourced cache requests the arr can't deliver
+// (failed download, or not downloaded or downloading within 24h) to the provider.
+Schedule::job(new SweepArrCacheFailback)
+    ->everyTenMinutes()
     ->withoutOverlapping();
 
 // Prune old notifications
