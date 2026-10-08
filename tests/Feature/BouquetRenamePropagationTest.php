@@ -165,4 +165,57 @@ describe('auto-include new groups', function () {
         expect($bouquet->refresh()->getSelectedVodGroupNames())->toBe(['Fresh VOD'])
             ->and($bouquet->getSelectedLiveGroupNames())->toBe([]);
     });
+
+    it('only appends new groups matching the bouquet auto-include patterns', function () {
+        $france = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'auto_include_new_live' => true,
+            'auto_include_live_patterns' => ['^FR\\|'],
+        ]);
+        $latino = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'auto_include_new_live' => true,
+            'auto_include_live_patterns' => ['^LAT\\|', '^(AR|MX)\\|'],
+        ]);
+        $everything = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'auto_include_new_live' => true,
+        ]);
+
+        runSyncSourceGroupType($this->playlist, collect([
+            ['category_id' => 501, 'category_name' => 'FR| CANAL+ LIVE'],
+            ['category_id' => 502, 'category_name' => 'LAT| CHILE'],
+            ['category_id' => 503, 'category_name' => 'MX| TELEVISA'],
+            ['category_id' => 504, 'category_name' => 'ES| DAZN BALONCESTO'],
+        ]));
+
+        expect($france->refresh()->getSelectedLiveGroupNames())->toBe(['FR| CANAL+ LIVE'])
+            ->and($latino->refresh()->getSelectedLiveGroupNames())->toBe(['LAT| CHILE', 'MX| TELEVISA'])
+            ->and($everything->refresh()->getSelectedLiveGroupNames())->toHaveCount(4);
+    });
+
+    it('does not re-append a manually removed group when the provider re-issues its category id', function () {
+        SourceGroup::create([
+            'name' => 'ES| F1 PPV', 'playlist_id' => $this->playlist->id,
+            'source_group_id' => 601, 'type' => 'live',
+        ]);
+        // The user removed "ES| F1 PPV" from this auto-include bouquet by hand.
+        $bouquet = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'auto_include_new_live' => true,
+            'group_selections' => ['selected_groups' => ['LAT| CHILE']],
+        ]);
+
+        // Same group name, new provider category_id: the old row is pruned.
+        runSyncSourceGroupType($this->playlist, collect([
+            ['category_id' => 699, 'category_name' => 'ES| F1 PPV'],
+        ]));
+
+        expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['LAT| CHILE'])
+            ->and(SourceGroup::where('playlist_id', $this->playlist->id)->where('name', 'ES| F1 PPV')->value('source_group_id'))->toBe(699);
+    });
 });

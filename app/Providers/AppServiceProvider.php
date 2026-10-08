@@ -867,6 +867,8 @@ class AppServiceProvider extends ServiceProvider
                     // Auto-include is a provider-sync concept; custom playlists never sync.
                     $bouquet->auto_include_new_live = false;
                     $bouquet->auto_include_new_vod = false;
+                    $bouquet->auto_include_live_patterns = null;
+                    $bouquet->auto_include_vod_patterns = null;
                 }
 
                 // The hidden target FK is otherwise a name-existence oracle for other

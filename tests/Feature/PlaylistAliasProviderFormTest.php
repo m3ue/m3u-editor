@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Resources\PlaylistAliases\Pages\CreatePlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\ListPlaylistAliases;
 use App\Models\Playlist;
@@ -102,11 +103,10 @@ it('seeds uuid-keyed provider entries with every field when creating', function 
     // The create form replaces the repeater state when a source is picked. Entries
     // keyed 0..n without the toggle key left the replacement toggle unreactive in the
     // browser, so they must look like the ones the repeater builds for a record.
-    $component = Livewire::test(ListPlaylistAliases::class)
-        ->mountAction('create')
+    $component = Livewire::test(CreatePlaylistAlias::class)
         ->fillForm(['source_type' => 'playlist', 'source_id' => $this->playlist->id]);
 
-    $entries = $component->get('mountedActions.0.data.xtream_config');
+    $entries = $component->get('data.xtream_config');
     $key = array_key_first($entries);
 
     expect($entries)->toHaveCount(1)
@@ -127,7 +127,7 @@ it('seeds uuid-keyed provider entries with every field when creating', function 
         ])
         ->assertFormFieldIsVisible("xtream_config.{$key}.replace_url")
         ->fillForm(["xtream_config.{$key}.replace_url" => 'http://vpn.provider.example.com:8080'])
-        ->callMountedAction()
+        ->call('create')
         ->assertHasNoFormErrors();
 
     expect(PlaylistAlias::where('name', 'VPN Alias')->first()?->xtream_config[0])->toMatchArray([
@@ -135,4 +135,50 @@ it('seeds uuid-keyed provider entries with every field when creating', function 
         'replace_url_enabled' => true,
         'replace_url' => 'http://vpn.provider.example.com:8080',
     ]);
+});
+
+it('saves fields from every tab of the create page and redirects to the edit page', function () {
+    $component = Livewire::test(CreatePlaylistAlias::class)
+        ->fillForm(['source_type' => 'playlist', 'source_id' => $this->playlist->id]);
+
+    $key = array_key_first($component->get('data.xtream_config'));
+
+    $component
+        ->fillForm([
+            'name' => 'Tabbed Alias',
+            "xtream_config.{$key}.url" => 'http://provider.example.com:8080',
+            "xtream_config.{$key}.username" => 'provider-user',
+            "xtream_config.{$key}.password" => 'provider-pass',
+            // Lives on the Auth tab, which is not the active tab when the form opens.
+            'username' => 'tabbed-user',
+            'password' => 'tabbed-pass',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $alias = PlaylistAlias::where('name', 'Tabbed Alias')->sole();
+
+    expect($alias->username)->toBe('tabbed-user');
+    $component->assertRedirect(EditPlaylistAlias::getUrl(['record' => $alias]));
+});
+
+it('opens the alias on the full edit page for its owner only', function () {
+    $alias = PlaylistAlias::create([
+        'name' => 'Page Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'xtream_config' => null,
+    ]);
+
+    $this->get(EditPlaylistAlias::getUrl(['record' => $alias]))->assertSuccessful();
+
+    Livewire::test(ListPlaylistAliases::class)
+        ->assertTableActionHasUrl('edit', EditPlaylistAlias::getUrl(['record' => $alias]), $alias)
+        ->assertActionHasUrl('create', CreatePlaylistAlias::getUrl());
+
+    $this->get(CreatePlaylistAlias::getUrl())->assertSuccessful();
+
+    $this->actingAs(User::factory()->create());
+    $this->get(EditPlaylistAlias::getUrl(['record' => $alias]))->assertNotFound();
 });
