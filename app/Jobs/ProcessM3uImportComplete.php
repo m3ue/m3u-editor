@@ -22,6 +22,8 @@ use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -168,6 +170,22 @@ class ProcessM3uImportComplete implements ShouldQueue
             ['new', true],
         ]);
 
+        // Get the added and removed series, only when series import ran this sync (matches the seriesCleanup gate).
+        // Existing series keep their original batch number, so only rows inserted this sync carry the current one.
+        // Series are removed along with their whole category, so a stale category batch means its series are going.
+        $newSeries = null;
+        $removedSeries = null;
+        if ($this->runningSeriesImport) {
+            $newSeries = Series::where([
+                ['playlist_id', $playlist->id],
+                ['import_batch_no', $this->batchNo],
+            ]);
+            $removedSeries = Series::whereHas('category', function ($q) use ($playlist) {
+                $q->where('playlist_id', $playlist->id)
+                    ->where('import_batch_no', '!=', $this->batchNo);
+            });
+        }
+
         // See if sync logs are disabled
         $syncLogsDisabled = config('dev.disable_sync_logs', false);
         if (! $playlist->sync_logs_enabled) {
@@ -181,19 +199,31 @@ class ProcessM3uImportComplete implements ShouldQueue
             $newGroupCount = $newGroups->count();
             $removedChannelCount = $removedChannels->count();
             $newChannelCount = $newChannels->count();
+            $removedSeriesCount = $removedSeries?->count() ?? 0;
+            $newSeriesCount = $newSeries?->count() ?? 0;
+
+            $syncStats = [
+                'time' => $completedIn,
+                'time_rounded' => $completedInRounded,
+                'removed_groups' => $removedGroupCount,
+                'added_groups' => $newGroupCount,
+                'removed_channels' => $removedChannelCount,
+                'added_channels' => $newChannelCount,
+                'removed_series' => $removedSeriesCount,
+                'added_series' => $newSeriesCount,
+                'max_hit' => $this->maxHit,
+            ];
+            $logQueries = [
+                'newChannels' => $newChannels,
+                'removedChannels' => $removedChannels,
+                'newGroups' => $newGroups,
+                'removedGroups' => $removedGroups,
+                'newSeries' => $newSeries,
+                'removedSeries' => $removedSeries,
+            ];
 
             // Check if we need to invalidate the import before proceeding
             if ($this->invalidateImport) {
-                $syncStats = [
-                    'time' => $completedIn,
-                    'time_rounded' => $completedInRounded,
-                    'removed_groups' => $removedGroupCount,
-                    'added_groups' => $newGroupCount,
-                    'removed_channels' => $removedChannelCount,
-                    'added_channels' => $newChannelCount,
-                    'max_hit' => $this->maxHit,
-                ];
-
                 // Channel threshold: only fires when the net result drops below current − threshold.
                 if ($removedChannelCount > 0) {
                     $currentCount = $playlist->channels()->where('is_custom', false)->count();
@@ -202,8 +232,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                     if ($newCount < ($currentCount - $this->invalidateImportThreshold)) {
                         $this->cancelImport(
                             "The channel count would have been {$newCount} after import, which is less than the current count of {$currentCount} minus the threshold of {$this->invalidateImportThreshold}.",
-                            $user, $playlist, $syncLogsDisabled, $syncStats,
-                            $newChannels, $removedChannels, $newGroups, $removedGroups,
+                            $user, $playlist, $syncLogsDisabled, $syncStats, $logQueries,
                         );
 
                         return;
@@ -214,24 +243,18 @@ class ProcessM3uImportComplete implements ShouldQueue
                 if ($removedGroupCount > $this->invalidateImportGroupThreshold) {
                     $this->cancelImport(
                         "{$removedGroupCount} groups/categories would have been removed, which exceeds the threshold of {$this->invalidateImportGroupThreshold}.",
-                        $user, $playlist, $syncLogsDisabled, $syncStats,
-                        $newChannels, $removedChannels, $newGroups, $removedGroups,
+                        $user, $playlist, $syncLogsDisabled, $syncStats, $logQueries,
                     );
 
                     return;
                 }
 
-                // Series threshold.
-                $removedSeriesCount = Series::whereHas('category', function ($q) use ($playlist) {
-                    $q->where('playlist_id', $playlist->id)
-                        ->where('import_batch_no', '!=', $this->batchNo);
-                })->count();
-
+                // Series threshold. Only counted when series import ran this sync: otherwise no category
+                // carries the current batch and every series would look removed (seriesCleanup skips them too).
                 if ($removedSeriesCount > $this->invalidateImportSeriesThreshold) {
                     $this->cancelImport(
                         "{$removedSeriesCount} series would have been removed, which exceeds the threshold of {$this->invalidateImportSeriesThreshold}.",
-                        $user, $playlist, $syncLogsDisabled, $syncStats,
-                        $newChannels, $removedChannels, $newGroups, $removedGroups,
+                        $user, $playlist, $syncLogsDisabled, $syncStats, $logQueries,
                     );
 
                     return;
@@ -244,23 +267,11 @@ class ProcessM3uImportComplete implements ShouldQueue
                     'user_id' => $user->id,
                     'playlist_id' => $playlist->id,
                     'sync_stats' => [
-                        'time' => $completedIn,
-                        'time_rounded' => $completedInRounded,
-                        'removed_groups' => $removedGroupCount,
-                        'added_groups' => $newGroupCount,
-                        'removed_channels' => $removedChannelCount,
-                        'added_channels' => $newChannelCount,
-                        'max_hit' => $this->maxHit,
+                        ...$syncStats,
                         'status' => 'success',
                     ],
                 ]);
-                $this->createSyncLogEntries(
-                    $sync,
-                    $newChannels->clone(),
-                    $removedChannels->clone(),
-                    $newGroups->clone(),
-                    $removedGroups->clone()
-                );
+                $this->createSyncLogEntries($sync, $logQueries);
             }
         }
 
@@ -466,6 +477,7 @@ class ProcessM3uImportComplete implements ShouldQueue
      * delete all new content from this batch, and notify the user.
      *
      * @param  array<string, mixed>  $syncStats  Base stats array (without message/status).
+     * @param  array<string, Builder|Relation|null>  $logQueries  Added/removed item queries, see createSyncLogEntries().
      */
     private function cancelImport(
         string $reason,
@@ -473,10 +485,7 @@ class ProcessM3uImportComplete implements ShouldQueue
         Playlist $playlist,
         bool $syncLogsDisabled,
         array $syncStats,
-        $newChannels,
-        $removedChannels,
-        $newGroups,
-        $removedGroups,
+        array $logQueries,
     ): void {
         $message = "Playlist Sync Invalidated: {$reason}";
 
@@ -492,14 +501,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                 ],
             ]);
 
-            // Clone before deletion so log entries can still read the queries.
-            $this->createSyncLogEntries(
-                $sync,
-                $newChannels->clone(),
-                $removedChannels->clone(),
-                $newGroups->clone(),
-                $removedGroups->clone(),
-            );
+            $this->createSyncLogEntries($sync, $logQueries);
         }
 
         // Invalidated syncs skip the auto resync loop: an immediate retry would most likely be
@@ -515,8 +517,8 @@ class ProcessM3uImportComplete implements ShouldQueue
             ],
         ]);
 
-        $newGroups->forceDelete();
-        $newChannels->delete();
+        $logQueries['newGroups']->forceDelete();
+        $logQueries['newChannels']->delete();
         Job::where('batch_no', $this->batchNo)->delete();
 
         Notification::make()
@@ -569,89 +571,55 @@ class ProcessM3uImportComplete implements ShouldQueue
     /**
      * Create the sync log entries for the import.
      *
-     * @param  PlaylistSyncStatus  $sync
+     * Each query is cloned before use, so the caller can still run its deletes afterwards.
+     *
+     * @param  array{newChannels: Builder|Relation, removedChannels: Builder|Relation, newGroups: Builder|Relation, removedGroups: Builder|Relation, newSeries: Builder|null, removedSeries: Builder|null}  $logQueries
      */
-    private function createSyncLogEntries(
-        $sync,
-        $newChannels,
-        $removedChannels,
-        $newGroups,
-        $removedGroups,
-    ) {
+    private function createSyncLogEntries(PlaylistSyncStatus $sync, array $logQueries): void
+    {
         // Limit logged entries
         $limit = config('dev.max_channels');
         $now = now();
 
+        $entries = [
+            ['query' => $logQueries['removedGroups'], 'type' => 'group', 'status' => 'removed'],
+            ['query' => $logQueries['newGroups'], 'type' => 'group', 'status' => 'added'],
+            ['query' => $logQueries['removedChannels'], 'type' => 'channel', 'status' => 'removed'],
+            ['query' => $logQueries['newChannels'], 'type' => 'channel', 'status' => 'added'],
+            ['query' => $logQueries['removedSeries'], 'type' => 'series', 'status' => 'removed'],
+            ['query' => $logQueries['newSeries'], 'type' => 'series', 'status' => 'added'],
+        ];
+
         // Create the sync log entries
         $bulk = [];
-        $removedGroups->limit($limit)->cursor()->each(function ($group) use ($sync, &$bulk, $now) {
-            $bulk[] = [
-                'playlist_sync_status_id' => $sync->id,
-                'name' => $group->name,
-                'type' => 'group',
-                'status' => 'removed',
-                'meta' => $group,
-                'playlist_id' => $group->playlist_id,
-                'user_id' => $group->user_id,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-            if (count($bulk) >= 100) {
-                PlaylistSyncStatusLog::insert($bulk);
-                $bulk = [];
+        foreach ($entries as $entry) {
+            if ($entry['query'] === null) {
+                continue;
             }
-        });
-        $newGroups->limit($limit)->cursor()->each(function ($group) use ($sync, &$bulk, $now) {
-            $bulk[] = [
-                'playlist_sync_status_id' => $sync->id,
-                'name' => $group->name,
-                'type' => 'group',
-                'status' => 'added',
-                'meta' => $group,
-                'playlist_id' => $group->playlist_id,
-                'user_id' => $group->user_id,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-            if (count($bulk) >= 100) {
-                PlaylistSyncStatusLog::insert($bulk);
-                $bulk = [];
+
+            foreach ($entry['query']->clone()->limit($limit)->cursor() as $item) {
+                $bulk[] = [
+                    'playlist_sync_status_id' => $sync->id,
+                    'name' => $entry['type'] === 'channel' ? ($item->title ?? $item->name) : $item->name,
+                    'type' => $entry['type'],
+                    'content_type' => match ($entry['type']) {
+                        'channel' => $item->is_vod ? 'vod' : 'live',
+                        'group' => $item->type === 'vod' ? 'vod' : 'live',
+                        'series' => 'series',
+                    },
+                    'status' => $entry['status'],
+                    'meta' => $item,
+                    'playlist_id' => $item->playlist_id,
+                    'user_id' => $item->user_id,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                if (count($bulk) >= 100) {
+                    PlaylistSyncStatusLog::insert($bulk);
+                    $bulk = [];
+                }
             }
-        });
-        $removedChannels->limit($limit)->cursor()->each(function ($channel) use ($sync, &$bulk, $now) {
-            $bulk[] = [
-                'playlist_sync_status_id' => $sync->id,
-                'name' => $channel->title ?? $channel->name,
-                'type' => 'channel',
-                'status' => 'removed',
-                'meta' => $channel,
-                'playlist_id' => $channel->playlist_id,
-                'user_id' => $channel->user_id,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-            if (count($bulk) >= 100) {
-                PlaylistSyncStatusLog::insert($bulk);
-                $bulk = [];
-            }
-        });
-        $newChannels->limit($limit)->cursor()->each(function ($channel) use ($sync, &$bulk, $now) {
-            $bulk[] = [
-                'playlist_sync_status_id' => $sync->id,
-                'name' => $channel->title ?? $channel->name,
-                'type' => 'channel',
-                'status' => 'added',
-                'meta' => $channel,
-                'playlist_id' => $channel->playlist_id,
-                'user_id' => $channel->user_id,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-            if (count($bulk) >= 100) {
-                PlaylistSyncStatusLog::insert($bulk);
-                $bulk = [];
-            }
-        });
+        }
         if (count($bulk) > 0) {
             PlaylistSyncStatusLog::insert($bulk);
         }
