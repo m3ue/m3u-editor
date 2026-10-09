@@ -94,50 +94,54 @@ class EpgMapResource extends Resource implements CopilotResource
                     ->toggleable()
                     ->color(fn (Status $state) => $state->getColor()),
                 ProgressColumn::make('progress')
+                    ->tooltip(__('Processing progress of the current or most recent mapping run. This is not the share of channels that were mapped.'))
                     ->sortable()
                     ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 TextColumn::make('group_ids')
                     ->label(__('Groups'))
                     ->state(fn (EpgMap $record) => $record->group_ids ? count($record->group_ids) : __('All'))
+                    ->tooltip(__('Number of playlist groups this mapping is limited to. "All" means every group in the playlist is included.'))
                     ->toggleable(),
                 TextColumn::make('total_channel_count')
                     ->label(__('Total Channels'))
-                    ->tooltip(__('Total number of channels available for this mapping.'))
+                    ->tooltip(__('Live channels in scope for this mapping (selected groups, or the whole playlist) that have EPG mapping enabled. VOD channels and channels with EPG mapping turned off are not counted. Counted when the latest run started.'))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('current_mapped_count')
                     ->label(__('Currently Mapped'))
-                    ->tooltip(__('Number of channels that were already mapped to an EPG entry.'))
+                    ->tooltip(__('Channels in scope that already had an EPG entry (manual or from earlier runs) when the latest run started.'))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('channel_count')
                     ->label(__('Search & Map'))
-                    ->tooltip(__('Number of channels that were searched for a matching EPG entry in this mapping. If the "Override" option is enabled, this will also include channels that were previously mapped. If the "Override" option is disabled, this will only include channels that were not previously mapped.'))
+                    ->tooltip(__('Channels the latest run searched for a matching EPG entry. With "Override" on, this includes channels that were already mapped. With "Override" off, only unmapped channels are searched.'))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('mapped_count')
                     ->label(__('Newly Mapped'))
-                    ->tooltip(__('Number of channels that were successfully matched to an EPG entry in this mapping. When "Override" is disabled, it is normal for this count to be 0 on subsequent syncs.'))
+                    ->tooltip(__('Channels the latest run successfully matched to an EPG entry. This is not the total mapped count. With "Override" off, 0 is normal on later runs once everything is mapped.'))
                     ->toggleable()
                     ->sortable(),
                 ToggleColumn::make('override')
                     ->toggleable()
-                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? 'Override existing EPG mappings' : 'Not available for custom channel mappings'))
+                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? __('When on, channels that are already mapped are searched again and their EPG entry can be replaced. When off, existing mappings are kept and only unmapped channels are searched.') : __('Not available for custom channel mappings')))
                     ->disabled((fn (EpgMap $record) => $record->playlist_id === null))
                     ->sortable(),
                 ToggleColumn::make('recurring')
                     ->toggleable()
-                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? 'Run again on EPG sync' : 'Not available for custom channel mappings'))
+                    ->tooltip((fn (EpgMap $record) => $record->playlist_id !== null ? __('When on, this mapping runs again automatically every time the EPG syncs.') : __('Not available for custom channel mappings')))
                     ->disabled((fn (EpgMap $record) => $record->playlist_id === null))
                     ->sortable(),
                 TextColumn::make('sync_time')
                     ->label(__('Sync Time'))
                     ->formatStateUsing(fn (string $state): string => gmdate('H:i:s', (int) $state))
+                    ->tooltip(__('How long the latest mapping run took to complete.'))
                     ->toggleable()
                     ->sortable(),
                 TextColumn::make('mapped_at')
                     ->label(__('Last ran'))
+                    ->tooltip(__('When the latest mapping run started.'))
                     ->since()
                     ->sortable()
                     ->toggleable(),

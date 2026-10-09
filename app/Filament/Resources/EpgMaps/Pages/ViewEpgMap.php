@@ -71,19 +71,19 @@ class ViewEpgMap extends ViewRecord
                                         TextEntry::make('total_channel_count')
                                             ->label(__('Total Channels'))
                                             ->badge()
-                                            ->tooltip(__('Total number of channels available for this mapping.')),
+                                            ->tooltip(__('Live channels in scope for this mapping (selected groups, or the whole playlist) that have EPG mapping enabled. VOD channels and channels with EPG mapping turned off are not counted. Counted when the latest run started.')),
                                         TextEntry::make('current_mapped_count')
                                             ->label(__('Currently Mapped'))
                                             ->badge()
-                                            ->tooltip(__('Number of channels that were already mapped to an EPG entry.')),
+                                            ->tooltip(__('Channels in scope that already had an EPG entry (manual or from earlier runs) when the latest run started.')),
                                         TextEntry::make('channel_count')
                                             ->label(__('Search & Map'))
                                             ->badge()
-                                            ->tooltip(__('Channels searched for a matching EPG entry in this run.')),
+                                            ->tooltip(__('Channels the latest run searched for a matching EPG entry. With "Override" on, this includes channels that were already mapped. With "Override" off, only unmapped channels are searched.')),
                                         TextEntry::make('mapped_count')
                                             ->label(__('Newly Mapped'))
                                             ->badge()
-                                            ->tooltip(__('Channels matched in this run. Zero is expected when Override is off and all channels are already mapped.')),
+                                            ->tooltip(__('Channels the latest run successfully matched to an EPG entry. This is not the total mapped count. With "Override" off, 0 is normal on later runs once everything is mapped.')),
                                     ]),
                                 Grid::make(2)
                                     ->columnSpanFull()
