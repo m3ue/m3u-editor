@@ -256,10 +256,9 @@ it('returns live streams successfully', function () {
     $channel1Data = collect($jsonResponse)->firstWhere('stream_id', $enabledChannel1->id);
     $this->assertNotNull($channel1Data, 'Channel 1 should be in response');
     $this->assertStringContainsString('icon1.png', $channel1Data['stream_icon']);
-    // direct_source field is present in the response structure
+    // direct_source is intentionally always empty so upstream URLs/credentials are never exposed (#1386)
     $this->assertArrayHasKey('direct_source', $channel1Data);
-    // Note: direct_source is currently not implemented and returns empty string
-    $this->assertIsString($channel1Data['direct_source']);
+    $this->assertSame('', $channel1Data['direct_source']);
 });
 
 it('includes stream stats when probed for get live streams', function () {

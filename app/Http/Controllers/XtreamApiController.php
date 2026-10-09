@@ -134,7 +134,7 @@ class XtreamApiController extends Controller
      * Supports optional category filtering via `category_id` parameter.
      * Each stream object contains: `num`, `name`, `stream_type`, `stream_id`, `stream_icon`, `epg_channel_id`,
      * `added`, `category_id`, `category_ids`, `tv_archive`, `tv_archive_duration`, `custom_sid`, `thumbnail`, `direct_source`.
-     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style stream URL.
+     * `direct_source` is always an empty string (kept for Xtream compatibility). Clients build playback URLs from `stream_id`, so upstream provider URLs and credentials are never exposed.
      * The `thumbnail` field contains the same value as `stream_icon`.
      * `tv_archive_duration` is in days. It falls back to `dev.default_epg_catchup_days` (env `DEFAULT_EPG_CATCHUP_DAYS`,
      * default 7) when `tv_archive` is `1` but the actual retention window is unknown (catchup enabled with no known
@@ -145,7 +145,7 @@ class XtreamApiController extends Controller
      * Supports optional category filtering via `category_id` parameter.
      * Each object contains: `num`, `name`, `title`, `year`, `stream_type` (always "movie"), `stream_id`, `stream_icon`,
      * `rating`, `rating_5based`, `added`, `category_id`, `category_ids`, `tmdb`, `tmdb_id`, `container_extension`, `custom_sid`, `direct_source`.
-     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style movie URL.
+     * `direct_source` is always an empty string (kept for Xtream compatibility), same as for live streams and series episodes.
      *
      * ### get_series
      * Returns a JSON array of series objects. Only enabled series are included.
