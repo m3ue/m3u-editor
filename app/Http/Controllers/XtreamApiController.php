@@ -113,6 +113,8 @@ class XtreamApiController extends Controller
      */
     private const int MAX_RECENT_EPISODES = 40;
 
+    private const int SCHEDULE_DVR_MAX_DURATION_SECONDS = 86400;
+
     /**
      * Xtream API request handler.
      *
@@ -4511,6 +4513,17 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * 422 for an invalid schedule_dvr request. Keeps the legacy `error` string and adds a stable `code`.
+     */
+    private function scheduleDvrRejection(string $code, string $message): JsonResponse
+    {
+        return response()->json([
+            'error' => $message,
+            'code' => $code,
+        ], 422);
+    }
+
+    /**
      * Schedule a one-shot DVR recording rule from the TV app.
      */
     private function scheduleDvr(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
@@ -4522,6 +4535,33 @@ class XtreamApiController extends Controller
 
         if (! $channelId || ! $title || ! $startTime || ! $endTime) {
             return response()->json(['error' => 'channel_id, title, start_time, and end_time are required'], 400);
+        }
+
+        try {
+            $requestedStart = Carbon::parse((string) $startTime);
+            $requestedEnd = Carbon::parse((string) $endTime);
+        } catch (\Throwable) {
+            return $this->scheduleDvrRejection('invalid_datetime', 'start_time and end_time must be ISO 8601 date-times');
+        }
+
+        if ($requestedEnd->lte($requestedStart)) {
+            return $this->scheduleDvrRejection('invalid_time_window', 'end_time must be after start_time');
+        }
+
+        // A start in the past is fine (recording something already airing); an end in the past is not.
+        if ($requestedEnd->lte(now())) {
+            return $this->scheduleDvrRejection('window_in_past', 'The requested recording window has already ended');
+        }
+
+        if ($requestedStart->diffInSeconds($requestedEnd) > self::SCHEDULE_DVR_MAX_DURATION_SECONDS) {
+            return $this->scheduleDvrRejection('duration_too_long', 'Recordings can be at most 24 hours long');
+        }
+
+        foreach (['start_early_seconds', 'end_late_seconds'] as $paddingField) {
+            $padding = $request->input($paddingField);
+            if ($padding !== null && filter_var($padding, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 65535]]) === false) {
+                return $this->scheduleDvrRejection('invalid_padding', "{$paddingField} must be a whole number of seconds between 0 and 65535");
+            }
         }
 
         $dvrSetting = $this->resolveDvrSettingForWrite($playlist, $channelId);
@@ -4547,8 +4587,8 @@ class XtreamApiController extends Controller
         // app.timezone's wall-clock before Eloquent formats them for storage, or the
         // round-trip re-read will reconstruct the wrong absolute instant.
         $appTz = config('app.timezone', 'UTC');
-        $manualStart = Carbon::parse($startTime)->setTimezone($appTz);
-        $manualEnd = Carbon::parse($endTime)->setTimezone($appTz);
+        $manualStart = $requestedStart->copy()->setTimezone($appTz);
+        $manualEnd = $requestedEnd->copy()->setTimezone($appTz);
 
         // Duplicate guard: same dvr_setting, same channel, same auth, overlapping
         // manual_start/manual_end window. Mirrors createDvrSeriesRule's pattern
