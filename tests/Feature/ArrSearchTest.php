@@ -1221,6 +1221,7 @@ it('toggleBrowseGenre loads discover results filtered by genre', function () {
     expect($component->get('browseResults'))->toHaveCount(1);
     expect($component->get('browseResults.0.title'))->toBe('Action Movie');
     expect($component->get('browseLoading'))->toBeFalse();
+    expect($component->html())->toMatch('/<button(?=[^>]*wire:click="clearBrowse")(?=[^>]*\\bfi-btn\\b)[^>]*>/');
 });
 
 it('toggleBrowseGenre supports multiple genres with OR logic', function () {

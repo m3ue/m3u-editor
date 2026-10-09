@@ -194,13 +194,9 @@
 
                 <!-- Footer -->
                 <div class="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
-                    <button
-                        type="button"
-                        @click="$wire.closeModal()"
-                        class="focus:ring-primary-500 inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-offset-2 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
-                    >
-                        Cancel
-                    </button>
+                    <x-filament::button color="gray" x-on:click="$wire.closeModal()">
+                        {{ __('Cancel') }}
+                    </x-filament::button>
                 </div>
             </div>
         </div>
