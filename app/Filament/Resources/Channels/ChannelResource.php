@@ -470,7 +470,7 @@ class ChannelResource extends Resource implements CopilotResource
                 ->query(function ($query) {
                     return $query->where('aed_profile_id', '!=', null);
                 }),
-            Filter::make('un_mapped')
+            Filter::make('aed_profile_not_applied')
                 ->label(__('AED Profile not applied'))
                 ->toggle()
                 ->query(function ($query) {
