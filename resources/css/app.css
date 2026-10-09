@@ -3,8 +3,12 @@
 
 @import '../../vendor/filament/filament/resources/css/theme.css';
 
+@import "./globals/brand.css";
 @import "./globals/global.scss";
 
+@import "./components/navigation.css";
+@import "./components/surfaces.css";
+@import "./components/controls.css";
 @import "./components/tables.scss";
 @import "./components/widgets.css";
 @import "./components/logs.css";

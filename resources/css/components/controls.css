@@ -1,0 +1,199 @@
+/*
+ * Controls: buttons, tabs, inputs, and badges.
+ */
+
+@layer components {
+    /* ── Buttons ─────────────────────────────────────────────── */
+    .fi-btn,
+    .fi-icon-btn {
+        @apply duration-150;
+
+        &:not(.fi-disabled):not([disabled]):active {
+            scale: 0.97;
+        }
+    }
+
+    /* Solid buttons: a soft top sheen and a shadow in their own colour */
+    .fi-btn.fi-color:not(.fi-outlined):not(label) {
+        background-image: linear-gradient(180deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0));
+        box-shadow:
+            inset 0 1px 0 rgb(255 255 255 / 0.14),
+            0 1px 2px color-mix(in oklab, var(--color-700) 35%, transparent);
+
+        &:not(.fi-disabled):not([disabled]):hover {
+            box-shadow:
+                inset 0 1px 0 rgb(255 255 255 / 0.16),
+                0 3px 10px -2px color-mix(in oklab, var(--color-600) 45%, transparent);
+        }
+
+        &:not(.fi-disabled):not([disabled]):focus-visible {
+            box-shadow:
+                inset 0 1px 0 rgb(255 255 255 / 0.16),
+                0 0 0 2px var(--m3u-surface),
+                0 0 0 4px color-mix(in oklab, var(--color-500) 60%, transparent);
+        }
+    }
+
+    /* Neutral buttons: hairline edge that firms up on hover */
+    .fi-btn:not(.fi-color):not(.fi-outlined):not(label) {
+        box-shadow:
+            var(--m3u-shadow-card),
+            0 0 0 1px var(--m3u-hairline-strong);
+
+        &:not(.fi-disabled):not([disabled]):hover {
+            box-shadow:
+                var(--m3u-shadow-raised),
+                0 0 0 1px color-mix(in oklab, var(--gray-950) 18%, transparent);
+
+            @variant dark {
+                box-shadow:
+                    var(--m3u-shadow-raised),
+                    0 0 0 1px rgb(255 255 255 / 0.2);
+            }
+        }
+
+        &:not(.fi-disabled):not([disabled]):focus-visible {
+            box-shadow:
+                0 0 0 1px var(--m3u-hairline-strong),
+                0 0 0 4px color-mix(in oklab, var(--primary-500) 25%, transparent);
+        }
+    }
+
+    .fi-icon-btn {
+        @apply transition-colors;
+    }
+
+    /* ── Tabs ────────────────────────────────────────────────── */
+    /* Standalone tab bars (record pages, list filters): a segmented control */
+    .fi-tabs:not(.fi-contained) {
+        @apply gap-x-0.5 rounded-xl p-1;
+        background-color: var(--m3u-surface-muted);
+        box-shadow: inset 0 0 0 1px var(--m3u-hairline);
+
+        @variant dark {
+            background-color: rgb(255 255 255 / 0.03);
+        }
+
+        & .fi-tabs-item {
+            @apply py-1.5;
+
+            &:hover:not(.fi-active),
+            &:focus-visible:not(.fi-active) {
+                @apply bg-transparent;
+
+                & .fi-tabs-item-label {
+                    color: var(--m3u-nav-text-strong);
+                }
+            }
+
+            &.fi-active {
+                @apply bg-white dark:bg-white/[0.08];
+                box-shadow:
+                    var(--m3u-shadow-raised),
+                    0 0 0 1px var(--m3u-hairline);
+            }
+        }
+    }
+
+    .fi-tabs-item {
+        @apply transition-colors duration-150;
+
+        & .fi-tabs-item-label {
+            @apply transition-colors duration-150;
+        }
+
+        &.fi-active {
+            & .fi-tabs-item-label {
+                @apply font-semibold;
+                color: var(--m3u-active-text);
+            }
+
+            & > .fi-icon {
+                @apply text-primary-500 dark:text-primary-400;
+            }
+        }
+    }
+
+    /* Tabs inside a card: flat, with a brand underline on the active tab */
+    .fi-tabs.fi-contained:not(.fi-vertical) {
+        border-color: var(--m3u-hairline);
+
+        & .fi-tabs-item {
+            @apply relative;
+
+            &:hover:not(.fi-active),
+            &:focus-visible:not(.fi-active) {
+                background-color: var(--m3u-hover-tint);
+            }
+
+            &::after {
+                content: '';
+                position: absolute;
+                inset-inline: 0.75rem;
+                bottom: -0.6875rem;
+                height: 2px;
+                border-radius: 2px;
+                background: var(--m3u-gradient);
+                opacity: 0;
+                transform: scaleX(0.4);
+                transition:
+                    opacity 0.25s ease,
+                    transform 0.25s ease;
+            }
+
+            &.fi-active {
+                @apply bg-transparent dark:bg-transparent;
+
+                &::after {
+                    opacity: 1;
+                    transform: scaleX(1);
+                }
+            }
+        }
+    }
+
+    /* Vertical tabs: the sidebar's tint and gradient edge */
+    .fi-tabs.fi-vertical {
+        border-color: var(--m3u-hairline);
+
+        & .fi-tabs-item {
+            border-radius: 0 0.5rem 0.5rem 0;
+
+            &:is(:hover, :focus-visible):not(.fi-active) {
+                background: var(--m3u-row-hover);
+            }
+
+            &.fi-active {
+                background: var(--m3u-row-active);
+                box-shadow: none;
+            }
+        }
+    }
+
+    /* ── Inputs ──────────────────────────────────────────────── */
+    .fi-input-wrp {
+        @apply transition-shadow duration-150;
+
+        &:not(.fi-disabled):not(:has(.fi-ac-action:focus)):focus-within {
+            --tw-shadow: 0 0 0 4px color-mix(in oklab, var(--primary-500) 14%, transparent);
+
+            &.fi-invalid {
+                --tw-shadow: 0 0 0 4px color-mix(in oklab, var(--danger-500) 14%, transparent);
+            }
+        }
+    }
+
+    .fi-input-wrp .fi-input-wrp-prefix,
+    .fi-input-wrp .fi-input-wrp-suffix {
+        border-color: var(--m3u-hairline-strong);
+    }
+
+    /* ── Badges ──────────────────────────────────────────────── */
+    .fi-badge {
+        @apply rounded-full px-2.5;
+
+        &.fi-size-xs {
+            @apply px-1.5;
+        }
+    }
+}

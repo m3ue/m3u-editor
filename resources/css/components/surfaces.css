@@ -1,0 +1,240 @@
+/*
+ * Surfaces: sections, table containers, widgets, dropdowns, modals, and the
+ * sign-in card. Hairline edges and soft shadows in light mode; zinc cards
+ * (as in M3U TV) with a faint top highlight in dark mode.
+ */
+
+@layer components {
+    /* ── Cards ───────────────────────────────────────────────── */
+    .fi-section:not(.fi-section-not-contained):not(.fi-aside),
+    .fi-section:not(.fi-section-not-contained).fi-aside > .fi-section-content-ctn,
+    .fi-ta-ctn,
+    .fi-wi-stats-overview-stat,
+    .fi-simple-main {
+        box-shadow: var(--m3u-shadow-card), 0 0 0 1px var(--m3u-hairline-strong);
+
+        @variant dark {
+            background-color: var(--m3u-surface);
+        }
+    }
+
+    /* Secondary sections stay recessed */
+    .fi-section:not(.fi-section-not-contained).fi-secondary:not(.fi-aside),
+    .fi-section:not(.fi-section-not-contained).fi-secondary.fi-aside > .fi-section-content-ctn {
+        @apply bg-gray-50 shadow-none dark:bg-white/[0.03];
+        box-shadow: 0 0 0 1px var(--m3u-hairline);
+    }
+
+    .fi-section:not(.fi-section-not-contained):not(.fi-aside) {
+        & > .fi-section-header {
+            @apply py-3.5;
+        }
+
+        &.fi-section-has-header:not(.fi-collapsed) > .fi-section-content-ctn {
+            border-color: var(--m3u-hairline);
+        }
+
+        & > .fi-section-content-ctn > .fi-section-footer {
+            border-color: var(--m3u-hairline);
+        }
+    }
+
+    .fi-section.fi-divided > .fi-section-content-ctn > .fi-section-content {
+        @apply divide-(--m3u-hairline);
+    }
+
+    .fi-section-header-heading {
+        @apply tracking-tight;
+    }
+
+    /* Section icons pick up the brand colour */
+    .fi-section > .fi-section-header > .fi-icon:not(.fi-color) {
+        @apply text-primary-500 dark:text-primary-400;
+    }
+
+    .fi-section.fi-collapsible > .fi-section-header {
+        @apply rounded-xl transition-colors duration-150;
+
+        &:hover {
+            background-color: var(--m3u-hover-tint);
+        }
+    }
+
+    .fi-section.fi-collapsible:not(.fi-collapsed) > .fi-section-header {
+        @apply rounded-b-none;
+    }
+
+    .fi-fieldset {
+        border-color: var(--m3u-hairline-strong);
+    }
+
+    /* ── Tables ──────────────────────────────────────────────── */
+    .fi-ta-ctn {
+        & .fi-ta-header,
+        & .fi-ta-header-toolbar {
+            border-color: var(--m3u-hairline);
+        }
+    }
+
+    /* ── Dashboard widgets ───────────────────────────────────── */
+    .fi-wi-stats-overview-stat {
+        & .fi-wi-stats-overview-stat-value {
+            @apply tracking-tighter;
+        }
+
+        & .fi-wi-stats-overview-stat-chart .fi-wi-stats-overview-stat-chart-bg-color {
+            @apply text-gray-50 dark:text-white/[0.03];
+        }
+    }
+
+    /* Linked stats lift onto a brand gradient ring, like the docs' cards */
+    a.fi-wi-stats-overview-stat,
+    .m3u-card-link {
+        @apply relative;
+        transition:
+            box-shadow 0.25s ease-out,
+            translate 0.25s ease-out;
+
+        &::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            padding: 1px;
+            border-radius: inherit;
+            background: var(--m3u-gradient);
+            -webkit-mask:
+                linear-gradient(#000 0 0) content-box,
+                linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask:
+                linear-gradient(#000 0 0) content-box exclude,
+                linear-gradient(#000 0 0);
+            opacity: 0;
+            transition: opacity 0.25s ease-out;
+            pointer-events: none;
+        }
+
+        &:hover,
+        &:focus-visible {
+            translate: 0 -2px;
+            box-shadow:
+                -0.5rem 0 1.5rem -0.75rem color-mix(in srgb, var(--m3u-rose) 45%, transparent),
+                0 0 1.5rem -0.75rem color-mix(in srgb, var(--m3u-magenta) 40%, transparent),
+                0.5rem 0 1.5rem -0.75rem color-mix(in srgb, var(--m3u-indigo) 45%, transparent);
+
+            &::before {
+                opacity: 1;
+            }
+        }
+    }
+
+    /* ── Dropdowns ───────────────────────────────────────────── */
+    .fi-dropdown-panel {
+        @apply rounded-xl;
+        box-shadow: var(--m3u-shadow-overlay), 0 0 0 1px var(--m3u-hairline-strong);
+
+        &:not(.fi-dropdown-list) {
+            @apply divide-(--m3u-hairline);
+        }
+    }
+
+    .fi-dropdown-list-item {
+        @apply rounded-lg transition-colors duration-150;
+    }
+
+    .fi-dropdown-header {
+        @apply font-semibold;
+    }
+
+    /* ── Modals and slide-overs ──────────────────────────────── */
+    .fi-modal-window {
+        box-shadow: var(--m3u-shadow-overlay), 0 0 0 1px var(--m3u-hairline-strong);
+
+        @variant dark {
+            background-color: var(--m3u-surface);
+        }
+
+        & .fi-modal-header {
+            border-color: var(--m3u-hairline);
+        }
+
+        & .fi-modal-footer {
+            border-color: var(--m3u-hairline);
+        }
+    }
+
+    .fi-modal:not(.fi-modal-slide-over) .fi-modal-window {
+        @apply rounded-2xl;
+    }
+
+    .fi-modal-close-overlay {
+        @apply bg-zinc-950/40 backdrop-blur-[2px] dark:bg-black/60;
+    }
+
+    .fi-modal-heading {
+        @apply tracking-tight;
+    }
+
+    /* ── Notifications ───────────────────────────────────────── */
+    .fi-no-notification {
+        @apply rounded-xl;
+        box-shadow: var(--m3u-shadow-overlay);
+
+        @variant dark {
+            background-color: var(--m3u-surface);
+        }
+    }
+
+    /* ── Sign in and other simple pages ──────────────────────── */
+    .fi-simple-layout {
+        @apply relative isolate overflow-hidden;
+
+        &::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background:
+                radial-gradient(40rem 26rem at 32% 18%, var(--m3u-glow-rose), transparent 70%),
+                radial-gradient(44rem 30rem at 68% 22%, var(--m3u-glow-indigo), transparent 70%);
+            pointer-events: none;
+        }
+    }
+
+    .fi-simple-main {
+        @apply relative overflow-hidden sm:rounded-2xl;
+
+        /* Brand edge along the top of the card */
+        &::before {
+            content: '';
+            position: absolute;
+            inset-inline: 0;
+            top: 0;
+            height: 3px;
+            background: var(--m3u-gradient);
+        }
+    }
+
+    .fi-simple-page .fi-form-actions .fi-btn.fi-color-primary:not(.fi-outlined),
+    .fi-simple-page .fi-ac .fi-btn[type='submit'].fi-color-primary:not(.fi-outlined) {
+        @apply font-semibold text-white;
+        background: var(--m3u-gradient-diagonal);
+        box-shadow: 0 6px 18px -6px rgb(179 80 159 / 0.55);
+
+        &:hover {
+            @apply text-white;
+            background: var(--m3u-gradient-diagonal);
+            filter: brightness(1.06);
+            box-shadow: 0 8px 22px -6px rgb(179 80 159 / 0.65);
+        }
+    }
+
+    /* ── Empty states ────────────────────────────────────────── */
+    .fi-empty-state-icon-bg {
+        background-color: var(--m3u-active-tint);
+
+        & .fi-icon {
+            @apply text-primary-500 dark:text-primary-400;
+        }
+    }
+}

@@ -1,0 +1,337 @@
+/*
+ * Navigation: sidebar, page sub-navigation (e.g. Settings), topbar, and the
+ * top navigation layout. Matches the docs sidebar: quiet rows on a hairline
+ * rail, and the current page as the one tinted row with the brand gradient
+ * on its leading edge.
+ */
+
+@layer components {
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    .fi-sidebar {
+        &.fi-sidebar-open {
+            @apply ring-0;
+        }
+    }
+
+    .fi-sidebar-nav {
+        scrollbar-width: thin;
+        scrollbar-color: var(--m3u-hairline-strong) transparent;
+    }
+
+    /* Desktop: a hairline separates the navigation from the content */
+    @media (min-width: 64rem) {
+        .fi-body:not(.fi-body-has-top-navigation) .fi-main-sidebar {
+            border-inline-end: 1px solid var(--m3u-hairline);
+        }
+    }
+
+    .fi-sidebar-group-btn {
+        @apply gap-x-2.5 px-2 pt-0 pb-1;
+
+        & .fi-icon {
+            @apply size-5 text-gray-400 transition duration-150 dark:text-gray-500;
+        }
+    }
+
+    .fi-sidebar-group-label {
+        @apply text-[0.8125rem] font-semibold tracking-[0.01em] text-(--m3u-nav-text-strong);
+    }
+
+    /* The group holding the current page shows its icon in the brand colour */
+    .fi-sidebar-group.fi-active {
+        & > .fi-sidebar-group-btn .fi-icon,
+        & .fi-sidebar-group-dropdown-trigger-btn .fi-icon {
+            @apply text-primary-500 dark:text-primary-400;
+        }
+    }
+
+    .fi-sidebar-group-items,
+    .fi-sidebar-sub-group-items {
+        @apply gap-y-0.5;
+    }
+
+    .fi-sidebar-item-btn {
+        @apply rounded-lg px-2 py-1.5 transition-colors duration-150;
+
+        & > .fi-icon {
+            @apply transition-colors duration-150;
+        }
+    }
+
+    .fi-sidebar-item-label {
+        @apply font-medium text-(--m3u-nav-text) transition-colors duration-150;
+    }
+
+    /*
+     * Every navigation row shares one shape: square on its leading edge,
+     * where hovering shows a neutral bar and the current page the brand
+     * gradient. This covers the expanded and icon-only sidebar, group
+     * flyouts, and page sub-navigation (Settings and clusters). Grouped rows
+     * in the expanded sidebar draw the same bar on the rail instead.
+     */
+    .fi-sidebar-item-btn:not(:has(> .fi-sidebar-item-grouped-border)),
+    .fi-sidebar-group-dropdown-trigger-btn {
+        border-radius: 0 0.5rem 0.5rem 0;
+    }
+
+    .fi-sidebar-item.fi-sidebar-item-has-url > .fi-sidebar-item-btn {
+        &:hover,
+        &:focus-visible {
+            & > .fi-sidebar-item-label {
+                color: var(--m3u-nav-text-strong);
+            }
+
+            & > .fi-icon {
+                @apply text-gray-500 dark:text-gray-300;
+            }
+        }
+
+        &:not(:has(> .fi-sidebar-item-grouped-border)):is(:hover, :focus-visible) {
+            background: var(--m3u-row-hover);
+        }
+
+        &:has(> .fi-sidebar-item-grouped-border):is(:hover, :focus-visible) {
+            background: var(--m3u-row-hover-on-rail);
+        }
+    }
+
+    .fi-sidebar-group-dropdown-trigger-btn {
+        @apply transition-colors duration-150;
+
+        &:hover,
+        &:focus-visible {
+            background: var(--m3u-row-hover);
+        }
+    }
+
+    /* Grouped items hang off one continuous hairline rail (no dots), drawn
+       on the list so it never breaks between rows */
+    .fi-sidebar-group-items:has(> .fi-sidebar-item > .fi-sidebar-item-btn > .fi-sidebar-item-grouped-border) {
+        background: linear-gradient(var(--m3u-hairline-strong), var(--m3u-hairline-strong)) 1.25rem 0 / 1px 100% no-repeat;
+    }
+
+    .fi-sidebar-item-grouped-border-part-not-first,
+    .fi-sidebar-item-grouped-border-part-not-last {
+        @apply hidden;
+    }
+
+    .fi-sidebar-item-grouped-border-part {
+        @apply h-0 w-0 bg-transparent;
+    }
+
+    /* Current page */
+    .fi-sidebar-item.fi-active {
+        & > .fi-sidebar-item-btn,
+        & > .fi-sidebar-item-btn:hover,
+        & > .fi-sidebar-item-btn:focus-visible {
+            background: var(--m3u-row-active);
+
+            & > .fi-sidebar-item-label {
+                @apply font-semibold;
+                color: var(--m3u-active-text);
+            }
+
+            & > .fi-icon {
+                @apply text-primary-500 dark:text-primary-400;
+            }
+
+            & > .fi-sidebar-item-grouped-border > .fi-sidebar-item-grouped-border-part {
+                @apply absolute -inset-y-1.5 h-auto w-0.5 rounded-full;
+                background: var(--m3u-gradient-vertical);
+            }
+        }
+
+        /* Grouped: the tint starts at the rail and the bar sits on it */
+        & > .fi-sidebar-item-btn:has(> .fi-sidebar-item-grouped-border),
+        & > .fi-sidebar-item-btn:has(> .fi-sidebar-item-grouped-border):hover,
+        & > .fi-sidebar-item-btn:has(> .fi-sidebar-item-grouped-border):focus-visible {
+            background: linear-gradient(90deg, transparent 1.25rem, var(--m3u-active-tint) 1.25rem);
+        }
+    }
+
+    /* Icon-only sidebar: the group holding the current page */
+    .fi-sidebar-group.fi-active .fi-sidebar-group-dropdown-trigger-btn {
+        &,
+        &:hover,
+        &:focus-visible {
+            background: var(--m3u-row-active);
+        }
+    }
+
+    /* Icon-only sidebar: the flyout listing a group's pages */
+    .fi-sidebar-group .fi-dropdown-list .fi-dropdown-list-item {
+        border-radius: 0 0.375rem 0.375rem 0;
+
+        &:not(.fi-disabled):not([disabled]):is(:hover, :focus-visible) {
+            background: var(--m3u-row-hover);
+        }
+
+        &[aria-current='page']:not(.fi-disabled):not([disabled]) {
+            &,
+            &:hover,
+            &:focus-visible {
+                background: var(--m3u-row-active);
+            }
+
+            & .fi-dropdown-list-item-label {
+                @apply font-semibold;
+            }
+        }
+    }
+
+    .fi-sidebar-header-controls {
+        @apply after:border-(--m3u-hairline);
+    }
+
+    /* ── Page sub-navigation (Settings and record pages) ─────── */
+    .fi-page-sub-navigation-sidebar {
+        & .fi-sidebar-item-btn {
+            @apply py-2;
+        }
+
+        & .fi-sidebar-item-btn > .fi-icon {
+            @apply text-gray-400 dark:text-gray-500;
+        }
+    }
+
+    /* ── Topbar ──────────────────────────────────────────────── */
+    /* backdrop-filter on the element itself creates a stacking context that
+       traps child dropdowns in Safari/Edge. Using a ::before pseudo-element
+       keeps the blur without scoping children's z-index to the topbar.
+       Do NOT add transform here: it creates a containing block for
+       position:fixed descendants, which breaks Floating UI dropdowns.
+       Filament's position:sticky already contains the pseudo-elements. */
+    .fi-topbar-ctn {
+        background-color: rgb(255 255 255 / 0.72);
+        border-bottom: 1px solid var(--m3u-hairline);
+
+        @variant dark {
+            background-color: rgb(9 9 11 / 0.68);
+        }
+
+        & .fi-global-search {
+            transform: translateZ(0);
+            flex-shrink: 0;
+        }
+
+        & .fi-topbar-end {
+            @media screen and (min-width: 1024px) {
+                min-width: 300px;
+            }
+        }
+
+        & .fi-dropdown.fi-user-menu {
+            flex-shrink: 0;
+        }
+
+        &::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            backdrop-filter: blur(14px) saturate(160%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Brand hairline, fading in once the page scrolls (where supported) */
+        &::after {
+            content: '';
+            position: absolute;
+            inset-inline: 0;
+            bottom: -1px;
+            height: 1px;
+            background: var(--m3u-gradient);
+            opacity: 0;
+            pointer-events: none;
+        }
+    }
+
+    @supports (animation-timeline: scroll()) {
+        .fi-topbar-ctn::after {
+            animation: m3u-reveal linear both;
+            animation-timeline: scroll(root);
+            animation-range: 0 6rem;
+        }
+    }
+
+    .fi-topbar {
+        @apply bg-transparent shadow-none ring-0 dark:bg-transparent;
+    }
+
+    /* Search: a pill, as on the docs */
+    .fi-global-search-field .fi-input-wrp {
+        @apply rounded-full shadow-none;
+        background-color: var(--m3u-surface-muted);
+        --tw-ring-color: var(--m3u-hairline-strong);
+
+        &:focus-within {
+            background-color: var(--m3u-surface);
+            box-shadow:
+                0 0 0 2px var(--primary-500),
+                0 0 0 6px color-mix(in oklab, var(--primary-500) 15%, transparent);
+        }
+    }
+
+    /* Avatar: a thin brand gradient ring */
+    .fi-user-menu-trigger .fi-user-avatar {
+        border: 1.5px solid transparent;
+        background: var(--m3u-gradient-diagonal) border-box;
+    }
+
+    /* ── Top navigation layout ───────────────────────────────── */
+    .fi-topbar-item-btn {
+        @apply relative transition-colors duration-150;
+
+        &:hover,
+        &:focus-visible {
+            background-color: var(--m3u-hover-tint);
+
+            &::after {
+                opacity: 0.45;
+                transform: scaleX(1);
+            }
+        }
+
+        &::after {
+            content: '';
+            position: absolute;
+            inset-inline: 0.75rem;
+            bottom: -0.15rem;
+            height: 2px;
+            border-radius: 2px;
+            background: var(--m3u-gradient);
+            opacity: 0;
+            transform: scaleX(0.4);
+            transition:
+                opacity 0.25s ease,
+                transform 0.25s ease;
+        }
+    }
+
+    .fi-topbar-item-label {
+        color: var(--m3u-nav-text);
+    }
+
+    .fi-topbar-item.fi-active {
+        & .fi-topbar-item-btn {
+            @apply bg-transparent dark:bg-transparent;
+
+            &::after {
+                opacity: 1;
+                transform: scaleX(1);
+            }
+        }
+
+        & .fi-topbar-item-label {
+            @apply font-semibold;
+            color: var(--m3u-active-text);
+        }
+    }
+}
+
+@keyframes m3u-reveal {
+    to {
+        opacity: 0.85;
+    }
+}

@@ -1,0 +1,83 @@
+/*
+ * M3U brand layer. Shared design tokens for the editor, matching the docs
+ * site and M3U TV: the logo gradient (rose -> magenta -> indigo) used as a
+ * thin accent, zinc surfaces, and hairline borders instead of heavy rings.
+ *
+ * Component overrides live in @layer components, after Filament's own, so
+ * they win over Filament's defaults while Tailwind utilities in our Blade
+ * views still win over them.
+ */
+
+:root {
+    --m3u-rose: #f43f5e;
+    --m3u-magenta: #b3509f;
+    --m3u-indigo: #6366f1;
+    --m3u-gradient: linear-gradient(90deg, var(--m3u-rose) 0%, var(--m3u-magenta) 50%, var(--m3u-indigo) 100%);
+    --m3u-gradient-vertical: linear-gradient(180deg, var(--m3u-rose) 0%, var(--m3u-magenta) 50%, var(--m3u-indigo) 100%);
+    --m3u-gradient-diagonal: linear-gradient(135deg, var(--m3u-rose) 0%, var(--m3u-magenta) 50%, var(--m3u-indigo) 100%);
+
+    --m3u-surface: #ffffff;
+    --m3u-surface-muted: #f4f4f5;
+    --m3u-hairline: rgb(9 9 11 / 0.06);
+    --m3u-hairline-strong: rgb(9 9 11 / 0.095);
+    --m3u-shadow-card: 0 1px 2px rgb(9 9 11 / 0.04), 0 1px 3px rgb(9 9 11 / 0.02);
+    --m3u-shadow-raised: 0 1px 2px rgb(9 9 11 / 0.06), 0 2px 6px rgb(9 9 11 / 0.04);
+    --m3u-shadow-overlay: 0 12px 32px -8px rgb(9 9 11 / 0.18), 0 4px 10px -4px rgb(9 9 11 / 0.08);
+    --m3u-active-tint: color-mix(in oklab, var(--primary-500) 9%, transparent);
+    --m3u-active-text: var(--primary-600);
+    --m3u-hover-tint: rgb(9 9 11 / 0.04);
+    --m3u-nav-text: var(--gray-600);
+    --m3u-nav-text-strong: var(--gray-950);
+    --m3u-glow-rose: rgb(244 63 94 / 0.07);
+    --m3u-glow-indigo: rgb(99 102 241 / 0.11);
+    --m3u-hover-edge: rgb(9 9 11 / 0.16);
+
+    /* Navigation rows: a 2px leading bar over a tint. On the sidebar rail
+       the tint starts at the rail (1.25rem in) and the bar sits on it. */
+    --m3u-row-hover:
+        linear-gradient(var(--m3u-hover-edge), var(--m3u-hover-edge)) left / 2px 100% no-repeat,
+        var(--m3u-hover-tint);
+    --m3u-row-hover-on-rail:
+        linear-gradient(var(--m3u-hover-edge), var(--m3u-hover-edge)) calc(1.25rem - 0.5px) 0 / 2px 100% no-repeat,
+        linear-gradient(90deg, transparent 1.25rem, var(--m3u-hover-tint) 1.25rem);
+    --m3u-row-active:
+        var(--m3u-gradient-vertical) left / 2px 100% no-repeat,
+        var(--m3u-active-tint);
+}
+
+.dark {
+    --m3u-surface: #18181b;
+    --m3u-surface-muted: rgb(255 255 255 / 0.04);
+    --m3u-hairline: rgb(255 255 255 / 0.07);
+    --m3u-hairline-strong: rgb(255 255 255 / 0.12);
+    --m3u-shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.03);
+    --m3u-shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.4);
+    --m3u-shadow-overlay: 0 16px 40px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.08);
+    --m3u-active-tint: color-mix(in oklab, var(--primary-400) 14%, transparent);
+    --m3u-active-text: var(--primary-300);
+    --m3u-hover-tint: rgb(255 255 255 / 0.04);
+    --m3u-nav-text: var(--gray-400);
+    --m3u-nav-text-strong: var(--gray-100);
+    --m3u-glow-rose: rgb(244 63 94 / 0.06);
+    --m3u-glow-indigo: rgb(99 102 241 / 0.13);
+    --m3u-hover-edge: rgb(255 255 255 / 0.2);
+}
+
+/* Ambient light from above, in the two ends of the logo gradient */
+body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 600px;
+    background:
+        radial-gradient(ellipse 45% 50% at 22% -10%, var(--m3u-glow-rose) 0%, transparent 100%),
+        radial-gradient(ellipse 65% 55% at 70% -10%, var(--m3u-glow-indigo) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+::selection {
+    background-color: color-mix(in oklab, var(--primary-500) 25%, transparent);
+}
