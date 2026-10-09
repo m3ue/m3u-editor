@@ -99,9 +99,14 @@
             0 0 0 4px color-mix(in oklab, var(--primary-500) 50%, transparent);
     }
 
-    /* Grouped toggle buttons: a segmented control, like the tab bars */
+    /* Toggle buttons are pills */
+    .fi-fo-toggle-buttons label.fi-btn {
+        @apply rounded-full px-3.5;
+    }
+
+    /* Grouped toggle buttons: pills in a contained pill track */
     .fi-btn-group {
-        @apply gap-0.5 rounded-[0.625rem] p-0.5;
+        @apply gap-1 rounded-full p-1;
         background-color: var(--m3u-surface-muted);
         box-shadow: inset 0 0 0 1px var(--m3u-hairline);
 
@@ -109,8 +114,9 @@
             background-color: rgb(255 255 255 / 0.03);
         }
 
-        & > .fi-btn:nth-child(n of .fi-btn) {
-            @apply m-0 rounded-md;
+        & > .fi-btn:nth-child(n of .fi-btn),
+        & > label.fi-btn:nth-child(n of .fi-btn) {
+            @apply m-0 rounded-full py-1.5;
         }
 
         & > input:not(:checked) + label.fi-btn:not(.fi-outlined) {
