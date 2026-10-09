@@ -18,9 +18,10 @@
         scrollbar-color: var(--m3u-hairline-strong) transparent;
     }
 
-    /* Desktop: a hairline separates the navigation from the content */
+    /* Desktop: a hairline separates the expanded navigation from the
+       content (the icon-only sidebar has none) */
     @media (min-width: 64rem) {
-        .fi-body:not(.fi-body-has-top-navigation) .fi-main-sidebar {
+        .fi-body:not(.fi-body-has-top-navigation) .fi-main-sidebar.fi-sidebar-open {
             border-inline-end: 1px solid var(--m3u-hairline);
         }
     }
@@ -179,6 +180,41 @@
         }
     }
 
+    /*
+     * Top-level rows in the main sidebar (ungrouped items like Dashboard,
+     * and group icons when the sidebar is collapsed) keep Filament's default
+     * look. The rail and gradient edge are only for the pages under a group
+     * and for page sub-navigation.
+     */
+    .fi-main-sidebar .fi-sidebar-item > .fi-sidebar-item-btn:not(:has(> .fi-sidebar-item-grouped-border)),
+    .fi-main-sidebar .fi-sidebar-group-dropdown-trigger-btn {
+        @apply rounded-lg;
+
+        &:hover,
+        &:focus-visible {
+            background: none;
+            @apply bg-gray-100 dark:bg-white/5;
+        }
+    }
+
+    .fi-main-sidebar .fi-sidebar-item.fi-active > .fi-sidebar-item-btn:not(:has(> .fi-sidebar-item-grouped-border)),
+    .fi-main-sidebar .fi-sidebar-group.fi-active .fi-sidebar-group-dropdown-trigger-btn {
+        &,
+        &:hover,
+        &:focus-visible {
+            background: none;
+            @apply bg-gray-100 dark:bg-white/5;
+        }
+    }
+
+    .fi-main-sidebar .fi-sidebar-item.fi-active > .fi-sidebar-item-btn:not(:has(> .fi-sidebar-item-grouped-border)) > .fi-sidebar-item-label {
+        @apply font-medium text-primary-700 dark:text-primary-400;
+    }
+
+    .fi-main-sidebar .fi-sidebar-item.fi-active > .fi-sidebar-item-btn:not(:has(> .fi-sidebar-item-grouped-border)) > .fi-icon {
+        @apply text-primary-700 dark:text-primary-400;
+    }
+
     .fi-sidebar-header-controls {
         @apply after:border-(--m3u-hairline);
     }
@@ -275,7 +311,7 @@
 
     /* Avatar: a thin brand gradient ring */
     .fi-user-menu-trigger .fi-user-avatar {
-        border: 1.5px solid transparent;
+        border: 2.5px solid transparent;
         background: var(--m3u-gradient-diagonal) border-box;
     }
 
