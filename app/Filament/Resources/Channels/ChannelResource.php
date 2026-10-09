@@ -201,17 +201,17 @@ class ChannelResource extends Resource implements CopilotResource
                     return $query->orderByRaw("COALESCE(title_custom, title) {$direction}");
                 })
                 ->getStateUsing(function ($record) {
-                    $info = $record->info;
-                    $title = $record->title_custom ?: $record->title;
+                    $title = e($record->title_custom ?: $record->title, false);
                     $html = "<span class='fi-ta-text-item-label whitespace-normal text-sm leading-6 text-gray-950 dark:text-white'>{$title}</span>";
-                    if (is_array($info)) {
-                        $description = Str::limit($info['description'] ?? $info['plot'] ?? '', 200);
+                    if ($description = static::infoDescription($record)) {
+                        $description = e(Str::limit($description, 200), false);
                         $html .= "<p class='text-sm text-gray-500 dark:text-gray-400 whitespace-normal mt-2'>{$description}</p>";
                     }
 
                     return new HtmlString($html);
                 })
-                ->extraAttributes(['style' => 'min-width: 350px;'])
+                // Only reserve room for a wrapped description; title-only rows (most live channels) size to their content
+                ->extraAttributes(fn ($record): array => static::infoDescription($record) ? ['style' => 'min-width: 350px;'] : [])
                 ->toggleable(),
             TextInputColumn::make('sort')
                 ->label(__('Sort Order'))
@@ -447,6 +447,21 @@ class ChannelResource extends Resource implements CopilotResource
                 ->sortable()
                 ->toggleable(isToggledHiddenByDefault: true),
         ];
+    }
+
+    /**
+     * Description/plot text shown under the title in the Info column, if any.
+     */
+    protected static function infoDescription(Channel $record): ?string
+    {
+        $info = $record->info;
+        if (! is_array($info)) {
+            return null;
+        }
+
+        $description = trim((string) ($info['description'] ?? $info['plot'] ?? ''));
+
+        return $description !== '' ? $description : null;
     }
 
     public static function getTableFilters($showPlaylist = true): array
