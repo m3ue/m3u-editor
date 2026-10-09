@@ -220,6 +220,22 @@
     }
 
     /* ── Page sub-navigation (Settings and record pages) ─────── */
+    /* Narrower than Filament's 18rem, and it stays in view while the page
+       scrolls (scrolling on its own if it is taller than the screen) */
+    .fi-page-sub-navigation-sidebar-ctn {
+        @apply w-52 shrink-0 lg:w-56 2xl:w-64;
+
+        @media (min-width: 48rem) {
+            position: sticky;
+            top: calc(var(--topbar-height) + 1.5rem);
+            align-self: flex-start;
+            max-height: calc(100dvh - var(--topbar-height) - 3rem);
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--m3u-hairline-strong) transparent;
+        }
+    }
+
     .fi-page-sub-navigation-sidebar {
         & .fi-sidebar-item-btn {
             @apply py-2;
