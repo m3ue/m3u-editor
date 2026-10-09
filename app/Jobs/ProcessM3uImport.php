@@ -95,8 +95,14 @@ class ProcessM3uImport implements ShouldQueue
     // Included category prefixes for import
     public array $includedCategoryPrefixes;
 
-    // Groups we should auto-enable channels for
+    // Groups we should auto-enable channels for (M3U, any type)
     public Collection $enabledGroups;
+
+    // Live groups we should auto-enable channels for (Xtream API only)
+    public Collection $enabledLiveGroups;
+
+    // VOD groups we should auto-enable channels for (Xtream API only)
+    public Collection $enabledVodGroups;
 
     // Enabled URL find & replace rules for this playlist, applied to provider URLs during import
     public Collection $urlFindReplaceRules;
@@ -165,9 +171,15 @@ class ProcessM3uImport implements ShouldQueue
             $this->canMergeVodEnabled = $vodCanMergeEnabled !== null ? $vodCanMergeEnabled : true;
         }
 
-        // Get the enabled groups and categories for this playlist
-        $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
-        $this->enabledCategories = $playlist->categories()->where('enabled', true)->get('name')->pluck('name');
+        // Get the enabled groups and categories for this playlist. Match on the provider
+        // name (name_internal), not the user-editable display name, so renamed groups and
+        // categories still auto-enable. Legacy rows without name_internal fall back to name.
+        $enabledGroups = $playlist->groups()->where('enabled', true)->get(['name', 'name_internal', 'type']);
+        $providerName = fn ($record): ?string => $record->name_internal ?: $record->name;
+        $this->enabledGroups = $enabledGroups->map($providerName)->filter()->values();
+        $this->enabledLiveGroups = $enabledGroups->where('type', 'live')->map($providerName)->filter()->values();
+        $this->enabledVodGroups = $enabledGroups->where('type', 'vod')->map($providerName)->filter()->values();
+        $this->enabledCategories = $playlist->categories()->where('enabled', true)->get(['name', 'name_internal'])->map($providerName)->filter()->values();
 
         // URL find & replace rules, applied to provider stream URLs before they're saved
         $this->urlFindReplaceRules = collect($playlist->url_find_replace_rules ?? [])
@@ -693,7 +705,7 @@ class ProcessM3uImport implements ShouldQueue
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;
                         }
-                        if ($liveEnabledByDefault || $this->enabledGroups->contains($category['category_name'] ?? '')) {
+                        if ($liveEnabledByDefault || $this->enabledLiveGroups->contains($category['category_name'] ?? '')) {
                             $channel['enabled'] = true;
                         }
                         yield $channel;
@@ -749,7 +761,7 @@ class ProcessM3uImport implements ShouldQueue
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;
                         }
-                        if ($vodEnabledByDefault || $this->enabledGroups->contains($category['category_name'] ?? '')) {
+                        if ($vodEnabledByDefault || $this->enabledVodGroups->contains($category['category_name'] ?? '')) {
                             $channel['enabled'] = true;
                         }
                         yield $channel;
