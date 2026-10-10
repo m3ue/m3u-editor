@@ -3,7 +3,9 @@
         $results = $getResults();
         $type = $getType();
         $recordType = $type === 'tv' ? 'series' : 'vod';
-        $recordId = $getRecordId();
+        $selectStatePath = $getSelectStatePath();
+        $selectedId = $selectStatePath ? $getSelectedId() : null;
+        $recordId = $selectStatePath ? null : $getRecordId();
     @endphp
 
     <div class="space-y-4">
@@ -15,11 +17,20 @@
         @else
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 @foreach ($results as $result)
+                    @php($isSelected = $selectedId === (int) $result['id'])
                     <div
-                        wire:click="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')"
-                        wire:loading.class="opacity-50 pointer-events-none"
-                        wire:target="applyTmdbSelection"
-                        class="flex cursor-pointer gap-4 rounded-lg border border-gray-200 p-4 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+                        @if ($selectStatePath)
+                            wire:click="$set('{{ $selectStatePath }}', {{ (int) $result['id'] }})"
+                        @else
+                            wire:click="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')"
+                            wire:loading.class="opacity-50 pointer-events-none"
+                            wire:target="applyTmdbSelection"
+                        @endif
+                        @class([
+                            'flex cursor-pointer gap-4 rounded-lg border p-4 transition-colors',
+                            'border-primary-500 bg-primary-50 ring-primary-500 ring-1 dark:bg-primary-950/40' => $isSelected,
+                            'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800' => ! $isSelected,
+                        ])
                     >
                         {{-- Poster --}}
                         <div class="w-20 flex-shrink-0">
@@ -71,14 +82,22 @@
                             </div>
                         </div>
 
+                        @if ($isSelected)
+                            <div class="flex flex-shrink-0 items-center">
+                                <x-filament::icon icon="heroicon-s-check-circle" class="text-primary-500 h-6 w-6" />
+                            </div>
+                        @endif
+
                         {{-- Loading indicator --}}
-                        <div
-                            wire:loading
-                            wire:target="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')"
-                            class="flex flex-shrink-0 items-center"
-                        >
-                            <x-filament::loading-indicator class="h-5 w-5" />
-                        </div>
+                        @unless ($selectStatePath)
+                            <div
+                                wire:loading
+                                wire:target="applyTmdbSelection({{ $result['id'] }}, '{{ $type }}', {{ $recordId ?? 'null' }}, '{{ $recordType }}')"
+                                class="flex flex-shrink-0 items-center"
+                            >
+                                <x-filament::loading-indicator class="h-5 w-5" />
+                            </div>
+                        @endunless
                     </div>
                 @endforeach
             </div>
