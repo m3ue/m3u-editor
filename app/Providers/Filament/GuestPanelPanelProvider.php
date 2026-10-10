@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Http\Middleware\GuestPlaylistAuth;
+use Filament\FontProviders\LocalFontProvider;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -27,6 +28,7 @@ class GuestPanelPanelProvider extends PanelProvider
             ->brandName('Playlist viewer')
             ->brandLogo(fn () => view('filament.admin.logo'))
             ->favicon('/favicon.png')
+            ->font('Plus Jakarta Sans', provider: LocalFontProvider::class)
             ->brandLogoHeight('2.5rem')
             ->middleware([
                 'web',

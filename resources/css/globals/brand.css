@@ -8,6 +8,29 @@
  * views still win over them.
  */
 
+/*
+ * Brand typeface: Plus Jakarta Sans (SIL Open Font License, see
+ * resources/fonts/plus-jakarta-sans/OFL.txt), bundled by Vite with the
+ * theme so nothing is fetched at runtime. Both panels select it with
+ * ->font('Plus Jakarta Sans', provider: LocalFontProvider::class).
+ * Font URLs are relative to app.css, which this file is inlined into.
+ */
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: normal;
+    font-weight: 200 800;
+    font-display: swap;
+    src: url('../fonts/plus-jakarta-sans/PlusJakartaSans-Variable.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Plus Jakarta Sans';
+    font-style: italic;
+    font-weight: 200 800;
+    font-display: swap;
+    src: url('../fonts/plus-jakarta-sans/PlusJakartaSans-Italic-Variable.woff2') format('woff2');
+}
+
 :root {
     --m3u-rose: #f43f5e;
     --m3u-magenta: #b3509f;
@@ -76,6 +99,12 @@ body::before {
         radial-gradient(ellipse 65% 55% at 70% -10%, var(--m3u-glow-indigo) 0%, transparent 100%);
     pointer-events: none;
     z-index: 0;
+}
+
+/* Plus Jakarta Sans has a narrow word space; open it up slightly so phrases
+   and tightly-tracked headings don't run together */
+.fi-body {
+    word-spacing: 0.06em;
 }
 
 ::selection {

@@ -38,6 +38,7 @@ use EslamRedaDiv\FilamentCopilot\Tools\RunToolTool;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
+use Filament\FontProviders\LocalFontProvider;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -125,6 +126,7 @@ class AdminPanelProvider extends PanelProvider
             ->brandName('m3u editor')
             ->brandLogo(fn () => view('filament.admin.logo'))
             ->favicon('/favicon.png')
+            ->font('Plus Jakarta Sans', provider: LocalFontProvider::class)
             ->brandLogoHeight('2.5rem')
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')
@@ -194,6 +196,7 @@ class AdminPanelProvider extends PanelProvider
                 ]),
             ]))
             ->maxContentWidth($settings['content_width'])
+            ->sidebarWidth('16rem')
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
