@@ -199,6 +199,41 @@ XML;
         ->and($programmes[0]['production_year'])->toBeNull();
 });
 
+it('preserves independent artwork declarations and rejects non-pixel icon dimensions', function () {
+    $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20260421100000 +0000" stop="20260421103000 +0000" channel="demo.channel">
+    <title>Artwork evidence</title>
+    <icon src="https://art.example.test/same.jpg" width="600" height="900"/>
+    <image type="backdrop" orient="L">https://art.example.test/same.jpg</image>
+    <image type="poster" orient="P">https://art.example.test/same.jpg</image>
+  </programme>
+  <programme start="20260421110000 +0000" stop="20260421113000 +0000" channel="demo.channel">
+    <title>Legacy poster</title>
+    <icon src="https://art.example.test/legacy-poster.jpg" type="poster" width="600" height="900"/>
+  </programme>
+  <programme start="20260421120000 +0000" stop="20260421123000 +0000" channel="demo.channel">
+    <title>Malformed dimensions</title>
+    <icon src="https://art.example.test/malformed.jpg" width="600px" height="900px"/>
+  </programme>
+</tv>
+XML;
+
+    file_put_contents($this->testGzPath, gzencode($xml));
+
+    $programmes = iterator_to_array(makeTestEpgCacheService()->exposeParseProgrammesStream($this->testGzPath), false);
+
+    expect($programmes[0]['images'])->toHaveCount(3)
+        ->and($programmes[0]['images'][0])->toMatchArray(['type' => '', 'width' => 600, 'height' => 900])
+        ->and($programmes[0]['images'][1])->toMatchArray(['type' => 'backdrop', 'orient' => 'L', 'width' => 0, 'height' => 0])
+        ->and($programmes[0]['images'][2])->toMatchArray(['type' => 'poster', 'orient' => 'P', 'width' => 0, 'height' => 0])
+        ->and($programmes[1]['icon'])->toBe('https://art.example.test/legacy-poster.jpg')
+        ->and($programmes[1]['images'][0])->toMatchArray(['type' => 'poster', 'width' => 600, 'height' => 900])
+        ->and($programmes[2]['icon'])->toBe('https://art.example.test/malformed.jpg')
+        ->and($programmes[2]['images'])->toBe([]);
+});
+
 // ---------------------------------------------------------------------------
 // parseEpisodeNumbers — episode number parsing tests
 // ---------------------------------------------------------------------------

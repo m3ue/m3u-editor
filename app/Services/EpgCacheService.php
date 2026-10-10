@@ -72,6 +72,9 @@ class EpgCacheService
      */
     private array $programmeStores = [];
 
+    /** Maximum wait for sanctioned store replacement/removal coordination. */
+    protected int $programmeStoreLockTimeoutMs = 5000;
+
     /**
      * Get the cache directory path for an EPG
      */
@@ -195,7 +198,9 @@ class EpgCacheService
             $parseProgressCeiling = $hasDvr ? self::DVR_PROGRESS_START : 99;
 
             // Start by clearing existing cache
-            $this->clearCache($epg);
+            if (! $this->clearCache($epg)) {
+                return false;
+            }
             $cacheDir = $this->getCacheDir($epg);
             Storage::disk('local')->makeDirectory($cacheDir);
 
@@ -260,6 +265,20 @@ class EpgCacheService
     }
 
     /**
+     * Return a source-proven positive pixel dimension, or zero when unknown.
+     */
+    private function pixelDimension(?string $value): int
+    {
+        $value = trim((string) $value);
+
+        if (preg_match('/^[1-9][0-9]{0,5}$/', $value) !== 1) {
+            return 0;
+        }
+
+        return (int) $value;
+    }
+
+    /**
      * Apply a single XMLTV programme child element's value to the $programme array.
      *
      * Shared by both the single-pass writer and the stream generator to avoid
@@ -285,21 +304,47 @@ class EpgCacheService
                 }
                 break;
             case 'icon':
-                if (! $programme['icon']) {
-                    $programme['icon'] = trim($reader->getAttribute('src') ?: '');
-                } else {
-                    $imageUrl = trim($reader->getAttribute('src') ?: '');
-                    if ($imageUrl) {
-                        $programme['images'][] = [
-                            'url' => $imageUrl,
-                            'type' => trim($reader->getAttribute('type') ?: 'poster'),
-                            'width' => (int) ($reader->getAttribute('width') ?: 0),
-                            'height' => (int) ($reader->getAttribute('height') ?: 0),
-                            'orient' => trim($reader->getAttribute('orient') ?: 'P'),
-                            'size' => (int) ($reader->getAttribute('size') ?: 1),
-                        ];
-                    }
+                $imageUrl = trim($reader->getAttribute('src') ?: '');
+                $type = mb_strtolower(trim($reader->getAttribute('type') ?: ''));
+                $width = $this->pixelDimension($reader->getAttribute('width'));
+                $height = $this->pixelDimension($reader->getAttribute('height'));
+
+                if ($imageUrl === '') {
+                    break;
                 }
+                if (! $programme['icon']) {
+                    $programme['icon'] = $imageUrl;
+                }
+                if (in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true) || ($width > 0 && $height > 0)) {
+                    $programme['images'][] = [
+                        'url' => $imageUrl,
+                        'type' => $type,
+                        'width' => $width,
+                        'height' => $height,
+                        'orient' => $width > $height ? 'L' : ($height > $width ? 'P' : ''),
+                        'size' => (int) ($reader->getAttribute('size') ?: 0),
+                    ];
+                }
+                break;
+            case 'image':
+                $type = mb_strtolower(trim($reader->getAttribute('type') ?: ''));
+                $orient = strtoupper(trim($reader->getAttribute('orient') ?: ''));
+                $size = (int) ($reader->getAttribute('size') ?: 0);
+                $imageUrl = trim($reader->readString() ?: '');
+                if ($imageUrl === '' || ! in_array($type, ['poster', 'backdrop', 'still', 'person', 'character'], true)) {
+                    break;
+                }
+
+                // Keep every source declaration. Collapsing same-URL evidence here
+                // makes later conflict detection depend on XML element order.
+                $programme['images'][] = [
+                    'url' => $imageUrl,
+                    'type' => $type,
+                    'width' => 0,
+                    'height' => 0,
+                    'orient' => $orient,
+                    'size' => $size,
+                ];
                 break;
             case 'new':
                 $programme['new'] = true;
@@ -986,7 +1031,12 @@ class EpgCacheService
             ]);
 
             // Delete current version directory
-            Storage::disk('local')->deleteDirectory($this->getCacheDir($epg));
+            $storePath = Storage::disk('local')->path($this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE));
+            EpgProgrammeStore::withExclusivePathLock(
+                $storePath,
+                fn (): bool => Storage::disk('local')->deleteDirectory($this->getCacheDir($epg)),
+                $this->programmeStoreLockTimeoutMs,
+            );
 
             // Also delete any legacy version directories so stale data is not left on disk
             foreach (self::PREVIOUS_CACHE_VERSIONS as $version) {

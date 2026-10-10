@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\EpgProgrammeStoreBusyException;
 use Generator;
 use PDO;
 use Pdo\Sqlite;
@@ -68,6 +69,9 @@ class EpgProgrammeStore
 
     /** Inode of the file {@see openExisting()} opened, to detect a rebuild swapping it out. */
     private int|false $openedInode = false;
+
+    /** @var resource|null Shared lock held while enrichment reads or writes the opened store. */
+    private $pathLock = null;
 
     /**
      * Strip `channel` / `start` / `stop` (stored as columns) and any key still
@@ -152,6 +156,13 @@ class EpgProgrammeStore
             .'stop_ts INTEGER, '
             .'data TEXT NOT NULL)'
         );
+        $this->pdo->exec(
+            'CREATE TABLE enrichment_state ('
+            .'singleton INTEGER PRIMARY KEY CHECK (singleton = 1), '
+            .'lineage TEXT NOT NULL, revision INTEGER NOT NULL)'
+        );
+        $state = $this->pdo->prepare('INSERT INTO enrichment_state (singleton, lineage, revision) VALUES (1, ?, 0)');
+        $state->execute([bin2hex(random_bytes(16))]);
 
         $this->insertStatement = $this->pdo->prepare(
             'INSERT INTO programmes (channel_id, date, start_ts, stop_ts, data) VALUES (?, ?, ?, ?, ?)'
@@ -203,11 +214,13 @@ class EpgProgrammeStore
         $this->insertStatement = null;
         $this->pdo = null;
 
-        if (! @rename($this->buildingPath, $this->finalPath)) {
-            @unlink($this->buildingPath);
+        self::withExclusivePathLock($this->finalPath, function (): void {
+            if (! @rename($this->buildingPath, $this->finalPath)) {
+                @unlink($this->buildingPath);
 
-            throw new \RuntimeException("Failed to move EPG programme store into place at {$this->finalPath}");
-        }
+                throw new \RuntimeException("Failed to move EPG programme store into place at {$this->finalPath}");
+            }
+        });
     }
 
     /**
@@ -251,15 +264,30 @@ class EpgProgrammeStore
      */
     public static function openExisting(string $sqlitePath, int $busyTimeoutMs = 5000): self
     {
+        $lock = self::openPathLock($sqlitePath);
+        if (! self::acquirePathLock($lock, LOCK_SH, $busyTimeoutMs)) {
+            fclose($lock);
+            throw new EpgProgrammeStoreBusyException("EPG programme store is busy at {$sqlitePath}");
+        }
+
         $store = new self;
         $store->finalPath = $sqlitePath;
-        $store->pdo = new PDO('sqlite:'.$sqlitePath, null, null, [
-            Sqlite::ATTR_OPEN_FLAGS => Sqlite::OPEN_READWRITE,
-        ]);
-        $store->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $store->pdo->exec('PRAGMA busy_timeout='.(int) $busyTimeoutMs);
-        clearstatcache(true, $sqlitePath);
-        $store->openedInode = @fileinode($sqlitePath);
+        $store->pathLock = $lock;
+        try {
+            if (! is_file($sqlitePath)) {
+                throw new \PDOException("Unable to open EPG programme store at {$sqlitePath}");
+            }
+            $store->pdo = new PDO('sqlite:'.$sqlitePath, null, null, [
+                Sqlite::ATTR_OPEN_FLAGS => Sqlite::OPEN_READWRITE,
+            ]);
+            $store->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $store->pdo->exec('PRAGMA busy_timeout='.(int) $busyTimeoutMs);
+            clearstatcache(true, $sqlitePath);
+            $store->openedInode = @fileinode($sqlitePath);
+        } catch (\Throwable $e) {
+            $store->close();
+            throw $e;
+        }
 
         return $store;
     }
@@ -268,6 +296,70 @@ class EpgProgrammeStore
     {
         $this->insertStatement = null;
         $this->pdo = null;
+        if (is_resource($this->pathLock)) {
+            flock($this->pathLock, LOCK_UN);
+            fclose($this->pathLock);
+            $this->pathLock = null;
+        }
+    }
+
+    /**
+     * Serialize sanctioned replacement or removal with enrichment operations.
+     * The callback stays short: callers use it only for rename or deletion.
+     */
+    public static function withExclusivePathLock(string $sqlitePath, callable $callback, int $busyTimeoutMs = 5000): mixed
+    {
+        $lock = self::openPathLock($sqlitePath);
+        if (! self::acquirePathLock($lock, LOCK_EX, $busyTimeoutMs)) {
+            fclose($lock);
+            throw new EpgProgrammeStoreBusyException("EPG programme store is busy at {$sqlitePath}");
+        }
+
+        try {
+            return $callback();
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    /** @return resource */
+    private static function openPathLock(string $sqlitePath): mixed
+    {
+        $storeDirectory = dirname($sqlitePath);
+        $lockDirectory = dirname(dirname($storeDirectory)).'/.programme-store-locks';
+        if (! is_dir($lockDirectory) && ! @mkdir($lockDirectory, 0755, true) && ! is_dir($lockDirectory)) {
+            throw new \RuntimeException("Unable to create EPG programme store lock directory at {$lockDirectory}");
+        }
+        $lockPath = $lockDirectory.'/'.hash('sha256', $sqlitePath).'.lock';
+        $lock = @fopen($lockPath, 'c+b');
+        if ($lock === false) {
+            throw new \RuntimeException("Unable to open EPG programme store lock at {$lockPath}");
+        }
+
+        return $lock;
+    }
+
+    /** @param resource $lock */
+    private static function acquirePathLock(mixed $lock, int $operation, int $busyTimeoutMs): bool
+    {
+        $deadline = hrtime(true) + (max(0, $busyTimeoutMs) * 1_000_000);
+
+        do {
+            if (flock($lock, $operation | LOCK_NB)) {
+                return true;
+            }
+
+            $remainingNanoseconds = $deadline - hrtime(true);
+            if ($remainingNanoseconds <= 0) {
+                return false;
+            }
+
+            usleep((int) min(
+                10_000,
+                max(1, (int) ceil($remainingNanoseconds / 1000)),
+            ));
+        } while (true);
     }
 
     /**
@@ -309,6 +401,50 @@ class EpgProgrammeStore
     }
 
     /**
+     * Read one page and its store evidence from the same SQLite snapshot.
+     *
+     * @param  array{lineage: string, revision: int}|null  $expectedEvidence
+     * @return array{status: string, evidence?: array{lineage: string, revision: int}, page?: array<int, array{hash: string, programme: array<string, mixed>}>}
+     */
+    public function readPageGuarded(?array $expectedEvidence, int $afterRowid, int $limit): array
+    {
+        $this->pdo->exec('BEGIN');
+
+        try {
+            $evidence = $this->evidenceState();
+            if ($evidence === null) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'unsupported'];
+            }
+            if ($expectedEvidence !== null && ! self::sameEvidence($evidence, $expectedEvidence)) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'stale'];
+            }
+
+            $page = $this->readPage($afterRowid, $limit);
+            if (! $this->isCurrentPath()) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'stale'];
+            }
+
+            $this->pdo->exec('COMMIT');
+
+            return ['status' => 'ok', 'evidence' => $evidence, 'page' => $page];
+        } catch (\Throwable $e) {
+            try {
+                $this->pdo->exec('ROLLBACK');
+            } catch (\Throwable) {
+                // SQLite already rolled the transaction back.
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
      * Apply programme changes to specific rows, all-or-nothing.
      *
      * Runs in one `BEGIN IMMEDIATE` transaction: every targeted row is re-read
@@ -321,16 +457,51 @@ class EpgProgrammeStore
      */
     public function updateRows(array $expectedHashes, array $changes): ?array
     {
+        $result = $this->updateRowsInternal(null, $expectedHashes, $changes);
+
+        return $result['status'] === 'ok' ? $result['changed'] : null;
+    }
+
+    /**
+     * Apply rows only while the complete evidence snapshot is still current.
+     *
+     * @param  array{lineage: string, revision: int}  $expectedEvidence
+     * @param  array<int, string>  $expectedHashes
+     * @param  array<int, array<string, mixed>>  $changes
+     * @return array{status: string, changed?: array<int, bool>, evidence?: array{lineage: string, revision: int}}
+     */
+    public function updateRowsGuarded(array $expectedEvidence, array $expectedHashes, array $changes): array
+    {
+        return $this->updateRowsInternal($expectedEvidence, $expectedHashes, $changes);
+    }
+
+    /**
+     * @param  array{lineage: string, revision: int}|null  $expectedEvidence
+     * @param  array<int, string>  $expectedHashes
+     * @param  array<int, array<string, mixed>>  $changes
+     * @return array{status: string, changed?: array<int, bool>, evidence?: array{lineage: string, revision: int}}
+     */
+    private function updateRowsInternal(?array $expectedEvidence, array $expectedHashes, array $changes): array
+    {
         $this->pdo->exec('BEGIN IMMEDIATE');
 
         try {
-            // A rebuild renames a new store over this path. Writing to the
-            // replaced file would be lost, so treat it like a changed row.
-            clearstatcache(true, $this->finalPath);
-            if ($this->openedInode === false || @fileinode($this->finalPath) !== $this->openedInode) {
+            if (! $this->isCurrentPath()) {
                 $this->pdo->exec('ROLLBACK');
 
-                return null;
+                return ['status' => 'stale'];
+            }
+
+            $evidence = $this->evidenceState();
+            if ($expectedEvidence !== null && $evidence === null) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'unsupported'];
+            }
+            if ($expectedEvidence !== null && ! self::sameEvidence($evidence, $expectedEvidence)) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'stale'];
             }
 
             $rowids = array_keys($expectedHashes);
@@ -349,7 +520,7 @@ class EpgProgrammeStore
                 if (! isset($current[$rowid]) || ! hash_equals($hash, self::rowHash($current[$rowid]))) {
                     $this->pdo->exec('ROLLBACK');
 
-                    return null;
+                    return ['status' => 'stale'];
                 }
             }
 
@@ -357,7 +528,17 @@ class EpgProgrammeStore
             $changed = [];
             foreach ($changes as $rowid => $fields) {
                 $programme = self::hydrateRow($current[$rowid]);
+                $imagesAppend = $fields['images_append'] ?? null;
+                unset($fields['images_append']);
                 $patched = array_replace($programme, $fields);
+                if ($imagesAppend !== null) {
+                    $patched['images'] = is_array($programme['images'] ?? null) ? $programme['images'] : [];
+                    foreach ($imagesAppend as $image) {
+                        if (! in_array($image, $patched['images'], true)) {
+                            $patched['images'][] = $image;
+                        }
+                    }
+                }
                 $changed[$rowid] = $patched !== $programme;
                 if ($changed[$rowid]) {
                     $update->execute([
@@ -367,9 +548,24 @@ class EpgProgrammeStore
                 }
             }
 
+            if (! $this->isCurrentPath()) {
+                $this->pdo->exec('ROLLBACK');
+
+                return ['status' => 'stale'];
+            }
+
+            if ($evidence !== null && in_array(true, $changed, true)) {
+                $this->pdo->exec('UPDATE enrichment_state SET revision = revision + 1 WHERE singleton = 1');
+                $evidence['revision']++;
+            }
+
             $this->pdo->exec('COMMIT');
 
-            return $changed;
+            return [
+                'status' => 'ok',
+                'changed' => $changed,
+                ...($evidence !== null ? ['evidence' => $evidence] : []),
+            ];
         } catch (\Throwable $e) {
             try {
                 $this->pdo->exec('ROLLBACK');
@@ -379,6 +575,46 @@ class EpgProgrammeStore
 
             throw $e;
         }
+    }
+
+    /** @return array{lineage: string, revision: int}|null */
+    private function evidenceState(): ?array
+    {
+        $table = $this->pdo->query(
+            "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'enrichment_state'"
+        );
+        if ($table->fetchColumn() === false) {
+            return null;
+        }
+
+        $row = $this->pdo->query(
+            'SELECT lineage, revision FROM enrichment_state WHERE singleton = 1'
+        )->fetch(PDO::FETCH_ASSOC);
+        if (! is_array($row) || ! is_string($row['lineage'] ?? null) || $row['lineage'] === '') {
+            return null;
+        }
+
+        return ['lineage' => $row['lineage'], 'revision' => (int) $row['revision']];
+    }
+
+    /**
+     * @param  array{lineage: string, revision: int}|null  $current
+     * @param  array{lineage: string, revision: int}  $expected
+     */
+    private static function sameEvidence(?array $current, array $expected): bool
+    {
+        return $current !== null
+            && hash_equals($current['lineage'], $expected['lineage'])
+            && $current['revision'] === $expected['revision'];
+    }
+
+    private function isCurrentPath(): bool
+    {
+        clearstatcache(true, $this->finalPath);
+
+        return $this->openedInode !== false
+            && is_file($this->finalPath)
+            && @fileinode($this->finalPath) === $this->openedInode;
     }
 
     /**

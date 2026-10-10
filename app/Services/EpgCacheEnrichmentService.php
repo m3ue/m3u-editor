@@ -2,9 +2,13 @@
 
 namespace App\Services;
 
+use App\Exceptions\EpgProgrammeStoreBusyException;
 use App\Models\Epg;
 use App\Plugins\Support\PluginExecutionContext;
 use App\Rules\UrlIsAllowed;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Crypt;
+use JsonException;
 use PDOException;
 
 /**
@@ -48,6 +52,9 @@ class EpgCacheEnrichmentService
     /** @var list<string> */
     private const IMAGE_KEYS = ['url', 'type', 'width', 'height', 'orient', 'size'];
 
+    /** Fields that cannot change identity or match evidence behind a completed census. */
+    private const EVIDENCE_NEUTRAL_FIELDS = ['icon', 'images', 'images_append'];
+
     /** How long a request waits for another connection's lock before reporting `busy`. */
     protected int $busyTimeoutMs = 5000;
 
@@ -82,6 +89,61 @@ class EpgCacheEnrichmentService
                 'status' => 'ok',
                 'programmes' => $programmes,
                 'next' => $hasMore ? array_key_last($page) : null,
+            ];
+        });
+    }
+
+    /**
+     * Read one evidence-consistent page. The first page establishes an opaque
+     * token; every later page must present it so a completed census cannot mix
+     * store generations or revisions.
+     *
+     * @return array{status: string, programmes?: list<array{id: int, hash: string, programme: array<string, mixed>}>, next?: int|null, evidence?: string, field?: string}
+     */
+    public function guardedSnapshot(
+        PluginExecutionContext $context,
+        Epg $epg,
+        int $afterId = 0,
+        int $limit = self::MAX_PAGE_SIZE,
+        ?string $evidence = null,
+    ): array {
+        if (! $this->isAllowed($context, $epg)) {
+            return ['status' => 'denied'];
+        }
+        if ($afterId < 0 || $limit < 1 || $limit > self::MAX_PAGE_SIZE) {
+            return ['status' => 'invalid_request'];
+        }
+        if ($afterId > 0 && $evidence === null) {
+            return ['status' => 'invalid_request', 'field' => 'evidence'];
+        }
+
+        $expectedEvidence = null;
+        if ($evidence !== null) {
+            $expectedEvidence = $this->decodeEvidenceToken($context, $epg, $evidence);
+            if ($expectedEvidence === null) {
+                return ['status' => 'invalid_request', 'field' => 'evidence'];
+            }
+        }
+
+        return $this->withStore($epg, function (EpgProgrammeStore $store) use ($context, $epg, $expectedEvidence, $afterId, $limit): array {
+            $result = $store->readPageGuarded($expectedEvidence, $afterId, $limit + 1);
+            if ($result['status'] !== 'ok') {
+                return ['status' => $result['status']];
+            }
+
+            $page = $result['page'];
+            $hasMore = count($page) > $limit;
+            $page = array_slice($page, 0, $limit, preserve_keys: true);
+            $programmes = [];
+            foreach ($page as $id => $row) {
+                $programmes[] = ['id' => $id, 'hash' => $row['hash'], 'programme' => $row['programme']];
+            }
+
+            return [
+                'status' => 'ok',
+                'programmes' => $programmes,
+                'next' => $hasMore ? array_key_last($page) : null,
+                'evidence' => $this->encodeEvidenceToken($context, $epg, $result['evidence']),
             ];
         });
     }
@@ -151,6 +213,132 @@ class EpgCacheEnrichmentService
     }
 
     /**
+     * Apply patches only while a completed guarded census is still current.
+     * Artwork-only writes return a successor token so callers can safely roll
+     * forward through further target batches without repeating the census.
+     *
+     * @param  list<array{id: int, hash: string, changes: array<string, mixed>}>  $patches
+     * @return array{status: string, index?: int, field?: string, evidence?: string}
+     */
+    public function guardedApply(
+        PluginExecutionContext $context,
+        Epg $epg,
+        array $patches,
+        string $evidence,
+    ): array {
+        if (! $this->isAllowed($context, $epg)) {
+            return ['status' => 'denied'];
+        }
+        if ($evidence === '') {
+            return ['status' => 'invalid_request', 'field' => 'evidence'];
+        }
+        $expectedEvidence = $this->decodeEvidenceToken($context, $epg, $evidence);
+        if ($expectedEvidence === null) {
+            return ['status' => 'invalid_request', 'field' => 'evidence'];
+        }
+        if ($patches === [] || count($patches) > self::MAX_PATCHES) {
+            return ['status' => 'invalid_request'];
+        }
+
+        $expectedHashes = [];
+        $changes = [];
+        foreach (array_values($patches) as $index => $patch) {
+            $id = $patch['id'] ?? null;
+            $hash = $patch['hash'] ?? null;
+            $fields = $patch['changes'] ?? null;
+            $invalidField = match (true) {
+                ! is_int($id) || $id < 1 || isset($expectedHashes[$id]) => 'id',
+                ! is_string($hash) => 'hash',
+                ! is_array($fields) || $fields === [] => 'changes',
+                default => $this->firstInvalidField($fields),
+            };
+            if ($invalidField !== null) {
+                return ['status' => 'invalid_request', 'index' => $index, 'field' => $invalidField];
+            }
+
+            $expectedHashes[$id] = $hash;
+            $changes[$id] = $fields;
+        }
+
+        return $this->withStore($epg, function (EpgProgrammeStore $store) use ($context, $epg, $expectedEvidence, $expectedHashes, $changes): array {
+            $result = $store->updateRowsGuarded($expectedEvidence, $expectedHashes, $changes);
+            if ($result['status'] !== 'ok') {
+                return ['status' => $result['status']];
+            }
+
+            $nextEvidence = $this->encodeEvidenceToken($context, $epg, $result['evidence']);
+            if (! in_array(true, $result['changed'], true)) {
+                return ['status' => 'noop', 'evidence' => $nextEvidence];
+            }
+
+            foreach ($epg->getAllPlaylists() as $playlist) {
+                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+            }
+
+            return [
+                'status' => 'applied',
+                ...($this->changesAreEvidenceNeutral($changes) ? ['evidence' => $nextEvidence] : []),
+            ];
+        });
+    }
+
+    /** @param array{lineage: string, revision: int} $evidence */
+    private function encodeEvidenceToken(PluginExecutionContext $context, Epg $epg, array $evidence): string
+    {
+        return Crypt::encryptString(json_encode([
+            'version' => 1,
+            'capability' => self::CAPABILITY,
+            'epg_id' => (int) $epg->getKey(),
+            'epg_uuid' => (string) $epg->uuid,
+            'owner_id' => (int) $epg->user_id,
+            'plugin_id' => (int) $context->plugin->getKey(),
+            'actor_id' => (int) $context->user?->getKey(),
+            'lineage' => $evidence['lineage'],
+            'revision' => $evidence['revision'],
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    /** @return array{lineage: string, revision: int}|null */
+    private function decodeEvidenceToken(PluginExecutionContext $context, Epg $epg, string $token): ?array
+    {
+        try {
+            $payload = json_decode(Crypt::decryptString($token), true, 16, JSON_THROW_ON_ERROR);
+        } catch (DecryptException|JsonException) {
+            return null;
+        }
+
+        $keys = ['version', 'capability', 'epg_id', 'epg_uuid', 'owner_id', 'plugin_id', 'actor_id', 'lineage', 'revision'];
+        if (! $this->hasExactKeys($payload, $keys)
+            || $payload['version'] !== 1
+            || $payload['capability'] !== self::CAPABILITY
+            || $payload['epg_id'] !== (int) $epg->getKey()
+            || $payload['epg_uuid'] !== (string) $epg->uuid
+            || $payload['owner_id'] !== (int) $epg->user_id
+            || $payload['plugin_id'] !== (int) $context->plugin->getKey()
+            || $payload['actor_id'] !== (int) $context->user?->getKey()
+            || ! is_string($payload['lineage'])
+            || $payload['lineage'] === ''
+            || ! is_int($payload['revision'])
+            || $payload['revision'] < 0) {
+            return null;
+        }
+
+        return ['lineage' => $payload['lineage'], 'revision' => $payload['revision']];
+    }
+
+    /** @param array<int, array<string, mixed>> $changes */
+    private function changesAreEvidenceNeutral(array $changes): bool
+    {
+        foreach ($changes as $fields) {
+            if (array_diff(array_keys($fields), self::EVIDENCE_NEUTRAL_FIELDS) !== []) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Only an enabled plugin declaring the capability, acting for the EPG's
      * owner (or an admin), may enrich it. Trust and integrity are already
      * enforced before any plugin gets an execution context.
@@ -184,6 +372,8 @@ class EpgCacheEnrichmentService
             $store = EpgProgrammeStore::openExisting($path, $this->busyTimeoutMs);
 
             return $callback($store);
+        } catch (EpgProgrammeStoreBusyException) {
+            return ['status' => 'busy'];
         } catch (PDOException $e) {
             $code = ((int) ($e->errorInfo[1] ?? 0)) & 0xFF;
 
@@ -206,6 +396,9 @@ class EpgCacheEnrichmentService
      */
     private function firstInvalidField(array $fields): ?string
     {
+        if (array_key_exists('images', $fields) && array_key_exists('images_append', $fields)) {
+            return 'images_append';
+        }
         foreach ($fields as $field => $value) {
             $valid = match (true) {
                 in_array($field, self::STRING_FIELDS, true) => $this->isBoundedString($value)
@@ -217,7 +410,7 @@ class EpgCacheEnrichmentService
                 $field === 'urls' => $this->isListOf($value, fn (mixed $entry): bool => $this->hasExactKeys($entry, ['system', 'value'])
                     && $this->isBoundedString($entry['system'])
                     && $this->isHttpUrl($entry['value'])),
-                $field === 'images' => $this->isListOf($value, fn (mixed $image): bool => $this->hasExactKeys($image, self::IMAGE_KEYS)
+                in_array($field, ['images', 'images_append'], true) => $this->isListOf($value, fn (mixed $image): bool => $this->hasExactKeys($image, self::IMAGE_KEYS)
                     && $this->isHttpUrl($image['url'])
                     && $this->isBoundedString($image['type'])
                     && $this->isBoundedString($image['orient'])
