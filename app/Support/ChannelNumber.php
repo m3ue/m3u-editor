@@ -23,11 +23,12 @@ final class ChannelNumber
      *
      * "5.1" => [5, 1], "5.10" => [5, 10], "7" => [7, null] and "" => [null, null].
      * A ".0" minor is treated as no sub-channel. Anything else falls back to an
-     * integer cast of the whole value (the previous import behavior).
+     * integer cast of the whole value (the previous import behavior). A float (e.g. a
+     * JSON-decoded Xtream `num`) can't tell 5.1 from 5.10, so 5.10 arrives as 5.1.
      *
      * @return array{0: int|null, 1: int|null}
      */
-    public static function parse(int|string|null $value): array
+    public static function parse(int|float|string|null $value): array
     {
         $value = trim((string) $value);
         if ($value === '') {
@@ -91,7 +92,7 @@ final class ChannelNumber
      *
      * @return array{channel: int|null, channel_minor: int|null}
      */
-    public static function toAttributes(int|string|null $value): array
+    public static function toAttributes(int|float|string|null $value): array
     {
         [$major, $minor] = self::parse($value);
 

@@ -699,7 +699,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->epg_channel_id ?? $item->stream_id, // prefer EPG id for mapping, if set
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'catchup' => $item->tv_archive ?? null,
                             'shift' => (int) ($item->tv_archive_duration ?? 0) * 24,
                             // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
@@ -753,7 +753,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->stream_id,
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'is_vod' => true, // mark as VOD
                             'container_extension' => $extension, // store the container extension
                             'year' => $item->year ?? null, // new field for year

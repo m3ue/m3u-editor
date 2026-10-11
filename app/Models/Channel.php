@@ -341,12 +341,6 @@ class Channel extends Model
     }
 
     /**
-     * Resolve the TVG/channel ID to output for the given playlist's "Preferred TVG ID output"
-     * setting. Used to keep the M3U, xmltv, Xtream API, and JSON EPG API outputs consistent
-     * with each other (e.g. so `epg_channel_id` matches the `<programme channel="...">` used
-     * in the generated xmltv guide data).
-     */
-    /**
      * The channel's own output number ("5" or "5.1"), before any playlist numbering.
      * In a custom playlist context the pivot number (and its minor) wins when set.
      */
@@ -362,6 +356,12 @@ class Channel extends Model
         );
     }
 
+    /**
+     * Resolve the TVG/channel ID to output for the given playlist's "Preferred TVG ID output"
+     * setting. Used to keep the M3U, xmltv, Xtream API, and JSON EPG API outputs consistent
+     * with each other (e.g. so `epg_channel_id` matches the `<programme channel="...">` used
+     * in the generated xmltv guide data).
+     */
     public function resolveTvgId(PlaylistChannelId $idChannelBy, int|string|null $channelNumber = null): int|string|null
     {
         return match ($idChannelBy) {

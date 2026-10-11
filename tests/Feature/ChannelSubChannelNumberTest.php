@@ -9,7 +9,7 @@
  * - M3U, HDHR and EPG output the full number; Xtream `num` stays the integer major
  * - Ordering puts sub-channels after their major number, on every driver's NULL ordering
  * - Recounts clear the minor so a renumbered "2.1" doesn't become "5.1"
- * - The M3U import keeps tvg-chno sub-channels instead of truncating them
+ * - The M3U (tvg-chno) and Xtream (num) imports keep sub-channels instead of truncating them
  * - The channel form, table columns and REST API accept and store the pair
  */
 
@@ -32,6 +32,7 @@ use App\Support\ChannelNumber;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -66,7 +67,7 @@ beforeEach(function () {
 // ChannelNumber parsing and formatting
 // ---------------------------------------------------------------------------
 
-it('parses channel numbers into a major and minor pair', function (int|string|null $input, array $expected) {
+it('parses channel numbers into a major and minor pair', function (int|float|string|null $input, array $expected) {
     expect(ChannelNumber::parse($input))->toBe($expected);
 })->with([
     'whole number' => ['7', [7, null]],
@@ -77,6 +78,8 @@ it('parses channel numbers into a major and minor pair', function (int|string|nu
     'empty' => ['', [null, null]],
     'null' => [null, [null, null]],
     'surrounding whitespace' => [' 12.3 ', [12, 3]],
+    'float from a JSON-decoded Xtream num' => [5.1, [5, 1]],
+    'integral float' => [5.0, [5, null]],
 ]);
 
 it('formats a pair as an int without a minor and as major.minor with one', function () {
@@ -275,6 +278,68 @@ it('imports tvg-chno sub-channels instead of truncating them', function () {
         config(['database.connections.jobs.database' => database_path('jobs.sqlite')]);
         @unlink($tempJobsDb);
         @unlink($m3uPath);
+    }
+});
+
+it('imports Xtream num sub-channels the same way', function () {
+    $tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    touch($tempJobsDb);
+    config(['database.connections.jobs.database' => $tempJobsDb]);
+    DB::purge('jobs');
+    (require database_path('migrations/2025_02_13_215803_create_jobs_table.php'))->up();
+
+    $streams = [
+        ['stream_id' => 1, 'name' => 'Whole', 'category_id' => '1', 'num' => 12],
+        ['stream_id' => 2, 'name' => 'String', 'category_id' => '1', 'num' => '5.1'],
+        ['stream_id' => 3, 'name' => 'Float', 'category_id' => '1', 'num' => 7.2],
+        ['stream_id' => 4, 'name' => 'Missing', 'category_id' => '1'],
+    ];
+
+    try {
+        $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create([
+            'xtream' => true,
+            'xtream_config' => [
+                'url' => 'http://xtream.example.test:8080',
+                'username' => 'user',
+                'password' => 'pass',
+                'output' => 'ts',
+                'import_options' => ['live'],
+            ],
+            'import_prefs' => [],
+        ]));
+
+        Http::fake([
+            'http://xtream.example.test:8080/player_api.php*' => function ($request) use ($streams) {
+                parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+
+                return match ($query['action'] ?? null) {
+                    'get_live_streams' => Http::response(json_encode($streams), 200),
+                    'get_live_categories' => Http::response(json_encode([
+                        ['category_id' => '1', 'category_name' => 'OTA'],
+                    ]), 200),
+                    default => Http::response(json_encode(['user_info' => ['status' => 'Active']]), 200),
+                };
+            },
+        ]);
+
+        Bus::fake();
+        (new ProcessM3uImport($playlist, force: true, isNew: true))->handle();
+
+        $numbers = collect(Job::firstOrFail()->payload)
+            ->mapWithKeys(fn (array $row) => [$row['title'] => [$row['channel'], $row['channel_minor']]])
+            ->all();
+
+        expect($numbers)->toBe([
+            'Whole' => [12, null],
+            'String' => [5, 1],
+            'Float' => [7, 2],
+            // A missing num stays null, as it did before
+            'Missing' => [null, null],
+        ]);
+    } finally {
+        DB::purge('jobs');
+        config(['database.connections.jobs.database' => database_path('jobs.sqlite')]);
+        @unlink($tempJobsDb);
     }
 });
 

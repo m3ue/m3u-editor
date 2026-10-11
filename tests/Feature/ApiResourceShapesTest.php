@@ -41,7 +41,7 @@ it('serializes the channel list items', function () {
 
     expect(array_keys($item))->toBe([
         'id', 'title', 'name', 'logo', 'url', 'stream_id', 'enabled', 'is_vod',
-        'channel_number', 'group', 'proxy_url', 'playlist',
+        'channel_number', 'channel_minor', 'group', 'proxy_url', 'playlist',
     ])
         ->and($item['title'])->toBe('ESPN HD')
         ->and($item['group'])->toBe(['id' => $this->group->id, 'name' => 'Sports'])
@@ -69,7 +69,7 @@ it('serializes a single channel with its epg mapping and failovers', function ()
     expect(array_keys($data))->toBe([
         'id', 'title', 'title_original', 'name', 'name_original', 'logo', 'logo_internal',
         'url', 'url_original', 'stream_id', 'stream_id_original', 'enabled', 'is_vod',
-        'channel_number', 'sort_order', 'catchup', 'shift', 'tvg_shift', 'logo_type',
+        'channel_number', 'channel_minor', 'sort_order', 'catchup', 'shift', 'tvg_shift', 'logo_type',
         'use_epg_logo', 'epg_map_enabled', 'proxy_url', 'epg', 'epg_channel_id', 'group_title',
         'group', 'playlist', 'failovers', 'metadata', 'created_at', 'updated_at',
     ])
