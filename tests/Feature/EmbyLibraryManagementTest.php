@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\EmbyManagedSetupService;
 use App\Services\MediaServerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
@@ -324,6 +325,100 @@ it('requires every managed setup response to remain on the exact requested origi
         ->and($method->invoke($service, 'https://emby.test:8096', 'https://emby.test:8920/M3uEditor/Managed/Setup/V1'))->toBeFalse();
 });
 
+it('uses a stable operation identity and accepts only a direct companion-prepared child path', function (string $root, string $preparedPath) {
+    $this->integration->updateQuietly([
+        'emby_managed_setup_binding_id' => $this->integration->id,
+        'emby_managed_setup_root' => $root,
+        'emby_managed_setup_capability_version' => 1,
+        'emby_managed_setup_contract_version' => 1,
+    ]);
+    Http::preventStrayRequests();
+    $operationIds = [];
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Libraries/V1/Prepare' => function (Request $request) use (&$operationIds, $preparedPath) {
+            $operationIds[] = $request->data()['OperationId'];
+
+            return Http::response([
+                'CapabilityVersion' => 1,
+                'IntegrationId' => $request->data()['IntegrationId'],
+                'OperationId' => $request->data()['OperationId'],
+                'PreparedPath' => $preparedPath,
+                'State' => 'prepared',
+                'Success' => true,
+            ]);
+        },
+    ]);
+
+    $service = app(EmbyManagedSetupService::class);
+    $first = $service->prepareLibrary($this->integration, 'Managed Movies', 'movies');
+    $second = app(EmbyManagedSetupService::class)
+        ->prepareLibrary($this->integration->fresh(), 'Managed Movies', 'movies');
+
+    expect($first['success'])->toBeTrue()
+        ->and($first['path'])->toBe($preparedPath)
+        ->and($second['success'])->toBeTrue()
+        ->and($operationIds)->toHaveCount(2)
+        ->and($operationIds[0])->toBe($operationIds[1])
+        ->and($operationIds[0])->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/');
+})->with([
+    'Unix path' => ['/srv/emby/managed', '/srv/emby/managed/movies-0123456789abcdef01234567'],
+    'Windows path' => ['C:\\Emby\\Managed', 'C:\\Emby\\Managed\\movies-0123456789abcdef01234567'],
+]);
+
+it('fails closed on malformed or malicious prepare responses without exposing secrets', function (array|string $response) {
+    $this->integration->updateQuietly([
+        'emby_managed_setup_binding_id' => $this->integration->id,
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_managed_setup_capability_version' => 1,
+        'emby_managed_setup_contract_version' => 1,
+    ]);
+    Http::preventStrayRequests();
+    $service = app(EmbyManagedSetupService::class);
+    if (is_array($response)) {
+        $response['IntegrationId'] = $this->integration->id;
+        $response['OperationId'] = $service->libraryOperationId($this->integration, 'Managed Movies', 'movies');
+    }
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Libraries/V1/Prepare' => Http::response($response),
+    ]);
+
+    $result = $service->prepareLibrary($this->integration, 'Managed Movies', 'movies');
+
+    expect($result['success'])->toBeFalse()
+        ->and($result['message'])->toBe('Emby returned an invalid managed setup response. Check the companion configuration, then retry.')
+        ->and($result['message'])->not->toContain('emby-secret', '/outside/secret');
+})->with([
+    'scalar JSON' => ['"emby-secret"'],
+    'outside root' => [[
+        'CapabilityVersion' => 1,
+        'IntegrationId' => 1,
+        'OperationId' => 'ignored',
+        'PreparedPath' => '/outside/secret',
+        'State' => 'prepared',
+        'Success' => true,
+    ]],
+    'root instead of direct child' => [[
+        'CapabilityVersion' => 1,
+        'IntegrationId' => 1,
+        'OperationId' => 'ignored',
+        'PreparedPath' => '/srv/emby/managed',
+        'State' => 'prepared',
+        'Success' => true,
+    ]],
+]);
+
+it('rejects an unsupported managed companion before making a library lifecycle request', function () {
+    Http::preventStrayRequests();
+    Http::fake();
+
+    $result = app(EmbyManagedSetupService::class)
+        ->prepareLibrary($this->integration, 'Managed Movies', 'movies');
+
+    expect($result['success'])->toBeFalse()
+        ->and($result['message'])->toBe('The Emby companion does not support managed setup version 1. Update the companion, then retry.');
+    Http::assertNothingSent();
+});
+
 it('creates an Emby library through the official virtual folders endpoint', function () {
     Http::preventStrayRequests();
     Http::fakeSequence('https://emby.test:8096/Library/VirtualFolders')
@@ -357,6 +452,38 @@ it('creates an Emby library through the official virtual folders endpoint', func
             'RefreshLibrary' => false,
         ]);
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'DELETE');
+});
+
+it('reconciles inventory after a create connection timeout and reports an ambiguous outcome', function () {
+    Http::preventStrayRequests();
+    $inventoryRequests = 0;
+    $createRequests = 0;
+    Http::fake([
+        'https://emby.test:8096/Library/VirtualFolders' => function (Request $request) use (&$inventoryRequests, &$createRequests) {
+            if ($request->method() === 'POST') {
+                $createRequests++;
+
+                throw new ConnectionException('secret timeout details');
+            }
+
+            $inventoryRequests++;
+
+            return Http::response([], 200);
+        },
+    ]);
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        refreshLibrary: false,
+    );
+
+    expect($result['success'])->toBeFalse()
+        ->and($result['created'])->toBeTrue()
+        ->and($result['message'])->not->toContain('secret timeout details')
+        ->and($inventoryRequests)->toBe(2)
+        ->and($createRequests)->toBe(1);
 });
 
 it('includes Mixed Content libraries when fetching Emby libraries', function () {

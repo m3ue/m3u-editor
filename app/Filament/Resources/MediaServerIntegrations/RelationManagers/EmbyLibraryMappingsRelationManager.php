@@ -697,7 +697,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ]);
                 }
 
-                $destination = $this->resolveSimpleDestination($data, $collectionType);
+                $destination = $this->resolveSimpleDestination($data, $collectionType, $sources);
 
                 $mapping = DB::transaction(function () use ($sources, $destination): EmbyLibraryMapping {
                     $created = collect();
@@ -707,13 +707,13 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     $usesSourceSubdirectories = ! $destination['managed']
                         || count($sources) > 1
                         || $sources[0]['kind'] !== 'all';
-                    foreach ($sources as $source) {
+                    foreach ($sources as $index => $source) {
                         $mappingDestination = $destination;
                         if ($usesSourceSubdirectories) {
                             $mappingDestination['path'] = $this->managedSourcePath($destination['path'], $source);
                         }
 
-                        $mapping = EmbyLibraryMapping::create([
+                        $attributes = [
                             'media_server_integration_id' => $this->ownerRecord->id,
                             'user_id' => $this->ownerRecord->user_id,
                             'enabled' => true,
@@ -727,10 +727,17 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                             'is_managed' => $mappingDestination['managed'],
                             'options' => EmbyLibraryMapping::DEFAULT_OPTIONS,
                             'status' => 'idle',
-                        ]);
+                        ];
+                        $intentId = $destination['intent_ids'][$index] ?? null;
+                        $mapping = $intentId === null
+                            ? EmbyLibraryMapping::create($attributes)
+                            : tap(
+                                $this->ownerRecord->embyLibraryMappings()->findOrFail($intentId),
+                                fn (EmbyLibraryMapping $intent) => $intent->updateQuietly($attributes),
+                            );
                         if ($mappingDestination['pending']) {
                             $mapping->updateQuietly([
-                                'library_create_requested_at' => now(),
+                                'library_create_requested_at' => $mapping->library_create_requested_at ?? now(),
                                 'last_planned_revision' => null,
                                 'status' => 'pending',
                                 'status_summary' => __('Pending'),
@@ -739,6 +746,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                         } else {
                             $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
                             $mapping->updateQuietly([
+                                'library_create_requested_at' => null,
                                 'last_planned_revision' => $catalog['revision'],
                                 'status' => 'planned',
                                 'status_summary' => __('Revision planned for companion sync.'),
@@ -886,9 +894,10 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
 
     /**
      * @param  array<string, mixed>  $data
-     * @return array{library_id: string|null, name: string, collection_type: string, path: string, managed: bool, pending: bool}
+     * @param  list<array{kind: string, identifier: string, label: string, collection_type: string|null}>  $sources
+     * @return array{library_id: string|null, name: string, collection_type: string, path: string, managed: bool, pending: bool, intent_ids?: list<int>}
      */
-    private function resolveSimpleDestination(array $data, ?string $sourceCollectionType): array
+    private function resolveSimpleDestination(array $data, ?string $sourceCollectionType, array $sources): array
     {
         $destinationValue = $data['destination'] ?? null;
         $destination = is_string($destinationValue) || is_int($destinationValue)
@@ -937,44 +946,128 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             ]);
         }
 
-        $path = $this->managedLibraryPath($root, $name);
-        if (! MediaServerIntegration::isSafeWritablePath($path)) {
+        $cleanupIsPending = $this->ownerRecord->embyLibraryMappings()
+            ->where('is_managed', true)
+            ->where('target_library_name', $name)
+            ->where('collection_type', $collectionType)
+            ->where('status', 'cleanup_pending')
+            ->exists();
+        if ($cleanupIsPending) {
             throw ValidationException::withMessages([
-                'destination' => __('Choose a valid new Emby library.'),
+                'destination' => __('Managed library cleanup is pending. Retry after cleanup completes.'),
             ]);
         }
+
+        $lifecycle = app(EmbyManagedSetupService::class);
+        $prepared = $lifecycle->prepareLibrary($this->ownerRecord, $name, $collectionType);
+        if (! $prepared['success'] || ! is_string($prepared['path'])) {
+            throw ValidationException::withMessages([
+                'destination' => __($prepared['message']),
+            ]);
+        }
+
+        $path = $prepared['path'];
+        $matchingManagedMappings = $this->ownerRecord->embyLibraryMappings()
+            ->where('is_managed', true)
+            ->where('target_library_name', $name)
+            ->where('collection_type', $collectionType);
+        $knownLibraryId = (clone $matchingManagedMappings)
+            ->whereNotNull('target_library_id')
+            ->value('target_library_id');
+        $createWasAlreadyRequested = $knownLibraryId !== null
+            || (clone $matchingManagedMappings)->whereNotNull('library_create_requested_at')->exists();
+        $intentIds = $this->persistManagedCreateIntents($sources, $name, $collectionType, $path);
         $result = MediaServerService::make($this->ownerRecord)->createLibrary(
             $name,
             $collectionType,
             [$path],
             false,
+            $knownLibraryId,
+            createIfMissing: ! $createWasAlreadyRequested,
         );
         $libraryId = $result['library']['id'] ?? null;
-        if (! $result['success']) {
+        $createIsAmbiguous = ! $result['success'] && $result['created'];
+        if (! $result['success'] && ! $createIsAmbiguous) {
+            $originalError = EmbyLibraryMapping::redactSummary($result['message']);
+            EmbyLibraryMapping::query()->whereKey($intentIds)->update([
+                'status' => 'cleanup_pending',
+                'status_summary' => __('Pending'),
+                'error_summary' => $originalError,
+                'updated_at' => now(),
+            ]);
+            $aborted = $lifecycle->abortLibrary(
+                $this->ownerRecord,
+                $prepared['operation_id'],
+                $path,
+            );
+            $message = $aborted['success']
+                ? __('Emby could not create the managed library. Retry after checking the companion version and administrator credential.')
+                : __('Emby could not create the managed library. Retry after checking the companion version and administrator credential. Companion cleanup is still pending and will be retried with the same operation.');
+            if ($aborted['success']) {
+                EmbyLibraryMapping::query()->whereKey($intentIds)->delete();
+            }
             throw ValidationException::withMessages([
-                'destination' => __('Emby could not create the managed library. Retry after checking the companion version and administrator credential.'),
+                'destination' => $message,
             ]);
         }
 
+        $libraryIsConfirmed = is_string($libraryId) && $libraryId !== '';
+        $committed = $libraryIsConfirmed
+            ? $lifecycle->commitLibrary(
+                $this->ownerRecord,
+                $prepared['operation_id'],
+                $path,
+            )
+            : ['success' => false];
+
         return [
-            'library_id' => is_string($libraryId) && $libraryId !== '' ? $libraryId : null,
+            'library_id' => $libraryIsConfirmed ? $libraryId : null,
             'name' => $name,
             'collection_type' => $collectionType,
             'path' => $path,
             'managed' => true,
-            'pending' => ! is_string($libraryId) || $libraryId === '',
+            'pending' => ! $libraryIsConfirmed || ! $committed['success'],
+            'intent_ids' => $intentIds,
         ];
     }
 
-    private function managedLibraryPath(string $root, string $name): string
+    /**
+     * @param  list<array{kind: string, identifier: string, label: string, collection_type: string|null}>  $sources
+     * @return list<int>
+     */
+    private function persistManagedCreateIntents(array $sources, string $name, string $collectionType, string $path): array
     {
-        $separator = str_contains($root, '\\') ? '\\' : '/';
-        $directory = Str::slug($name);
-        if ($directory === '') {
-            $directory = 'library-'.substr(hash('sha256', $name), 0, 12);
-        }
+        return DB::transaction(function () use ($sources, $name, $collectionType, $path): array {
+            $usesSourceSubdirectories = count($sources) > 1 || $sources[0]['kind'] !== 'all';
+            $intentIds = [];
 
-        return rtrim($root, '/\\').$separator.$directory;
+            foreach ($sources as $source) {
+                $mappingPath = $usesSourceSubdirectories
+                    ? $this->managedSourcePath($path, $source)
+                    : $path;
+                $intentIds[] = EmbyLibraryMapping::create([
+                    'media_server_integration_id' => $this->ownerRecord->id,
+                    'user_id' => $this->ownerRecord->user_id,
+                    'enabled' => true,
+                    'source_kind' => $source['kind'],
+                    'source_identifier' => $source['identifier'],
+                    'source_label' => $source['label'],
+                    'target_library_id' => null,
+                    'target_library_name' => $name,
+                    'collection_type' => $collectionType,
+                    'output_path' => $mappingPath,
+                    'is_managed' => true,
+                    'library_create_requested_at' => now(),
+                    'options' => EmbyLibraryMapping::DEFAULT_OPTIONS,
+                    'last_planned_revision' => null,
+                    'status' => 'pending',
+                    'status_summary' => __('Pending'),
+                    'error_summary' => null,
+                ])->getKey();
+            }
+
+            return $intentIds;
+        });
     }
 
     /**
@@ -1501,6 +1594,12 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
 
     private function reconcile(EmbyLibraryMapping $mapping): void
     {
+        if ($mapping->status === 'cleanup_pending') {
+            $this->retryManagedLibraryCleanup($mapping);
+
+            return;
+        }
+
         $result = MediaServerService::make($this->ownerRecord)->createLibrary(
             $mapping->target_library_name,
             $mapping->collection_type,
@@ -1530,7 +1629,6 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         if ($targetLibraryId !== $mapping->target_library_id) {
             $mapping->updateQuietly([
                 'target_library_id' => $targetLibraryId,
-                'library_create_requested_at' => null,
             ]);
             $mapping->refresh();
         }
@@ -1574,6 +1672,42 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             return;
         }
 
+        if ($mapping->is_managed && $mapping->library_create_requested_at !== null) {
+            $preparedPath = $this->lifecyclePreparedPath($mapping->output_path, $mapping->collection_type);
+            if ($preparedPath !== null) {
+                $lifecycle = app(EmbyManagedSetupService::class);
+                $committed = $lifecycle->commitLibrary(
+                    $this->ownerRecord,
+                    $lifecycle->libraryOperationId(
+                        $this->ownerRecord,
+                        $mapping->target_library_name,
+                        $mapping->collection_type,
+                    ),
+                    $preparedPath,
+                );
+                if (! $committed['success']) {
+                    $mapping->updateQuietly([
+                        'last_planned_revision' => null,
+                        'status' => 'pending',
+                        'status_summary' => __('Pending'),
+                        'error_summary' => EmbyLibraryMapping::redactSummary($committed['message']),
+                    ]);
+                    Notification::make()
+                        ->warning()
+                        ->title(__('Pending'))
+                        ->body(__($committed['message']))
+                        ->send();
+
+                    return;
+                }
+            }
+
+            $mapping->updateQuietly([
+                'library_create_requested_at' => null,
+            ]);
+            $mapping->refresh();
+        }
+
         $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
         $mapping->updateQuietly([
             'last_planned_revision' => $catalog['revision'],
@@ -1586,5 +1720,80 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             ->title(__('Managed library plan updated'))
             ->body(Str::limit($catalog['revision'], 12, ''))
             ->send();
+    }
+
+    private function retryManagedLibraryCleanup(EmbyLibraryMapping $mapping): void
+    {
+        $preparedPath = $this->lifecyclePreparedPath($mapping->output_path, $mapping->collection_type);
+        if ($preparedPath === null) {
+            Notification::make()
+                ->danger()
+                ->title(__('Managed library reconcile failed'))
+                ->body($mapping->error_summary)
+                ->send();
+
+            return;
+        }
+
+        $lifecycle = app(EmbyManagedSetupService::class);
+        $aborted = $lifecycle->abortLibrary(
+            $this->ownerRecord,
+            $lifecycle->libraryOperationId(
+                $this->ownerRecord,
+                $mapping->target_library_name,
+                $mapping->collection_type,
+            ),
+            $preparedPath,
+        );
+        if (! $aborted['success']) {
+            $mapping->updateQuietly([
+                'status' => 'cleanup_pending',
+                'status_summary' => __('Pending'),
+            ]);
+            Notification::make()
+                ->warning()
+                ->title(__('Pending'))
+                ->body($mapping->error_summary)
+                ->send();
+
+            return;
+        }
+
+        $this->ownerRecord->embyLibraryMappings()
+            ->where('status', 'cleanup_pending')
+            ->where('target_library_name', $mapping->target_library_name)
+            ->where('collection_type', $mapping->collection_type)
+            ->get()
+            ->filter(fn (EmbyLibraryMapping $candidate): bool => $this->lifecyclePreparedPath(
+                $candidate->output_path,
+                $candidate->collection_type,
+            ) === $preparedPath)
+            ->each->delete();
+
+        Notification::make()
+            ->success()
+            ->title(__('Managed library cleanup completed'))
+            ->send();
+    }
+
+    private function lifecyclePreparedPath(string $path, string $collectionType): ?string
+    {
+        $root = $this->ownerRecord->emby_managed_setup_root;
+        if (! is_string($root)
+            || ! MediaServerIntegration::isSafeWritablePath($path)
+            || ! MediaServerIntegration::isPathWithinWritableRoot($path, $root)) {
+            return null;
+        }
+
+        $normalizedPath = rtrim(str_replace('\\', '/', $path), '/');
+        $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/');
+        $relativePath = substr($normalizedPath, strlen($normalizedRoot) + 1);
+        $preparedDirectory = explode('/', $relativePath, 2)[0] ?? '';
+
+        if (preg_match('/^'.preg_quote($collectionType, '/').'-[0-9a-f]{24}$/i', $preparedDirectory) !== 1) {
+            return null;
+        }
+
+        return $normalizedRoot.'/'.$preparedDirectory;
     }
 }

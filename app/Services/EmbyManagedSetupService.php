@@ -105,6 +105,168 @@ class EmbyManagedSetupService
         ];
     }
 
+    /** @return array{success: bool, message: string, operation_id: string, path: string|null, state: string|null} */
+    public function prepareLibrary(MediaServerIntegration $integration, string $name, string $collectionType): array
+    {
+        $operationId = $this->libraryOperationId($integration, $name, $collectionType);
+
+        return $this->libraryOperationRequest(
+            $integration,
+            'put',
+            'Prepare',
+            $operationId,
+            [
+                'Name' => $name,
+                'CollectionType' => $collectionType,
+            ],
+            null,
+        );
+    }
+
+    /** @return array{success: bool, message: string, operation_id: string, path: string|null, state: string|null} */
+    public function commitLibrary(MediaServerIntegration $integration, string $operationId, string $preparedPath): array
+    {
+        return $this->libraryOperationRequest($integration, 'post', 'Commit', $operationId, [], $preparedPath);
+    }
+
+    /** @return array{success: bool, message: string, operation_id: string, path: string|null, state: string|null} */
+    public function abortLibrary(MediaServerIntegration $integration, string $operationId, string $preparedPath): array
+    {
+        return $this->libraryOperationRequest($integration, 'post', 'Abort', $operationId, [], $preparedPath);
+    }
+
+    public function libraryOperationId(MediaServerIntegration $integration, string $name, string $collectionType): string
+    {
+        $hex = substr(hash('sha256', "m3u-editor\0{$integration->id}\0{$collectionType}\0{$name}"), 0, 32);
+        $hex[12] = '5';
+        $hex[16] = dechex((hexdec($hex[16]) & 0x3) | 0x8);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 4),
+            substr($hex, 16, 4),
+            substr($hex, 20, 12),
+        );
+    }
+
+    /**
+     * @param  array<string, string>  $payload
+     * @return array{success: bool, message: string, operation_id: string, path: string|null, state: string|null}
+     */
+    private function libraryOperationRequest(
+        MediaServerIntegration $integration,
+        string $method,
+        string $action,
+        string $operationId,
+        array $payload,
+        ?string $expectedPath,
+    ): array {
+        $root = $integration->emby_managed_setup_root;
+        if (! $integration->isEmby() || ! $this->originIsAllowed($integration)
+            || $integration->emby_managed_setup_binding_id !== $integration->id
+            || $integration->emby_managed_setup_capability_version !== self::CONTRACT_VERSION
+            || $integration->emby_managed_setup_contract_version !== self::CONTRACT_VERSION
+            || ! is_string($root) || ! MediaServerIntegration::isSafeWritablePath($root)) {
+            return $this->libraryOperationFailure($operationId, self::UNSUPPORTED_VERSION_MESSAGE);
+        }
+
+        try {
+            $response = Http::baseUrl($integration->base_url)
+                ->connectTimeout(5)
+                ->timeout(15)
+                ->withoutRedirecting()
+                ->withHeaders([
+                    'X-Emby-Token' => $integration->api_key,
+                    'Accept' => 'application/json',
+                ])
+                ->{$method}("/M3uEditor/Managed/Libraries/V1/{$action}", [
+                    'IntegrationId' => $integration->id,
+                    'OperationId' => $operationId,
+                    ...$payload,
+                ]);
+        } catch (Throwable) {
+            return $this->libraryOperationFailure($operationId, self::CONNECTION_FAILED_MESSAGE);
+        }
+
+        if (! $this->responseOriginIsValid($response, $integration)) {
+            return $this->libraryOperationFailure($operationId, self::ORIGIN_BLOCKED_MESSAGE);
+        }
+        if ($response->status() === 404) {
+            return $this->libraryOperationFailure($operationId, self::ENDPOINT_NOT_FOUND_MESSAGE);
+        }
+        if (! $response->successful()) {
+            return $this->libraryOperationFailure($operationId, self::REQUEST_REJECTED_MESSAGE);
+        }
+
+        $data = $response->json();
+        $preparedPath = is_array($data) ? ($data['PreparedPath'] ?? null) : null;
+        $state = is_array($data) ? ($data['State'] ?? null) : null;
+        $validState = $action === 'Prepare'
+            ? in_array($state, ['prepared', 'committed'], true)
+            : $state === ($action === 'Commit' ? 'committed' : 'aborted');
+        $pathIsValid = is_string($preparedPath)
+            && ($expectedPath === null
+                ? $this->isDirectChildPath($preparedPath, $root, $payload['CollectionType'] ?? null)
+                : $this->remotePathsMatch($preparedPath, $expectedPath));
+
+        if (! is_array($data) || ($data['Success'] ?? null) !== true
+            || ($data['CapabilityVersion'] ?? null) !== self::CONTRACT_VERSION
+            || ($data['IntegrationId'] ?? null) !== $integration->id
+            || ($data['OperationId'] ?? null) !== $operationId
+            || ! $validState || ! $pathIsValid) {
+            return $this->libraryOperationFailure($operationId, self::INVALID_RESPONSE_MESSAGE);
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Ready',
+            'operation_id' => $operationId,
+            'path' => $preparedPath,
+            'state' => $state,
+        ];
+    }
+
+    private function isDirectChildPath(string $path, string $root, ?string $collectionType): bool
+    {
+        if (! MediaServerIntegration::isSafeWritablePath($path)
+            || ! MediaServerIntegration::isPathWithinWritableRoot($path, $root)
+            || ! in_array($collectionType, ['movies', 'tvshows'], true)) {
+            return false;
+        }
+
+        $normalizedPath = rtrim(str_replace('\\', '/', $path), '/');
+        $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/');
+        $separator = strrpos($normalizedPath, '/');
+
+        return $separator !== false
+            && $separator < strlen($normalizedPath) - 1
+            && $this->remotePathsMatch(substr($normalizedPath, 0, $separator), $normalizedRoot)
+            && preg_match('/^'.preg_quote($collectionType, '/').'-[0-9a-f]{24}$/', substr($normalizedPath, $separator + 1)) === 1;
+    }
+
+    private function remotePathsMatch(string $left, string $right): bool
+    {
+        $left = rtrim(str_replace('\\', '/', $left), '/');
+        $right = rtrim(str_replace('\\', '/', $right), '/');
+        $windowsStyle = preg_match('/^(?:[a-z]:|\/\/)/i', $left) === 1;
+
+        return $windowsStyle ? strcasecmp($left, $right) === 0 : $left === $right;
+    }
+
+    /** @return array{success: bool, message: string, operation_id: string, path: null, state: null} */
+    private function libraryOperationFailure(string $operationId, string $message): array
+    {
+        return [
+            'success' => false,
+            'message' => $message,
+            'operation_id' => $operationId,
+            'path' => null,
+            'state' => null,
+        ];
+    }
+
     private function originIsAllowed(MediaServerIntegration $integration): bool
     {
         $host = trim((string) $integration->host, '[]');

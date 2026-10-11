@@ -265,6 +265,8 @@ class EmbyJellyfinService implements MediaServer
             && $library['type'] === $collectionType
             && $containsRequestedPaths($library);
 
+        $createAttempted = false;
+
         try {
             $existingLibraries = $this->fetchLibraries(withoutRedirecting: true, failClosed: true);
             $existingLibrary = $libraryId === null
@@ -315,6 +317,7 @@ class EmbyJellyfinService implements MediaServer
                 return $this->libraryResult(true, false, 'Managed Emby library is pending inventory.');
             }
 
+            $createAttempted = true;
             $response = $this->client(withoutRedirecting: true)->post('/Library/VirtualFolders', [
                 'Name' => $name,
                 'CollectionType' => $collectionType,
@@ -322,15 +325,35 @@ class EmbyJellyfinService implements MediaServer
                 'RefreshLibrary' => $refreshLibrary,
             ]);
 
+            if ($response->serverError()) {
+                $reconciledLibrary = $this->fetchLibraries(withoutRedirecting: true, failClosed: true)
+                    ->first($matchesRequest);
+
+                return $reconciledLibrary === null
+                    ? $this->libraryResult(
+                        false,
+                        true,
+                        'Emby library request has an unknown outcome.',
+                    )
+                    : $this->libraryResult(
+                        true,
+                        true,
+                        'Emby library creation was confirmed from inventory.',
+                        $reconciledLibrary,
+                    );
+            }
+
             if (! $response->successful()) {
                 return $this->libraryResult(false, false, 'Emby rejected the library request.');
             }
+
+            $createdLibrary = $this->fetchLibraries(withoutRedirecting: true, failClosed: true)->first($matchesRequest);
 
             return $this->libraryResult(
                 true,
                 true,
                 'Emby library created.',
-                $this->fetchLibraries(withoutRedirecting: true, failClosed: true)->first($matchesRequest),
+                $createdLibrary,
             );
         } catch (Exception $exception) {
             Log::warning('EmbyJellyfinService: Library creation failed', [
@@ -338,7 +361,30 @@ class EmbyJellyfinService implements MediaServer
                 'exception' => $exception::class,
             ]);
 
-            return $this->libraryResult(false, false, 'Emby library request failed.');
+            if ($createAttempted) {
+                try {
+                    $reconciledLibrary = $this->fetchLibraries(withoutRedirecting: true, failClosed: true)
+                        ->first($matchesRequest);
+                    if ($reconciledLibrary !== null) {
+                        return $this->libraryResult(
+                            true,
+                            true,
+                            'Emby library creation was confirmed from inventory.',
+                            $reconciledLibrary,
+                        );
+                    }
+                } catch (Exception) {
+                    // The create outcome remains ambiguous until a later inventory reconcile.
+                }
+            }
+
+            return $this->libraryResult(
+                false,
+                $createAttempted,
+                $createAttempted
+                    ? 'Emby library request has an unknown outcome.'
+                    : 'Emby library request failed before creation.',
+            );
         }
     }
 
