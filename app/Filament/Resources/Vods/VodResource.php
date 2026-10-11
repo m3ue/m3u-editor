@@ -335,7 +335,7 @@ class VodResource extends Resource implements CopilotResource
                 })
                 ->toggleable(),
             TextInputColumn::make('channel')
-                ->rules(['numeric', 'min:0'])
+                ->rules(['nullable', 'integer', 'min:0'])
                 ->type('number')
                 ->placeholder(__('Channel No.'))
                 ->toggleable()
@@ -1708,7 +1708,7 @@ class VodResource extends Resource implements CopilotResource
                         ->label(__('Channel No.'))
                         ->hint(__('tvg-chno'))
                         ->columnSpan(1)
-                        ->rules(['numeric', 'min:0']),
+                        ->rules(['nullable', 'integer', 'min:0']),
                     TextInput::make('shift')
                         ->label(__('Time Shift'))
                         ->hint(__('timeshift'))

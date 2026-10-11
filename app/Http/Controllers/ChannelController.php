@@ -337,6 +337,8 @@ class ChannelController extends Controller
                 Rule::exists('epg_channels', 'id')->where('user_id', $user->id),
             ],
             'channel_number' => 'sometimes|nullable|integer|min:0',
+            // Sub-channel part of an over-the-air number (the 1 in "5.1")
+            'channel_minor' => 'sometimes|nullable|integer|min:1|max:9999',
             'sort_order' => 'sometimes|nullable|numeric|min:0',
             'logo_type' => 'sometimes|string|in:channel,epg',
             'use_epg_logo' => 'sometimes|boolean',
@@ -369,6 +371,7 @@ class ChannelController extends Controller
                 'stream_id' => $channel->stream_id_custom ?? $channel->stream_id,
                 'enabled' => $channel->enabled,
                 'channel_number' => $channel->channel,
+                'channel_minor' => $channel->channel_minor,
                 'sort_order' => $channel->sort,
                 'group' => $channel->group,
                 'group_id' => $channel->group_id,
@@ -502,6 +505,7 @@ class ChannelController extends Controller
             ],
             'updates.channel' => 'sometimes|nullable|integer|min:0',
             'updates.channel_number' => 'sometimes|nullable|integer|min:0',
+            'updates.channel_minor' => 'sometimes|nullable|integer|min:1|max:9999',
             'updates.sort' => 'sometimes|nullable|numeric|min:0',
             'updates.sort_order' => 'sometimes|nullable|numeric|min:0',
             'updates.logo_type' => 'sometimes|string|in:channel,epg',
@@ -833,6 +837,14 @@ class ChannelController extends Controller
 
             $updates['channel'] = $channelNumber;
             $applied['channel_number'] = $channelNumber;
+
+            // A new number replaces the whole number, so any previous sub-channel
+            // part is cleared unless one is sent with it.
+            $updates['channel_minor'] = $channelNumber === null ? null : ($input['channel_minor'] ?? null);
+            $applied['channel_minor'] = $updates['channel_minor'];
+        } elseif (array_key_exists('channel_minor', $input)) {
+            $updates['channel_minor'] = $input['channel_minor'];
+            $applied['channel_minor'] = $input['channel_minor'];
         }
 
         if (array_key_exists('sort_order', $input)) {

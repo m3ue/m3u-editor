@@ -5435,6 +5435,8 @@
     "Use Simplified Default": "使用简化默认",
     "Use Simplified Default navigation": "使用简化默认导航",
     "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.": "当流ID不同时，使用TMDB ID跨提供商合并相同电影。没有TMDB ID的VOD频道将被跳过。",
+    "Use a decimal for a sub-channel, e.g. 5.1.": "子频道请使用小数，例如 5.1。",
+    "Use a whole number, or a sub-channel like 5.1.": "请使用整数，或类似 5.1 的子频道。",
     "Use an existing Emby library": "使用现有的 Emby 媒体库",
     "Use easy editor to manage groups and channels in one place": "使用简易编辑器在一个地方管理分组和频道",
     "Use for caching": "用于缓存",

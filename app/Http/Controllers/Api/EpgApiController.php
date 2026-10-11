@@ -366,9 +366,7 @@ class EpgApiController extends Controller
             $channelSortIndex = $skip;
             foreach ($playlistChannels as $channel) {
                 $epgId = $channel->epg_id ?? null;
-                $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                    ? (int) $channel->pivot->channel_number
-                    : $channel->channel;
+                $channelNo = $channel->resolveChannelNumber($isCustomContext);
                 $channelNo = $pageNumbers !== null
                     ? ($pageNumbers[$channel->id] ?? $channelNo)
                     : $numberSequence->next($channelNo);

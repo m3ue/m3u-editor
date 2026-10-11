@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\PlaylistChannelId;
+use App\Support\ChannelNumber;
 
 /**
  * Assigns output channel numbers in output order, shared by every output
@@ -87,17 +88,22 @@ class ChannelNumberSequence
         }
 
         // Only the id and numbers are needed, so walk a light copy of the query.
-        $query = (clone $fullQuery)->select('channels.id', 'channels.channel');
+        $query = (clone $fullQuery)->select('channels.id', 'channels.channel', 'channels.channel_minor');
         if ($isCustomContext) {
-            $query->addSelect('channel_custom_playlist.channel_number as pivot_channel_number');
+            $query->addSelect(
+                'channel_custom_playlist.channel_number as pivot_channel_number',
+                'channel_custom_playlist.channel_minor as pivot_channel_minor',
+            );
         }
 
         $sequence = new self($playlist);
         foreach ($query->toBase()->cursor() as $row) {
-            $channelNo = ($isCustomContext && ! empty($row->pivot_channel_number))
-                ? (int) $row->pivot_channel_number
-                : ($row->channel === null ? null : (int) $row->channel);
-            $channelNo = $sequence->next($channelNo);
+            $channelNo = $sequence->next(ChannelNumber::resolve(
+                $row->channel,
+                $row->channel_minor,
+                $isCustomContext ? $row->pivot_channel_number : null,
+                $isCustomContext ? $row->pivot_channel_minor : null,
+            ));
 
             if (isset($wanted[$row->id])) {
                 $numbers[$row->id] = $channelNo;

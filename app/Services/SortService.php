@@ -103,10 +103,13 @@ class SortService
             default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
 
+        // Sub-channels ("5.1", "5.2") follow their major number
+        $tiebreak = $column === 'channel' ? ", COALESCE(channel_minor, 0) {$direction}" : '';
+
         // MySQL (8+)
         if ($driver === 'mysql') {
             $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn FROM channels WHERE group_id = ?) t ON c.id = t.id SET c.sort = t.rn", [$record->id]);
 
             return;
         }
@@ -114,7 +117,7 @@ class SortService
         // Postgres
         if ($this->isPostgres($driver)) {
             $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
-            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
+            DB::statement("UPDATE channels SET sort = t.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn FROM channels WHERE group_id = ?) t WHERE channels.id = t.id", [$record->id]);
 
             return;
         }
@@ -123,7 +126,7 @@ class SortService
         if ($driver === 'sqlite') {
             $this->registerSqliteNaturalSortFunction();
             $sortKeyExpr = $this->naturalSortKeyExpr($driver, $orderByColumn);
-            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn FROM channels WHERE group_id = ?) UPDATE channels SET sort = (SELECT rn FROM ranked WHERE ranked.id = channels.id) WHERE group_id = ?", [$record->id, $record->id]);
 
             return;
         }
@@ -461,13 +464,13 @@ class SortService
 
         if ($driver === 'mysql') {
             $where = $activeOnly ? 'group_id = ? AND enabled = 1' : 'group_id = ?';
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t ON c.id = t.id SET c.channel = t.rn + ?", [$record->id, $offset]);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t ON c.id = t.id SET c.channel = t.rn + ?, c.channel_minor = NULL", [$record->id, $offset]);
         } elseif ($this->isPostgres($driver)) {
             $where = $activeOnly ? 'group_id = ? AND enabled = true' : 'group_id = ?';
-            DB::statement("UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t WHERE channels.id = t.id", [$offset, $record->id]);
+            DB::statement("UPDATE channels SET channel = t.rn + ?, channel_minor = NULL FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) t WHERE channels.id = t.id", [$offset, $record->id]);
         } elseif ($driver === 'sqlite') {
             $where = $activeOnly ? 'group_id = ? AND enabled = 1' : 'group_id = ?';
-            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE id IN (SELECT id FROM ranked)", [$record->id, $offset]);
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE {$where}) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ?, channel_minor = NULL WHERE id IN (SELECT id FROM ranked)", [$record->id, $offset]);
         } else {
             // Fallback: CASE update
             $query = $record->channels()->orderBy('sort');
@@ -489,7 +492,7 @@ class SortService
             $casesSql = implode(' ', $cases);
             $idsSql = implode(',', $ids);
 
-            DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+            DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END, channel_minor = NULL WHERE id IN ({$idsSql})");
         }
 
         EpgCacheService::clearForGroup($record->id, $record->playlist_id);
@@ -551,11 +554,11 @@ class SortService
         $idsSql = implode(',', $ids);
 
         if ($driver === 'mysql') {
-            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t ON c.id = t.id SET c.channel = t.rn + ?", [$offset]);
+            DB::statement("UPDATE channels c JOIN (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t ON c.id = t.id SET c.channel = t.rn + ?, c.channel_minor = NULL", [$offset]);
         } elseif ($this->isPostgres($driver)) {
-            DB::statement("UPDATE channels SET channel = t.rn + ? FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t WHERE channels.id = t.id", [$offset]);
+            DB::statement("UPDATE channels SET channel = t.rn + ?, channel_minor = NULL FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) t WHERE channels.id = t.id", [$offset]);
         } elseif ($driver === 'sqlite') {
-            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ? WHERE id IN ({$idsSql})", [$offset]);
+            DB::statement("WITH ranked AS (SELECT id, ROW_NUMBER() OVER (ORDER BY sort) AS rn FROM channels WHERE id IN ({$idsSql})) UPDATE channels SET channel = (SELECT rn FROM ranked WHERE ranked.id = channels.id) + ?, channel_minor = NULL WHERE id IN ({$idsSql})", [$offset]);
         } else {
             // Fallback: CASE update
             $cases = [];
@@ -566,7 +569,7 @@ class SortService
             }
 
             $casesSql = implode(' ', $cases);
-            DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END WHERE id IN ({$idsSql})");
+            DB::statement("UPDATE channels SET channel = CASE id {$casesSql} END, channel_minor = NULL WHERE id IN ({$idsSql})");
         }
 
         EpgCacheService::clearForChannelIds($ids);
@@ -908,6 +911,11 @@ class SortService
             default => throw new \InvalidArgumentException('Invalid sort column provided.'),
         };
 
+        // Sub-channels follow their major number, taken from the same source as it
+        $tiebreak = $column === 'channel'
+            ? ", COALESCE(CASE WHEN ccp2.channel_number IS NOT NULL THEN ccp2.channel_minor ELSE c.channel_minor END, 0) {$direction}"
+            : '';
+
         $ids = $channels->pluck('id')->map(fn ($id) => (int) $id)->unique()->values()->all();
         if (empty($ids)) {
             return;
@@ -922,7 +930,7 @@ class SortService
                 "UPDATE channel_custom_playlist ccp
                  JOIN (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -940,7 +948,7 @@ class SortService
                  SET sort = t.rn
                  FROM (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -957,7 +965,7 @@ class SortService
             DB::statement(
                 "WITH ranked AS (
                     SELECT ccp2.channel_id,
-                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}) AS rn
+                           ROW_NUMBER() OVER (ORDER BY {$sortKeyExpr} {$direction}{$tiebreak}) AS rn
                     FROM channel_custom_playlist ccp2
                     JOIN channels c ON c.id = ccp2.channel_id
                     WHERE ccp2.custom_playlist_id = ?
@@ -1039,7 +1047,7 @@ class SortService
                     WHERE ccp2.custom_playlist_id = ?
                       AND ccp2.channel_id IN ({$idsSql})
                  ) t ON t.channel_id = ccp.channel_id
-                 SET ccp.channel_number = t.rn + ?
+                 SET ccp.channel_number = t.rn + ?, ccp.channel_minor = NULL
                  WHERE ccp.custom_playlist_id = ?
                    AND ccp.channel_id IN ({$idsSql})",
                 [$playlist->id, $offset, $playlist->id]
@@ -1048,7 +1056,7 @@ class SortService
             // Postgres
             DB::statement(
                 "UPDATE channel_custom_playlist ccp
-                 SET channel_number = t.rn + ?
+                 SET channel_number = t.rn + ?, channel_minor = NULL
                  FROM (
                     SELECT ccp2.channel_id,
                            ROW_NUMBER() OVER (ORDER BY COALESCE(ccp2.sort, c.sort), c.channel, c.id) AS rn
@@ -1074,7 +1082,7 @@ class SortService
                       AND ccp2.channel_id IN ({$idsSql})
                  )
                  UPDATE channel_custom_playlist
-                 SET channel_number = (SELECT rn FROM ranked WHERE ranked.channel_id = channel_custom_playlist.channel_id) + ?
+                 SET channel_number = (SELECT rn FROM ranked WHERE ranked.channel_id = channel_custom_playlist.channel_id) + ?, channel_minor = NULL
                  WHERE custom_playlist_id = ?
                    AND channel_id IN ({$idsSql})",
                 [$playlist->id, $offset, $playlist->id]
@@ -1108,7 +1116,7 @@ class SortService
 
             DB::statement(
                 "UPDATE channel_custom_playlist
-                 SET channel_number = CASE channel_id {$casesSql} END
+                 SET channel_number = CASE channel_id {$casesSql} END, channel_minor = NULL
                  WHERE custom_playlist_id = {$playlist->id}
                    AND channel_id IN ({$orderedIdsSql})"
             );

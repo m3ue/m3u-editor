@@ -6593,6 +6593,8 @@
     "Use Simplified Default": "Use Simplified Default",
     "Use Simplified Default navigation": "Use Simplified Default navigation",
     "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.": "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.",
+    "Use a decimal for a sub-channel, e.g. 5.1.": "Use a decimal for a sub-channel, e.g. 5.1.",
+    "Use a whole number, or a sub-channel like 5.1.": "Use a whole number, or a sub-channel like 5.1.",
     "Use an existing Emby library": "Use an existing Emby library",
     "Use easy editor to manage groups and channels in one place": "Use easy editor to manage groups and channels in one place",
     "Use for caching": "Use for caching",

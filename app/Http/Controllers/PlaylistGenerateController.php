@@ -20,6 +20,12 @@ use Illuminate\Support\LazyCollection;
 
 class PlaylistGenerateController extends Controller
 {
+    /**
+     * Sub-channel tiebreak for custom playlist ordering: the pivot's minor when the
+     * pivot number is set (it overrides as a pair), else the channel's own minor.
+     */
+    private const CUSTOM_CHANNEL_MINOR_ORDER = 'COALESCE(CASE WHEN NULLIF(channel_custom_playlist.channel_number, 0) IS NOT NULL THEN channel_custom_playlist.channel_minor ELSE channels.channel_minor END, 0)';
+
     public function __invoke(Request $request, string $uuid)
     {
         // Fetch the playlist
@@ -127,9 +133,7 @@ class PlaylistGenerateController extends Controller
                     $epgIconCustom = $channel->epg_icon_custom ?? null;
                     $isCustomContext = ($type === 'custom') || ($type === 'alias' && ! empty($playlist->custom_playlist_id));
 
-                    $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                        ? (int) $channel->pivot->channel_number
-                        : $channel->channel;
+                    $channelNo = $channel->resolveChannelNumber($isCustomContext);
                     $timeshift = $channel->shift ?? 0;
                     $stationId = $channel->station_id ?? '';
                     $epgShift = $channel->tvg_shift ?? 0;
@@ -535,9 +539,7 @@ class PlaylistGenerateController extends Controller
 
                 $url = PlaylistUrlService::getChannelUrl($channel, $playlist);
 
-                $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                        ? (int) $channel->pivot->channel_number
-                        : $channel->channel;
+                $channelNo = $channel->resolveChannelNumber($isCustomContext);
 
                 $channelNo = $numberSequence->next($channelNo);
 
@@ -802,13 +804,16 @@ class PlaylistGenerateController extends Controller
         // on every driver, then fall through to the standard ordering below. A custom
         // playlist's pivot number wins when set, as it does for tvg-chno. 0 is folded
         // into NULL so unnumbered channels tie here regardless of driver NULL ordering.
+        // Sub-channels ("5.1") follow their major number, from the same source as it.
         if ($playlist->sort_by_channel_number) {
             if ($isCustomContext) {
                 $query->orderByRaw('CASE WHEN COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), NULLIF(channels.channel, 0)) IS NULL THEN 1 ELSE 0 END')
-                    ->orderByRaw('COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), NULLIF(channels.channel, 0))');
+                    ->orderByRaw('COALESCE(NULLIF(channel_custom_playlist.channel_number, 0), NULLIF(channels.channel, 0))')
+                    ->orderByRaw(self::CUSTOM_CHANNEL_MINOR_ORDER);
             } else {
                 $query->orderByRaw('CASE WHEN NULLIF(channels.channel, 0) IS NULL THEN 1 ELSE 0 END')
-                    ->orderByRaw('NULLIF(channels.channel, 0)');
+                    ->orderByRaw('NULLIF(channels.channel, 0)')
+                    ->orderByRaw('COALESCE(channels.channel_minor, 0)');
             }
         }
 
@@ -852,6 +857,7 @@ class PlaylistGenerateController extends Controller
             $query->orderByRaw("COALESCE({$orderSubquery}, groups.sort_order)", [Channel::class, $playlistUuid])
                 ->orderByRaw('COALESCE(channel_custom_playlist.sort, channels.sort)')
                 ->orderByRaw('COALESCE(channel_custom_playlist.channel_number, channels.channel)')
+                ->orderByRaw(self::CUSTOM_CHANNEL_MINOR_ORDER)
                 ->orderBy('channels.title');
         } else {
             // Per-alias custom live group ordering (optional). When enabled, the
@@ -879,6 +885,7 @@ class PlaylistGenerateController extends Controller
                 ->orderBy('groups.sort_order')
                 ->orderBy('channels.sort')
                 ->orderBy('channels.channel')
+                ->orderByRaw('COALESCE(channels.channel_minor, 0)')
                 ->orderBy('channels.title');
         }
 

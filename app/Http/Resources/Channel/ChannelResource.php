@@ -39,6 +39,12 @@ class ChannelResource extends JsonResource
             'is_vod' => $this->is_vod,
             /** @var int|null */
             'channel_number' => $this->channel,
+            /**
+             * Sub-channel part of an over-the-air number (the 1 in "5.1").
+             *
+             * @var int|null
+             */
+            'channel_minor' => $this->channel_minor,
             /** The channel's group, or null when it has none. */
             'group' => $this->groupSummary(),
             'proxy_url' => $this->getProxyUrl(),

@@ -10,6 +10,7 @@ use App\Jobs\DetachItemsFromCustomPlaylist;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Services\PlaylistService;
+use App\Support\ChannelNumber;
 use Filament\Actions\AttachAction;
 use Filament\Actions\BulkAction;
 use Filament\Actions\CreateAction;
@@ -143,20 +144,21 @@ class ChannelsRelationManager extends RelationManager
             if (method_exists($column, 'getName') && $column->getName() === 'channel') {
                 $defaultColumns[$i] = TextInputColumn::make('custom_channel_number')
                     ->label(__('Channel'))
-                    ->type('number')
-                    ->rules(['nullable', 'numeric', 'min:0'])
-                    ->placeholder(fn ($record) => (string) $record->channel)
+                    ->rules(['nullable', 'regex:'.ChannelNumber::PATTERN])
+                    ->validationMessages(['regex' => __('Use a whole number, or a sub-channel like 5.1.')])
+                    ->placeholder(fn ($record) => (string) $record->resolveChannelNumber())
                     ->getStateUsing(function ($record) {
-                        return $record->pivot?->channel_number ?? null;
+                        return ChannelNumber::format($record->pivot?->channel_number, $record->pivot?->channel_minor);
                     })
                     ->updateStateUsing(function ($record, $state) use ($ownerRecord): void {
                         $ownerRecord->channels()->updateExistingPivot(
                             $record->id,
-                            ['channel_number' => ($state !== '' && $state !== null) ? (int) $state : null]
+                            ChannelNumber::toPivotAttributes($state)
                         );
                     })
                     ->sortable(query: function (Builder $query, string $direction): Builder {
-                        return $query->orderBy('channel_custom_playlist.channel_number', $direction);
+                        return $query->orderBy('channel_custom_playlist.channel_number', $direction)
+                            ->orderByRaw('COALESCE(channel_custom_playlist.channel_minor, 0) '.($direction === 'desc' ? 'desc' : 'asc'));
                     });
             }
             if (method_exists($column, 'getName') && $column->getName() === 'sort') {

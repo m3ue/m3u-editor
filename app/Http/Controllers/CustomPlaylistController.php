@@ -63,11 +63,12 @@ class CustomPlaylistController extends Controller
      * semantics. `channel_number` is only accepted when attaching a single channel, and is
      * applied synchronously since it requires the pivot row to exist immediately.
      *
-     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[], group: string|null, channel_number_applied: int|null}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
+     * @response JsonResponse<array{success: true, message: string, data: array{custom_playlist_uuid: string, queued_channel_ids: int[], group: string|null, channel_number_applied: int|null, channel_minor_applied: int|null}}, 202>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
     #[BodyParameter('ids', 'The channel IDs to attach.', required: true, type: 'int[]', example: [123, 456])]
     #[BodyParameter('group', 'The custom group tag to assign (created if it doesn\'t exist).', type: 'string', example: 'Sports')]
     #[BodyParameter('channel_number', 'The per-playlist channel number. Only valid with a single id.', type: 'int', example: 101)]
+    #[BodyParameter('channel_minor', 'The sub-channel part of the per-playlist number (the 1 in "5.1"). Only valid with channel_number.', type: 'int', example: 1)]
     public function attachChannels(Request $request, string $uuid): JsonResponse
     {
         [$playlist, $error] = $this->resolveOwnedCustomPlaylist($request, $uuid);
@@ -82,11 +83,13 @@ class CustomPlaylistController extends Controller
             'ids.*' => ['integer', Rule::exists('channels', 'id')->where('user_id', $user->id)],
             'group' => 'sometimes|nullable|string|max:255',
             'channel_number' => 'sometimes|nullable|integer|min:0',
+            'channel_minor' => 'sometimes|nullable|integer|min:1|max:9999',
         ]);
 
         $ids = $validated['ids'];
         $group = $validated['group'] ?? null;
         $channelNumber = $validated['channel_number'] ?? null;
+        $channelMinor = $channelNumber === null ? null : ($validated['channel_minor'] ?? null);
 
         if ($channelNumber !== null && count($ids) !== 1) {
             return response()->json([
@@ -99,7 +102,10 @@ class CustomPlaylistController extends Controller
             // Ensure the pivot row exists synchronously so channel_number can be applied
             // immediately, rather than racing the queued attach job below.
             $playlist->channels()->syncWithoutDetaching($ids);
-            $playlist->channels()->updateExistingPivot($ids[0], ['channel_number' => $channelNumber]);
+            $playlist->channels()->updateExistingPivot($ids[0], [
+                'channel_number' => $channelNumber,
+                'channel_minor' => $channelMinor,
+            ]);
         }
 
         AddItemsToCustomPlaylist::dispatch(
@@ -118,6 +124,7 @@ class CustomPlaylistController extends Controller
                 'queued_channel_ids' => $ids,
                 'group' => $group,
                 'channel_number_applied' => $channelNumber,
+                'channel_minor_applied' => $channelMinor,
             ],
         ], 202);
     }
@@ -169,10 +176,11 @@ class CustomPlaylistController extends Controller
      * columns and the detach action's tag handling). The channel must already be attached to
      * the custom playlist.
      *
-     * @response JsonResponse<array{success: true, message: string, data: array{id: int, group: string|null, channel_number: int|null, sort: float|null}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
+     * @response JsonResponse<array{success: true, message: string, data: array{id: int, group: string|null, channel_number: int|null, channel_minor: int|null, sort: float|null}}, 200>|JsonResponse<array{success: false, message: string}, 403>|JsonResponse<array{success: false, message: string}, 404>|JsonResponse<array{success: false, message: string}, 422>
      */
     #[BodyParameter('group', 'The custom group tag to assign, or null to remove the channel\'s group tag.', type: 'string', example: 'Sports')]
     #[BodyParameter('channel_number', 'The per-playlist channel number. Can be set to null to clear it.', type: 'int', example: 101)]
+    #[BodyParameter('channel_minor', 'The sub-channel part of the per-playlist number (the 1 in "5.1"). Cleared when channel_number is set without it.', type: 'int', example: 1)]
     #[BodyParameter('sort', 'The per-playlist sort order. Can be set to null to clear it.', type: 'float', example: 1)]
     public function updateChannelPivot(Request $request, string $uuid, int $id): JsonResponse
     {
@@ -198,6 +206,7 @@ class CustomPlaylistController extends Controller
         $validated = $request->validate([
             'group' => 'sometimes|nullable|string|max:255',
             'channel_number' => 'sometimes|nullable|integer|min:0',
+            'channel_minor' => 'sometimes|nullable|integer|min:1|max:9999',
             'sort' => 'sometimes|nullable|numeric|min:0',
         ]);
 
@@ -208,7 +217,14 @@ class CustomPlaylistController extends Controller
             ], 422);
         }
 
-        $pivotUpdates = array_intersect_key($validated, array_flip(['channel_number', 'sort']));
+        $pivotUpdates = array_intersect_key($validated, array_flip(['channel_number', 'channel_minor', 'sort']));
+        if (array_key_exists('channel_number', $pivotUpdates)) {
+            // A new number replaces the whole number, so a previous sub-channel part is
+            // cleared unless one is sent with it.
+            $pivotUpdates['channel_minor'] = $pivotUpdates['channel_number'] === null
+                ? null
+                : ($validated['channel_minor'] ?? null);
+        }
         if ($pivotUpdates !== []) {
             $playlist->channels()->updateExistingPivot($channel->id, $pivotUpdates);
         }
@@ -239,6 +255,7 @@ class CustomPlaylistController extends Controller
                 'id' => $channel->id,
                 'group' => $channel->tags->first()?->getAttributeValue('name'),
                 'channel_number' => $channel->pivot->channel_number,
+                'channel_minor' => $channel->pivot->channel_minor,
                 'sort' => $channel->pivot->sort === null ? null : (float) $channel->pivot->sort,
             ],
         ]);

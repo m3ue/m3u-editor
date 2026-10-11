@@ -153,6 +153,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
             'enabled',
             'group',
             'channel',
+            'channel_minor',
             'shift',
             'station_id',
             'url',
@@ -279,6 +280,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     'group_id',
                     'shift',
                     'channel',
+                    'channel_minor',
                     'station_id',
                     'sort',
                 ])))
@@ -443,7 +445,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     ->get([
                         'id', 'name', 'name_custom', 'title', 'title_custom', 'stream_id',
                         'stream_id_custom', 'logo_internal', 'enabled', 'group', 'channel',
-                        'shift', 'sort', 'station_id', 'epg_channel_id',
+                        'channel_minor', 'shift', 'sort', 'station_id', 'epg_channel_id',
                     ])
                     ->keyBy('id');
 
@@ -451,7 +453,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
                     ->whereIn('id', $targetIds)
                     ->get([
                         'id', 'name_custom', 'title_custom', 'stream_id_custom', 'logo', 'enabled',
-                        'group', 'group_id', 'shift', 'channel', 'station_id', 'sort', 'epg_channel_id',
+                        'group', 'group_id', 'shift', 'channel', 'channel_minor', 'station_id', 'sort', 'epg_channel_id',
                     ])
                     ->keyBy('id');
 
@@ -841,6 +843,12 @@ class CopyAttributesToPlaylist implements ShouldQueue
 
             // Default copy behavior
             $updateData[$targetField] = $sourceValue;
+
+            // A sub-channel part ("5.1") is copied as a pair with its number, so a
+            // target "2.1" overwritten by a source "7" becomes 7, not 7.1.
+            if ($targetField === 'channel') {
+                $updateData['channel_minor'] = $sourceChannel->channel_minor;
+            }
         }
 
         return $updateData;
@@ -869,6 +877,7 @@ class CopyAttributesToPlaylist implements ShouldQueue
             'stream_id' => $sourceChannel->stream_id ?? null,
             'station_id' => $sourceChannel->station_id ?? null,
             'channel' => $sourceChannel->channel ?? null,
+            'channel_minor' => $sourceChannel->channel_minor ?? null,
             'shift' => $sourceChannel->shift ?? 0,
             'enabled' => $sourceChannel->enabled ?? true,
             'group' => $sourceChannel->group ?? null,

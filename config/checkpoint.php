@@ -315,6 +315,14 @@ return [
         '66a1a4c351d7',
         '6b5bb290e977',
         '4c12ed674220',
+        // OTA sub-channel numbers (issue #1604): the group sort-by-channel branches
+        // gained $tiebreak, a hardcoded SQL literal chosen by `$column === 'channel'`
+        // with the same ternary-validated $direction; the recount statements gained
+        // a literal `channel_minor = NULL`. Same guarantees as above, new hashes.
+        'f8dbb7ab0f2d',
+        '74d70cc2f5d5',
+        'fcd1c278e168',
+        'aa24a598f9c3',
 
         // Migration 2026_04_06: one-time data migration building a CASE
         // expression from UUIDs generated in the same migration — no user input.

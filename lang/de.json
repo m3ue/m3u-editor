@@ -5438,6 +5438,8 @@
     "Use Simplified Default": "Vereinfachten Standard verwenden",
     "Use Simplified Default navigation": "Vereinfachte Standardnavigation verwenden",
     "Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.": "TMDB-ID verwenden, um denselben Film über Anbieter hinweg zusammenzuführen, wenn Stream-IDs unterschiedlich sind. VOD-Kanäle ohne TMDB-ID werden übersprungen.",
+    "Use a decimal for a sub-channel, e.g. 5.1.": "Für einen Unterkanal eine Dezimalzahl verwenden, z. B. 5.1.",
+    "Use a whole number, or a sub-channel like 5.1.": "Eine ganze Zahl oder einen Unterkanal wie 5.1 verwenden.",
     "Use an existing Emby library": "Eine vorhandene Emby-Bibliothek verwenden",
     "Use easy editor to manage groups and channels in one place": "Verwenden Sie den einfachen Editor, um Gruppen und Kanäle an einem Ort zu verwalten",
     "Use for caching": "Für das Caching verwenden",

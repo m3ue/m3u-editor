@@ -54,6 +54,7 @@ use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
 use App\Support\EpgProgrammeArtwork;
 use App\Support\EpisodeNumberParser;
 use App\Support\SeriesKey;
@@ -572,6 +573,10 @@ class XtreamApiController extends Controller
                     ->selectRaw(
                         '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
                         [$customPlaylistId]
+                    )
+                    ->selectRaw(
+                        '(SELECT ccp.channel_minor FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_minor',
+                        [$customPlaylistId]
                     );
             }
 
@@ -638,9 +643,12 @@ class XtreamApiController extends Controller
                         $channelCategoryId = XtreamCategoryService::channelStreamCategoryId($channel);
                     }
 
-                    $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
-                        ? (int) $channel->ccp_channel_number
-                        : $channel->channel;
+                    $channelNo = ChannelNumber::resolve(
+                        $channel->channel,
+                        $channel->channel_minor,
+                        $isCustomPlaylist ? $channel->ccp_channel_number : null,
+                        $isCustomPlaylist ? $channel->ccp_channel_minor : null,
+                    );
                     $channelNo = $categoryNumbers !== null
                         ? ($categoryNumbers[$channel->id] ?? $channelNo)
                         : $numberSequence->next($channelNo);
@@ -655,7 +663,9 @@ class XtreamApiController extends Controller
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
                     $liveStream = [
-                        'num' => $channelNo,
+                        // Xtream clients parse `num` as an integer, so a sub-channel
+                        // ("5.1") reports its major number here; tvg-id keeps the full one.
+                        'num' => ChannelNumber::major($channelNo),
                         'name' => $channel->title_custom ?? $channel->title,
                         'stream_type' => 'live',
                         'stream_id' => $channel->id,
@@ -713,6 +723,10 @@ class XtreamApiController extends Controller
                     )
                     ->selectRaw(
                         '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
+                        [$customPlaylistId]
+                    )
+                    ->selectRaw(
+                        '(SELECT ccp.channel_minor FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_minor',
                         [$customPlaylistId]
                     );
             }
@@ -807,15 +821,18 @@ class XtreamApiController extends Controller
                     }
 
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
-                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
-                        ? (int) $channel->ccp_channel_number
-                        : $channel->channel;
+                    $vodChannelNo = ChannelNumber::resolve(
+                        $channel->channel,
+                        $channel->channel_minor,
+                        $isCustomPlaylist ? $channel->ccp_channel_number : null,
+                        $isCustomPlaylist ? $channel->ccp_channel_minor : null,
+                    );
                     $vodChannelNo = $categoryNumbers !== null
                         ? ($categoryNumbers[$channel->id] ?? $vodChannelNo)
                         : $numberSequence->next($vodChannelNo);
 
                     echo json_encode([
-                        'num' => $vodChannelNo,
+                        'num' => ChannelNumber::major($vodChannelNo),
                         'name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->title_custom ?? $channel->title,
                         'year' => $vodFileNameService->resolveMovieYearAsInt($channel),

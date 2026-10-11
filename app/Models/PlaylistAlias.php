@@ -768,7 +768,7 @@ class PlaylistAlias extends Model
 
         if ($this->custom_playlist_id) {
             $relation = $this->belongsToMany(Channel::class, 'channel_custom_playlist', 'custom_playlist_id', 'channel_id', 'custom_playlist_id', 'id')
-                ->withPivot(['channel_number']);
+                ->withPivot(['channel_number', 'channel_minor']);
 
             // Custom playlists group their channels with per-playlist tags rather than
             // provider groups, so the filter is matched against the tag the channel carries

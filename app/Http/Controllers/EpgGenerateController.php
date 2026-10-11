@@ -164,10 +164,7 @@ class EpgGenerateController extends Controller
             }
 
             // Get/set the channel number (use pivot channel_number for custom playlists)
-            $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                ? (int) $channel->pivot->channel_number
-                : $channel->channel;
-            $channelNo = $numberSequence->next($channelNo);
+            $channelNo = $numberSequence->next($channel->resolveChannelNumber($isCustomContext));
 
             // Get the `tvg-id` based on the playlist setting
             $tvgId = $channel->resolveTvgId($idChannelBy, $channelNo);
