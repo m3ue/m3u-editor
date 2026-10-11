@@ -16,6 +16,7 @@ use App\Services\ChannelNumberSequence;
 use App\Services\EpgCacheService;
 use App\Services\EpisodeNumberNormalizer;
 use App\Services\NetworkEpgService;
+use App\Support\EpgProgrammeArtwork;
 use Carbon\Carbon;
 use DOMDocument;
 use DOMElement;
@@ -385,41 +386,41 @@ class EpgGenerateController extends Controller
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
+                                $images = is_array($programme['images'] ?? null) ? $programme['images'] : [];
+                                if ($programme['icon']) {
+                                    $progXml .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($programme['icon'], $epg, $logoProxyEnabled)).'"/>'.PHP_EOL;
+                                }
+                                foreach ($images as $image) {
+                                    $rawUrl = trim((string) ($image['url'] ?? ''));
+                                    if ($rawUrl === '') {
+                                        continue;
+                                    }
+                                    $width = (int) ($image['width'] ?? 0);
+                                    $height = (int) ($image['height'] ?? 0);
+                                    $dimensions = $width > 0 && $height > 0 ? ' width="'.$width.'" height="'.$height.'"' : '';
+                                    $progXml .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($rawUrl, $epg, $logoProxyEnabled)).'"'.$dimensions.'/>'.PHP_EOL;
+                                }
                                 foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
                                     $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
                                         ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
                                         : '';
                                     $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
-                                if ($programme['icon']) {
-                                    $icon = $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($programme['icon'], $epg)
-                                        ? LogoProxyController::generateProxyUrl($programme['icon'])
-                                        : $programme['icon'];
-                                    $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
-                                }
-                                // Program artwork images (NEW)
-                                if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
-                                    foreach ($programme['images'] as $image) {
-                                        $rawUrl = $image['url'] ?? '';
-                                        $proxiedUrl = $logoProxyEnabled && $rawUrl && ! $this->isSchedulesDirectImageUrl($rawUrl, $epg)
-                                            ? LogoProxyController::generateProxyUrl($rawUrl)
-                                            : $rawUrl;
-
-                                        $url = $this->escapeXml($proxiedUrl);
-                                        $type = $this->escapeXml($image['type']);
-                                        $width = $this->escapeXml($image['width']);
-                                        $height = $this->escapeXml($image['height']);
-                                        $orient = $this->escapeXml($image['orient']);
-                                        $size = $this->escapeXml($image['size']);
-
-                                        $progXml .= "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n";
-                                    }
+                                if (! empty($programme['new']) && $programme['new']) {
+                                    $progXml .= '    <new />'.PHP_EOL;
                                 }
                                 if ($programme['rating']) {
                                     $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
-                                if (! empty($programme['new']) && $programme['new']) {
-                                    $progXml .= '    <new />'.PHP_EOL;
+                                foreach ($this->programmeRoleImages($images) as $image) {
+                                    $attributes = ' type="'.$image['type'].'"';
+                                    if ($image['size'] !== null) {
+                                        $attributes .= ' size="'.$image['size'].'"';
+                                    }
+                                    if ($image['orient'] !== null) {
+                                        $attributes .= ' orient="'.$image['orient'].'"';
+                                    }
+                                    $progXml .= '    <image'.$attributes.'>'.$this->escapeXml($this->programmeImageUrl($image['url'], $epg, $logoProxyEnabled)).'</image>'.PHP_EOL;
                                 }
 
                                 $progXml .= '  </programme>'.PHP_EOL;
@@ -906,6 +907,53 @@ class EpgGenerateController extends Controller
         }
 
         return ! in_array($matches[1], ['.', '..'], true);
+    }
+
+    /**
+     * Route programme artwork through the logo proxy when enabled, except
+     * first-party Schedules Direct images that are already served locally.
+     */
+    private function programmeImageUrl(string $url, Epg $epg, bool $logoProxyEnabled): string
+    {
+        return $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($url, $epg)
+            ? LogoProxyController::generateProxyUrl($url)
+            : $url;
+    }
+
+    /**
+     * Role-qualified XMLTV <image> entries: the portrait poster and the
+     * landscape backdrop picked by {@see EpgProgrammeArtwork}, plus any
+     * still/person/character artwork as declared. Emitted in addition to
+     * the plain <icon> list so legacy consumers keep working.
+     *
+     * @param  array<int, mixed>  $images
+     * @return list<array{url: string, type: string, size: int|null, orient: string|null}>
+     */
+    private function programmeRoleImages(array $images): array
+    {
+        $roleImages = [];
+        $add = function (?array $image, string $type) use (&$roleImages): void {
+            $url = trim((string) ($image['url'] ?? ''));
+            if ($image === null || $url === '' || isset($roleImages[$url.'|'.$type])) {
+                return;
+            }
+            $roleImages[$url.'|'.$type] = [
+                'url' => $url,
+                'type' => $type,
+                'size' => EpgProgrammeArtwork::size($image),
+                'orient' => EpgProgrammeArtwork::orientation($image),
+            ];
+        };
+
+        $add(EpgProgrammeArtwork::poster($images), 'poster');
+        $add(EpgProgrammeArtwork::backdrop($images), 'backdrop');
+        foreach ($images as $image) {
+            if (is_array($image) && in_array(EpgProgrammeArtwork::type($image), ['still', 'person', 'character'], true)) {
+                $add($image, EpgProgrammeArtwork::type($image));
+            }
+        }
+
+        return array_values($roleImages);
     }
 
     /**

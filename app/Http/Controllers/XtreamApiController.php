@@ -54,6 +54,7 @@ use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
+use App\Support\EpgProgrammeArtwork;
 use App\Support\EpisodeNumberParser;
 use App\Support\SeriesKey;
 use App\Support\TmdbRating;
@@ -1915,7 +1916,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist);
                     $count++;
                 }
             }
@@ -1995,7 +1996,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist);
                 }
             }
 
@@ -2527,18 +2528,15 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
+     * @return array{poster_url?: string, backdrop_url?: string, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
-        $details = [];
+        $details = $this->epgProgrammeArtwork($programme, $playlist);
 
-        $icon = $this->epgWideProgrammeImage($programme['images'] ?? null)
-            ?? trim((string) ($programme['icon'] ?? ''));
+        $icon = trim((string) (EpgProgrammeArtwork::wide($programme['images'] ?? null)['url'] ?? $programme['icon'] ?? ''));
         if ($icon !== '' && filter_var($icon, FILTER_VALIDATE_URL)) {
-            $details['icon'] = $playlist->enable_logo_proxy && ! str_starts_with($icon, url('/'))
-                ? LogoProxyController::generateProxyUrl($icon)
-                : $icon;
+            $details['icon'] = $this->epgProgrammeImageUrl($icon, $playlist);
         }
 
         foreach (['category', 'rating'] as $key) {
@@ -2570,42 +2568,34 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * The guide frames programme art at 16:9, so when the source carries
-     * alternative images (Schedules Direct sends several aspect ratios, and
-     * the cache keeps every <icon> after the first under `images`), pick the
-     * landscape one closest to 16:9, largest first on ties. Null when there
-     * is none, leaving the primary icon in place.
+     * Role-specific programme artwork for Xtream EPG listings: a portrait
+     * `poster_url` and a landscape `backdrop_url`, each only when the cached
+     * images actually contain one (see {@see EpgProgrammeArtwork}).
+     *
+     * @param  array<string, mixed>  $programme
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return array{poster_url?: string, backdrop_url?: string}
      */
-    private function epgWideProgrammeImage(mixed $images): ?string
+    private function epgProgrammeArtwork(array $programme, $playlist): array
     {
-        if (! is_array($images)) {
-            return null;
+        $artwork = [];
+        $images = $programme['images'] ?? null;
+        if ($poster = EpgProgrammeArtwork::poster($images)) {
+            $artwork['poster_url'] = $this->epgProgrammeImageUrl(trim($poster['url']), $playlist);
+        }
+        if ($backdrop = EpgProgrammeArtwork::backdrop($images)) {
+            $artwork['backdrop_url'] = $this->epgProgrammeImageUrl(trim($backdrop['url']), $playlist);
         }
 
-        $bestUrl = null;
-        $bestDistance = null;
-        $bestWidth = 0;
-        foreach ($images as $image) {
-            if (! is_array($image)) {
-                continue;
-            }
+        return $artwork;
+    }
 
-            $url = trim((string) ($image['url'] ?? ''));
-            $width = (int) ($image['width'] ?? 0);
-            $height = (int) ($image['height'] ?? 0);
-            if ($url === '' || $height <= 0 || $width <= $height || ! filter_var($url, FILTER_VALIDATE_URL)) {
-                continue;
-            }
-
-            $distance = round(abs($width / $height - 16 / 9), 2);
-            if ($bestDistance === null || $distance < $bestDistance || ($distance === $bestDistance && $width > $bestWidth)) {
-                $bestUrl = $url;
-                $bestDistance = $distance;
-                $bestWidth = $width;
-            }
-        }
-
-        return $bestUrl;
+    /** @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist */
+    private function epgProgrammeImageUrl(string $url, $playlist): string
+    {
+        return $playlist->enable_logo_proxy && ! str_starts_with($url, url('/'))
+            ? LogoProxyController::generateProxyUrl($url)
+            : $url;
     }
 
     /**

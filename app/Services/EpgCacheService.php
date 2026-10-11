@@ -12,6 +12,7 @@ use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpgProgrammeArtwork;
 use App\Support\EpgProgrammeNormalizer;
 use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
@@ -285,20 +286,45 @@ class EpgCacheService
                 }
                 break;
             case 'icon':
+                // Only the programme's own <icon>, not ones nested in <rating>,
+                // <star-rating> or <credits>.
+                if ($reader->depth !== 1) {
+                    break;
+                }
                 if (! $programme['icon']) {
                     $programme['icon'] = trim($reader->getAttribute('src') ?: '');
                 } else {
                     $imageUrl = trim($reader->getAttribute('src') ?: '');
                     if ($imageUrl) {
+                        // No role or orientation is assumed when the source omits it.
                         $programme['images'][] = [
                             'url' => $imageUrl,
-                            'type' => trim($reader->getAttribute('type') ?: 'poster'),
+                            'type' => strtolower(trim($reader->getAttribute('type') ?: '')),
                             'width' => (int) ($reader->getAttribute('width') ?: 0),
                             'height' => (int) ($reader->getAttribute('height') ?: 0),
-                            'orient' => trim($reader->getAttribute('orient') ?: 'P'),
-                            'size' => (int) ($reader->getAttribute('size') ?: 1),
+                            'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
+                            'size' => (int) ($reader->getAttribute('size') ?: 0),
                         ];
                     }
+                }
+                break;
+            case 'image':
+                // XMLTV <image type="poster" orient="P" size="3">URL</image>. Credits
+                // can nest <image> for actor headshots, so only direct children count.
+                if ($reader->depth !== 1) {
+                    break;
+                }
+                $type = strtolower(trim($reader->getAttribute('type') ?: ''));
+                $imageUrl = trim($reader->readString() ?: '');
+                if ($imageUrl !== '' && in_array($type, EpgProgrammeArtwork::ROLES, true)) {
+                    $programme['images'][] = [
+                        'url' => $imageUrl,
+                        'type' => $type,
+                        'width' => 0,
+                        'height' => 0,
+                        'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
+                        'size' => (int) ($reader->getAttribute('size') ?: 0),
+                    ];
                 }
                 break;
             case 'new':

@@ -361,7 +361,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             ],
             'XtreamShortEpg' => [
                 'actions' => 'get_short_epg',
-                'description' => 'The current and next `limit` programmes for `stream_id`.',
+                'description' => 'The current and next `limit` programmes for `stream_id`. `poster_url` (portrait) and `backdrop_url` (landscape) are present only when the guide source has that artwork.',
                 'example' => [
                     'epg_listings' => [
                         [
@@ -378,6 +378,8 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'stop_timestamp' => '1755155700',
                             'now_playing' => 1,
                             'has_archive' => 0,
+                            'poster_url' => 'https://example.com/art/morning-news-poster.jpg',
+                            'backdrop_url' => 'https://example.com/art/morning-news-wide.jpg',
                         ],
                     ],
                 ],
@@ -400,6 +402,8 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'stop_timestamp' => '1755155700',
                             'now_playing' => 1,
                             'has_archive' => 0,
+                            'poster_url' => 'https://example.com/art/morning-news-poster.jpg',
+                            'backdrop_url' => 'https://example.com/art/morning-news-wide.jpg',
                         ],
                     ],
                 ],

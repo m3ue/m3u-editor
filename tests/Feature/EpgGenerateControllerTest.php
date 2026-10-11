@@ -975,3 +975,103 @@ test('aed pre-event padding stops at the dummy epg window for events far in the 
 
     Carbon::setTestNow();
 });
+
+test('programme artwork keeps its role from XMLTV import through epg.xml output', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+        'enable_logo_proxy' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/artwork.xml',
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.artwork',
+        'display_name' => 'Artwork Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'artwork-channel',
+        'title' => 'Artwork Channel',
+        'channel' => 1,
+    ]);
+
+    $date = now()->format('Y-m-d');
+    $start = now()->startOfDay()->addHour()->format('YmdHis O');
+    $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="source.artwork"><display-name>Artwork Channel</display-name></channel>
+  <programme start="{$start}" stop="{$stop}" channel="source.artwork">
+    <title>Artwork Programme</title>
+    <credits>
+      <actor>Someone<image type="person">https://example.com/actor.jpg</image></actor>
+    </credits>
+    <icon src="https://example.com/primary.jpg" />
+    <icon src="https://example.com/untyped.jpg" />
+    <icon src="https://example.com/wide.jpg" width="1920" height="1080" />
+    <episode-num system="xmltv_ns">1 . 4 .</episode-num>
+    <new />
+    <rating system="VCHIP"><value>TV-14</value><icon src="https://example.com/tv14.png" /></rating>
+    <image type="poster" orient="P" size="3">https://example.com/poster.jpg</image>
+    <image type="still" size="2">https://example.com/still.jpg</image>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    $cachedProgramme = app(EpgCacheService::class)
+        ->getCachedProgrammes($epg, $date, ['source.artwork'])['source.artwork'][0];
+
+    // Untyped icons are not assumed to be portrait posters, and nested
+    // credits/rating images are not programme artwork.
+    expect($cachedProgramme['icon'])->toBe('https://example.com/primary.jpg')
+        ->and($cachedProgramme['images'])->toBe([
+            ['url' => 'https://example.com/untyped.jpg', 'type' => '', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 0],
+            ['url' => 'https://example.com/wide.jpg', 'type' => '', 'width' => 1920, 'height' => 1080, 'orient' => '', 'size' => 0],
+            ['url' => 'https://example.com/poster.jpg', 'type' => 'poster', 'width' => 0, 'height' => 0, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://example.com/still.jpg', 'type' => 'still', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 2],
+        ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz")->assertOk();
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+
+    $programme = (new DOMXPath($document))->query('//programme[@channel="artwork-channel"]')->item(0);
+    $children = [];
+    foreach ($programme->childNodes as $child) {
+        if ($child instanceof DOMElement) {
+            $attributes = [];
+            foreach ($child->attributes as $attribute) {
+                $attributes[$attribute->name] = $attribute->value;
+            }
+            $children[] = [$child->tagName, $attributes, in_array($child->tagName, ['image', 'title'], true) ? $child->textContent : null];
+        }
+    }
+
+    // DTD order (icon* before episode-num*, new before rating, image* last),
+    // and no non-standard type/orient/size attributes on <icon>.
+    expect($children)->toBe([
+        ['title', [], 'Artwork Programme'],
+        ['icon', ['src' => 'https://example.com/primary.jpg'], null],
+        ['icon', ['src' => 'https://example.com/untyped.jpg'], null],
+        ['icon', ['src' => 'https://example.com/wide.jpg', 'width' => '1920', 'height' => '1080'], null],
+        ['icon', ['src' => 'https://example.com/poster.jpg'], null],
+        ['icon', ['src' => 'https://example.com/still.jpg'], null],
+        ['episode-num', ['system' => 'xmltv_ns'], null],
+        ['new', [], null],
+        ['rating', [], null],
+        ['image', ['type' => 'poster', 'size' => '3', 'orient' => 'P'], 'https://example.com/poster.jpg'],
+        ['image', ['type' => 'backdrop', 'size' => '3', 'orient' => 'L'], 'https://example.com/wide.jpg'],
+        ['image', ['type' => 'still', 'size' => '2'], 'https://example.com/still.jpg'],
+    ]);
+});
