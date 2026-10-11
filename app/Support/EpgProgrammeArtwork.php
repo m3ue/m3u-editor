@@ -17,7 +17,9 @@ class EpgProgrammeArtwork
 
     /**
      * The portrait poster: an image typed `poster` (or untyped) whose
-     * orientation is portrait. Known dimensions rank first, then the largest.
+     * orientation is portrait, else a typed `poster` with no orientation
+     * at all (XMLTV makes <image orient> optional). Known-portrait images
+     * rank first, then the largest.
      *
      * @return array<string, mixed>|null
      */
@@ -25,11 +27,15 @@ class EpgProgrammeArtwork
     {
         $posters = array_values(array_filter(
             self::validImages($images),
-            fn (array $image): bool => in_array(self::type($image), ['poster', ''], true)
-                && self::orientation($image) === 'P',
+            fn (array $image): bool => match (self::orientation($image)) {
+                'P' => in_array(self::type($image), ['poster', ''], true),
+                null => self::type($image) === 'poster',
+                default => false,
+            },
         ));
 
-        usort($posters, fn (array $a, array $b): int => self::area($b) <=> self::area($a));
+        usort($posters, fn (array $a, array $b): int => [self::orientation($b) === 'P', self::area($b)]
+            <=> [self::orientation($a) === 'P', self::area($a)]);
 
         return $posters[0] ?? null;
     }

@@ -351,6 +351,8 @@ class EpgGenerateController extends Controller
                         }
 
                         foreach ($programmes as $programme) {
+                            // Artwork doesn't depend on the mapped channel, so build it once.
+                            $artworkXml = $this->programmeArtworkXml($programme, $epg, $logoProxyEnabled);
                             foreach ($channelMapping[$channelId] as $mappedData) {
                                 $mappedChannelId = $mappedData['tvg_id'];
                                 $tvgShift = $mappedData['tvg_shift'];
@@ -386,20 +388,7 @@ class EpgGenerateController extends Controller
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
-                                $images = is_array($programme['images'] ?? null) ? $programme['images'] : [];
-                                if ($programme['icon']) {
-                                    $progXml .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($programme['icon'], $epg, $logoProxyEnabled)).'"/>'.PHP_EOL;
-                                }
-                                foreach ($images as $image) {
-                                    $rawUrl = trim((string) ($image['url'] ?? ''));
-                                    if ($rawUrl === '') {
-                                        continue;
-                                    }
-                                    $width = (int) ($image['width'] ?? 0);
-                                    $height = (int) ($image['height'] ?? 0);
-                                    $dimensions = $width > 0 && $height > 0 ? ' width="'.$width.'" height="'.$height.'"' : '';
-                                    $progXml .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($rawUrl, $epg, $logoProxyEnabled)).'"'.$dimensions.'/>'.PHP_EOL;
-                                }
+                                $progXml .= $artworkXml['icons'];
                                 foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
                                     $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
                                         ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
@@ -412,16 +401,7 @@ class EpgGenerateController extends Controller
                                 if ($programme['rating']) {
                                     $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
-                                foreach ($this->programmeRoleImages($images) as $image) {
-                                    $attributes = ' type="'.$image['type'].'"';
-                                    if ($image['size'] !== null) {
-                                        $attributes .= ' size="'.$image['size'].'"';
-                                    }
-                                    if ($image['orient'] !== null) {
-                                        $attributes .= ' orient="'.$image['orient'].'"';
-                                    }
-                                    $progXml .= '    <image'.$attributes.'>'.$this->escapeXml($this->programmeImageUrl($image['url'], $epg, $logoProxyEnabled)).'</image>'.PHP_EOL;
-                                }
+                                $progXml .= $artworkXml['images'];
 
                                 $progXml .= '  </programme>'.PHP_EOL;
                                 echo $progXml;
@@ -907,6 +887,46 @@ class EpgGenerateController extends Controller
         }
 
         return ! in_array($matches[1], ['.', '..'], true);
+    }
+
+    /**
+     * A programme's XMLTV artwork: the plain <icon> list (placed before
+     * <episode-num>) and the role-qualified <image> list (placed last), per
+     * the XMLTV DTD element order.
+     *
+     * @param  array<string, mixed>  $programme
+     * @return array{icons: string, images: string}
+     */
+    private function programmeArtworkXml(array $programme, Epg $epg, bool $logoProxyEnabled): array
+    {
+        $icons = '';
+        $roleImages = '';
+        $images = is_array($programme['images'] ?? null) ? $programme['images'] : [];
+        if ($programme['icon']) {
+            $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($programme['icon'], $epg, $logoProxyEnabled)).'"/>'.PHP_EOL;
+        }
+        foreach ($images as $image) {
+            $rawUrl = trim((string) ($image['url'] ?? ''));
+            if ($rawUrl === '') {
+                continue;
+            }
+            $width = (int) ($image['width'] ?? 0);
+            $height = (int) ($image['height'] ?? 0);
+            $dimensions = $width > 0 && $height > 0 ? ' width="'.$width.'" height="'.$height.'"' : '';
+            $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($rawUrl, $epg, $logoProxyEnabled)).'"'.$dimensions.'/>'.PHP_EOL;
+        }
+        foreach ($this->programmeRoleImages($images) as $image) {
+            $attributes = ' type="'.$image['type'].'"';
+            if ($image['size'] !== null) {
+                $attributes .= ' size="'.$image['size'].'"';
+            }
+            if ($image['orient'] !== null) {
+                $attributes .= ' orient="'.$image['orient'].'"';
+            }
+            $roleImages .= '    <image'.$attributes.'>'.$this->escapeXml($this->programmeImageUrl($image['url'], $epg, $logoProxyEnabled)).'</image>'.PHP_EOL;
+        }
+
+        return ['icons' => $icons, 'images' => $roleImages];
     }
 
     /**

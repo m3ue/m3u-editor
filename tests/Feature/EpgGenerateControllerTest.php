@@ -1003,6 +1003,7 @@ test('programme artwork keeps its role from XMLTV import through epg.xml output'
     $date = now()->format('Y-m-d');
     $start = now()->startOfDay()->addHour()->format('YmdHis O');
     $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $later = now()->startOfDay()->addHours(3)->format('YmdHis O');
     $xml = <<<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <tv>
@@ -1020,6 +1021,10 @@ test('programme artwork keeps its role from XMLTV import through epg.xml output'
     <rating system="VCHIP"><value>TV-14</value><icon src="https://example.com/tv14.png" /></rating>
     <image type="poster" orient="P" size="3">https://example.com/poster.jpg</image>
     <image type="still" size="2">https://example.com/still.jpg</image>
+  </programme>
+  <programme start="{$stop}" stop="{$later}" channel="source.artwork">
+    <title>Orientless Poster</title>
+    <image type="poster" size="3">https://example.com/orientless-poster.jpg</image>
   </programme>
 </tv>
 XML;
@@ -1074,4 +1079,8 @@ XML;
         ['image', ['type' => 'backdrop', 'size' => '3', 'orient' => 'L'], 'https://example.com/wide.jpg'],
         ['image', ['type' => 'still', 'size' => '2'], 'https://example.com/still.jpg'],
     ]);
+
+    // XMLTV makes <image orient> optional: a typed poster without one keeps its role.
+    $xpath = new DOMXPath($document);
+    expect($xpath->query('//programme[title="Orientless Poster"]/image[@type="poster" and @size="3" and not(@orient) and .="https://example.com/orientless-poster.jpg"]'))->toHaveCount(1);
 });

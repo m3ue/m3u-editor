@@ -507,6 +507,17 @@ it('adds role-specific poster and backdrop artwork to detailed batch listings wi
         ],
     ]);
 
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles', [
+        'id' => 'roles-3', 'title' => 'Orientless Poster', 'desc' => '',
+        'start' => Carbon::now()->addHours(4)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHours(5)->format('Y-m-d H:i:s'),
+        'images' => [
+            // From <image type="poster" size="3">: XMLTV makes orient optional.
+            ['url' => 'https://images.example/orientless.jpg', 'type' => 'poster', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 3],
+            ['url' => 'https://images.example/untyped.jpg', 'type' => '', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 0],
+        ],
+    ]);
+
     $response = $this->getJson(batchUrl($this->username, $this->password, [
         'stream_ids' => (string) $ctx['channel']->id,
         'details' => 1,
@@ -520,7 +531,8 @@ it('adds role-specific poster and backdrop artwork to detailed batch listings wi
         'backdrop_url' => 'https://images.example/iconic-wide.jpg',
     ])
         ->and($listings['roles-2']['backdrop_url'])->toBe('https://images.example/mislabelled.jpg')
-        ->and($listings['roles-2'])->not->toHaveKey('poster_url');
+        ->and($listings['roles-2'])->not->toHaveKey('poster_url')
+        ->and($listings['roles-3']['poster_url'])->toBe('https://images.example/orientless.jpg');
 });
 
 it('keeps programme artwork out of batch listings unless details=1', function () {
