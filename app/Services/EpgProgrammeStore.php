@@ -241,7 +241,7 @@ class EpgProgrammeStore
         $compactPath = $this->buildingPath.'.compact';
 
         try {
-            $this->pdo->exec('VACUUM INTO '.$this->pdo->quote($compactPath));
+            $this->pdo->prepare('VACUUM INTO ?')->execute([$compactPath]);
 
             return $compactPath;
         } catch (\PDOException) {
