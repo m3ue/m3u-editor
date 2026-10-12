@@ -233,6 +233,8 @@ class EpgProgrammeStore
      * streams straight to a new file; a plain `VACUUM` would build its copy in
      * temp storage, which this connection keeps in memory. Compaction is only an
      * optimization, so a failure (e.g. disk full) keeps the uncompacted store.
+     * A copy orphaned by a hard crash shares the `.building-*` prefix and is
+     * removed with the rest of the cache dir by the next rebuild's clearCache().
      *
      * @return string|null Path of the compacted copy, or null if it failed
      */

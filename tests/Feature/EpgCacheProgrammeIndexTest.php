@@ -268,3 +268,23 @@ it('skips compaction when only a few duplicates were removed', function () {
         ->and((int) $pdo->query('SELECT COUNT(*) FROM programmes')->fetchColumn())->toBe(201)
         ->and(glob(dirname($path).'/*.{building,compact}*', GLOB_BRACE))->toBe([]);
 });
+
+it('sweeps build sidecars left behind by a crashed run on the next rebuild', function () {
+    ['epg' => $epg] = cacheXmltvForIndex(
+        ['channel.a'],
+        [['channel' => 'channel.a', 'title' => 'A One', 'startHour' => 1]],
+    );
+
+    $storePath = "epg-cache/{$epg->uuid}/v2/programmes.sqlite";
+    $leftovers = ["{$storePath}.building-1234-deadbeef", "{$storePath}.building-1234-deadbeef.compact"];
+    foreach ($leftovers as $leftover) {
+        Storage::disk('local')->put($leftover, 'partial build');
+    }
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    foreach ($leftovers as $leftover) {
+        expect(Storage::disk('local')->exists($leftover))->toBeFalse();
+    }
+    expect(Storage::disk('local')->exists($storePath))->toBeTrue();
+});
