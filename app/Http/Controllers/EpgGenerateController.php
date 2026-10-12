@@ -693,28 +693,10 @@ class EpgGenerateController extends Controller
         $filename = Str::slug($playlist->name).($compressed ? '.xml.gz' : '.xml');
         $contentType = $compressed ? 'application/gzip' : 'application/xml';
 
-        if ($compressed) {
-            // For compressed, keep existing behaviour (generate then compress)
-            // NOTE: streaming gzip on-the-fly is more complex; keep as-is for safety
-            ob_start();
-            $this->generate($playlist);
-            $content = ob_get_clean();
-            $compressedContent = gzencode($content, 9);
-
-            // Save to cache
-            $disk->put($cacheFilePath, $compressedContent);
-
-            return response($compressedContent, 200, [
-                'Access-Control-Allow-Origin' => '*',
-                'Cache-Control' => 'no-store, no-cache, must-revalidate',
-                'Content-Disposition' => "attachment; filename=\"$filename\"",
-                'Content-Type' => $contentType,
-                'X-EPG-Cache' => 'MISS',
-            ]);
-        }
-
-        // For regular XML, stream generation directly to the client and write cache incrementally
-        return response()->stream(function () use ($playlist, $disk, $cacheFilePath) {
+        // Stream generation directly to the client and write the cache incrementally.
+        // The compressed variant gzips each chunk on the fly, so neither path ever
+        // holds the whole document (which can run to gigabytes) in memory.
+        return response()->stream(function () use ($playlist, $disk, $cacheFilePath, $compressed) {
             // Resolve full path for cache and ensure directory exists
             $fullPath = $disk->path($cacheFilePath);
             $dir = dirname($fullPath);
@@ -752,22 +734,31 @@ class EpgGenerateController extends Controller
             };
             register_shutdown_function($cleanupShutdown);
 
+            // If the cache can't be written, still stream (and compress) to the client
             $fh = @fopen($tmpPath, 'w');
-            if ($fh === false) {
-                // Fallback: if we can't write cache, just stream without caching
-                $this->generate($playlist);
 
-                return;
-            }
+            // Incremental gzip context; the final chunk (with the gzip trailer) is
+            // emitted when the output buffer is closed.
+            $deflate = $compressed ? deflate_init(ZLIB_ENCODING_GZIP, ['level' => 6]) : null;
 
-            // Start an output buffer with a callback that writes each flushed chunk to cache
-            ob_start(function ($buffer) use ($fh) {
-                // Write chunk to cache file
-                @fwrite($fh, $buffer);
+            // Start an output buffer with a callback that compresses (if needed) each
+            // flushed chunk, writes it to the cache file and passes it to the client
+            $outerBufferLevel = ob_get_level();
+            ob_start(function (string $buffer, int $phase) use (&$fh, $deflate) {
+                if ($deflate !== null) {
+                    $isFinal = (bool) ($phase & PHP_OUTPUT_HANDLER_FINAL);
+                    $buffer = deflate_add($deflate, $buffer, $isFinal ? ZLIB_FINISH : ZLIB_NO_FLUSH);
+                }
+
+                // Guard: the handle is closed in `finally`, but a buffer left open by a
+                // failed generation is only flushed (and calls back here) afterwards
+                if (is_resource($fh)) {
+                    @fwrite($fh, $buffer);
+                }
 
                 // Return buffer so it is sent to the client
                 return $buffer;
-            }, 4096);
+            }, 65536);
 
             try {
                 // Generate will echo directly; each echo will be passed through the ob callback
@@ -776,8 +767,9 @@ class EpgGenerateController extends Controller
                 // Mark completed only after successful generation
                 $completed = true;
 
-                // Flush any remaining buffers
-                while (ob_get_level() > 0) {
+                // Flush our buffer (and anything generate() left open above it) so the
+                // final gzip chunk is written before the cache file is closed
+                while (ob_get_level() > $outerBufferLevel) {
                     ob_end_flush();
                 }
             } finally {
@@ -785,12 +777,10 @@ class EpgGenerateController extends Controller
                 if (is_resource($fh)) {
                     fclose($fh);
                 }
-                if ($completed) {
+                if ($completed && $fh !== false) {
                     @rename($tmpPath, $fullPath);
-                } else {
-                    if (file_exists($tmpPath)) {
-                        @unlink($tmpPath);
-                    }
+                } elseif (file_exists($tmpPath)) {
+                    @unlink($tmpPath);
                 }
             }
         }, 200, [
@@ -800,33 +790,6 @@ class EpgGenerateController extends Controller
             'Content-Type' => $contentType,
             'X-EPG-Cache' => 'MISS',
         ]);
-    }
-
-    /**
-     * Gzip the file
-     *
-     * @param  string  $filename
-     * @param  string  $disk
-     * @param  bool  $delete_original
-     * @return bool
-     */
-    private function gzip($filename, $disk = 'local', $delete_original = false)
-    {
-        $disk = Storage::disk($disk);
-        $data = $disk->get($filename);
-        $out_file = "$filename.gz";
-
-        $gzdata = gzencode($data, 9);
-        $disk->put($out_file, $gzdata);
-        $fp = fopen($disk->path($out_file), 'w');
-        $result = fwrite($fp, $gzdata);
-        fclose($fp);
-
-        if ($result && $delete_original) {
-            $disk->delete($filename);
-        }
-
-        return $result > 0;
     }
 
     /**
@@ -1032,6 +995,11 @@ class EpgGenerateController extends Controller
             return;
         }
 
+        // Binary hashes of programmes already emitted, so a feed repeating the
+        // exact same <programme> (matching the cache build's dedupe) is only
+        // output once per mapped channel. Only mapped programmes are tracked.
+        $seenProgrammes = [];
+
         // Loop through the XML data
         while (@$programReader->read()) {
             // Only consider XML elements and programme nodes
@@ -1047,11 +1015,19 @@ class EpgGenerateController extends Controller
                 if (! count($filtered)) {
                     continue;
                 }
+
+                $programmeXml = $programReader->readOuterXML();
+                $programmeHash = md5($programmeXml, true);
+                if (isset($seenProgrammes[$programmeHash])) {
+                    continue;
+                }
+                $seenProgrammes[$programmeHash] = true;
+
                 // Channel program found, output the <programme> tag
                 // First, we need to make sure the channel is correct
                 // Replace `channel="<channel_id>"` with `channel="<stream_id>"`
                 $itemDom = new DOMDocument;
-                $itemDom->loadXML($programReader->readOuterXML());
+                $itemDom->loadXML($programmeXml);
 
                 // Get the item element
                 $item = $itemDom->documentElement;

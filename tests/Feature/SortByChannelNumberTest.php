@@ -202,7 +202,7 @@ it('applies forced numbering to the EPG channel ids', function () {
     ]);
 
     // The compressed route buffers its output, so it can be read back here.
-    $xml = gzdecode($this->get("/{$this->playlist->uuid}/epg.xml.gz")->assertOk()->getContent());
+    $xml = gzdecode($this->get("/{$this->playlist->uuid}/epg.xml.gz")->assertOk()->streamedContent());
     preg_match_all('/<channel id="([^"]+)">/', $xml, $matches);
 
     expect($matches[1])->toBe(['100', '101', '102', '103', '104', '105']);

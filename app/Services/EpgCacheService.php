@@ -534,8 +534,11 @@ class EpgCacheService
                 $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
             }
 
-            // Commit, index, and atomically swap the SQLite store into place.
-            $store->finish();
+            // Commit, index, drop exact duplicate programmes, and atomically swap the SQLite store into place.
+            $duplicatesRemoved = $store->finish();
+            if ($duplicatesRemoved > 0) {
+                Log::info("Removed {$duplicatesRemoved} exact duplicate programmes from EPG cache for {$epg->name}");
+            }
         } catch (\Throwable $e) {
             $store->discard();
             throw $e;

@@ -185,21 +185,24 @@ class EpgProgrammeStore
     }
 
     /**
-     * Commit, build the lookup index, close, and atomically swap the built DB
-     * into place. Throws if the swap fails so the caller can flag the cache
-     * generation as failed rather than leaving a stale/missing store behind a
-     * "success" metadata write.
+     * Commit, build the lookup index, drop exact duplicate programmes, close,
+     * and atomically swap the built DB into place. Throws if the swap fails so
+     * the caller can flag the cache generation as failed rather than leaving a
+     * stale/missing store behind a "success" metadata write.
+     *
+     * @return int Number of exact duplicate programmes removed
      */
-    public function finish(): void
+    public function finish(): int
     {
         if ($this->pdo === null) {
-            return;
+            return 0;
         }
 
         if ($this->pdo->inTransaction()) {
             $this->pdo->commit();
         }
         $this->pdo->exec('CREATE INDEX programmes_date_channel ON programmes (date, channel_id, start_ts)');
+        $duplicatesRemoved = $this->removeExactDuplicates();
         $this->insertStatement = null;
         $this->pdo = null;
 
@@ -208,6 +211,32 @@ class EpgProgrammeStore
 
             throw new \RuntimeException("Failed to move EPG programme store into place at {$this->finalPath}");
         }
+
+        return $duplicatesRemoved;
+    }
+
+    /**
+     * Delete rows whose channel, times and full payload exactly match an
+     * earlier row, keeping the first occurrence. Some feeds repeat the same
+     * schedule many times for one channel, and every copy would otherwise be
+     * emitted once per mapped output channel. Anything that differs (title,
+     * desc, episode, artwork, ...) is a different blob and survives.
+     *
+     * Runs after the lookup index exists so each row's duplicate probe is an
+     * index seek on (date, channel_id, start_ts) rather than a full-table sort.
+     */
+    private function removeExactDuplicates(): int
+    {
+        return (int) $this->pdo->exec(
+            'DELETE FROM programmes WHERE EXISTS ('
+            .'SELECT 1 FROM programmes earlier '
+            .'WHERE earlier.date = programmes.date '
+            .'AND earlier.channel_id = programmes.channel_id '
+            .'AND earlier.start_ts = programmes.start_ts '
+            .'AND earlier.stop_ts IS programmes.stop_ts '
+            .'AND earlier.data = programmes.data '
+            .'AND earlier.rowid < programmes.rowid)'
+        );
     }
 
     /**

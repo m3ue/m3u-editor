@@ -153,7 +153,7 @@ it('uses the full sub-channel number for HDHR GuideNumber and EPG ids when ident
 
     expect(array_column($lineup, 'GuideNumber'))->toBe(['5.1', '5.2']);
 
-    $xml = gzdecode($this->get("/{$this->playlist->uuid}/epg.xml.gz")->assertOk()->getContent());
+    $xml = gzdecode($this->get("/{$this->playlist->uuid}/epg.xml.gz")->assertOk()->streamedContent());
 
     expect($xml)->toContain('<channel id="5.1">')
         ->and($xml)->toContain('<channel id="5.2">');

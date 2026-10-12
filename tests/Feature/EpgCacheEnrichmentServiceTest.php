@@ -297,7 +297,7 @@ it('accepts full-shape artwork from hosts outside the playlist domain allowlist,
     $response->assertOk();
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
     $xpath = new DOMXPath($document);
     expect($xpath->query('//programme[title="Enriched"]/icon[@src="https://image.tmdb.org/t/p/w500/a.jpg" and @width="500" and @height="750" and not(@type)]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Enriched"]/image[@type="poster" and @orient="P" and @size="3" and .="https://image.tmdb.org/t/p/w500/a.jpg"]'))->toHaveCount(1);
