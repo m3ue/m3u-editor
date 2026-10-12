@@ -402,6 +402,8 @@ class EpgCacheService
         $lastProgressUpdate = 0;
         $progressUpdateInterval = 5000; // Update progress every 5000 items instead of 50
 
+        $duplicatesRemoved = 0;
+
         $store = new EpgProgrammeStore;
         $store->beginWrite(Storage::disk('local')->path($this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE)));
 
@@ -548,7 +550,8 @@ class EpgCacheService
 
         return [
             'channels' => $channelCount,
-            'programmes' => $programmeCount,
+            // Duplicates never reach the store, so they don't count towards the EPG's programmes
+            'programmes' => $programmeCount - $duplicatesRemoved,
             'date_count' => count($processedDates),
             'date_range' => $dateRangeTracker,
         ];

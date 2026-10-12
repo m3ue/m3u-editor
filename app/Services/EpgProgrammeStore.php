@@ -62,6 +62,9 @@ class EpgProgrammeStore
 
     private int $pendingRows = 0;
 
+    /** Rows inserted by this writer, to decide whether duplicate removal freed enough space to compact. */
+    private int $insertedRows = 0;
+
     private string $buildingPath = '';
 
     private string $finalPath = '';
@@ -158,6 +161,7 @@ class EpgProgrammeStore
         );
         $this->pdo->beginTransaction();
         $this->pendingRows = 0;
+        $this->insertedRows = 0;
     }
 
     /**
@@ -176,6 +180,7 @@ class EpgProgrammeStore
             $blob = '{}';
         }
         $this->insertStatement->execute([$channelId, $date, $startTs, $stopTs, $blob]);
+        $this->insertedRows++;
 
         if (++$this->pendingRows >= self::COMMIT_EVERY) {
             $this->pdo->commit();
@@ -185,8 +190,9 @@ class EpgProgrammeStore
     }
 
     /**
-     * Commit, build the lookup index, drop exact duplicate programmes, close,
-     * and atomically swap the built DB into place. Throws if the swap fails so
+     * Commit, build the lookup index, drop exact duplicate programmes (compacting
+     * the file when they were most of it), close, and atomically swap the built
+     * DB into place. Throws if the swap fails so
      * the caller can flag the cache generation as failed rather than leaving a
      * stale/missing store behind a "success" metadata write.
      *
@@ -203,8 +209,14 @@ class EpgProgrammeStore
         }
         $this->pdo->exec('CREATE INDEX programmes_date_channel ON programmes (date, channel_id, start_ts)');
         $duplicatesRemoved = $this->removeExactDuplicates();
+        $compactPath = $duplicatesRemoved * 2 > $this->insertedRows ? $this->compactInto() : null;
         $this->insertStatement = null;
         $this->pdo = null;
+
+        if ($compactPath !== null) {
+            @unlink($this->buildingPath);
+            $this->buildingPath = $compactPath;
+        }
 
         if (! @rename($this->buildingPath, $this->finalPath)) {
             @unlink($this->buildingPath);
@@ -213,6 +225,30 @@ class EpgProgrammeStore
         }
 
         return $duplicatesRemoved;
+    }
+
+    /**
+     * Write a compacted copy of the store, so the pages freed by removing
+     * duplicates don't keep the file at its pre-dedupe size. `VACUUM INTO`
+     * streams straight to a new file; a plain `VACUUM` would build its copy in
+     * temp storage, which this connection keeps in memory. Compaction is only an
+     * optimization, so a failure (e.g. disk full) keeps the uncompacted store.
+     *
+     * @return string|null Path of the compacted copy, or null if it failed
+     */
+    private function compactInto(): ?string
+    {
+        $compactPath = $this->buildingPath.'.compact';
+
+        try {
+            $this->pdo->exec('VACUUM INTO '.$this->pdo->quote($compactPath));
+
+            return $compactPath;
+        } catch (\PDOException) {
+            @unlink($compactPath);
+
+            return null;
+        }
     }
 
     /**

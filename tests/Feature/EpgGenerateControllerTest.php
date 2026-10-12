@@ -1202,11 +1202,20 @@ test('rebuilding the epg cache keeps deduplicated programme counts stable', func
     $countShared = fn () => count(app(EpgCacheService::class)
         ->getCachedProgrammes($epg, $date, ['demo:SharedSports.placeholder'])['demo:SharedSports.placeholder']);
 
-    expect($countShared())->toBe(3);
+    // 6 source programmes, 2 of them exact duplicates
+    $assertStoredCounts = function () use ($epg, $countShared) {
+        $epg->refresh();
+
+        expect($countShared())->toBe(3)
+            ->and($epg->programme_count)->toBe(4)
+            ->and($epg->cache_meta['total_programmes'])->toBe(4);
+    };
+
+    $assertStoredCounts();
 
     expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
 
-    expect($countShared())->toBe(3);
+    $assertStoredCounts();
 });
 
 test('compressed epg is streamed and cached as a valid gzip file', function () {
