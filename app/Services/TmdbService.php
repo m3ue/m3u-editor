@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Settings\GeneralSettings;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -2112,55 +2113,17 @@ class TmdbService
         $this->waitForRateLimit();
 
         try {
-            $response = Http::timeout(15)->get(
-                self::BASE_URL."/tv/{$tmdbId}/season/{$seasonNumber}",
-                [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                    'append_to_response' => 'credits,videos',
-                ]
-            );
+            $response = $this->requestSeasonDetails($tmdbId, $seasonNumber);
 
             if (! $response->successful()) {
-                Log::warning('TMDB: Failed to get season details', [
-                    'tmdb_id' => $tmdbId,
-                    'season' => $seasonNumber,
-                    'status' => $response->status(),
-                ]);
+                $this->logSeasonDetailsFailure($tmdbId, $seasonNumber, $response->status());
 
                 return null;
             }
 
-            $data = $response->json();
-
-            return [
-                'season_number' => $data['season_number'] ?? $seasonNumber,
-                'name' => $data['name'] ?? null,
-                'overview' => $data['overview'] ?? null,
-                'air_date' => $data['air_date'] ?? null,
-                'poster_path' => $data['poster_path'] ?? null,
-                'poster_url' => isset($data['poster_path']) ? "https://image.tmdb.org/t/p/w500{$data['poster_path']}" : null,
-                'episodes' => collect($data['episodes'] ?? [])->map(function ($episode) {
-                    return [
-                        'id' => $episode['id'] ?? null,
-                        'tmdb_id' => $episode['id'] ?? null,
-                        'episode_number' => $episode['episode_number'] ?? null,
-                        'name' => $episode['name'] ?? null,
-                        'overview' => $episode['overview'] ?? null,
-                        'air_date' => $episode['air_date'] ?? null,
-                        'still_path' => $episode['still_path'] ?? null,
-                        'vote_average' => $episode['vote_average'] ?? null,
-                        'vote_count' => $episode['vote_count'] ?? null,
-                        'runtime' => $episode['runtime'] ?? null,
-                    ];
-                })->toArray(),
-            ];
+            return $this->mapSeasonDetails((array) $response->json(), $seasonNumber);
         } catch (\Exception $e) {
-            Log::error('TMDB get season details error', [
-                'tmdb_id' => $tmdbId,
-                'season' => $seasonNumber,
-                'error' => $e->getMessage(),
-            ]);
+            $this->logSeasonDetailsError($tmdbId, $seasonNumber, $e);
 
             return null;
         }
@@ -2168,6 +2131,9 @@ class TmdbService
 
     /**
      * Retrieve a season while preserving the distinction between absence and failures.
+     *
+     * Unlike getSeasonDetails(), the response is validated against the requested season
+     * and a verified TMDB "resource not found" is reported separately from errors.
      *
      * @return array{status: 'found'|'not_found'|'error', payload?: array<string, mixed>}
      */
@@ -2178,23 +2144,15 @@ class TmdbService
         }
 
         $cacheKey = "tmdb_season_result_v1_{$tmdbId}_{$seasonNumber}_{$this->language}";
-        if (Cache::has($cacheKey)) {
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
             /** @var array{status: 'found'|'not_found', payload?: array<string, mixed>} $cached */
-            $cached = Cache::get($cacheKey);
-
             return $cached;
         }
 
         try {
             $this->waitForRateLimit();
-            $response = Http::timeout(15)->get(
-                self::BASE_URL."/tv/{$tmdbId}/season/{$seasonNumber}",
-                [
-                    'api_key' => $this->apiKey,
-                    'language' => $this->language,
-                    'append_to_response' => 'credits,videos',
-                ]
-            );
+            $response = $this->requestSeasonDetails($tmdbId, $seasonNumber);
 
             if ($response->status() === 404 && $this->isTmdbResourceNotFound($response->json())) {
                 $result = ['status' => 'not_found'];
@@ -2204,65 +2162,60 @@ class TmdbService
             }
 
             if (! $response->successful()) {
-                Log::warning('TMDB: Failed to get season details', [
-                    'tmdb_id' => $tmdbId,
-                    'season' => $seasonNumber,
-                    'status' => $response->status(),
-                ]);
+                $this->logSeasonDetailsFailure($tmdbId, $seasonNumber, $response->status());
 
                 return ['status' => 'error'];
             }
 
-            $payload = $this->normalizeSeasonDetails($response->json(), $seasonNumber);
-            if ($payload === null) {
+            $data = $response->json();
+            if (! $this->isValidSeasonDetails($data, $seasonNumber)) {
                 return ['status' => 'error'];
             }
 
-            $result = ['status' => 'found', 'payload' => $payload];
+            $result = ['status' => 'found', 'payload' => $this->mapSeasonDetails($data, $seasonNumber)];
             Cache::put($cacheKey, $result, now()->addHour());
 
             return $result;
         } catch (\Throwable $e) {
-            Log::error('TMDB get season details error', [
-                'tmdb_id' => $tmdbId,
-                'season' => $seasonNumber,
-                'error' => $e->getMessage(),
-            ]);
+            $this->logSeasonDetailsError($tmdbId, $seasonNumber, $e);
 
             return ['status' => 'error'];
         }
     }
 
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function normalizeSeasonDetails(mixed $data, int $seasonNumber): ?array
+    private function requestSeasonDetails(int $tmdbId, int $seasonNumber): Response
     {
-        if (! is_array($data)
-            || ! is_int($data['id'] ?? null)
-            || $data['id'] < 1
-            || ! is_int($data['season_number'] ?? null)
-            || $data['season_number'] !== $seasonNumber
-            || ! is_array($data['episodes'] ?? null)
-            || ! array_is_list($data['episodes'])) {
-            return null;
-        }
+        return Http::timeout(15)->get(
+            self::BASE_URL."/tv/{$tmdbId}/season/{$seasonNumber}",
+            [
+                'api_key' => $this->apiKey,
+                'language' => $this->language,
+                'append_to_response' => 'credits,videos',
+            ]
+        );
+    }
 
-        foreach ($data['episodes'] as $episode) {
-            if (! is_array($episode)) {
-                return null;
-            }
-        }
+    /**
+     * Map a TMDB season response to the shape shared by both season lookups.
+     *
+     * `season_id` is TMDB's ID for the season itself, not the series ID used to request it.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function mapSeasonDetails(array $data, int $seasonNumber): array
+    {
+        $posterPath = $data['poster_path'] ?? null;
 
         return [
-            'tmdb_id' => $data['id'],
-            'season_number' => $data['season_number'],
+            'season_id' => $data['id'] ?? null,
+            'season_number' => $data['season_number'] ?? $seasonNumber,
             'name' => $data['name'] ?? null,
             'overview' => $data['overview'] ?? null,
             'air_date' => $data['air_date'] ?? null,
-            'poster_path' => $data['poster_path'] ?? null,
-            'poster_url' => isset($data['poster_path']) && is_string($data['poster_path']) ? "https://image.tmdb.org/t/p/w500{$data['poster_path']}" : null,
-            'episodes' => collect($data['episodes'])->map(function (array $episode) {
+            'poster_path' => $posterPath,
+            'poster_url' => is_string($posterPath) ? "https://image.tmdb.org/t/p/w500{$posterPath}" : null,
+            'episodes' => collect($data['episodes'] ?? [])->map(function ($episode) {
                 return [
                     'id' => $episode['id'] ?? null,
                     'tmdb_id' => $episode['id'] ?? null,
@@ -2279,11 +2232,53 @@ class TmdbService
         ];
     }
 
+    /**
+     * @phpstan-assert-if-true array<string, mixed> $data
+     */
+    private function isValidSeasonDetails(mixed $data, int $seasonNumber): bool
+    {
+        if (! is_array($data)
+            || ! is_int($data['id'] ?? null)
+            || $data['id'] < 1
+            || ($data['season_number'] ?? null) !== $seasonNumber
+            || ! is_array($data['episodes'] ?? null)
+            || ! array_is_list($data['episodes'])) {
+            return false;
+        }
+
+        foreach ($data['episodes'] as $episode) {
+            if (! is_array($episode)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * TMDB status code 34 is its documented "resource not found" response.
+     */
     private function isTmdbResourceNotFound(mixed $data): bool
     {
-        return is_array($data)
-            && ($data['status_code'] ?? null) === 34
-            && ($data['status_message'] ?? null) === 'The resource you requested could not be found.';
+        return is_array($data) && ($data['status_code'] ?? null) === 34;
+    }
+
+    private function logSeasonDetailsFailure(int $tmdbId, int $seasonNumber, int $status): void
+    {
+        Log::warning('TMDB: Failed to get season details', [
+            'tmdb_id' => $tmdbId,
+            'season' => $seasonNumber,
+            'status' => $status,
+        ]);
+    }
+
+    private function logSeasonDetailsError(int $tmdbId, int $seasonNumber, \Throwable $e): void
+    {
+        Log::error('TMDB get season details error', [
+            'tmdb_id' => $tmdbId,
+            'season' => $seasonNumber,
+            'error' => $e->getMessage(),
+        ]);
     }
 
     /**
