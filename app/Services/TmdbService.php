@@ -2167,6 +2167,126 @@ class TmdbService
     }
 
     /**
+     * Retrieve a season while preserving the distinction between absence and failures.
+     *
+     * @return array{status: 'found'|'not_found'|'error', payload?: array<string, mixed>}
+     */
+    public function getSeasonDetailsResult(int $tmdbId, int $seasonNumber): array
+    {
+        if ($tmdbId < 1 || $seasonNumber < 0 || ! $this->isConfigured()) {
+            return ['status' => 'error'];
+        }
+
+        $cacheKey = "tmdb_season_result_v1_{$tmdbId}_{$seasonNumber}_{$this->language}";
+        if (Cache::has($cacheKey)) {
+            /** @var array{status: 'found'|'not_found', payload?: array<string, mixed>} $cached */
+            $cached = Cache::get($cacheKey);
+
+            return $cached;
+        }
+
+        try {
+            $this->waitForRateLimit();
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/tv/{$tmdbId}/season/{$seasonNumber}",
+                [
+                    'api_key' => $this->apiKey,
+                    'language' => $this->language,
+                    'append_to_response' => 'credits,videos',
+                ]
+            );
+
+            if ($response->status() === 404 && $this->isTmdbResourceNotFound($response->json())) {
+                $result = ['status' => 'not_found'];
+                Cache::put($cacheKey, $result, now()->addHour());
+
+                return $result;
+            }
+
+            if (! $response->successful()) {
+                Log::warning('TMDB: Failed to get season details', [
+                    'tmdb_id' => $tmdbId,
+                    'season' => $seasonNumber,
+                    'status' => $response->status(),
+                ]);
+
+                return ['status' => 'error'];
+            }
+
+            $payload = $this->normalizeSeasonDetails($response->json(), $seasonNumber);
+            if ($payload === null) {
+                return ['status' => 'error'];
+            }
+
+            $result = ['status' => 'found', 'payload' => $payload];
+            Cache::put($cacheKey, $result, now()->addHour());
+
+            return $result;
+        } catch (\Throwable $e) {
+            Log::error('TMDB get season details error', [
+                'tmdb_id' => $tmdbId,
+                'season' => $seasonNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ['status' => 'error'];
+        }
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function normalizeSeasonDetails(mixed $data, int $seasonNumber): ?array
+    {
+        if (! is_array($data)
+            || ! is_int($data['id'] ?? null)
+            || $data['id'] < 1
+            || ! is_int($data['season_number'] ?? null)
+            || $data['season_number'] !== $seasonNumber
+            || ! is_array($data['episodes'] ?? null)
+            || ! array_is_list($data['episodes'])) {
+            return null;
+        }
+
+        foreach ($data['episodes'] as $episode) {
+            if (! is_array($episode)) {
+                return null;
+            }
+        }
+
+        return [
+            'tmdb_id' => $data['id'],
+            'season_number' => $data['season_number'],
+            'name' => $data['name'] ?? null,
+            'overview' => $data['overview'] ?? null,
+            'air_date' => $data['air_date'] ?? null,
+            'poster_path' => $data['poster_path'] ?? null,
+            'poster_url' => isset($data['poster_path']) && is_string($data['poster_path']) ? "https://image.tmdb.org/t/p/w500{$data['poster_path']}" : null,
+            'episodes' => collect($data['episodes'])->map(function (array $episode) {
+                return [
+                    'id' => $episode['id'] ?? null,
+                    'tmdb_id' => $episode['id'] ?? null,
+                    'episode_number' => $episode['episode_number'] ?? null,
+                    'name' => $episode['name'] ?? null,
+                    'overview' => $episode['overview'] ?? null,
+                    'air_date' => $episode['air_date'] ?? null,
+                    'still_path' => $episode['still_path'] ?? null,
+                    'vote_average' => $episode['vote_average'] ?? null,
+                    'vote_count' => $episode['vote_count'] ?? null,
+                    'runtime' => $episode['runtime'] ?? null,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function isTmdbResourceNotFound(mixed $data): bool
+    {
+        return is_array($data)
+            && ($data['status_code'] ?? null) === 34
+            && ($data['status_message'] ?? null) === 'The resource you requested could not be found.';
+    }
+
+    /**
      * Fetch trending content (movies + TV or a specific type).
      *
      * @param  string  $mediaType  'all', 'movie', or 'tv'
