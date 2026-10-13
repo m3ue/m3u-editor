@@ -184,10 +184,9 @@ it('rejects invalid inputs without an HTTP request', function (int $tmdbId, int 
 it('keeps the legacy season lookup request and result compatible while exposing the result contract', function () {
     Http::fake(function (Request $request) {
         if (str_starts_with($request->url(), 'https://api.themoviedb.org/3/tv/123/season/3')
-            && ($request->data()['append_to_response'] ?? null) === 'credits,videos') {
+            && ($request->data()['append_to_response'] ?? null) === 'videos') {
             return Http::response([
                 ...seasonResponse(3),
-                'credits' => ['cast' => [['id' => 700001]]],
                 'videos' => ['results' => [['id' => 'synthetic-video']]],
             ]);
         }
@@ -207,7 +206,7 @@ it('keeps the legacy season lookup request and result compatible while exposing 
     ])->and($service->getSeasonDetails(123, 7))->toBeNull();
 
     Http::assertSent(fn (Request $request) => str_starts_with($request->url(), 'https://api.themoviedb.org/3/tv/123/season/3')
-        && ($request->data()['append_to_response'] ?? null) === 'credits,videos');
+        && ($request->data()['append_to_response'] ?? null) === 'videos');
 });
 
 it('maps found results with the same shape as the legacy lookup', function () {

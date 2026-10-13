@@ -2190,7 +2190,7 @@ class TmdbService
             [
                 'api_key' => $this->apiKey,
                 'language' => $this->language,
-                'append_to_response' => 'credits,videos',
+                'append_to_response' => 'videos',
             ]
         );
     }
