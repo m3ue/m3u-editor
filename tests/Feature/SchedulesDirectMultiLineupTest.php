@@ -247,7 +247,7 @@ it('completes a nonempty SchedulesDirect import and replaces only the previous c
         ProcessEpgImportChunk::class,
         ProcessEpgImportComplete::class,
     ]);
-    $batchNo = Job::sole()->batch_no;
+    $batchNo = Job::findOrFail($importChunk->jobs[0])->batch_no;
     (new ProcessEpgImportComplete($this->user->id, $epg->id, $batchNo, now()))->handle();
 
     expect(EpgChannel::find($previousChannel->id))->toBeNull()
