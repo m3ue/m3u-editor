@@ -6,6 +6,7 @@ use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Exceptions\SchedulesDirectTokenExpiredException;
 use App\Facades\ProxyFacade;
 use App\Models\Epg;
+use App\Models\EpgProgramme;
 use Carbon\Carbon;
 use Exception;
 use Generator;
@@ -1257,6 +1258,7 @@ class SchedulesDirectService
             foreach ($epg->sd_lineup_ids as $lineupId) {
                 try {
                     $lineup = $this->getOrAddLineup($epg, $lineupId);
+                    $this->validateLineup($lineup, $lineupId);
                 } catch (Exception $e) {
                     if (! in_array($e->getCode(), [self::MAX_LINEUPS_CODE, self::TOO_MANY_LINEUP_CHANGES_CODE], true)) {
                         throw $e;
@@ -1273,15 +1275,18 @@ class SchedulesDirectService
 
                     continue;
                 }
-                foreach ($lineup['map'] ?? [] as $mapping) {
+                foreach ($lineup['map'] as $mapping) {
                     $map[$mapping['stationID']] ??= $mapping;
                 }
-                foreach ($lineup['stations'] ?? [] as $station) {
+                foreach ($lineup['stations'] as $station) {
                     $stations[$station['stationID']] ??= $station;
                 }
             }
             if (count($lineupErrors) === count($epg->sd_lineup_ids)) {
                 throw new Exception(implode(' ', array_column($lineupErrors, 'message')));
+            }
+            if ($map === [] && $this->hasPersistedImportData($epg)) {
+                throw new Exception('SchedulesDirect returned an empty lineup for an EPG with existing stations');
             }
             $lineupData = ['map' => array_values($map), 'stations' => array_values($stations)];
 
@@ -1344,6 +1349,50 @@ class SchedulesDirectService
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Ensure a lineup has the complete structure needed to safely replace an existing import.
+     *
+     * @param  array<string, mixed>  $lineup
+     */
+    private function validateLineup(array $lineup, string $lineupId): void
+    {
+        if (! isset($lineup['map'], $lineup['stations']) || ! is_array($lineup['map']) || ! is_array($lineup['stations'])) {
+            throw new Exception("SchedulesDirect returned an invalid lineup structure for {$lineupId}");
+        }
+
+        $mapStationIds = [];
+        foreach ($lineup['map'] as $mapping) {
+            if (! is_array($mapping) || ! isset($mapping['stationID']) || ! is_string($mapping['stationID']) || $mapping['stationID'] === '') {
+                throw new Exception("SchedulesDirect returned an invalid lineup map for {$lineupId}");
+            }
+
+            $mapStationIds[$mapping['stationID']] = true;
+        }
+
+        $stationIds = [];
+        foreach ($lineup['stations'] as $station) {
+            if (! is_array($station) || ! isset($station['stationID']) || ! is_string($station['stationID']) || $station['stationID'] === '') {
+                throw new Exception("SchedulesDirect returned invalid lineup stations for {$lineupId}");
+            }
+
+            $stationIds[$station['stationID']] = true;
+        }
+
+        ksort($mapStationIds);
+        ksort($stationIds);
+
+        if (array_keys($mapStationIds) !== array_keys($stationIds)) {
+            throw new Exception("SchedulesDirect returned inconsistent map and stations for {$lineupId}");
+        }
+    }
+
+    private function hasPersistedImportData(Epg $epg): bool
+    {
+        return ! empty($epg->sd_station_ids)
+            || $epg->channels()->exists()
+            || EpgProgramme::query()->where('epg_id', $epg->id)->exists();
     }
 
     /**
@@ -1885,6 +1934,9 @@ class SchedulesDirectService
         }
         // Check response body for error codes (API may return error codes in successful HTTP responses)
         $body = $response->json();
+        if (! is_array($body)) {
+            throw new Exception('SchedulesDirect API returned invalid JSON');
+        }
         $responseCode = $body['code'] ?? null;
 
         // Handle code 2055: debug not enabled - disable sd_debug and retry without debug header
@@ -1919,6 +1971,9 @@ class SchedulesDirectService
             }
 
             $body = $response->json();
+            if (! is_array($body)) {
+                throw new Exception('SchedulesDirect API returned invalid JSON');
+            }
             $responseCode = $body['code'] ?? null;
         }
 
@@ -1940,6 +1995,20 @@ class SchedulesDirectService
             ]);
 
             throw new SchedulesDirectTokenExpiredException('SchedulesDirect token expired (Code: 4006)');
+        }
+
+        if (is_numeric($responseCode) && (int) $responseCode !== 0) {
+            $message = $body['message'] ?? $body['response'] ?? 'Unknown error';
+
+            Log::error('SchedulesDirect API error response', [
+                'method' => $method,
+                'endpoint' => $endpoint,
+                'status' => $response->status(),
+                'code' => $responseCode,
+                'message' => $message,
+            ]);
+
+            throw new Exception("SchedulesDirect API error: {$message} (Code: {$responseCode})", (int) $responseCode);
         }
 
         if ($response->failed()) {

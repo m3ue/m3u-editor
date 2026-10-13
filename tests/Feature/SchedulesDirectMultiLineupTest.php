@@ -1,12 +1,21 @@
 <?php
 
 use App\Enums\EpgSourceType;
+use App\Jobs\ProcessEpgImport;
+use App\Jobs\ProcessEpgImportChunk;
+use App\Jobs\ProcessEpgImportComplete;
+use App\Models\Channel;
 use App\Models\Epg;
+use App\Models\EpgChannel;
+use App\Models\EpgProgramme;
+use App\Models\Job;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
@@ -14,6 +23,7 @@ use Illuminate\Support\Sleep;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Event::fake();
     Sleep::fake();
     Storage::fake('local');
     Http::preventStrayRequests();
@@ -56,6 +66,263 @@ it('merges stations from every selected lineup and keeps shared stations once', 
     app(SchedulesDirectService::class)->syncEpgData($epg);
 
     expect($epg->fresh()->sd_station_ids)->toBe(['1', '2', '3']);
+});
+
+it('rejects an HTTP-success SchedulesDirect API error before it replaces an existing lineup file', function () {
+    $epg = ($this->makeEpg)(['USA-EXISTING'], ['sd_station_ids' => ['old-station']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EXISTING' => Http::response([
+            'code' => 3000,
+            'message' => 'Provider unavailable',
+        ]),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'Provider unavailable');
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old-station'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('rejects malformed JSON without replacing an existing lineup file', function () {
+    $epg = ($this->makeEpg)(['USA-MALFORMED'], ['sd_station_ids' => ['old-station']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-MALFORMED' => Http::response('{', 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'invalid JSON');
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old-station'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('rejects an incomplete lineup without replacing an existing lineup file', function () {
+    $epg = ($this->makeEpg)(['USA-BROKEN'], ['sd_station_ids' => ['old-station']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-BROKEN' => Http::response(['map' => []]),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'invalid lineup structure');
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old-station'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('rejects a malformed lineup alongside a valid lineup without partially replacing existing stations', function () {
+    $epg = ($this->makeEpg)(['USA-GOOD', 'USA-BROKEN'], ['sd_station_ids' => ['old-station']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-GOOD' => Http::response(sdLineupResponse(['good-station'])),
+        'json.schedulesdirect.org/20141201/lineups/USA-BROKEN' => Http::response([
+            'map' => [['stationID' => 'broken-station']],
+            'stations' => [],
+        ]),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'inconsistent map and stations');
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old-station'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('rejects an empty valid lineup when existing stations would be replaced', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY'], ['sd_station_ids' => ['old-station']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([])),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'empty lineup');
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old-station'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('rejects an empty valid lineup when persisted import data exists despite empty station ids', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY'], ['sd_station_ids' => []]);
+    $epgChannel = EpgChannel::factory()->for($this->user)->for($epg)->create(['import_batch_no' => 'previous-batch']);
+    $programme = EpgProgramme::factory()->for($epg)->create(['epg_channel_id' => $epgChannel->channel_id]);
+    $channel = Channel::factory()->for($this->user)->create(['epg_channel_id' => $epgChannel->id]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'empty lineup');
+
+    expect($epg->fresh()->sd_station_ids)->toBe([])
+        ->and(EpgChannel::find($epgChannel->id))->not->toBeNull()
+        ->and(EpgProgramme::find($programme->id))->not->toBeNull()
+        ->and(Channel::find($channel->id)?->epg_channel_id)->toBe($epgChannel->id)
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+});
+
+it('preserves persisted mappings when an empty lineup retry reaches its terminal attempt', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY'], [
+        'sd_station_ids' => [],
+        'auto_resync_on_failure' => true,
+        'auto_resync_retries' => 1,
+    ]);
+    $epgChannel = EpgChannel::factory()->for($this->user)->for($epg)->create(['import_batch_no' => 'previous-batch']);
+    $programme = EpgProgramme::factory()->for($epg)->create(['epg_channel_id' => $epgChannel->channel_id]);
+    $channel = Channel::factory()->for($this->user)->create(['epg_channel_id' => $epgChannel->id]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+    Bus::fake();
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([])),
+    ]);
+
+    (new ProcessEpgImport($epg, force: true))->handle(app(SchedulesDirectService::class));
+
+    $epg->refresh();
+    expect($epg->errors)->toContain('empty lineup')
+        ->and($epg->resync_attempt)->toBe(1)
+        ->and(EpgChannel::find($epgChannel->id))->not->toBeNull()
+        ->and(EpgProgramme::find($programme->id))->not->toBeNull()
+        ->and(Channel::find($channel->id)?->epg_channel_id)->toBe($epgChannel->id)
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+    $retry = null;
+    Bus::assertDispatchedWithoutChain(ProcessEpgImport::class, function (ProcessEpgImport $job) use (&$retry, $epg) {
+        if ($job->force === true && $job->epg->is($epg)) {
+            $retry = $job;
+
+            return true;
+        }
+
+        return false;
+    });
+
+    $retry->handle(app(SchedulesDirectService::class));
+
+    $epg->refresh();
+    expect($epg->resync_attempt)->toBe(1)
+        ->and($epg->errors)->toContain('empty lineup')
+        ->and(EpgChannel::find($epgChannel->id))->not->toBeNull()
+        ->and(EpgProgramme::find($programme->id))->not->toBeNull()
+        ->and(Channel::find($channel->id)?->epg_channel_id)->toBe($epgChannel->id)
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+    Bus::assertDispatchedTimes(ProcessEpgImport::class, 1);
+    Bus::assertNotDispatched(ProcessEpgImportComplete::class);
+});
+
+it('completes a nonempty SchedulesDirect import and replaces only the previous channel batch', function () {
+    $epg = ($this->makeEpg)(['USA-NONEMPTY']);
+    $previousChannel = EpgChannel::factory()->for($this->user)->for($epg)->create(['import_batch_no' => 'previous-batch']);
+
+    Bus::fake();
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-NONEMPTY' => Http::response(sdLineupResponse(['station-1'])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([['stationID' => 'station-1', 'programs' => []]]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    (new ProcessEpgImport($epg, force: true))->handle(app(SchedulesDirectService::class));
+
+    $importChunk = null;
+    Bus::assertDispatched(ProcessEpgImportChunk::class, function (ProcessEpgImportChunk $job) use (&$importChunk) {
+        $importChunk = $job;
+
+        return true;
+    });
+    $importChunk->handle();
+
+    Bus::assertChained([
+        ProcessEpgImportChunk::class,
+        ProcessEpgImportComplete::class,
+    ]);
+    $batchNo = Job::sole()->batch_no;
+    (new ProcessEpgImportComplete($this->user->id, $epg->id, $batchNo, now()))->handle();
+
+    expect(EpgChannel::find($previousChannel->id))->toBeNull()
+        ->and(EpgChannel::where('epg_id', $epg->id)->where('channel_id', 'station-1')->exists())->toBeTrue()
+        ->and($epg->fresh()->processing)->toBeFalse();
+});
+
+it('completes a fresh empty SchedulesDirect import without touching an existing channel batch', function () {
+    $epg = ($this->makeEpg)(['USA-FRESH-EMPTY']);
+
+    Bus::fake();
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-FRESH-EMPTY' => Http::response(sdLineupResponse([])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    (new ProcessEpgImport($epg, force: true))->handle(app(SchedulesDirectService::class));
+
+    $completion = null;
+    Bus::assertDispatched(ProcessEpgImportComplete::class, function (ProcessEpgImportComplete $job) use (&$completion) {
+        $completion = $job;
+
+        return true;
+    });
+    $completion->handle();
+
+    expect(EpgChannel::where('epg_id', $epg->id)->count())->toBe(0)
+        ->and($epg->fresh()->processing)->toBeFalse();
+});
+
+it('accepts matching lineup station ids in a different order', function () {
+    $epg = ($this->makeEpg)(['USA-ORDERED']);
+    $lineup = sdLineupResponse(['station-1', 'station-2']);
+    $lineup['stations'] = array_reverse($lineup['stations']);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-ORDERED' => Http::response($lineup),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([['stationID' => 'station-1', 'programs' => []], ['stationID' => 'station-2', 'programs' => []]]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['station-1', 'station-2']);
+});
+
+it('accepts a code zero lineup response with matching stations', function () {
+    $epg = ($this->makeEpg)(['USA-OK']);
+    $lineup = sdLineupResponse(['station-1']);
+    $lineup['code'] = 0;
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-OK' => Http::response($lineup),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([['stationID' => 'station-1', 'programs' => []]]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['station-1']);
+});
+
+it('allows an empty valid lineup for a fresh EPG', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY']);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    expect($epg->fresh()->sd_station_ids)->toBe([]);
 });
 
 it('adds a selected lineup to the account when it is not subscribed yet', function () {
