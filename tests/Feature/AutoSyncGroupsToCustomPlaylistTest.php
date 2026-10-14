@@ -512,6 +512,37 @@ it('does not dispatch SyncCompleted when processing rules are disabled on the cu
     Event::assertNotDispatched(SyncCompleted::class);
 });
 
+it('dispatches SyncCompleted when only auto-merge is enabled on the custom playlist', function () {
+    Event::fake([SyncCompleted::class]);
+
+    $this->customPlaylist->update([
+        'processing_config' => null,
+        'auto_merge_channels_enabled' => true,
+    ]);
+
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        type: 'channel',
+        syncMode: 'add_only',
+    ))->handle();
+
+    Event::assertDispatched(
+        SyncCompleted::class,
+        fn (SyncCompleted $event): bool => $event->model->is($this->customPlaylist)
+            && $event->source === 'custom_playlist'
+    );
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // SyncListener: dispatch behavior
 // ──────────────────────────────────────────────────────────────────────────────

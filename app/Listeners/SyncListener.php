@@ -104,11 +104,85 @@ class SyncListener
      */
     private function dispatchCustomPlaylistProcessing(CustomPlaylist $customPlaylist): void
     {
-        if (! $customPlaylist->hasEnabledProcessingRules()) {
+        $jobs = [];
+
+        // Merge runs first so the processing rules (sort/recount) see the
+        // post-merge channel lineup.
+        if ($mergeJob = self::getCustomPlaylistMergeJob($customPlaylist)) {
+            $jobs[] = $mergeJob;
+        }
+
+        if ($customPlaylist->hasEnabledProcessingRules()) {
+            $jobs[] = new RunCustomPlaylistProcessing($customPlaylist);
+        }
+
+        if (empty($jobs)) {
             return;
         }
 
-        dispatch(new RunCustomPlaylistProcessing($customPlaylist));
+        Bus::chain($jobs)->dispatch();
+    }
+
+    /**
+     * Build a MergeChannels job scoped to a custom playlist's channel set (issue #1103).
+     *
+     * Mirrors getMergeJob() but restricts merge candidates to channels attached to
+     * the custom playlist (optionally filtered to selected custom groups). The
+     * master-priority playlist order comes from the config, falling back to the
+     * distinct source playlists of the custom playlist's channels.
+     *
+     * Returns null if auto-merge is disabled or there is nothing to merge.
+     */
+    public static function getCustomPlaylistMergeJob(CustomPlaylist $customPlaylist): ?MergeChannels
+    {
+        if (! $customPlaylist->auto_merge_channels_enabled) {
+            return null;
+        }
+
+        $config = $customPlaylist->auto_merge_config ?? [];
+
+        $playlists = collect($config['failover_playlists'] ?? [])
+            ->map(fn ($failover) => is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover)
+            ->filter()
+            ->map(fn ($id) => ['playlist_failover_id' => (int) $id])
+            ->values();
+
+        if ($playlists->isEmpty()) {
+            $playlists = $customPlaylist->channels()
+                ->whereNotNull('playlist_id')
+                ->distinct()
+                ->pluck('playlist_id')
+                ->map(fn ($id) => ['playlist_failover_id' => (int) $id])
+                ->values();
+        }
+
+        if ($playlists->isEmpty()) {
+            return null;
+        }
+
+        $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
+        $effectivePlaylistId = $preferredPlaylistId
+            ? (int) $preferredPlaylistId
+            : (int) $playlists->first()['playlist_failover_id'];
+
+        return new MergeChannels(
+            user: $customPlaylist->user,
+            playlists: $playlists,
+            playlistId: $effectivePlaylistId,
+            checkResolution: $config['check_resolution'] ?? false,
+            deactivateFailoverChannels: (bool) ($customPlaylist->auto_merge_deactivate_failover ?? false),
+            forceCompleteRemerge: $config['force_complete_remerge'] ?? false,
+            preferCatchupAsPrimary: $config['prefer_catchup_as_primary'] ?? false,
+            weightedConfig: self::buildWeightedConfig($config),
+            newChannelsOnly: $config['new_channels_only'] ?? false,
+            regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
+            fallbackMergeConfig: PlaylistService::buildMergeFallbackConfig($config),
+            contentType: ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live',
+            mergeKey: $config['merge_key'] ?? 'stream_id',
+            scrubberAwareMasterSelection: (bool) ($config['scrubber_aware_master_selection'] ?? false),
+            customPlaylistId: $customPlaylist->id,
+            customGroupNames: $config['groups'] ?? null,
+        );
     }
 
     /**

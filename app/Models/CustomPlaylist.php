@@ -59,6 +59,9 @@ class CustomPlaylist extends Model
         'm3u_enabled' => 'boolean',
         'xapi_enabled' => 'boolean',
         'xmltv_enabled' => 'boolean',
+        'auto_merge_channels_enabled' => 'boolean',
+        'auto_merge_config' => 'array',
+        'auto_merge_deactivate_failover' => 'boolean',
     ];
 
     public function enabledProcessingRules(): SupportCollection
