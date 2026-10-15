@@ -62,7 +62,7 @@ class EmbyJellyfinService implements MediaServer
      * Jellyfin 12 removed the legacy X-Emby-Token header, so Jellyfin uses the
      * Authorization header with the MediaBrowser scheme (also accepted by
      * Jellyfin 10.8+). Emby keeps the header it has always documented. The two
-     * mechanisms must never be combined on one request — Jellyfin 12 rejects
+     * mechanisms must never be combined on one request, since Jellyfin 12 rejects
      * requests carrying more than one token.
      *
      * @return array<string, string>
@@ -75,7 +75,7 @@ class EmbyJellyfinService implements MediaServer
                     'MediaBrowser Token="%s", Client="m3u editor", Device="m3u editor", DeviceId="%s", Version="%s"',
                     $this->apiKey,
                     substr(sha1('m3u-editor:'.($this->integration->id ?? '')), 0, 32),
-                    (string) config('app.version', '1.0.0'),
+                    (string) config('dev.version', '1.0.0'),
                 ),
             ];
         }
@@ -1224,7 +1224,7 @@ class EmbyJellyfinService implements MediaServer
         }
 
         try {
-            // Jellyfin authenticates through the Authorization header alone —
+            // Jellyfin authenticates through the Authorization header alone:
             // pairing it with an auth query parameter is rejected by Jellyfin
             // 12. Emby keeps its historical header + api_key query combination.
             $query = ['static' => 'true'];

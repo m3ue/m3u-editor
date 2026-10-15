@@ -2,8 +2,8 @@
 
 /**
  * Regression tests for Jellyfin 12 compatibility (issue #1618): Jellyfin 12
- * removed the legacy authorization mechanisms — the X-Emby-Token header and
- * the lowercase api_key query parameter. Jellyfin integrations must use the
+ * removed the legacy authorization mechanisms (the X-Emby-Token header and
+ * the lowercase api_key query parameter). Jellyfin integrations must use the
  * Authorization header with the MediaBrowser scheme for JSON API calls and
  * the ApiKey query parameter for raw media URLs consumed by external players
  * and proxies. Emby keeps its legacy mechanisms unchanged.
