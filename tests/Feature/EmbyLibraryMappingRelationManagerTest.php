@@ -1034,6 +1034,10 @@ it('durably retries cleanup after Emby rejects creation and the first abort fail
         ->and($abortRequests)->toBe(1)
         ->and($cleanupWasDurableBeforeAbort)->toBeTrue();
 
+    app(EmbyPublicationCatalogService::class)->buildForUser($user);
+
+    expect($mapping->refresh()->status)->toBe('cleanup_pending');
+
     Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration->fresh(),
         'pageClass' => EditMediaServerIntegration::class,
@@ -1844,6 +1848,84 @@ it('does not repeat an ambiguous Emby create when another source joins the same 
         ->and($createRequests)->toBe(1)
         ->and($operationIds)->toHaveCount(3)
         ->and($operationIds[0])->toBe($operationIds[2]);
+});
+
+it('retries the Emby create on reconcile when an ambiguous create left no library behind', function () {
+    config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+    $user = User::factory()->create(['permissions' => ['use_integrations']]);
+    $this->actingAs($user);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly([
+        'type' => 'emby',
+        'host' => 'emby.test',
+        'port' => 8096,
+        'ssl' => true,
+        'api_key' => 'emby-secret',
+        'emby_publisher_writable_paths' => null,
+    ]);
+    Http::preventStrayRequests();
+    $preparedPath = '/srv/emby/managed/movies-0123456789abcdef01234567';
+    $createdPaths = [];
+    $commitRequests = 0;
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+        ]),
+        'https://emby.test:8096/M3uEditor/Managed/Libraries/V1/*' => function (Request $request) use (&$commitRequests, $integration, $preparedPath) {
+            $isCommit = str_ends_with($request->url(), '/Commit');
+            $commitRequests += $isCommit ? 1 : 0;
+
+            return Http::response([
+                'CapabilityVersion' => 1,
+                'IntegrationId' => $integration->id,
+                'OperationId' => $request->data()['OperationId'],
+                'PreparedPath' => $preparedPath,
+                'State' => $isCommit ? 'committed' : 'prepared',
+                'Success' => true,
+            ]);
+        },
+        'https://emby.test:8096/Library/VirtualFolders' => function (Request $request) use (&$createdPaths, $preparedPath) {
+            if ($request->method() === 'POST') {
+                $createdPaths[] = $request->data()['Paths'] ?? null;
+
+                return Http::response([], count($createdPaths) === 1 ? 500 : 204);
+            }
+
+            return Http::response(count($createdPaths) > 1 ? [[
+                'ItemId' => 'managed-library',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => [$preparedPath],
+            ]] : [], 200);
+        },
+    ]);
+
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+        'ownerRecord' => $integration,
+        'pageClass' => EditMediaServerIntegration::class,
+    ])->callAction(TestAction::make('create')->table(), [
+        'publication_type' => 'movies',
+        'publish_all' => true,
+        'destination' => '__new__',
+        'new_library_name' => 'Managed Movies',
+    ])->assertHasNoActionErrors();
+
+    $mapping = EmbyLibraryMapping::query()->sole();
+    expect($mapping->status)->toBe('pending')
+        ->and($mapping->library_create_requested_at)->not->toBeNull()
+        ->and($createdPaths)->toHaveCount(1);
+
+    $component->callAction(TestAction::make('reconcile')->table($mapping))
+        ->assertNotified();
+
+    expect($mapping->refresh())
+        ->status->toBe('planned')
+        ->target_library_id->toBe('managed-library')
+        ->library_create_requested_at->toBeNull()
+        ->and($createdPaths)->toBe([[$preparedPath], [$preparedPath]])
+        ->and($commitRequests)->toBe(1);
 });
 
 it('recovers a committed lifecycle operation after core mapping persistence was lost', function () {

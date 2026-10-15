@@ -511,6 +511,7 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                         'synced' => 'success',
                         'failed', 'drifted' => 'danger',
                         'pending', 'planned' => 'warning',
+                        'cleanup_pending' => 'danger',
                         default => 'gray',
                     }),
                 TextColumn::make('last_applied_revision')
@@ -1600,13 +1601,20 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
             return;
         }
 
+        // A companion-prepared library is retried even after an earlier create
+        // request: createLibrary() only creates once a fail-closed inventory shows
+        // no library with this name or path, so an ambiguous earlier attempt that
+        // did land is matched instead of duplicated.
+        $preparedPath = $mapping->is_managed
+            ? $this->lifecyclePreparedPath($mapping->output_path, $mapping->collection_type)
+            : null;
         $result = MediaServerService::make($this->ownerRecord)->createLibrary(
             $mapping->target_library_name,
             $mapping->collection_type,
-            [$mapping->output_path],
+            [$preparedPath ?? $mapping->output_path],
             false,
             $mapping->target_library_id,
-            createIfMissing: $mapping->library_create_requested_at === null,
+            createIfMissing: $mapping->library_create_requested_at === null || $preparedPath !== null,
         );
 
         if (! $result['success']) {
@@ -1673,7 +1681,6 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
         }
 
         if ($mapping->is_managed && $mapping->library_create_requested_at !== null) {
-            $preparedPath = $this->lifecyclePreparedPath($mapping->output_path, $mapping->collection_type);
             if ($preparedPath !== null) {
                 $lifecycle = app(EmbyManagedSetupService::class);
                 $committed = $lifecycle->commitLibrary(

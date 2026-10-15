@@ -30,6 +30,12 @@ class EmbyPublicationCatalogService
                 ->where('enabled', true));
 
         foreach ($query->lazyById(100) as $mapping) {
+            // Cleanup-pending intents keep their state so Reconcile retries the
+            // companion abort and further publishes stay blocked until it lands.
+            if ($mapping->status === 'cleanup_pending') {
+                continue;
+            }
+
             if ($mapping->is_managed && $mapping->target_library_id === null) {
                 $mapping->updateQuietly([
                     'last_planned_revision' => null,
