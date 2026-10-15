@@ -13,6 +13,7 @@ use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
 use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
@@ -48,6 +49,7 @@ class Channel extends Model
         'id' => 'integer',
         'enabled' => 'boolean',
         'channel' => 'integer',
+        'channel_minor' => 'integer',
         'shift' => 'integer',
         'user_id' => 'integer',
         'playlist_id' => 'integer',
@@ -66,6 +68,7 @@ class Channel extends Model
         'movie_data' => 'array',
         'sync_settings' => 'array',
         'last_metadata_fetch' => 'datetime',
+        'source_added_at' => 'datetime',
         'aed_profile_id' => 'integer',
         'epg_map_enabled' => 'boolean',
         'logo_type' => ChannelLogoType::class,
@@ -339,6 +342,22 @@ class Channel extends Model
     }
 
     /**
+     * The channel's own output number ("5" or "5.1"), before any playlist numbering.
+     * In a custom playlist context the pivot number (and its minor) wins when set.
+     */
+    public function resolveChannelNumber(bool $isCustomContext = false): int|string|null
+    {
+        $pivot = $isCustomContext ? $this->pivot : null;
+
+        return ChannelNumber::resolve(
+            $this->channel,
+            $this->channel_minor,
+            $pivot?->channel_number,
+            $pivot?->channel_minor,
+        );
+    }
+
+    /**
      * Resolve the TVG/channel ID to output for the given playlist's "Preferred TVG ID output"
      * setting. Used to keep the M3U, xmltv, Xtream API, and JSON EPG API outputs consistent
      * with each other (e.g. so `epg_channel_id` matches the `<programme channel="...">` used
@@ -458,7 +477,7 @@ class Channel extends Model
             $password = urlencode($password);
         } else {
             $username = urlencode($user->name ?? 'admin');
-            $password = urlencode($playlist->uuid);
+            $password = urlencode($playlist->getInternalAuthPassword());
         }
 
         // Build the proxy URL path

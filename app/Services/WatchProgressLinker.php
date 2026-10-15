@@ -23,6 +23,11 @@ use Illuminate\Database\Eloquent\Builder;
  * read, so the fix is visible immediately) and the offline prune command /
  * Playlist Viewers admin action (relink or, failing that, delete the row).
  *
+ * Rows added by hand from the Playlist Viewer "Add Progress" action for a
+ * title that isn't in the library yet are stored unlinked (stream_id NULL,
+ * tmdb_id set). Those are kept, rather than pruned as unrecoverable, until
+ * the content shows up and they can be relinked.
+ *
  * A PlaylistViewer's `viewerable` can be any of these four playlist types
  * (see AppServiceProvider's morph map), so every method here accepts all four.
  */
@@ -42,7 +47,7 @@ class WatchProgressLinker
             }
 
             $replacement = $this->findChannel($progress, $playlist);
-            if (! $replacement) {
+            if (! $replacement || $this->conflictsWithExistingRow($progress, $replacement->id)) {
                 return false;
             }
 
@@ -54,15 +59,27 @@ class WatchProgressLinker
 
         if ($progress->content_type === 'episode') {
             if ($progress->episode) {
+                $this->repairSeriesId($progress);
+
                 return true;
             }
 
             $replacement = $this->findEpisode($progress, $playlist);
-            if (! $replacement) {
+            if (! $replacement || $this->conflictsWithExistingRow($progress, $replacement->id)) {
                 return false;
             }
 
-            $progress->forceFill(['stream_id' => $replacement->id])->save();
+            // series_id always follows the episode: a library flush recreates the
+            // series too, so the row's old value points at a deleted series and
+            // clients can't resolve (or play) the entry. Unlinked manual rows
+            // carry no season/episode yet - fill them from the episode so
+            // get_series_progress can see the row.
+            $progress->forceFill([
+                'stream_id' => $replacement->id,
+                'series_id' => $replacement->series_id,
+                'season_number' => $progress->season_number ?? $replacement->season,
+                'episode_number' => $progress->episode_number ?? $replacement->episode_num,
+            ])->save();
             $progress->setRelation('episode', $replacement->loadMissing('series'));
 
             return true;
@@ -104,25 +121,12 @@ class WatchProgressLinker
     }
 
     /**
-     * Read-only check for whether ensureLinked() would find a match, without
-     * persisting anything - used by preview().
-     */
-    public function findsReplacement(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): bool
-    {
-        return match ($progress->content_type) {
-            'vod' => (bool) $this->findChannel($progress, $playlist),
-            'episode' => (bool) $this->findEpisode($progress, $playlist),
-            default => false,
-        };
-    }
-
-    /**
      * Read-only preview of what pruneOrphaned() would do, scoped the same
      * way, without persisting anything. Shared by the `progress:prune-orphaned
      * --dry-run` command output and the Playlist Viewers "Preview" admin
      * action, so both report identical rows for identical scope.
      *
-     * @return array{checked: int, items: list<array{id: int, content_type: string, stream_id: int, tmdb_id: ?int, action: string}>}
+     * @return array{checked: int, items: list<array{id: int, content_type: string, stream_id: ?int, tmdb_id: ?int, action: string}>}
      */
     public function preview(Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null $scopeToPlaylist = null): array
     {
@@ -146,8 +150,10 @@ class WatchProgressLinker
                 continue;
             }
 
-            $action = $this->findsReplacement($progress, $playlist) ? 'relink' : 'delete';
-            $items[] = $this->describe($progress, $action);
+            $action = $this->resolveOrphanAction($progress, $playlist);
+            if ($action !== 'keep') {
+                $items[] = $this->describe($progress, $action);
+            }
         }
 
         return ['checked' => $checked, 'items' => $items];
@@ -186,7 +192,7 @@ class WatchProgressLinker
 
             if ($this->ensureLinked($progress, $playlist)) {
                 $stats['relinked']++;
-            } else {
+            } elseif ($this->resolveOrphanAction($progress, $playlist) !== 'keep') {
                 $progress->delete();
                 $stats['deleted']++;
             }
@@ -196,7 +202,72 @@ class WatchProgressLinker
     }
 
     /**
-     * @return array{id: int, content_type: string, stream_id: int, tmdb_id: ?int, action: string}
+     * Find the library content a TMDB id points at - a VOD Channel for 'vod',
+     * an Episode (by its own per-episode TMDB id) for 'episode'. Scoped to the
+     * playlist owner, the same way stale rows are relinked.
+     */
+    public function findContentByTmdbId(string $contentType, int $tmdbId, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): Channel|Episode|null
+    {
+        return match ($contentType) {
+            'vod' => Channel::where('user_id', $playlist->user_id)
+                ->where('is_vod', true)
+                ->where('tmdb_id', $tmdbId)
+                ->first(),
+            'episode' => Episode::where('user_id', $playlist->user_id)
+                ->where('tmdb_id', $tmdbId)
+                ->first(),
+            default => null,
+        };
+    }
+
+    /**
+     * What a sweep should do with a row ensureLinked() couldn't fix: 'relink'
+     * (preview only - a match exists), 'keep' for a manually added row whose
+     * content isn't in the library yet, or 'delete' (content gone, or already
+     * tracked by another row for the same viewer).
+     */
+    private function resolveOrphanAction(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): string
+    {
+        $replacement = $progress->tmdb_id
+            ? $this->findContentByTmdbId($progress->content_type, $progress->tmdb_id, $playlist)
+            : null;
+
+        if ($replacement) {
+            return $this->conflictsWithExistingRow($progress, $replacement->id) ? 'delete' : 'relink';
+        }
+
+        return $progress->stream_id === null ? 'keep' : 'delete';
+    }
+
+    /**
+     * Point an episode row's series_id back at its episode's series. Rows
+     * relinked before series_id followed the episode (see ensureLinked()) kept
+     * the deleted pre-flush series id, so they resolve server side but clients
+     * looking the series up by that id treat the entry as gone.
+     */
+    private function repairSeriesId(ViewerWatchProgress $progress): void
+    {
+        $seriesId = (int) $progress->episode->series_id;
+        if ($seriesId && $progress->series_id !== $seriesId) {
+            $progress->forceFill(['series_id' => $seriesId])->save();
+        }
+    }
+
+    /**
+     * Whether the viewer already has a progress row for $streamId - relinking
+     * onto it would violate the (viewer, content_type, stream_id) unique index.
+     */
+    private function conflictsWithExistingRow(ViewerWatchProgress $progress, int $streamId): bool
+    {
+        return ViewerWatchProgress::where('playlist_viewer_id', $progress->playlist_viewer_id)
+            ->where('content_type', $progress->content_type)
+            ->where('stream_id', $streamId)
+            ->whereKeyNot($progress->getKey())
+            ->exists();
+    }
+
+    /**
+     * @return array{id: int, content_type: string, stream_id: ?int, tmdb_id: ?int, action: string}
      */
     private function describe(ViewerWatchProgress $progress, string $action): array
     {
@@ -227,24 +298,11 @@ class WatchProgressLinker
 
     private function findChannel(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): ?Channel
     {
-        if (! $progress->tmdb_id) {
-            return null;
-        }
-
-        return Channel::where('user_id', $playlist->user_id)
-            ->where('is_vod', true)
-            ->where('tmdb_id', $progress->tmdb_id)
-            ->first();
+        return $progress->tmdb_id ? $this->findContentByTmdbId('vod', $progress->tmdb_id, $playlist) : null;
     }
 
     private function findEpisode(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): ?Episode
     {
-        if (! $progress->tmdb_id) {
-            return null;
-        }
-
-        return Episode::where('user_id', $playlist->user_id)
-            ->where('tmdb_id', $progress->tmdb_id)
-            ->first();
+        return $progress->tmdb_id ? $this->findContentByTmdbId('episode', $progress->tmdb_id, $playlist) : null;
     }
 }

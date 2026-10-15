@@ -2,16 +2,50 @@
 
 namespace App\Forms\Components;
 
+use Closure;
 use Filament\Forms\Components\Field;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class TmdbSearchResults extends Field
 {
     protected string $view = 'forms.components.tmdb-search-results';
 
-    protected string $type = 'tv';
+    protected string|Closure $type = 'tv';
 
-    public function type(string $type): static
+    /**
+     * Sibling field that a clicked result's TMDB id is written into. When
+     * unset, clicking a result calls the host's applyTmdbSelection() instead.
+     */
+    protected ?string $selectInto = null;
+
+    public function selectInto(string $field): static
+    {
+        $this->selectInto = $field;
+
+        return $this;
+    }
+
+    public function getSelectStatePath(): ?string
+    {
+        if (! $this->selectInto) {
+            return null;
+        }
+
+        return Str::contains($this->getStatePath(), '.')
+            ? Str::beforeLast($this->getStatePath(), '.').'.'.$this->selectInto
+            : $this->selectInto;
+    }
+
+    public function getSelectedId(): ?int
+    {
+        $statePath = $this->getSelectStatePath();
+        $selected = $statePath ? data_get($this->getLivewire(), $statePath) : null;
+
+        return filled($selected) ? (int) $selected : null;
+    }
+
+    public function type(string|Closure $type): static
     {
         $this->type = $type;
 
@@ -20,7 +54,7 @@ class TmdbSearchResults extends Field
 
     public function getType(): string
     {
-        return $this->type;
+        return $this->evaluate($this->type);
     }
 
     public function getResults(): array

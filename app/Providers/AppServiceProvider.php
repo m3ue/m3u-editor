@@ -820,6 +820,16 @@ class AppServiceProvider extends ServiceProvider
                     // The alias now points at a different playlist/custom playlist, so its
                     // cached EPG XML (generated against the previous target) is stale.
                     EpgCacheService::clearPlaylistEpgCacheFile($playlistAlias);
+
+                    // Bouquets only apply to aliases of their own playlist (see the
+                    // BouquetPlaylistAlias attach guard), so the previous target's
+                    // bouquets would otherwise keep filtering the new one.
+                    $staleBouquetIds = $playlistAlias->bouquets()->get()
+                        ->reject(fn (Bouquet $bouquet): bool => $bouquet->appliesTo($playlistAlias))
+                        ->modelKeys();
+                    if ($staleBouquetIds !== []) {
+                        $playlistAlias->bouquets()->detach($staleBouquetIds);
+                    }
                 }
 
                 return $playlistAlias;
@@ -857,6 +867,8 @@ class AppServiceProvider extends ServiceProvider
                     // Auto-include is a provider-sync concept; custom playlists never sync.
                     $bouquet->auto_include_new_live = false;
                     $bouquet->auto_include_new_vod = false;
+                    $bouquet->auto_include_live_patterns = null;
+                    $bouquet->auto_include_vod_patterns = null;
                 }
 
                 // The hidden target FK is otherwise a name-existence oracle for other

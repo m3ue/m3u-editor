@@ -11,6 +11,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -33,6 +34,32 @@ class ManageGeneralSettings extends BaseSettingsPage
     public function getTitle(): string
     {
         return __('General');
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('test_websocket')
+                ->label(__('Test WebSocket'))
+                ->icon('heroicon-o-signal')
+                ->color('gray')
+                ->modalWidth('md')
+                ->schema([
+                    TextInput::make('message')
+                        ->label(__('Message'))
+                        ->required()
+                        ->default('Testing WebSocket connection')
+                        ->helperText(__('This message will be sent to the WebSocket server and displayed as a pop-up notification. If you do not see a notification shortly after sending, there is likely an issue with your WebSocket configuration.')),
+                ])
+                ->action(function (array $data): void {
+                    Notification::make()
+                        ->success()
+                        ->title(__('WebSocket Connection Test'))
+                        ->body($data['message'])
+                        ->persistent()
+                        ->broadcast(auth()->user());
+                }),
+        ];
     }
 
     /** Preset date format strings available in the select. */

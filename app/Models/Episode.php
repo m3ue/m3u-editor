@@ -447,7 +447,7 @@ class Episode extends Model
             $password = urlencode($password);
         } else {
             $username = urlencode($user->name ?? 'admin');
-            $password = urlencode($playlist->uuid);
+            $password = urlencode($playlist->getInternalAuthPassword());
         }
 
         // Build the proxy URL path

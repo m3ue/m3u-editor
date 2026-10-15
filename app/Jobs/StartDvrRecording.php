@@ -15,6 +15,9 @@ use Throwable;
 /**
  * StartDvrRecording — Spawn an ffmpeg process for a scheduled recording.
  *
+ * With $resume, restarts the proxy capture of an in-progress recording the proxy
+ * lost instead (see DvrSchedulerService::resumeLostRecordings()).
+ *
  * ShouldBeUnique prevents the scheduler from queuing a second start job for
  * the same recording while one is already pending or processing, removing the
  * need to pre-transition the recording's status before the job runs.
@@ -27,7 +30,7 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 30;
 
-    public function __construct(public readonly int $recordingId)
+    public function __construct(public readonly int $recordingId, public readonly bool $resume = false)
     {
         $this->onQueue('dvr');
     }
@@ -44,6 +47,12 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
         if (! $recording) {
             Log::warning("StartDvrRecording: recording {$this->recordingId} not found");
             $this->fail(new \Exception("StartDvrRecording: recording {$this->recordingId} not found"));
+
+            return;
+        }
+
+        if ($this->resume) {
+            $this->resumeRecording($recorder, $recording);
 
             return;
         }
@@ -78,6 +87,23 @@ class StartDvrRecording implements ShouldBeUnique, ShouldQueue
                     ->broadcast($user)
                     ->sendToDatabase($user);
             }
+        }
+    }
+
+    /**
+     * A failed resume leaves the recording as-is (it already has footage); the
+     * next scheduler tick tries again until the airing window ends.
+     */
+    private function resumeRecording(DvrRecorderService $recorder, DvrRecording $recording): void
+    {
+        if ($recording->status !== DvrRecordingStatus::Recording) {
+            return;
+        }
+
+        try {
+            $recorder->resume($recording);
+        } catch (Throwable $e) {
+            Log::error("StartDvrRecording: recording {$this->recordingId} failed to resume - {$e->getMessage()}");
         }
     }
 }

@@ -134,8 +134,41 @@ it('relinks an episode progress row to its new stream_id via tmdb_id after a lib
     $data = $response->json();
     expect($data)->toHaveCount(1);
     expect($data[0]['stream_id'])->toBe($newEpisode->id);
+    expect($data[0]['series_id'])->toBe($series->id);
 
     expect($progress->fresh()->stream_id)->toBe($newEpisode->id);
+    expect($progress->fresh()->series_id)->toBe($series->id);
+});
+
+it('repairs a stale series_id on an episode row that already resolves', function () {
+    $series = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+    ]);
+    $episode = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id,
+    ]);
+
+    // Relinked before series_id followed the episode: the stream_id is
+    // current but series_id still points at the deleted pre-flush series.
+    $progress = ViewerWatchProgress::create([
+        'playlist_viewer_id' => $this->viewer->id,
+        'content_type' => 'episode',
+        'stream_id' => $episode->id,
+        'series_id' => 424242,
+        'position_seconds' => 120,
+        'duration_seconds' => 1800,
+        'completed' => false,
+        'last_watched_at' => now(),
+    ]);
+
+    $response = getRecentlyWatchedForViewer($this->viewer);
+
+    $response->assertOk();
+    expect($response->json('0.series_id'))->toBe($series->id);
+    expect($progress->fresh()->series_id)->toBe($series->id);
 });
 
 it('stores tmdb_id when recording vod watch progress', function () {

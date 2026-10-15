@@ -583,7 +583,7 @@ it('offers only source-compatible libraries with a companion-approved writable p
         ->assertMountedActionModalDontSee('Compatible TV');
 });
 
-it('shows one actionable version error and persists nothing when managed setup is unavailable', function () {
+it('shows a safe endpoint error and persists nothing when managed setup is unavailable', function () {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
     $playlist = Playlist::factory()->for($user)->createQuietly();
@@ -617,7 +617,7 @@ it('shows one actionable version error and persists nothing when managed setup i
     $errorBag = $component->instance()->getErrorBag();
     $errors = $errorBag->all();
     expect($errors)->toHaveCount(1)
-        ->and($errors[0])->toContain('managed setup version 1', 'retry')
+        ->and($errors[0])->toBe(__('The Emby managed setup endpoint was not found. Check the companion installation, then retry.'))
         ->not->toContain('emby-secret', '/config/', 'integration ID', 'output path')
         ->and(EmbyLibraryMapping::query()->count())->toBe(0)
         ->and($integration->refresh())

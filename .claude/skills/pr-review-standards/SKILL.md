@@ -91,6 +91,8 @@ The actual import/sync work lives in the `Process*` job chains, not just `Sync*`
 
 A diff touching any stage of one of these chains needs the same "did a default silently change" scrutiny described above — check the whole chain's control flow, not just the file the PR happened to edit.
 
+EPG channel matching (`app/Services/SimilaritySearchService.php`, `app/Jobs/MapPlaylistChannelsToEpg*.php`) is the same kind of hot path, but its regressions are usually speed rather than behavior: a change can pass every test, including the bounded-query ones, and still turn minutes of mapping into hours (#1302). A diff touching it should include `php artisan epg:benchmark-mapping --compare=<base results>` output in the PR description (run on the base branch with `--json` first). Flag it if that's missing, and treat a large median-time increase or unexplained mapping differences in the comparison as a regression.
+
 ## 5. Migration / Schema Safety on Hot Tables
 
 A migration can regress the app without changing a single line of application code, by locking a table the `Process*`/`Sync*` job chains write to continuously. Treat any migration touching `channels`, `epg_channels`, `playlists`, `epgs`, or another table those job chains read/write as needing the same scrutiny as §4.

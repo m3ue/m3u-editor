@@ -26,13 +26,7 @@ class BouquetPlaylistAlias extends Pivot
             $bouquet = Bouquet::find($pivot->bouquet_id);
             $alias = PlaylistAlias::find($pivot->playlist_alias_id);
 
-            $matches = $bouquet && $alias && (
-                ($bouquet->playlist_id !== null && $bouquet->playlist_id === $alias->playlist_id)
-                || ($bouquet->custom_playlist_id !== null && $bouquet->custom_playlist_id === $alias->custom_playlist_id)
-                || ($bouquet->merged_playlist_id !== null && $bouquet->merged_playlist_id === $alias->merged_playlist_id)
-            );
-
-            if (! $matches) {
+            if (! $bouquet || ! $alias || ! $bouquet->appliesTo($alias)) {
                 throw new InvalidArgumentException('A bouquet can only be attached to an alias of the same playlist.');
             }
         });

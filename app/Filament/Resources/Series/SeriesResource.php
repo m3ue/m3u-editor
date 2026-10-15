@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series;
 
+use App\Enums\CachedContentFileStatus;
 use App\Facades\LogoFacade;
 use App\Filament\Actions\AssetPickerAction;
 use App\Filament\Actions\BulkModalActionGroup;
@@ -205,6 +206,18 @@ class SeriesResource extends Resource implements CopilotResource
                 ->label(__('Episodes'))
                 ->counts('episodes')
                 ->badge()
+                ->toggleable()
+                ->sortable(),
+            TextColumn::make('cached_episodes_count')
+                ->label(__('Cached'))
+                ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+                ->counts(['episodes as cached_episodes_count' => fn ($q) => $q->whereHas(
+                    'cachedContentFile',
+                    fn ($file) => $file->where('status', CachedContentFileStatus::Completed),
+                )])
+                ->badge()
+                ->color(fn ($state) => $state > 0 ? 'success' : 'gray')
+                ->tooltip(__('Episodes with a local cache file'))
                 ->toggleable()
                 ->sortable(),
             TextColumn::make('probe_enabled_episodes_count')

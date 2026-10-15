@@ -97,6 +97,7 @@ class DuplicateCustomPlaylist implements ShouldQueue
                             'channel_id' => $row->channel_id,
                             'custom_playlist_id' => $newPlaylist->id,
                             'channel_number' => $row->channel_number,
+                            'channel_minor' => $row->channel_minor,
                             'sort' => $row->sort,
                         ])->all()
                     );

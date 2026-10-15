@@ -16,6 +16,7 @@ use App\Services\ChannelNumberSequence;
 use App\Services\EpgCacheService;
 use App\Services\EpisodeNumberNormalizer;
 use App\Services\NetworkEpgService;
+use App\Support\EpgProgrammeArtwork;
 use Carbon\Carbon;
 use DOMDocument;
 use DOMElement;
@@ -163,10 +164,7 @@ class EpgGenerateController extends Controller
             }
 
             // Get/set the channel number (use pivot channel_number for custom playlists)
-            $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                ? (int) $channel->pivot->channel_number
-                : $channel->channel;
-            $channelNo = $numberSequence->next($channelNo);
+            $channelNo = $numberSequence->next($channel->resolveChannelNumber($isCustomContext));
 
             // Get the `tvg-id` based on the playlist setting
             $tvgId = $channel->resolveTvgId($idChannelBy, $channelNo);
@@ -350,6 +348,8 @@ class EpgGenerateController extends Controller
                         }
 
                         foreach ($programmes as $programme) {
+                            // Artwork doesn't depend on the mapped channel, so build it once.
+                            $artworkXml = $this->programmeArtworkXml($programme, $epg, $logoProxyEnabled);
                             foreach ($channelMapping[$channelId] as $mappedData) {
                                 $mappedChannelId = $mappedData['tvg_id'];
                                 $tvgShift = $mappedData['tvg_shift'];
@@ -385,42 +385,20 @@ class EpgGenerateController extends Controller
                                 if ($programme['category']) {
                                     $progXml .= '    <category>'.$this->escapeXml($programme['category']).'</category>'.PHP_EOL;
                                 }
+                                $progXml .= $artworkXml['icons'];
                                 foreach (EpisodeNumberNormalizer::forProgramme($programme) as $episodeNumber) {
                                     $systemAttribute = ($episodeNumber['system'] !== null && $episodeNumber['system'] !== '')
                                         ? ' system="'.$this->escapeXml($episodeNumber['system']).'"'
                                         : '';
                                     $progXml .= '    <episode-num'.$systemAttribute.'>'.$this->escapeXml($episodeNumber['value']).'</episode-num>'.PHP_EOL;
                                 }
-                                if ($programme['icon']) {
-                                    $icon = $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($programme['icon'], $epg)
-                                        ? LogoProxyController::generateProxyUrl($programme['icon'])
-                                        : $programme['icon'];
-                                    $progXml .= '    <icon src="'.$this->escapeXml($icon).'"/>'.PHP_EOL;
-                                }
-                                // Program artwork images (NEW)
-                                if (! empty($programme['images'] ?? null) && is_array($programme['images'])) {
-                                    foreach ($programme['images'] as $image) {
-                                        $rawUrl = $image['url'] ?? '';
-                                        $proxiedUrl = $logoProxyEnabled && $rawUrl && ! $this->isSchedulesDirectImageUrl($rawUrl, $epg)
-                                            ? LogoProxyController::generateProxyUrl($rawUrl)
-                                            : $rawUrl;
-
-                                        $url = $this->escapeXml($proxiedUrl);
-                                        $type = $this->escapeXml($image['type']);
-                                        $width = $this->escapeXml($image['width']);
-                                        $height = $this->escapeXml($image['height']);
-                                        $orient = $this->escapeXml($image['orient']);
-                                        $size = $this->escapeXml($image['size']);
-
-                                        $progXml .= "    <icon src=\"{$url}\" type=\"{$type}\" width=\"{$width}\" height=\"{$height}\" orient=\"{$orient}\" size=\"{$size}\" />\n";
-                                    }
+                                if (! empty($programme['new']) && $programme['new']) {
+                                    $progXml .= '    <new />'.PHP_EOL;
                                 }
                                 if ($programme['rating']) {
                                     $progXml .= '    <rating><value>'.$this->escapeXml($programme['rating']).'</value></rating>'.PHP_EOL;
                                 }
-                                if (! empty($programme['new']) && $programme['new']) {
-                                    $progXml .= '    <new />'.PHP_EOL;
-                                }
+                                $progXml .= $artworkXml['images'];
 
                                 $progXml .= '  </programme>'.PHP_EOL;
                                 echo $progXml;
@@ -715,28 +693,10 @@ class EpgGenerateController extends Controller
         $filename = Str::slug($playlist->name).($compressed ? '.xml.gz' : '.xml');
         $contentType = $compressed ? 'application/gzip' : 'application/xml';
 
-        if ($compressed) {
-            // For compressed, keep existing behaviour (generate then compress)
-            // NOTE: streaming gzip on-the-fly is more complex; keep as-is for safety
-            ob_start();
-            $this->generate($playlist);
-            $content = ob_get_clean();
-            $compressedContent = gzencode($content, 9);
-
-            // Save to cache
-            $disk->put($cacheFilePath, $compressedContent);
-
-            return response($compressedContent, 200, [
-                'Access-Control-Allow-Origin' => '*',
-                'Cache-Control' => 'no-store, no-cache, must-revalidate',
-                'Content-Disposition' => "attachment; filename=\"$filename\"",
-                'Content-Type' => $contentType,
-                'X-EPG-Cache' => 'MISS',
-            ]);
-        }
-
-        // For regular XML, stream generation directly to the client and write cache incrementally
-        return response()->stream(function () use ($playlist, $disk, $cacheFilePath) {
+        // Stream generation directly to the client and write the cache incrementally.
+        // The compressed variant gzips each chunk on the fly, so neither path ever
+        // holds the whole document (which can run to gigabytes) in memory.
+        return response()->stream(function () use ($playlist, $disk, $cacheFilePath, $compressed) {
             // Resolve full path for cache and ensure directory exists
             $fullPath = $disk->path($cacheFilePath);
             $dir = dirname($fullPath);
@@ -774,22 +734,31 @@ class EpgGenerateController extends Controller
             };
             register_shutdown_function($cleanupShutdown);
 
+            // If the cache can't be written, still stream (and compress) to the client
             $fh = @fopen($tmpPath, 'w');
-            if ($fh === false) {
-                // Fallback: if we can't write cache, just stream without caching
-                $this->generate($playlist);
 
-                return;
-            }
+            // Incremental gzip context; the final chunk (with the gzip trailer) is
+            // emitted when the output buffer is closed.
+            $deflate = $compressed ? deflate_init(ZLIB_ENCODING_GZIP, ['level' => 6]) : null;
 
-            // Start an output buffer with a callback that writes each flushed chunk to cache
-            ob_start(function ($buffer) use ($fh) {
-                // Write chunk to cache file
-                @fwrite($fh, $buffer);
+            // Start an output buffer with a callback that compresses (if needed) each
+            // flushed chunk, writes it to the cache file and passes it to the client
+            $outerBufferLevel = ob_get_level();
+            ob_start(function (string $buffer, int $phase) use (&$fh, $deflate) {
+                if ($deflate !== null) {
+                    $isFinal = (bool) ($phase & PHP_OUTPUT_HANDLER_FINAL);
+                    $buffer = deflate_add($deflate, $buffer, $isFinal ? ZLIB_FINISH : ZLIB_NO_FLUSH);
+                }
+
+                // Guard: the handle is closed in `finally`, but a buffer left open by a
+                // failed generation is only flushed (and calls back here) afterwards
+                if (is_resource($fh)) {
+                    @fwrite($fh, $buffer);
+                }
 
                 // Return buffer so it is sent to the client
                 return $buffer;
-            }, 4096);
+            }, 65536);
 
             try {
                 // Generate will echo directly; each echo will be passed through the ob callback
@@ -798,8 +767,9 @@ class EpgGenerateController extends Controller
                 // Mark completed only after successful generation
                 $completed = true;
 
-                // Flush any remaining buffers
-                while (ob_get_level() > 0) {
+                // Flush our buffer (and anything generate() left open above it) so the
+                // final gzip chunk is written before the cache file is closed
+                while (ob_get_level() > $outerBufferLevel) {
                     ob_end_flush();
                 }
             } finally {
@@ -807,12 +777,10 @@ class EpgGenerateController extends Controller
                 if (is_resource($fh)) {
                     fclose($fh);
                 }
-                if ($completed) {
+                if ($completed && $fh !== false) {
                     @rename($tmpPath, $fullPath);
-                } else {
-                    if (file_exists($tmpPath)) {
-                        @unlink($tmpPath);
-                    }
+                } elseif (file_exists($tmpPath)) {
+                    @unlink($tmpPath);
                 }
             }
         }, 200, [
@@ -822,33 +790,6 @@ class EpgGenerateController extends Controller
             'Content-Type' => $contentType,
             'X-EPG-Cache' => 'MISS',
         ]);
-    }
-
-    /**
-     * Gzip the file
-     *
-     * @param  string  $filename
-     * @param  string  $disk
-     * @param  bool  $delete_original
-     * @return bool
-     */
-    private function gzip($filename, $disk = 'local', $delete_original = false)
-    {
-        $disk = Storage::disk($disk);
-        $data = $disk->get($filename);
-        $out_file = "$filename.gz";
-
-        $gzdata = gzencode($data, 9);
-        $disk->put($out_file, $gzdata);
-        $fp = fopen($disk->path($out_file), 'w');
-        $result = fwrite($fp, $gzdata);
-        fclose($fp);
-
-        if ($result && $delete_original) {
-            $disk->delete($filename);
-        }
-
-        return $result > 0;
     }
 
     /**
@@ -906,6 +847,93 @@ class EpgGenerateController extends Controller
         }
 
         return ! in_array($matches[1], ['.', '..'], true);
+    }
+
+    /**
+     * A programme's XMLTV artwork: the plain <icon> list (placed before
+     * <episode-num>) and the role-qualified <image> list (placed last), per
+     * the XMLTV DTD element order.
+     *
+     * @param  array<string, mixed>  $programme
+     * @return array{icons: string, images: string}
+     */
+    private function programmeArtworkXml(array $programme, Epg $epg, bool $logoProxyEnabled): array
+    {
+        $icons = '';
+        $roleImages = '';
+        $images = is_array($programme['images'] ?? null) ? $programme['images'] : [];
+        if ($programme['icon']) {
+            $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($programme['icon'], $epg, $logoProxyEnabled)).'"/>'.PHP_EOL;
+        }
+        foreach ($images as $image) {
+            $rawUrl = trim((string) ($image['url'] ?? ''));
+            if ($rawUrl === '') {
+                continue;
+            }
+            $width = (int) ($image['width'] ?? 0);
+            $height = (int) ($image['height'] ?? 0);
+            $dimensions = $width > 0 && $height > 0 ? ' width="'.$width.'" height="'.$height.'"' : '';
+            $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($rawUrl, $epg, $logoProxyEnabled)).'"'.$dimensions.'/>'.PHP_EOL;
+        }
+        foreach ($this->programmeRoleImages($images) as $image) {
+            $attributes = ' type="'.$image['type'].'"';
+            if ($image['size'] !== null) {
+                $attributes .= ' size="'.$image['size'].'"';
+            }
+            if ($image['orient'] !== null) {
+                $attributes .= ' orient="'.$image['orient'].'"';
+            }
+            $roleImages .= '    <image'.$attributes.'>'.$this->escapeXml($this->programmeImageUrl($image['url'], $epg, $logoProxyEnabled)).'</image>'.PHP_EOL;
+        }
+
+        return ['icons' => $icons, 'images' => $roleImages];
+    }
+
+    /**
+     * Route programme artwork through the logo proxy when enabled, except
+     * first-party Schedules Direct images that are already served locally.
+     */
+    private function programmeImageUrl(string $url, Epg $epg, bool $logoProxyEnabled): string
+    {
+        return $logoProxyEnabled && ! $this->isSchedulesDirectImageUrl($url, $epg)
+            ? LogoProxyController::generateProxyUrl($url)
+            : $url;
+    }
+
+    /**
+     * Role-qualified XMLTV <image> entries: the portrait poster and the
+     * landscape backdrop picked by {@see EpgProgrammeArtwork}, plus any
+     * still/person/character artwork as declared. Emitted in addition to
+     * the plain <icon> list so legacy consumers keep working.
+     *
+     * @param  array<int, mixed>  $images
+     * @return list<array{url: string, type: string, size: int|null, orient: string|null}>
+     */
+    private function programmeRoleImages(array $images): array
+    {
+        $roleImages = [];
+        $add = function (?array $image, string $type) use (&$roleImages): void {
+            $url = trim((string) ($image['url'] ?? ''));
+            if ($image === null || $url === '' || isset($roleImages[$url.'|'.$type])) {
+                return;
+            }
+            $roleImages[$url.'|'.$type] = [
+                'url' => $url,
+                'type' => $type,
+                'size' => EpgProgrammeArtwork::size($image),
+                'orient' => EpgProgrammeArtwork::orientation($image),
+            ];
+        };
+
+        $add(EpgProgrammeArtwork::poster($images), 'poster');
+        $add(EpgProgrammeArtwork::backdrop($images), 'backdrop');
+        foreach ($images as $image) {
+            if (is_array($image) && in_array(EpgProgrammeArtwork::type($image), ['still', 'person', 'character'], true)) {
+                $add($image, EpgProgrammeArtwork::type($image));
+            }
+        }
+
+        return array_values($roleImages);
     }
 
     /**
@@ -967,6 +995,11 @@ class EpgGenerateController extends Controller
             return;
         }
 
+        // Binary hashes of programmes already emitted, so a feed repeating the
+        // exact same <programme> (matching the cache build's dedupe) is only
+        // output once per mapped channel. Only mapped programmes are tracked.
+        $seenProgrammes = [];
+
         // Loop through the XML data
         while (@$programReader->read()) {
             // Only consider XML elements and programme nodes
@@ -982,11 +1015,19 @@ class EpgGenerateController extends Controller
                 if (! count($filtered)) {
                     continue;
                 }
+
+                $programmeXml = $programReader->readOuterXML();
+                $programmeHash = md5($programmeXml, true);
+                if (isset($seenProgrammes[$programmeHash])) {
+                    continue;
+                }
+                $seenProgrammes[$programmeHash] = true;
+
                 // Channel program found, output the <programme> tag
                 // First, we need to make sure the channel is correct
                 // Replace `channel="<channel_id>"` with `channel="<stream_id>"`
                 $itemDom = new DOMDocument;
-                $itemDom->loadXML($programReader->readOuterXML());
+                $itemDom->loadXML($programmeXml);
 
                 // Get the item element
                 $item = $itemDom->documentElement;

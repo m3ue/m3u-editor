@@ -25,6 +25,8 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\SourceGroup;
 use App\Models\User;
+use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,6 +94,63 @@ it('renders the alias edit form with an attached bouquet', function () {
         ->assertSuccessful();
 });
 
+it('loads assigned bouquets in the order they were assigned', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $first = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => 'Alpha']);
+    $second = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => 'Beta']);
+    $alias->bouquets()->attach($second->id);
+    $alias->bouquets()->attach($first->id);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSuccessful()
+        ->assertSchemaStateSet(['bouquets' => [(string) $second->id, (string) $first->id]]);
+});
+
+it('does not load a leftover pivot row for another target into the bouquets state', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $own = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->attach($own->id);
+
+    // A stale row from before the target-switch cleanup, written past the pivot guard.
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $foreign = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $otherPlaylist->id]);
+    DB::table('bouquet_playlist_alias')->insert(['bouquet_id' => $foreign->id, 'playlist_alias_id' => $alias->id]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSchemaStateSet(['bouquets' => [(string) $own->id]]);
+});
+
+it('saves newly assigned bouquets in the order they were picked', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $bouquets = collect(['France', 'Belgium', 'Africa'])->map(fn (string $name) => Bouquet::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id, 'name' => $name,
+    ]));
+    $picked = [(string) $bouquets[2]->id, (string) $bouquets[0]->id, (string) $bouquets[1]->id];
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->fillForm([
+            'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
+            'bouquets' => $picked,
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($alias->bouquets()->orderByPivot('id')->pluck('bouquets.id')->map(fn ($id) => (string) $id)->all())->toBe($picked);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->assertSchemaStateSet(['bouquets' => $picked]);
+});
+
+it('clears all assigned bouquets from the hint action', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->attach($bouquet->id);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->callAction(TestAction::make('clear_bouquets')->schemaComponent('bouquets'))
+        ->assertSchemaStateSet(['bouquets' => []]);
+});
+
 it('resets the bouquets form state when the source playlist changes', function () {
     $alias = makeFormAlias($this->user, $this->playlist);
     $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
@@ -103,6 +162,80 @@ it('resets the bouquets form state when the source playlist changes', function (
         ->assertSuccessful()
         ->set('data.source_id', $otherPlaylist->id)
         ->assertSchemaStateSet(['bouquets' => []]);
+});
+
+it('detaches the previous playlist\'s bouquets when the alias is saved against a different playlist', function () {
+    // Regression: the form cleared the field on a playlist switch, but Filament's
+    // relationship save only detaches within the new target's options, so the old
+    // playlist's bouquets stayed attached (and kept filtering) after the save.
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $oldBouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_selections' => ['selected_groups' => ['Sports']],
+    ]);
+    $alias->bouquets()->sync([$oldBouquet->id]);
+
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $newBouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $otherPlaylist->id,
+        'group_selections' => ['selected_groups' => ['News']],
+    ]);
+
+    Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+        ->fillForm(['source_id' => $otherPlaylist->id])
+        // The switch seeds a blank provider credentials row; fill it so the save validates.
+        ->fillForm([
+            'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
+            'bouquets' => [(string) $newBouquet->id],
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $alias->refresh();
+
+    expect($alias->playlist_id)->toBe($otherPlaylist->id)
+        ->and($alias->bouquets()->pluck('bouquets.id')->all())->toBe([$newBouquet->id])
+        ->and($alias->getAllowedLiveGroupNames())->toBe(['News']);
+});
+
+it('detaches bouquets of the previous target when an alias is repointed outside the form', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $bouquet = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->sync([$bouquet->id]);
+
+    $custom = CustomPlaylist::create(['name' => 'CP', 'user_id' => $this->user->id, 'id_channel_by' => 'stream_id']);
+    $alias->update(['playlist_id' => null, 'custom_playlist_id' => $custom->id]);
+
+    expect($alias->bouquets()->count())->toBe(0);
+
+    // Saving without a target change leaves matching bouquets alone.
+    $customBouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => null, 'custom_playlist_id' => $custom->id,
+    ]);
+    $alias->bouquets()->sync([$customBouquet->id]);
+    $alias->update(['name' => 'Renamed Alias']);
+
+    expect($alias->bouquets()->pluck('bouquets.id')->all())->toBe([$customBouquet->id]);
+});
+
+it('removes bouquets left attached from an alias\'s previous playlist (data fix migration)', function () {
+    $alias = makeFormAlias($this->user, $this->playlist);
+    $matching = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->sync([$matching->id]);
+
+    // Simulate a pivot row left behind by the old form behaviour: the bouquet
+    // targets a different playlist than the alias. Inserted raw because the
+    // pivot's attach guard rejects it.
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    $leftover = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $otherPlaylist->id]);
+    DB::table('bouquet_playlist_alias')->insert(['bouquet_id' => $leftover->id, 'playlist_alias_id' => $alias->id]);
+
+    $migration = require database_path('migrations/2026_10_06_152330_detach_mismatched_alias_bouquets.php');
+    $migration->up();
+
+    expect($alias->bouquets()->pluck('bouquets.id')->all())->toBe([$matching->id]);
 });
 
 it('does not leak another user\'s bouquet contribution when the bouquets state is tampered', function () {

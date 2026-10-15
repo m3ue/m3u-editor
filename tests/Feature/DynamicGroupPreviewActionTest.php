@@ -221,8 +221,12 @@ it('mounts the preview action from the dynamic groups repeater on the edit page'
     $component
         ->mountAction(
             TestAction::make('preview_dynamic_group')
-                ->schemaComponent('dynamic_groups_config')
-                ->arguments(['item' => $itemKey]),
+                ->schemaComponent("dynamic_groups_config.{$itemKey}.dynamic_group_preview"),
         )
-        ->assertSuccessful();
+        ->assertMountedActionModalSee(['Preview: Trending Now', 'Hot Movie']);
+});
+
+it('explains when there is no playlist to preview against yet', function () {
+    expect(PlaylistResource::getDynamicGroupPreviewData($this->trendingVodRule, null)['error'])
+        ->toBe('Save the playlist before previewing dynamic groups.');
 });

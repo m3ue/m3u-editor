@@ -213,3 +213,78 @@ it('populates epg_programmes for DVR from the sqlite store', function () {
         ->and($row->title)->toBe('DVR Show')
         ->and($row->description)->toBe('Body');
 });
+
+/**
+ * Writes `$copies` exact copies of one programme plus `$distinct` unique ones
+ * straight through the store, returning the path and finish()'s removed count.
+ *
+ * @return array{path: string, removed: int}
+ */
+function buildStoreWithDuplicates(int $copies, int $distinct): array
+{
+    $path = Storage::disk('local')->path('store-compaction/programmes.sqlite');
+    $start = now()->startOfDay()->addHour();
+    $description = str_repeat('Repeated schedule payload. ', 40);
+
+    $store = new EpgProgrammeStore;
+    $store->beginWrite($path);
+    for ($i = 0; $i < $copies; $i++) {
+        $store->insert('demo.channel', $start->format('Y-m-d'), $start->getTimestamp(), $start->getTimestamp() + 3600, [
+            'title' => 'Repeated', 'desc' => $description,
+        ]);
+    }
+    for ($i = 0; $i < $distinct; $i++) {
+        $slot = $start->getTimestamp() + (($i + 1) * 3600);
+        $store->insert('demo.channel', $start->format('Y-m-d'), $slot, $slot + 3600, [
+            'title' => "Distinct {$i}", 'desc' => $description,
+        ]);
+    }
+
+    return ['path' => $path, 'removed' => $store->finish()];
+}
+
+it('compacts the store file when duplicates were most of it', function () {
+    ['path' => $path, 'removed' => $removed] = buildStoreWithDuplicates(copies: 2000, distinct: 10);
+
+    $pdo = new PDO('sqlite:'.$path);
+
+    expect($removed)->toBe(1999)
+        ->and((int) $pdo->query('SELECT COUNT(*) FROM programmes')->fetchColumn())->toBe(11)
+        ->and((int) $pdo->query('PRAGMA freelist_count')->fetchColumn())->toBe(0)
+        ->and(filesize($path))->toBeLessThan(100 * 1024)
+        ->and(glob(dirname($path).'/*.{building,compact}*', GLOB_BRACE))->toBe([]);
+
+    // The lookup index survives compaction
+    expect($pdo->query("SELECT name FROM sqlite_master WHERE type = 'index'")->fetchAll(PDO::FETCH_COLUMN))
+        ->toBe(['programmes_date_channel']);
+});
+
+it('skips compaction when only a few duplicates were removed', function () {
+    ['path' => $path, 'removed' => $removed] = buildStoreWithDuplicates(copies: 2, distinct: 200);
+
+    $pdo = new PDO('sqlite:'.$path);
+
+    expect($removed)->toBe(1)
+        ->and((int) $pdo->query('SELECT COUNT(*) FROM programmes')->fetchColumn())->toBe(201)
+        ->and(glob(dirname($path).'/*.{building,compact}*', GLOB_BRACE))->toBe([]);
+});
+
+it('sweeps build sidecars left behind by a crashed run on the next rebuild', function () {
+    ['epg' => $epg] = cacheXmltvForIndex(
+        ['channel.a'],
+        [['channel' => 'channel.a', 'title' => 'A One', 'startHour' => 1]],
+    );
+
+    $storePath = "epg-cache/{$epg->uuid}/v2/programmes.sqlite";
+    $leftovers = ["{$storePath}.building-1234-deadbeef", "{$storePath}.building-1234-deadbeef.compact"];
+    foreach ($leftovers as $leftover) {
+        Storage::disk('local')->put($leftover, 'partial build');
+    }
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    foreach ($leftovers as $leftover) {
+        expect(Storage::disk('local')->exists($leftover))->toBeFalse();
+    }
+    expect(Storage::disk('local')->exists($storePath))->toBeTrue();
+});

@@ -12,6 +12,7 @@ use App\Models\EpgProgramme;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Support\EpgProgrammeArtwork;
 use App\Support\EpgProgrammeNormalizer;
 use App\Support\EpisodeNumberParser;
 use Carbon\Carbon;
@@ -285,20 +286,45 @@ class EpgCacheService
                 }
                 break;
             case 'icon':
+                // Only the programme's own <icon>, not ones nested in <rating>,
+                // <star-rating> or <credits>.
+                if ($reader->depth !== 1) {
+                    break;
+                }
                 if (! $programme['icon']) {
                     $programme['icon'] = trim($reader->getAttribute('src') ?: '');
                 } else {
                     $imageUrl = trim($reader->getAttribute('src') ?: '');
                     if ($imageUrl) {
+                        // No role or orientation is assumed when the source omits it.
                         $programme['images'][] = [
                             'url' => $imageUrl,
-                            'type' => trim($reader->getAttribute('type') ?: 'poster'),
+                            'type' => strtolower(trim($reader->getAttribute('type') ?: '')),
                             'width' => (int) ($reader->getAttribute('width') ?: 0),
                             'height' => (int) ($reader->getAttribute('height') ?: 0),
-                            'orient' => trim($reader->getAttribute('orient') ?: 'P'),
-                            'size' => (int) ($reader->getAttribute('size') ?: 1),
+                            'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
+                            'size' => (int) ($reader->getAttribute('size') ?: 0),
                         ];
                     }
+                }
+                break;
+            case 'image':
+                // XMLTV <image type="poster" orient="P" size="3">URL</image>. Credits
+                // can nest <image> for actor headshots, so only direct children count.
+                if ($reader->depth !== 1) {
+                    break;
+                }
+                $type = strtolower(trim($reader->getAttribute('type') ?: ''));
+                $imageUrl = trim($reader->readString() ?: '');
+                if ($imageUrl !== '' && in_array($type, EpgProgrammeArtwork::ROLES, true)) {
+                    $programme['images'][] = [
+                        'url' => $imageUrl,
+                        'type' => $type,
+                        'width' => 0,
+                        'height' => 0,
+                        'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
+                        'size' => (int) ($reader->getAttribute('size') ?: 0),
+                    ];
                 }
                 break;
             case 'new':
@@ -375,6 +401,8 @@ class EpgCacheService
         $processedDates = [];
         $lastProgressUpdate = 0;
         $progressUpdateInterval = 5000; // Update progress every 5000 items instead of 50
+
+        $duplicatesRemoved = 0;
 
         $store = new EpgProgrammeStore;
         $store->beginWrite(Storage::disk('local')->path($this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE)));
@@ -508,8 +536,11 @@ class EpgCacheService
                 $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
             }
 
-            // Commit, index, and atomically swap the SQLite store into place.
-            $store->finish();
+            // Commit, index, drop exact duplicate programmes, and atomically swap the SQLite store into place.
+            $duplicatesRemoved = $store->finish();
+            if ($duplicatesRemoved > 0) {
+                Log::info("Removed {$duplicatesRemoved} exact duplicate programmes from EPG cache for {$epg->name}");
+            }
         } catch (\Throwable $e) {
             $store->discard();
             throw $e;
@@ -519,7 +550,8 @@ class EpgCacheService
 
         return [
             'channels' => $channelCount,
-            'programmes' => $programmeCount,
+            // Duplicates never reach the store, so they don't count towards the EPG's programmes
+            'programmes' => $programmeCount - $duplicatesRemoved,
             'date_count' => count($processedDates),
             'date_range' => $dateRangeTracker,
         ];
@@ -1145,6 +1177,72 @@ class EpgCacheService
             ->pluck('custom_playlist_id')
             ->all();
 
+        self::bulkDeleteCacheFiles(self::withDependentPlaylists($sourceIds, $customIds));
+    }
+
+    /**
+     * Clear EPG file caches for all playlist types that output a channel using the
+     * given AED profile, either directly or through the channel's group. AED
+     * programmes are built when the EPG file is generated, so a cached file keeps
+     * serving the old profile's output until it expires.
+     */
+    public static function clearForAedProfile(int $aedProfileId): void
+    {
+        self::bulkDeleteCacheFiles(self::aedProfileCacheTargets($aedProfileId));
+    }
+
+    /**
+     * Resolve the playlist IDs (by table) whose EPG output uses the given AED profile.
+     * Split out from clearForAedProfile() so a profile delete can resolve them before
+     * the foreign keys are nulled and clear them after.
+     *
+     * Uses subqueries rather than loading channel IDs, since a group-level profile
+     * can cover thousands of channels.
+     *
+     * @return array<string, array<int>>
+     */
+    public static function aedProfileCacheTargets(int $aedProfileId): array
+    {
+        $profileGroupIds = DB::table('groups')
+            ->where('aed_profile_id', $aedProfileId)
+            ->select('id');
+
+        // Source playlists owning a channel or group with the profile
+        $sourceIds = DB::table('groups')
+            ->where('aed_profile_id', $aedProfileId)
+            ->whereNotNull('playlist_id')
+            ->distinct()
+            ->pluck('playlist_id')
+            ->merge(DB::table('channels')
+                ->where('aed_profile_id', $aedProfileId)
+                ->whereNotNull('playlist_id')
+                ->distinct()
+                ->pluck('playlist_id'))
+            ->unique()
+            ->values()
+            ->all();
+
+        // Custom playlists containing any of those channels
+        $customIds = DB::table('channel_custom_playlist as ccp')
+            ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
+            ->where(fn ($query) => $query
+                ->where('c.aed_profile_id', $aedProfileId)
+                ->orWhereIn('c.group_id', $profileGroupIds))
+            ->distinct()
+            ->pluck('ccp.custom_playlist_id')
+            ->all();
+
+        return self::withDependentPlaylists($sourceIds, $customIds);
+    }
+
+    /**
+     * Expand affected source and custom playlist IDs with the merged playlists and
+     * aliases that output them, keyed by table for bulkDeleteCacheFiles().
+     *
+     * @return array<string, array<int>>
+     */
+    private static function withDependentPlaylists(array $sourceIds, array $customIds): array
+    {
         // Merged playlist IDs via the merged_playlist_playlist pivot
         $mergedIds = $sourceIds
             ? DB::table('merged_playlist_playlist')
@@ -1170,12 +1268,12 @@ class EpgCacheService
                 ->all()
             : [];
 
-        self::bulkDeleteCacheFiles([
+        return [
             'playlists' => $sourceIds,
             'custom_playlists' => $customIds,
             'merged_playlists' => $mergedIds,
             'playlist_aliases' => $aliasIds,
-        ]);
+        ];
     }
 
     /**
@@ -1241,7 +1339,7 @@ class EpgCacheService
     /**
      * Build EPG cache file paths from a table → IDs map and delete them in one Storage call.
      */
-    private static function bulkDeleteCacheFiles(array $tableIdMap): void
+    public static function bulkDeleteCacheFiles(array $tableIdMap): void
     {
         $paths = [];
         foreach ($tableIdMap as $table => $ids) {

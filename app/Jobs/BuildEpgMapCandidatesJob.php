@@ -109,8 +109,8 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
                 cleanedName: $matcher->cleanNameForMatching($channel->name_custom ?? $channel->name, $settings),
             ),
         )->unique()->values()->all();
-        $trigramMatchingEnabled = $settings['trigram_matching_enabled'] ?? false;
-        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms, $trigramMatchingEnabled);
+        $options = $matcher->matcherOptionsFromSettings($settings);
+        $prefetched = $matcher->loadEpgCandidates($epg, $unionTerms, $options['trigram_matching_enabled']);
 
         $processed = 0;
         $rows = [];
@@ -121,15 +121,15 @@ class BuildEpgMapCandidatesJob implements ShouldQueue
             $result = $matcher->findEpgChannelCandidates(
                 channel: $channel,
                 epg: $epg,
-                removeQualityIndicators: $settings['remove_quality_indicators'] ?? false,
-                similarityThreshold: $settings['similarity_threshold'] ?? 70,
-                fuzzyMaxDistance: $settings['fuzzy_max_distance'] ?? 25,
-                exactMatchDistance: $settings['exact_match_distance'] ?? 8,
-                customQualityIndicators: $settings['quality_indicators'] ?? null,
+                removeQualityIndicators: $options['remove_quality_indicators'],
+                similarityThreshold: $options['similarity_threshold'],
+                fuzzyMaxDistance: $options['fuzzy_max_distance'],
+                exactMatchDistance: $options['exact_match_distance'],
+                customQualityIndicators: $options['quality_indicators'],
                 cleanedTitle: $cleanedTitle,
                 cleanedName: $cleanedName,
                 prefetchedCandidates: $prefetched,
-                trigramMatchingEnabled: $trigramMatchingEnabled,
+                trigramMatchingEnabled: $options['trigram_matching_enabled'],
             );
 
             $top = $result['candidates'][0] ?? null;

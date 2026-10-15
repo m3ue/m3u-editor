@@ -14,6 +14,7 @@ use App\Models\Series;
 use App\Support\EpisodeNumberParser;
 use Exception;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 
 /**
  * DvrVodIntegrationService — Converts completed DVR recordings into VOD entries.
@@ -165,44 +166,51 @@ class DvrVodIntegrationService
     }
 
     /**
-     * Build the authenticated stream URL for a DVR recording.
+     * Rewrite a playlist's DVR VOD stream URLs in the current signed form. Entries
+     * integrated before signed URLs stored the owner's name and playlist UUID, which
+     * stop working (and would leak the owner login) once UUID login is off.
+     */
+    public function refreshStreamUrls(Playlist $playlist): void
+    {
+        foreach ([Channel::class, Episode::class] as $model) {
+            $model::query()
+                ->where('playlist_id', $playlist->id)
+                ->whereNotNull('dvr_recording_id')
+                ->with('dvrRecording.dvrSetting')
+                ->lazyById()
+                ->each(function (Channel|Episode $item): void {
+                    if ($item->dvrRecording) {
+                        $item->updateQuietly(['url' => $this->buildStreamUrl($item->dvrRecording)]);
+                    }
+                });
+        }
+    }
+
+    /**
+     * Build the stream URL for a DVR recording:
+     *   /dvr/signed/{recording-uuid}.{ext}?signature=...
      *
-     * Generates the same URL format as the "Watch" action:
-     *   /dvr/{username}/{playlist-uuid}/{recording-uuid}.{ext}
-     *
-     * DvrStreamController authenticates via the playlist UUID (no session required),
-     * so this URL works in any media player without additional login.
+     * The URL is stored on the VOD entry and reaches whoever plays it (guests
+     * included, e.g. raw M3U output or the Xtream redirect when the proxy is off),
+     * so it is signed for this one recording rather than carrying the owner's
+     * credentials. It works in any media player without additional login.
      */
     private function buildStreamUrl(DvrRecording $recording): string
     {
-        $setting = $recording->dvrSetting;
-        $playlistId = $setting !== null ? $this->resolvePlaylistId($setting, $recording) : null;
-        $playlist = $playlistId !== null ? Playlist::find($playlistId) : null;
-        $user = $recording->user;
+        $signedPath = URL::signedRoute('dvr.recording.stream.signed', [
+            'uuid' => $recording->uuid,
+            'format' => $recording->dvrSetting?->dvr_output_format ?? 'ts',
+        ], absolute: false);
 
-        if ($playlist && $user) {
-            $ext = $setting->dvr_output_format ?? 'ts';
-
-            $params = [
-                'username' => $user->name,
-                'password' => $playlist->uuid,
-                'uuid' => $recording->uuid,
-                'format' => $ext,
-            ];
-
-            // DVR_STREAM_BASE_URL lets operators override APP_URL so that
-            // proxies running in separate containers can reach the editor
-            // using the internal Docker hostname rather than localhost.
-            $streamBase = config('dvr.stream_base_url');
-            if ($streamBase) {
-                return rtrim($streamBase, '/').route('dvr.recording.stream', $params, absolute: false);
-            }
-
-            return route('dvr.recording.stream', $params);
+        // DVR_STREAM_BASE_URL lets operators override APP_URL so that
+        // proxies running in separate containers can reach the editor
+        // using the internal Docker hostname rather than localhost.
+        $streamBase = config('dvr.stream_base_url');
+        if ($streamBase) {
+            return rtrim($streamBase, '/').$signedPath;
         }
 
-        // Fallback: path-only URL (playlist or user not resolvable)
-        return url('/dvr/recordings/'.$recording->uuid.'/stream');
+        return url($signedPath);
     }
 
     /**

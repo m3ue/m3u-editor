@@ -28,8 +28,14 @@ use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Log;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
+/**
+ * The properties below are set by the embedding page or by this component's own
+ * methods, and are locked so the browser can't change them (e.g. switch the guest
+ * panel's view-only viewer to editable, or point an action at another channel).
+ */
 class EpgViewer extends Component implements HasActions, HasForms
 {
     use InteractsWithActions;
@@ -37,27 +43,37 @@ class EpgViewer extends Component implements HasActions, HasForms
 
     public ?array $data = [];
 
+    #[Locked]
     public $record;
 
+    #[Locked]
     public $type;
 
+    #[Locked]
     public $editingChannelId = null;
 
+    #[Locked]
     public $viewOnly = false;
 
+    #[Locked]
     public $username = null;
 
+    #[Locked]
     public $password = null;
 
+    #[Locked]
     public $vod = true;
 
     /** Whether the associated playlist has DVR enabled. */
+    #[Locked]
     public bool $dvrEnabled = false;
 
     /** Programme data for the pending schedule action. */
+    #[Locked]
     public ?array $programmeData = null;
 
     /** Channel database ID for the pending schedule action. */
+    #[Locked]
     public ?int $schedulingChannelId = null;
 
     // Use static cache to prevent Livewire from clearing it
@@ -101,6 +117,10 @@ class EpgViewer extends Component implements HasActions, HasForms
         return EditAction::make('editChannel')
             ->label('Edit Channel')
             ->record(fn () => $this->getChannelRecord())
+            // Filament re-checks both on mount and on save, so a forged call can't
+            // edit from the guest panel or reach another user's channel.
+            ->hidden(fn (): bool => (bool) $this->viewOnly)
+            ->authorize('update')
             ->schema($this->type === 'Epg' ? EpgChannelResource::getForm() : ChannelResource::getForm(edit: true))
             ->action(function (array $data, $record) {
                 if ($record) {
@@ -189,6 +209,11 @@ class EpgViewer extends Component implements HasActions, HasForms
             ->label(__('Schedule Recording'))
             ->icon('heroicon-o-video-camera')
             ->color('danger')
+            // Same guards as editChannel: never from the guest panel, and only for a
+            // channel the user may view.
+            ->record(fn (): ?Channel => Channel::find($this->schedulingChannelId))
+            ->hidden(fn (): bool => (bool) $this->viewOnly)
+            ->authorize('view')
             ->schema([
                 Select::make('rule_type')
                     ->label(__('Recording type'))
@@ -204,8 +229,8 @@ class EpgViewer extends Component implements HasActions, HasForms
                     ->default(false)
                     ->inline(false),
             ])
-            ->action(function (array $data) {
-                $this->handleScheduleProgramme($data);
+            ->action(function (array $data, Channel $record) {
+                $this->handleScheduleProgramme($data, $record);
             })
             ->slideOver(false)
             ->modalWidth('lg');
@@ -224,13 +249,13 @@ class EpgViewer extends Component implements HasActions, HasForms
     }
 
     /**
-     * Create a DvrRecordingRule for the pending programme.
+     * Create a DvrRecordingRule for the pending programme on the given channel.
      *
      * @param  array{rule_type: string, new_only: bool}  $data
      */
-    protected function handleScheduleProgramme(array $data): void
+    protected function handleScheduleProgramme(array $data, Channel $channel): void
     {
-        if (empty($this->programmeData) || empty($this->schedulingChannelId)) {
+        if (empty($this->programmeData)) {
             Notification::make()
                 ->danger()
                 ->title(__('Recording failed'))
@@ -252,19 +277,6 @@ class EpgViewer extends Component implements HasActions, HasForms
                 ->danger()
                 ->title(__('DVR not enabled'))
                 ->body(__('Enable DVR for this playlist in the playlist settings before scheduling recordings.'))
-                ->send();
-
-            return;
-        }
-
-        /** @var Channel $channel */
-        $channel = Channel::find($this->schedulingChannelId);
-
-        if (! $channel) {
-            Notification::make()
-                ->danger()
-                ->title(__('Recording failed'))
-                ->body(__('Channel not found.'))
                 ->send();
 
             return;

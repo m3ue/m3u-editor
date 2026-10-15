@@ -42,6 +42,12 @@ class CustomPlaylistChannelResource extends JsonResource
              */
             'channel_number' => $this->pivot->channel_number,
             /**
+             * Sub-channel part of the per-playlist number (the 1 in "5.1").
+             *
+             * @var int|null
+             */
+            'channel_minor' => $this->pivot->channel_minor === null ? null : (int) $this->pivot->channel_minor,
+            /**
              * Per-playlist sort order.
              *
              * @var int|float|null

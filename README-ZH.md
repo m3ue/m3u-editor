@@ -14,6 +14,8 @@
 
 支持 XMLTV 格式的 EPG 数据，包括本地或远程 XMLTV 文件、XMLTV URL，以及完整的 **Schedules Direct** 集成。
 
+![feature-card](https://m3ue.sparkison.dev/img/social-card.jpg)
+
 ### 问题 / 异常 / 建议
 
 欢迎在此仓库中 [提交 issue](https://github.com/sparkison/m3u-editor/issues/new?template=bug_report.md)，或加入我们的 [Discord](https://discord.gg/rS3abJ5dz7)
@@ -57,19 +59,19 @@
 
 ## 📸 截图
 
-![Dashboard](./screenshots/v0.12.59/m3ue-home.png)
+![Dashboard](./screenshots/v0.13.4/m3ue-home.png)
 
-![Series detail](./screenshots/v0.12.59/m3ue-series-detail.png)
+![Series detail](./screenshots/v0.13.4/m3ue-series-detail.png)
 
-![Series editor](./screenshots/v0.12.59/m3ue-series-editor.png)
+![Series editor](./screenshots/v0.13.4/m3ue-series-editor.png)
 
-![Playlist output options](./screenshots/v0.12.59/m3ue-output-options.png)
+![Playlist output options](./screenshots/v0.13.4/m3ue-output-options.png)
 
-![Media servers](./screenshots/v0.12.59/m3ue-servers.png)
+![Media servers](./screenshots/v0.13.4/m3ue-servers.png)
 
-![Proxy stream monitor](./screenshots/v0.12.59/m3ue-proxy-monitor.png)
+![Proxy stream monitor](./screenshots/v0.13.4/m3ue-proxy-monitor.png)
 
-![API](./screenshots/v0.12.59/m3ue-api.png)
+![API](./screenshots/v0.13.4/m3ue-api.png)
 
 ---
 

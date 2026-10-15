@@ -109,6 +109,82 @@ class DvrRecorderService
             throw new Exception("DvrSetting not found for recording {$recording->id}");
         }
 
+        $streamUrl = $this->resolveCaptureUrl($recording);
+
+        Log::info('DVR: Starting proxy broadcast', [
+            'recording_id' => $recording->id,
+            'title' => $recording->title,
+            'stream_url' => $streamUrl,
+        ]);
+
+        $networkId = $this->proxy->startDvrBroadcast($recording, $setting, $streamUrl);
+
+        $recording->update([
+            'status' => DvrRecordingStatus::Recording->value,
+            'actual_start' => now(),
+            'proxy_network_id' => $networkId,
+            'attempt_count' => ($recording->attempt_count ?? 0) + 1,
+        ]);
+
+        Log::info('DVR: Proxy broadcast started', [
+            'recording_id' => $recording->id,
+            'proxy_network_id' => $networkId,
+            'title' => $recording->title,
+        ]);
+
+        if ($user = $recording->user) {
+            Notification::make()
+                ->success()
+                ->title('Recording Started')
+                ->body($recording->title)
+                ->broadcast($user)
+                ->sendToDatabase($user);
+        }
+
+        $recording->notifyTv(__('Recording Started'), 'info');
+    }
+
+    /**
+     * Restart a recording the proxy is no longer running, typically because the
+     * proxy restarted mid-recording.
+     *
+     * The proxy resumes into the recording's existing segment directory (its
+     * playlist is appended to, not replaced) and only records what's left of the
+     * airing window, so the result is still a single file with a short gap.
+     * This is the same airing attempt, so attempt_count is left alone.
+     */
+    public function resume(DvrRecording $recording): void
+    {
+        if ($recording->status !== DvrRecordingStatus::Recording) {
+            return;
+        }
+
+        $setting = $recording->dvrSetting;
+        if (! $setting) {
+            throw new Exception("DvrSetting not found for recording {$recording->id}");
+        }
+
+        $streamUrl = $this->resolveCaptureUrl($recording);
+
+        Log::warning('DVR: Resuming recording missing from the proxy', [
+            'recording_id' => $recording->id,
+            'proxy_network_id' => $recording->proxy_network_id,
+            'title' => $recording->title,
+        ]);
+
+        $networkId = $this->proxy->startDvrBroadcast($recording, $setting, $streamUrl);
+
+        if ($networkId !== $recording->proxy_network_id) {
+            $recording->update(['proxy_network_id' => $networkId]);
+        }
+    }
+
+    /**
+     * Resolve the URL the proxy should capture a recording from, persisting it to
+     * stream_url when it changed.
+     */
+    private function resolveCaptureUrl(DvrRecording $recording): string
+    {
         // Resolve the raw source URL for the recording.
         // If there's already an active stream on the proxy for this channel, piggyback
         // off it by using the stream's local proxy URL as the broadcast source. This
@@ -194,37 +270,7 @@ class DvrRecorderService
             $recording->saveQuietly();
         }
 
-        Log::info('DVR: Starting proxy broadcast', [
-            'recording_id' => $recording->id,
-            'title' => $recording->title,
-            'stream_url' => $streamUrl,
-        ]);
-
-        $networkId = $this->proxy->startDvrBroadcast($recording, $setting, $streamUrl);
-
-        $recording->update([
-            'status' => DvrRecordingStatus::Recording->value,
-            'actual_start' => now(),
-            'proxy_network_id' => $networkId,
-            'attempt_count' => ($recording->attempt_count ?? 0) + 1,
-        ]);
-
-        Log::info('DVR: Proxy broadcast started', [
-            'recording_id' => $recording->id,
-            'proxy_network_id' => $networkId,
-            'title' => $recording->title,
-        ]);
-
-        if ($user = $recording->user) {
-            Notification::make()
-                ->success()
-                ->title('Recording Started')
-                ->body($recording->title)
-                ->broadcast($user)
-                ->sendToDatabase($user);
-        }
-
-        $recording->notifyTv(__('Recording Started'), 'info');
+        return $streamUrl;
     }
 
     /**

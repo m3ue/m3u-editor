@@ -49,6 +49,9 @@ use Illuminate\Support\Str;
  * @property string|null $last_error_message
  * @property int $failure_count
  * @property CachedContentManagedBy|null $managed_by
+ * @property string $source
+ * @property int|null $arr_integration_id
+ * @property Carbon|null $arr_requested_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
  *
@@ -91,6 +94,16 @@ class CachedContentFile extends Model
         'last_error_message',
         'failure_count',
         'managed_by',
+        'source',
+        'arr_integration_id',
+        'arr_requested_at',
+    ];
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'source' => 'provider',
     ];
 
     /**
@@ -111,6 +124,8 @@ class CachedContentFile extends Model
             'season_number' => 'integer',
             'episode_number' => 'integer',
             'managed_by' => CachedContentManagedBy::class,
+            'arr_integration_id' => 'integer',
+            'arr_requested_at' => 'datetime',
         ];
     }
 
@@ -196,6 +211,26 @@ class CachedContentFile extends Model
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
+    }
+
+    /**
+     * Arr integration this row was requested through (source='arr' rows only).
+     */
+    public function arrIntegration(): BelongsTo
+    {
+        return $this->belongsTo(ArrIntegration::class);
+    }
+
+    /**
+     * Rows requested through an arr (failback tracking) that haven't fallen
+     * back to the provider yet. Falling back flips `source` to 'provider'.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeArrTracked(Builder $query): Builder
+    {
+        return $query->where('source', 'arr');
     }
 
     /**
@@ -334,6 +369,58 @@ class CachedContentFile extends Model
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Row attributes derived from the cacheable item itself: morph keys,
+     * identity, fingerprint, display title, and group management. Callers
+     * add the playlist, status, and source columns.
+     *
+     * @return array<string, mixed>
+     */
+    public static function buildAttributes(Channel|Episode $item, bool $automatic = false): array
+    {
+        return [
+            'cacheable_type' => $item->getMorphClass(),
+            'cacheable_id' => $item->getKey(),
+            'content_type' => $item instanceof Channel ? 'movie' : 'episode',
+            'tmdb_id' => static::identityValue($item, 'tmdb_id'),
+            'tvdb_id' => static::identityValue($item, 'tvdb_id'),
+            'season_number' => $item instanceof Episode ? $item->season : null,
+            'episode_number' => $item instanceof Episode ? $item->episode_num : null,
+            'content_fingerprint' => $item->cacheFingerprint(),
+            'title' => static::resolveTitle($item),
+            'managed_by' => $automatic ? CachedContentManagedBy::DynamicGroup : null,
+        ];
+    }
+
+    /**
+     * TMDB/TVDB id stored on the row. Episodes carry their series' ids.
+     */
+    private static function identityValue(Channel|Episode $item, string $column): ?string
+    {
+        $value = $item instanceof Episode
+            ? ($item->series?->{$column} ?? ($column === 'tmdb_id' ? $item->tmdb_id : null))
+            : $item->{$column};
+
+        return $value !== null && $value !== '' ? (string) $value : null;
+    }
+
+    /**
+     * Display title persisted on the row so the downloads table never has to
+     * look it up again.
+     */
+    private static function resolveTitle(Channel|Episode $item): ?string
+    {
+        $title = trim((string) $item->display_title);
+
+        if ($item instanceof Episode) {
+            $seriesName = trim((string) $item->series?->name);
+            $code = sprintf('S%02dE%02d', (int) $item->season, (int) $item->episode_num);
+            $title = trim(implode(' - ', array_filter([$seriesName, $code, $title])));
+        }
+
+        return $title === '' ? null : mb_substr($title, 0, 500);
     }
 
     /**

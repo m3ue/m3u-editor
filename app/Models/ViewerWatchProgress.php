@@ -60,12 +60,30 @@ class ViewerWatchProgress extends Model
     }
 
     /**
+     * A vod/episode row added by hand for a title that isn't in the library
+     * yet - it has a tmdb_id but no stream_id until it's relinked (see
+     * WatchProgressLinker), and carries its own denormalised TMDB metadata.
+     */
+    public function isUnlinked(): bool
+    {
+        return in_array($this->content_type, ['vod', 'episode'], true) && $this->stream_id === null;
+    }
+
+    /**
      * Get the display title for this progress record.
      */
     public function getContentTitleAttribute(): string
     {
         if ($this->content_type === 'aiostreams') {
             return $this->title ?? $this->aio_item_id ?? 'Unknown';
+        }
+
+        if ($this->isUnlinked()) {
+            $title = $this->title ?? 'Unknown';
+
+            return $this->season_number && $this->episode_number
+                ? "{$title} - S{$this->season_number}E{$this->episode_number}"
+                : $title;
         }
 
         if ($this->content_type === 'episode') {
@@ -91,6 +109,10 @@ class ViewerWatchProgress extends Model
      */
     public function getContentLogoAttribute(): ?string
     {
+        if ($this->isUnlinked()) {
+            return $this->thumbnail_url;
+        }
+
         if ($this->content_type === 'episode') {
             return $this->episode?->cover ?? $this->episode?->series?->cover ?? null;
         }

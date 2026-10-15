@@ -6,6 +6,12 @@ on:
   push:
     branches: [main, master]
   workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to check out (defaults to the triggering ref)'
+        required: false
+        type: string
+        default: ''
     secrets:
       DOCKERHUB_USERNAME:
         required: false
@@ -16,7 +22,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -71,6 +79,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -156,6 +166,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -237,6 +249,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

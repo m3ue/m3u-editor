@@ -51,6 +51,7 @@ class FakeTmdbService extends TmdbService
     {
         return [
             'poster_path' => '/poster.jpg',
+            'youtube_trailer' => 'https://www.youtube.com/watch?v=season1',
             'episodes' => [
                 [
                     'id' => 999,
@@ -73,7 +74,7 @@ class FakeFetchTmdbIds extends FetchTmdbIds
     protected function notifyUser(string $title, string $body, string $type = 'success'): void {}
 }
 
-test('it updates season cover images from tmdb when fetching episode data', function () {
+test('it updates season cover images and trailer from tmdb when fetching episode data', function () {
     Event::fake();
 
     $user = User::factory()->create();
@@ -127,4 +128,5 @@ test('it updates season cover images from tmdb when fetching episode data', func
 
     expect($season->cover)->toBe('https://image.tmdb.org/t/p/w500/poster.jpg');
     expect($season->cover_big)->toBe('https://image.tmdb.org/t/p/original/poster.jpg');
+    expect($season->metadata['youtube_trailer'])->toBe('https://www.youtube.com/watch?v=season1');
 });

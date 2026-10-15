@@ -9,6 +9,7 @@ use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
 use App\Filament\Resources\MergedPlaylists\Pages\ViewMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
+use App\Filament\Support\DefaultAuthFields;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
@@ -634,6 +635,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                                     }
                                                 })
                                                 ->dehydrated(false), // Don't save this field directly
+                                            ...DefaultAuthFields::schema(),
                                         ]),
                                 ]),
                             Tab::make(__('Output'))

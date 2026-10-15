@@ -278,7 +278,7 @@ class EpgApiController extends Controller
 
         if (Auth::check() && Auth::id() === $playlist->user_id) {
             $username = $user->name ?? 'admin';
-            $password = $playlist->uuid;
+            $password = $playlist->getInternalAuthPassword();
         } elseif ($requestedUsername && $requestedPassword) {
             $authResult = PlaylistFacade::authenticate($requestedUsername, $requestedPassword);
             $resolvedPlaylist = $authResult[0] ?? null;
@@ -366,9 +366,7 @@ class EpgApiController extends Controller
             $channelSortIndex = $skip;
             foreach ($playlistChannels as $channel) {
                 $epgId = $channel->epg_id ?? null;
-                $channelNo = ($isCustomContext && ! empty($channel->pivot?->channel_number))
-                    ? (int) $channel->pivot->channel_number
-                    : $channel->channel;
+                $channelNo = $channel->resolveChannelNumber($isCustomContext);
                 $channelNo = $pageNumbers !== null
                     ? ($pageNumbers[$channel->id] ?? $channelNo)
                     : $numberSequence->next($channelNo);

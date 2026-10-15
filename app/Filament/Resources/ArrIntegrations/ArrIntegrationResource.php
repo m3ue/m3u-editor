@@ -2,16 +2,17 @@
 
 namespace App\Filament\Resources\ArrIntegrations;
 
-use App\Filament\Resources\ArrIntegrations\Pages\CreateArrIntegration;
-use App\Filament\Resources\ArrIntegrations\Pages\EditArrIntegration;
+use App\Filament\Clusters\MediaServers\MediaServersCluster;
 use App\Filament\Resources\ArrIntegrations\Pages\ListArrIntegrations;
 use App\Models\ArrIntegration;
 use App\Services\Arr\ArrService;
+use App\Services\CachedContentDispatchService;
 use App\Traits\HasUserFiltering;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
+use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -22,14 +23,16 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
-use Filament\Tables;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Enums\RecordActionsPosition;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
@@ -41,6 +44,11 @@ class ArrIntegrationResource extends Resource
     protected static ?string $model = ArrIntegration::class;
 
     protected static ?string $recordTitleAttribute = 'name';
+
+    protected static ?string $cluster = MediaServersCluster::class;
+
+    // Prefixed by the cluster: the admin URL is /media-server-integrations/arr.
+    protected static ?string $slug = 'arr';
 
     public static function getNavigationLabel(): string
     {
@@ -56,15 +64,6 @@ class ArrIntegrationResource extends Resource
     {
         return __('Sonarr & Radarr');
     }
-
-    public static function getNavigationGroup(): ?string
-    {
-        return __('Integrations');
-    }
-
-    protected static bool $shouldRegisterNavigation = false;
-
-    protected static ?int $navigationSort = 105;
 
     /**
      * Restrict the resource to integrations owned by the current user.
@@ -84,9 +83,11 @@ class ArrIntegrationResource extends Resource
     {
         return $schema
             ->components([
-                Section::make(__('Connection'))
-                    ->description(__('Connect to your Sonarr or Radarr server.'))
-                    ->collapsible()
+                Toggle::make('enabled')
+                    ->label(__('Enabled'))
+                    ->helperText(__('Disable to pause use of this integration without deleting it.'))
+                    ->default(true),
+                Fieldset::make(__('Connection'))
                     ->schema([
                         Grid::make(2)->schema([
                             TextInput::make('name')
@@ -124,24 +125,33 @@ class ArrIntegrationResource extends Resource
                                 ? 'Leave blank to keep the existing API key.'
                                 : 'Found in Sonarr/Radarr under Settings → General → API Key.'),
 
-                        Actions::make(self::getDiscoverActions())
-                            ->fullWidth(),
+                        Grid::make(1)->columnSpanFull()->schema([
+                            Actions::make(self::getDiscoverActions())
+                                ->fullWidth(),
+                        ]),
 
                         Hidden::make('quality_profile_name'),
 
-                        Grid::make(2)->schema([
+                        // Until "Test Connection & Discover" loads the server's lists,
+                        // these show just the saved choice, locked, with a prompt.
+                        Fieldset::make(__('Defaults'))->schema([
                             Select::make('quality_profile_id')
                                 ->label(__('Quality Profile'))
-                                ->options(function (Get $get) {
-                                    $raw = $get('quality_profiles_options') ?? '[]';
-                                    $profiles = json_decode($raw, true) ?: [];
+                                ->options(function (Get $get): array {
+                                    if (blank($get('quality_profiles_options'))) {
+                                        return filled($get('quality_profile_id'))
+                                            ? [$get('quality_profile_id') => $get('quality_profile_name') ?: $get('quality_profile_id')]
+                                            : [];
+                                    }
 
-                                    return collect($profiles)
+                                    return collect(json_decode($get('quality_profiles_options'), true) ?: [])
                                         ->mapWithKeys(fn (array $p) => [$p['id'] => $p['name']])
                                         ->all();
                                 })
-                                ->helperText(__('Discovered from the server - click "Test Connection & Discover" above to populate.'))
-                                ->visible(fn (Get $get): bool => filled($get('quality_profiles_options')))
+                                ->disabled(fn (Get $get): bool => blank($get('quality_profiles_options')))
+                                ->helperText(fn (Get $get): ?string => blank($get('quality_profiles_options'))
+                                    ? __('Click "Test Connection & Discover" above to load the options from the server.')
+                                    : null)
                                 ->live()
                                 ->afterStateUpdated(function (Get $get, Set $set, $state): void {
                                     $raw = $get('quality_profiles_options') ?? '[]';
@@ -155,16 +165,21 @@ class ArrIntegrationResource extends Resource
 
                             Select::make('root_folder_path')
                                 ->label(__('Root Folder'))
-                                ->options(function (Get $get) {
-                                    $raw = $get('root_folders_options') ?? '[]';
-                                    $folders = json_decode($raw, true) ?: [];
+                                ->options(function (Get $get): array {
+                                    if (blank($get('root_folders_options'))) {
+                                        return filled($get('root_folder_path'))
+                                            ? [$get('root_folder_path') => $get('root_folder_path')]
+                                            : [];
+                                    }
 
-                                    return collect($folders)
+                                    return collect(json_decode($get('root_folders_options'), true) ?: [])
                                         ->mapWithKeys(fn (array $f) => [$f['path'] => $f['path']])
                                         ->all();
                                 })
-                                ->helperText(__('Discovered from the server - click "Test Connection & Discover" above to populate.'))
-                                ->visible(fn (Get $get): bool => filled($get('root_folders_options')))
+                                ->disabled(fn (Get $get): bool => blank($get('root_folders_options')))
+                                ->helperText(fn (Get $get): ?string => blank($get('root_folders_options'))
+                                    ? __('Click "Test Connection & Discover" above to load the options from the server.')
+                                    : null)
                                 ->native(false),
                         ]),
 
@@ -177,26 +192,69 @@ class ArrIntegrationResource extends Resource
                             ->dehydrated(false),
                     ]),
 
-                Section::make(__('Options'))
+                Fieldset::make(__('Options'))
                     ->schema([
-                        Toggle::make('enabled')
-                            ->label(__('Enabled'))
-                            ->helperText(__('Disable to pause use of this integration without deleting it.'))
-                            ->default(true),
+                        Grid::make()
+                            ->columns(1)
+                            ->schema([
 
-                        Toggle::make('guest_enabled')
-                            ->label(__('Allow Guest Requests'))
-                            ->helperText(__('Allow guests to request content via this integration on any playlist that has content requests enabled.'))
-                            ->default(false),
+                                Toggle::make('guest_enabled')
+                                    ->label(__('Allow Guest Requests'))
+                                    ->helperText(__('Let guests request content through this integration.'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Applies to any playlist that has content requests enabled.')
+                                    )
+                                    ->default(false),
 
-                        Toggle::make('cache_enabled')
-                            ->label(__('Use for caching'))
-                            ->helperText(__('On playlists that prefer media server sources, Cache Now and dynamic group caching add new titles here instead of downloading them from the provider. Titles already in the library are never changed or removed.'))
-                            ->default(false),
+                                // With caching off in Settings nothing is sent here, so the
+                                // caching options are hidden behind a locked "off" toggle.
+                                // Hidden fields aren't saved, so the stored values survive
+                                // a save meanwhile.
+                                Toggle::make('cache_enabled')
+                                    ->label(__('Use for caching'))
+                                    ->helperText(__('Send new cached titles here instead of downloading them from the provider.'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Applies to Cache Now and dynamic group caching on playlists that prefer media server sources. Titles already in the library are never changed or removed.')
+                                    )
+                                    ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+                                    ->live()
+                                    ->default(false),
+
+                                Toggle::make('cache_enabled_locked')
+                                    ->label(__('Use for caching'))
+                                    ->helperText(__('Turn on "Enable cache" in Settings > Cache to use this integration for caching.'))
+                                    ->formatStateUsing(fn (): bool => false)
+                                    ->disabled()
+                                    ->dehydrated(false)
+                                    ->hidden(fn (): bool => app(CachedContentDispatchService::class)->isEnabled()),
+
+                                Toggle::make('cache_cleanup')
+                                    ->label(__('Remove after leaving dynamic groups'))
+                                    ->helperText(__('Remove movies that dynamic group caching added here, files included, once they leave every dynamic group.'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Removal waits for the longest "Keep after leaving (days)" among your caching rules (at least 1 day). Only movies added while this is on are removed, never ones already in the library. Use Cache Now on a movie to keep it.')
+                                    )
+                                    ->visible(fn (Get $get): bool => $get('type') === 'radarr' && (bool) $get('cache_enabled') && app(CachedContentDispatchService::class)->isEnabled())
+                                    ->default(false),
+
+                                Toggle::make('cache_failback')
+                                    ->label(__('Fail back to the provider'))
+                                    ->helperText(__('Download from the playlist provider instead when a title sent here fails or stalls.'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Kicks in when a movie or episode fails to download, or still isn\'t downloaded or downloading after 24 hours. The title is then unmonitored here. Nothing is ever deleted from the arr.')
+                                    )
+                                    ->visible(fn (Get $get): bool => (bool) $get('cache_enabled') && app(CachedContentDispatchService::class)->isEnabled())
+                                    ->default(false),
+                            ]),
                     ]),
 
                 Section::make(__('Webhook'))
                     ->key('webhook')
+                    ->compact()
                     ->description(__('Add this URL as a notification in Radarr/Sonarr (Settings → Connect → Webhook) for real-time queue updates.'))
                     ->afterHeader(self::getWebhookActions())
                     ->schema([
@@ -211,7 +269,7 @@ class ArrIntegrationResource extends Resource
                     ])
                     ->visible(fn (string $operation): bool => $operation === 'edit'),
 
-                Section::make(__('Status'))
+                Fieldset::make(__('Status'))
                     ->schema([
                         Grid::make(2)->schema([
                             TextInput::make('last_test_at')
@@ -234,14 +292,42 @@ class ArrIntegrationResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->headerActions([
+                CreateAction::make()
+                    ->label(__('Add Sonarr / Radarr'))
+                    ->slideOver()
+                    ->mutateDataUsing(fn (array $data): array => [...$data, 'user_id' => Auth::id()]),
+            ])
+            ->filtersTriggerAction(function ($action) {
+                return $action->button()->label(__('Filters'));
+            })
             ->columns([
                 TextColumn::make('name')
                     ->searchable()
                     ->sortable(),
 
+                ToggleColumn::make('enabled')
+                    ->label(__('Enabled'))
+                    ->sortable(),
+
+                ToggleColumn::make('guest_enabled')
+                    ->label(__('Guest'))
+                    ->sortable(),
+
+                // Off for every row while caching is off in Settings, as
+                // nothing is sent here then.
+                ToggleColumn::make('cache_enabled')
+                    ->label(__('Caching'))
+                    ->state(fn (ArrIntegration $record): bool => app(CachedContentDispatchService::class)->isEnabled() && $record->cache_enabled)
+                    ->disabled(fn (): bool => ! app(CachedContentDispatchService::class)->isEnabled())
+                    ->tooltip(fn (): string => app(CachedContentDispatchService::class)->isEnabled()
+                        ? __('Send new cached titles here instead of downloading them from the provider.')
+                        : __('Turn on "Enable cache" in Settings > Cache to use this integration for caching.'))
+                    ->sortable(),
+
                 TextColumn::make('type')
                     ->badge()
-                    ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'purple')
+                    ->color(fn (string $state): string => $state === 'sonarr' ? 'info' : 'warning')
                     ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->sortable(),
 
@@ -256,16 +342,6 @@ class ArrIntegrationResource extends Resource
                     ->placeholder('—')
                     ->toggleable(),
 
-                IconColumn::make('enabled')
-                    ->label(__('Enabled'))
-                    ->boolean()
-                    ->sortable(),
-
-                IconColumn::make('guest_enabled')
-                    ->label(__('Guest'))
-                    ->boolean()
-                    ->sortable(),
-
                 TextColumn::make('last_test_at')
                     ->label(__('Last Tested'))
                     ->dateTime()
@@ -274,50 +350,49 @@ class ArrIntegrationResource extends Resource
                     ->toggleable(),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('type')
+                SelectFilter::make('type')
                     ->options([
                         'sonarr' => 'Sonarr',
                         'radarr' => 'Radarr',
                     ]),
             ])
-            ->actions([
+            ->recordActions([
                 ActionGroup::make([
-                    EditAction::make(),
                     Action::make('test')
                         ->label(__('Test Connection'))
                         ->icon('heroicon-o-signal')
-                        ->action(function (ArrIntegration $record) {
-                            $service = ArrService::make($record);
-                            $result = $service->testConnection();
+                        ->action(function (ArrIntegration $record): void {
+                            $result = ArrService::make($record)->testConnection();
 
-                            if ($result['ok']) {
-                                $record->forceFill(['last_test_at' => now()])->save();
-
-                                Notification::make()
-                                    ->success()
-                                    ->title(__('Connection Successful'))
-                                    ->body(__('Connected to :name (v:version)', [
-                                        'name' => $record->name,
-                                        'version' => $result['version'] ?? 'unknown',
-                                    ]))
-                                    ->send();
-                            } else {
+                            if (! $result['ok']) {
                                 Notification::make()
                                     ->danger()
                                     ->title(__('Connection Failed'))
                                     ->body($result['error'] ?? 'Unknown error')
                                     ->send();
+
+                                return;
                             }
+
+                            $record->forceFill(['last_test_at' => now()])->save();
+
+                            Notification::make()
+                                ->success()
+                                ->title(__('Connection Successful'))
+                                ->body(__('Connected to :name (v:version)', [
+                                    'name' => $record->name,
+                                    'version' => $result['version'] ?? 'unknown',
+                                ]))
+                                ->send();
                         }),
                     Action::make('syncProfiles')
                         ->label(__('Sync Profiles & Folders'))
                         ->icon('heroicon-o-arrow-path')
-                        ->action(function (ArrIntegration $record) {
+                        ->action(function (ArrIntegration $record): void {
                             $service = ArrService::make($record);
                             $profiles = $service->fetchQualityProfiles();
                             $folders = $service->fetchRootFolders();
 
-                            // Cache first as defaults on the model if not already set
                             $update = [];
                             if (! empty($profiles) && ! $record->quality_profile_id) {
                                 $update['quality_profile_id'] = $profiles[0]['id'];
@@ -341,32 +416,29 @@ class ArrIntegrationResource extends Resource
                                 ->send();
                         }),
                     DeleteAction::make(),
-                ])->button(),
-            ])
-            ->bulkActions([
+                ])->button()->hiddenLabel()->size('sm'),
+                EditAction::make()
+                    ->slideOver()
+                    ->button()->hiddenLabel()->size('sm'),
+            ], RecordActionsPosition::BeforeCells)
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
             ])
-            ->defaultSort('name');
+            ->defaultSort('name')
+            ->emptyStateHeading(__('No Sonarr or Radarr integrations'))
+            ->emptyStateDescription(__('Add a Sonarr or Radarr server to enable content requesting.'))
+            ->emptyStateIcon('heroicon-o-arrow-down-tray');
     }
 
     public static function getPages(): array
     {
         return [
             'index' => ListArrIntegrations::route('/'),
-            'create' => CreateArrIntegration::route('/create'),
-            'edit' => EditArrIntegration::route('/{record}/edit'),
         ];
     }
 
-    /**
-     * Build the in-form "Test Connection & Discover" action. Runs against the
-     * current form state, populates profile/folder hidden state, and surfaces
-     * a Filament notification.
-     *
-     * @return array<int, Action>
-     */
     /**
      * Register and Test buttons for the Webhook section. Both use the URL
      * shown in the field, so the arr gets the address this page is open at.
@@ -418,14 +490,21 @@ class ArrIntegrationResource extends Resource
             ->body(trim(($result['error'] ?? '').' '.__(':name must be able to reach the Webhook URL. If this page is open at localhost, open it at the app\'s LAN address and try again.', ['name' => $record->name])));
     }
 
+    /**
+     * Build the in-form "Test Connection & Discover" action. Runs against the
+     * current form state, populates profile/folder hidden state, and surfaces
+     * a Filament notification.
+     *
+     * @return array<int, Action>
+     */
     private static function getDiscoverActions(): array
     {
         return [
             Action::make('testAndDiscover')
                 ->label(__('Test Connection & Discover'))
                 ->icon('heroicon-o-signal')
-                ->action(function (Get $get, Set $set, $livewire) {
-                    $apiKey = $get('api_key') ?: $livewire->record?->api_key;
+                ->action(function (Get $get, Set $set, ?ArrIntegration $record) {
+                    $apiKey = $get('api_key') ?: $record?->api_key;
 
                     if (! $get('type') || ! $get('url') || ! $apiKey) {
                         Notification::make()
@@ -471,7 +550,7 @@ class ArrIntegrationResource extends Resource
                         $set('root_folder_path', $folders[0]['path']);
                     }
 
-                    $livewire->record?->forceFill(['last_test_at' => now()])->save();
+                    $record?->forceFill(['last_test_at' => now()])->save();
 
                     Notification::make()
                         ->success()

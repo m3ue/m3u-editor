@@ -82,6 +82,48 @@ it('writes tmdb_id, tvdb_id and imdb_id on a new movie from ProviderIds', functi
         ->and($channel->is_vod)->toBeTrue();
 });
 
+it('stores the media server DateCreated as the source added date', function () {
+    $movie = [
+        'Id' => 'm1',
+        'Name' => 'The Matrix',
+        'DateCreated' => '2021-03-04T05:06:07.0000000Z',
+        'People' => [],
+    ];
+
+    (new ReflectionMethod($this->job, 'syncMovie'))->invoke(
+        $this->job,
+        $this->integration,
+        $this->playlist,
+        fakeMediaServerForMovieIds(),
+        $movie,
+    );
+
+    $channel = Channel::where('source_id', "media-server-{$this->integration->id}-m1")->firstOrFail();
+
+    expect($channel->source_added_at?->toDateTimeString())->toBe('2021-03-04 05:06:07');
+});
+
+it('ignores the .NET placeholder DateCreated and keeps an existing added date', function () {
+    Channel::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'source_id' => "media-server-{$this->integration->id}-m1",
+        'is_vod' => true,
+        'source_added_at' => '2021-03-04 05:06:07',
+    ]);
+
+    (new ReflectionMethod($this->job, 'syncMovie'))->invoke(
+        $this->job,
+        $this->integration,
+        $this->playlist,
+        fakeMediaServerForMovieIds(),
+        ['Id' => 'm1', 'Name' => 'The Matrix', 'DateCreated' => '0001-01-01T00:00:00.0000000Z', 'People' => []],
+    );
+
+    $channel = Channel::where('source_id', "media-server-{$this->integration->id}-m1")->firstOrFail();
+
+    expect($channel->source_added_at?->toDateTimeString())->toBe('2021-03-04 05:06:07');
+});
+
 it('keeps existing ids when ProviderIds is empty (local re-sync case)', function () {
     // Simulate a channel whose ids were filled earlier by FetchTmdbIds
     $existing = Channel::create([

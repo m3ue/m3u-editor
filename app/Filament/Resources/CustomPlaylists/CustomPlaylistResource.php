@@ -13,6 +13,7 @@ use App\Filament\Resources\CustomPlaylists\RelationManagers\ChannelsRelationMana
 use App\Filament\Resources\CustomPlaylists\RelationManagers\GroupsRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\SeriesRelationManager;
 use App\Filament\Resources\CustomPlaylists\RelationManagers\VodRelationManager;
+use App\Filament\Support\DefaultAuthFields;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Jobs\DuplicateCustomPlaylist;
 use App\Models\CustomPlaylist;
@@ -742,6 +743,7 @@ class CustomPlaylistResource extends Resource implements CopilotResource
                                                     }
                                                 })
                                                 ->dehydrated(false), // Don't save this field directly
+                                            ...DefaultAuthFields::schema(),
                                         ]),
                                 ]),
                             Tab::make(__('Processing'))

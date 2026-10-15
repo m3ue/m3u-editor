@@ -9,6 +9,7 @@ use App\Models\Group;
 use App\Models\Job as JobRecord;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\SimilaritySearchService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -87,4 +88,69 @@ it('resolves every channel in the chunk against one prefetched candidate set ins
     $matches->each(function (EpgChannel $epgChannel) use ($payloads) {
         expect($payloads->pluck('epg_channel_id'))->toContain($epgChannel->id);
     });
+});
+
+it('does not score a channel against candidates only another channel in the chunk found', function () {
+    // "cbc" isn't a substring of "cbbc", so CBC's own candidate query never
+    // returns the CBBC row - it's only in the chunk's prefetch because the
+    // CBBC channel's terms found it. Scored against it anyway, CBC used to
+    // auto-match it (edit distance 1).
+    $cbbc = EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+        'name' => 'CBBC',
+        'display_name' => 'CBBC',
+        'channel_id' => 'cbbc.uk',
+    ]);
+
+    $channels = collect(['UK: CBBC HD', 'US: CBC'])->map(fn (string $name) => Channel::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->for($this->group)
+        ->create(['name' => $name, 'title' => $name, 'is_vod' => false]));
+
+    $map = EpgMap::factory()->create([
+        'epg_id' => $this->epg->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'processing' => true,
+        'progress' => 0,
+    ]);
+
+    $batchNo = (string) Str::uuid();
+
+    (new MapPlaylistChannelsToEpgChunk(
+        channelIds: $channels->pluck('id')->toArray(),
+        epgId: $this->epg->id,
+        epgMapId: $map->id,
+        settings: ['remove_quality_indicators' => true],
+        batchNo: $batchNo,
+        totalChannels: $channels->count(),
+    ))->handle();
+
+    $payloads = JobRecord::where('batch_no', $batchNo)->get()->flatMap(fn (JobRecord $job) => $job->payload);
+
+    expect($payloads)->toHaveCount(1)
+        ->and($payloads->first()['title'])->toBe('UK: CBBC HD')
+        ->and($payloads->first()['epg_channel_id'])->toBe($cbbc->id);
+});
+
+it('prefetches candidates for every term, even past what one query holds', function () {
+    $zebra = EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+        'name' => 'Zebra Network',
+        'display_name' => 'Zebra Network',
+        'channel_id' => 'zebra.us',
+    ]);
+
+    // 250 filler terms ahead of the one that finds it - more than a single
+    // prefetch query takes, which used to silently drop every term past 200.
+    $terms = [...array_map(fn (int $index): string => "filler{$index}", range(1, 250)), 'zebra'];
+
+    DB::enableQueryLog();
+    $candidates = app(SimilaritySearchService::class)->loadEpgCandidates($this->epg, $terms);
+    $candidateScans = collect(DB::getQueryLog())->filter(
+        fn (array $query) => str_contains($query['query'], 'additional_display_names'),
+    );
+    DB::disableQueryLog();
+
+    expect($candidates->pluck('id')->all())->toBe([$zebra->id])
+        ->and($candidateScans)->toHaveCount(2);
 });

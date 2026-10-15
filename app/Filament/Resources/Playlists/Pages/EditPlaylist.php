@@ -7,6 +7,7 @@ use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResourc
 use App\Filament\Resources\Networks\NetworkResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Resources\Playlists\Widgets\ImportProgress;
+use App\Jobs\SyncDynamicGroups;
 use App\Models\Playlist;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
@@ -97,7 +98,15 @@ class EditPlaylist extends EditRecord
     }
 
     /**
-     * Save dvr_/request_ prefixed fields back to their respective owned relations.
+     * Save dvr_/request_ prefixed fields back to their respective owned
+     * relations, and re-sync the Dynamic Groups when their rules changed.
+     * The VOD / Series Dynamic Groups listings read each group's row, which
+     * only SyncDynamicGroups updates, so without this a rule enabled,
+     * disabled, renamed or removed here only showed there after the next
+     * playlist sync or the daily refresh. The rows are updated in the
+     * request without calling TMDB (like the listings' create/edit actions),
+     * so they are current when the save returns, then a TMDB refresh of the
+     * members is queued.
      */
     protected function afterSave(): void
     {
@@ -105,5 +114,10 @@ class EditPlaylist extends EditRecord
         $record = $this->getRecord();
 
         $this->saveDvrAndRequestFormData($record, $this->form->getRawState());
+
+        if ($record->wasChanged('dynamic_groups_config')) {
+            (new SyncDynamicGroups($record->id, refreshMembership: false))->handle();
+            SyncDynamicGroups::queueRefresh($record->id);
+        }
     }
 }

@@ -9,7 +9,10 @@ use App\Models\EpgMap;
 use App\Models\Job;
 use App\Services\SimilaritySearchService;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class MapPlaylistChannelsToEpgChunk implements ShouldQueue
@@ -68,15 +71,15 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Process each channel
         $skipMissing = $this->settings['skip_missing'] ?? false;
         $setEpgIcon = $this->settings['set_epg_icon'] ?? false;
+        $prioritizeNameMatch = $this->settings['prioritize_name_match'] ?? false;
         $mappedChannels = [];
 
-        // Channels that fall through to the similarity search (step 4) are
-        // deferred instead of queried immediately - one prefetch below loads
-        // every candidate the whole chunk could need in a single query,
-        // instead of a LIKE/trigram scan per channel (see loadEpgCandidates
-        // doc block). Exact/callsign matches above stay per-channel since
-        // those are cheap indexed lookups.
-        $pendingSimilarity = [];
+        // Steps 1-3 (exact channel_id, exact name/display_name, callsign) are
+        // batched for the whole chunk: gather every channel's lookups first,
+        // load the rows any of them could match in one query per kind of
+        // lookup (see exactMatchCandidates), then let each channel take the
+        // first row its own lookups match.
+        $prepared = [];
 
         foreach ($channels->cursor() as $channel) {
             // Get the title and stream id - sanitize UTF-8 immediately
@@ -99,155 +102,81 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 $this->settings,
             );
 
-            // Get the EPG channel (check for direct match first with improved logic)
-            $epgChannel = null;
+            // Callsign from the original (pre-cleaned) channel name, e.g.
+            // "US: CBS 13 (KOVR) STOCKTON HD" -> "KOVR", which matches "KOVR-DT"
+            $originalTitle = $this->sanitizeUtf8(trim((string) ($channel->title_custom ?? $channel->title)));
+            $originalName = $this->sanitizeUtf8(trim((string) ($channel->name_custom ?? $channel->name)));
+            $callsign = $this->extractCallsign($originalTitle ?: $originalName);
 
-            // Get matching priority setting
-            $prioritizeNameMatch = $this->settings['prioritize_name_match'] ?? false;
+            $prepared[] = [
+                'channel' => $channel,
+                'name' => $name,
+                'title' => $title,
+                // Search terms (only non-empty values)
+                'terms' => array_values(array_filter([
+                    mb_strtolower(trim($streamId), 'UTF-8'),
+                    mb_strtolower(trim($name), 'UTF-8'),
+                    mb_strtolower(trim($title), 'UTF-8'),
+                ], fn ($term) => ! empty($term))),
+                'callsign' => $callsign ? mb_strtolower($callsign, 'UTF-8') : null,
+            ];
+        }
 
-            // Prepare search terms
-            $search1 = mb_strtolower(trim($streamId), 'UTF-8');
-            $search2 = mb_strtolower(trim($name), 'UTF-8');
-            $search3 = mb_strtolower(trim($title), 'UTF-8');
+        $exactCandidates = $this->exactMatchCandidates(
+            $epg,
+            collect($prepared)->pluck('terms')->flatten()->unique()->values()->all(),
+            collect($prepared)->pluck('callsign')->filter()->unique()->values()->all(),
+        );
 
-            // Build search terms array (only non-empty values)
-            $searchTerms = array_filter([$search1, $search2, $search3], fn ($term) => ! empty($term));
+        // Channels that fall through to the similarity search (step 4) are
+        // deferred too - one prefetch below loads every candidate the whole
+        // chunk could need in a single query, instead of a LIKE/trigram scan
+        // per channel (see loadEpgCandidates doc block).
+        $pendingSimilarity = [];
 
-            if ($prioritizeNameMatch) {
-                // Step 1: Try exact match on name/display_name FIRST (highest priority - most specific)
-                if (! empty($searchTerms)) {
-                    $epgChannel = $epg->matchableChannels()
-                        ->where(function ($query) use ($searchTerms) {
-                            $first = true;
-                            foreach ($searchTerms as $term) {
-                                if ($first) {
-                                    $query->whereRaw('LOWER(name) = ?', [$term])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$term]);
-                                    $first = false;
-                                } else {
-                                    $query->orWhereRaw('LOWER(name) = ?', [$term])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$term]);
-                                }
-                            }
-                        })
-                        ->select('id', 'channel_id', 'name', 'display_name')
-                        ->first();
-                }
+        foreach ($prepared as $entry) {
+            $terms = $entry['terms'];
+            $channelIdMatch = fn (EpgChannel $row): bool => in_array($row->channel_id_lower, $terms, true);
+            $nameMatch = fn (EpgChannel $row): bool => in_array($row->name_lower, $terms, true)
+                || in_array($row->display_name_lower, $terms, true);
 
-                // Step 2: Try exact match on channel_id if no name/display_name match
-                if (! $epgChannel && ! empty($searchTerms)) {
-                    $epgChannel = $epg->matchableChannels()
-                        ->where('channel_id', '!=', '')
-                        ->where(function ($query) use ($searchTerms) {
-                            $first = true;
-                            foreach ($searchTerms as $term) {
-                                if ($first) {
-                                    $query->whereRaw('LOWER(channel_id) = ?', [$term]);
-                                    $first = false;
-                                } else {
-                                    $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
-                                }
-                            }
-                        })
-                        ->select('id', 'channel_id', 'name', 'display_name')
-                        ->first();
-                }
-            } else {
-                // Original behavior: Try channel_id first, then name/display_name
-                if (! empty($searchTerms)) {
-                    $epgChannel = $epg->matchableChannels()
-                        ->where('channel_id', '!=', '')
-                        ->where(function ($query) use ($searchTerms) {
-                            $first = true;
-                            foreach ($searchTerms as $term) {
-                                if ($first) {
-                                    $query->whereRaw('LOWER(channel_id) = ?', [$term]);
-                                    $first = false;
-                                } else {
-                                    $query->orWhereRaw('LOWER(channel_id) = ?', [$term]);
-                                }
-                            }
-                        })
-                        ->select('id', 'channel_id', 'name', 'display_name')
-                        ->first();
-                }
+            // Steps 1-2: exact channel_id then name/display_name, or the
+            // other way around when the map prioritizes name matches
+            $epgChannel = $prioritizeNameMatch
+                ? $exactCandidates['name']->first($nameMatch) ?? $exactCandidates['channel_id']->first($channelIdMatch)
+                : $exactCandidates['channel_id']->first($channelIdMatch) ?? $exactCandidates['name']->first($nameMatch);
 
-                if (! $epgChannel && ! empty($searchTerms)) {
-                    $epgChannel = $epg->matchableChannels()
-                        ->where(function ($query) use ($searchTerms) {
-                            $first = true;
-                            foreach ($searchTerms as $term) {
-                                if ($first) {
-                                    $query->whereRaw('LOWER(name) = ?', [$term])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$term]);
-                                    $first = false;
-                                } else {
-                                    $query->orWhereRaw('LOWER(name) = ?', [$term])
-                                        ->orWhereRaw('LOWER(display_name) = ?', [$term]);
-                                }
-                            }
-                        })
-                        ->select('id', 'channel_id', 'name', 'display_name')
-                        ->first();
-                }
-            }
-
-            // Step 3: Callsign extraction from original (pre-cleaned) channel name
-            // Handles patterns like "US: CBS 13 (KOVR) STOCKTON HD" → extracts "KOVR" and matches "KOVR-DT"
-            if (! $epgChannel) {
-                $originalTitle = $this->sanitizeUtf8(trim($channel->title_custom ?? $channel->title));
-                $originalName = $this->sanitizeUtf8(trim($channel->name_custom ?? $channel->name));
-                $callsign = $this->extractCallsign($originalTitle ?: $originalName);
-
-                if ($callsign) {
-                    $callsignLower = mb_strtolower($callsign, 'UTF-8');
-
-                    $epgChannel = $epg->matchableChannels()
-                        ->where(function ($query) use ($callsignLower) {
-                            $query->whereRaw('LOWER(channel_id) = ?', [$callsignLower])
-                                ->orWhereRaw('LOWER(channel_id) LIKE ?', [$callsignLower.'-%'])
-                                ->orWhereRaw('LOWER(name) = ?', [$callsignLower])
-                                ->orWhereRaw('LOWER(name) LIKE ?', [$callsignLower.'-%'])
-                                ->orWhereRaw('LOWER(display_name) = ?', [$callsignLower])
-                                ->orWhereRaw('LOWER(display_name) LIKE ?', [$callsignLower.'-%']);
-                        })
-                        ->select('id', 'channel_id', 'name', 'display_name')
-                        ->first();
-                }
+            // Step 3: the callsign, alone or with a digital suffix ("KOVR-DT")
+            if (! $epgChannel && $entry['callsign']) {
+                $callsign = $entry['callsign'];
+                $epgChannel = $exactCandidates['callsign']->first(
+                    fn (EpgChannel $row): bool => collect([$row->channel_id_lower, $row->name_lower, $row->display_name_lower])
+                        ->contains(fn (?string $value): bool => $value === $callsign || str_starts_with((string) $value, $callsign.'-')),
+                );
             }
 
             // Step 4: If no exact match, defer to a batched similarity search
-            // (only for channels with significant content). Deferred so the
-            // whole chunk's candidates can be prefetched in one query below,
-            // instead of one LIKE/trigram scan per channel.
+            // (only for channels with significant content).
             if (! $epgChannel) {
-                $channelNameForSearch = trim($title ?: $name);
-                if (strlen($channelNameForSearch) >= 3) {
+                if (strlen(trim($entry['title'] ?: $entry['name'])) >= 3) {
                     $pendingSimilarity[] = [
-                        'channel' => $channel,
-                        'cleaned_title' => $title,
-                        'cleaned_name' => $name,
+                        'channel' => $entry['channel'],
+                        'cleaned_title' => $entry['title'],
+                        'cleaned_name' => $entry['name'],
                     ];
-
-                    continue;
                 }
+
+                continue;
             }
 
             // If EPG channel found via an exact/callsign match, link it now.
-            if ($epgChannel) {
-                $mappedChannels[] = $this->mappedChannelRow($channel, $epgChannel, $setEpgIcon);
-            }
+            $mappedChannels[] = $this->mappedChannelRow($entry['channel'], $epgChannel, $setEpgIcon);
         }
 
         // Resolve every deferred channel against one prefetched candidate
         // set for the whole chunk, instead of a per-channel DB round-trip.
         if (! empty($pendingSimilarity)) {
-            $removeQualityIndicators = $this->settings['remove_quality_indicators'] ?? false;
-            $similarityThreshold = $this->settings['similarity_threshold'] ?? 70;
-            $fuzzyMaxDistance = $this->settings['fuzzy_max_distance'] ?? 25;
-            $exactMatchDistance = $this->settings['exact_match_distance'] ?? 8;
-            $customQualityIndicators = $this->settings['quality_indicators'] ?? null;
-            $trigramMatchingEnabled = $this->settings['trigram_matching_enabled'] ?? false;
+            $options = $this->similaritySearch->matcherOptionsFromSettings($this->settings);
 
             $unionTerms = collect($pendingSimilarity)
                 ->flatMap(fn (array $pending): array => $this->similaritySearch->searchTermsFor(
@@ -258,23 +187,23 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
                 ->unique()
                 ->values()
                 ->all();
-            $prefetchedCandidates = $this->similaritySearch->loadEpgCandidates($epg, $unionTerms, $trigramMatchingEnabled);
+            $prefetchedCandidates = $this->similaritySearch->loadEpgCandidates($epg, $unionTerms, $options['trigram_matching_enabled']);
 
             foreach ($pendingSimilarity as $pending) {
                 $epgChannel = $this->similaritySearch->findMatchingEpgChannel(
-                    $pending['channel'],
-                    $epg,
-                    $removeQualityIndicators,
-                    $similarityThreshold,
-                    $fuzzyMaxDistance,
-                    $exactMatchDistance,
-                    $customQualityIndicators ?: null,
+                    channel: $pending['channel'],
+                    epg: $epg,
+                    removeQualityIndicators: $options['remove_quality_indicators'],
+                    similarityThreshold: $options['similarity_threshold'],
+                    fuzzyMaxDistance: $options['fuzzy_max_distance'],
+                    exactMatchDistance: $options['exact_match_distance'],
+                    customQualityIndicators: $options['quality_indicators'],
                     // Pass the prefix/pattern-cleaned values so the similarity
                     // search honors the map's exclude settings (issue #1265)
                     cleanedTitle: $pending['cleaned_title'],
                     cleanedName: $pending['cleaned_name'],
                     prefetchedCandidates: $prefetchedCandidates,
-                    trigramMatchingEnabled: $trigramMatchingEnabled,
+                    trigramMatchingEnabled: $options['trigram_matching_enabled'],
                 );
 
                 if ($epgChannel) {
@@ -301,6 +230,49 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
         // Update progress
         $progressIncrement = (count($this->channelIds) / $this->totalChannels) * 95; // Reserve 5% for completion
         $map->update(['progress' => min(99, $map->progress + $progressIncrement)]);
+    }
+
+    /**
+     * Load every EPG row a channel in this chunk could match exactly (steps
+     * 1-3), one query per kind of lookup instead of up to three per channel.
+     * Rows carry the database's own LOWER() of each field, so PHP compares
+     * them exactly as the per-channel SQL did, and keep the order the
+     * database returned them in, so a channel's first match is the row its
+     * own `->first()` query would have returned.
+     *
+     * @param  list<string>  $terms
+     * @param  list<string>  $callsigns
+     * @return array{channel_id: Collection<int, EpgChannel>, name: Collection<int, EpgChannel>, callsign: Collection<int, EpgChannel>}
+     */
+    protected function exactMatchCandidates(Epg $epg, array $terms, array $callsigns): array
+    {
+        $baseQuery = fn (): Builder => $epg->matchableChannels()
+            ->select('id', 'channel_id', 'name', 'display_name')
+            ->selectRaw('LOWER(channel_id) AS channel_id_lower, LOWER(name) AS name_lower, LOWER(display_name) AS display_name_lower');
+
+        return [
+            'channel_id' => $terms === [] ? new Collection : $baseQuery()
+                ->where('channel_id', '!=', '')
+                ->whereIn(DB::raw('LOWER(channel_id)'), $terms)
+                ->get(),
+            'name' => $terms === [] ? new Collection : $baseQuery()
+                ->where(fn (Builder $query): Builder => $query
+                    ->whereIn(DB::raw('LOWER(name)'), $terms)
+                    ->orWhereIn(DB::raw('LOWER(display_name)'), $terms))
+                ->get(),
+            'callsign' => $callsigns === [] ? new Collection : $baseQuery()
+                ->where(function (Builder $query) use ($callsigns): void {
+                    foreach ($callsigns as $callsign) {
+                        $query->orWhereRaw('LOWER(channel_id) = ?', [$callsign])
+                            ->orWhereRaw('LOWER(channel_id) LIKE ?', [$callsign.'-%'])
+                            ->orWhereRaw('LOWER(name) = ?', [$callsign])
+                            ->orWhereRaw('LOWER(name) LIKE ?', [$callsign.'-%'])
+                            ->orWhereRaw('LOWER(display_name) = ?', [$callsign])
+                            ->orWhereRaw('LOWER(display_name) LIKE ?', [$callsign.'-%']);
+                    }
+                })
+                ->get(),
+        ];
     }
 
     /**

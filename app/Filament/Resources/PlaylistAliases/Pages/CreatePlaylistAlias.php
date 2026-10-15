@@ -8,4 +8,9 @@ use Filament\Resources\Pages\CreateRecord;
 class CreatePlaylistAlias extends CreateRecord
 {
     protected static string $resource = PlaylistAliasResource::class;
+
+    protected function getRedirectUrl(): string
+    {
+        return EditPlaylistAlias::getUrl(['record' => $this->getRecord()]);
+    }
 }

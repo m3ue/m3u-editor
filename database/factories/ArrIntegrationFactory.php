@@ -58,4 +58,11 @@ class ArrIntegrationFactory extends Factory
             'cache_enabled' => true,
         ]);
     }
+
+    public function cacheFailback(): static
+    {
+        return $this->state(fn (): array => [
+            'cache_failback' => true,
+        ]);
+    }
 }

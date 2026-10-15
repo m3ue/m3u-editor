@@ -135,6 +135,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 'container_extension', // new field for container extension
                 'rating', // new field for rating
                 'rating_5based', // new field for 5-based rating
+                'source_added_at', // provider `added`
             ];
 
             if ($job->variables['autoSort'] ?? false) {

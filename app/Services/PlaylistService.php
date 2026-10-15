@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\DefaultAuthMode;
 use App\Jobs\AddGroupsToCustomPlaylist;
 use App\Jobs\AddItemsToCustomPlaylist;
 use App\Jobs\AddItemsToCustomPlaylistChunk;
@@ -42,7 +43,6 @@ use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Bus;
@@ -109,17 +109,8 @@ class PlaylistService
      */
     public static function getUrls($playlist)
     {
-        // Get the first enabled auth (URLs can only contain one set of credentials)
-        $playlistAuth = null;
-        if (method_exists($playlist, 'playlistAuths')) {
-            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
-        }
-        // For PlaylistAlias, fall back to direct alias credentials if no PlaylistAuth found
-        if (! $playlistAuth && $playlist instanceof PlaylistAlias) {
-            $playlistAuth = $playlist->username && $playlist->password
-                ? (object) ['username' => $playlist->username, 'password' => $playlist->password]
-                : null;
-        }
+        // URLs can only contain one set of credentials
+        $playlistAuth = self::getOutputCredentials($playlist);
         $auth = null;
         if ($playlistAuth) {
             $auth = '?username='.urlencode($playlistAuth->username).'&password='.urlencode($playlistAuth->password);
@@ -186,27 +177,54 @@ class PlaylistService
     }
 
     /**
-     * Get Xtream API info for the given playlist
+     * The credentials to embed in a playlist's M3U/HDHR URLs: the first enabled
+     * Playlist Auth, then an alias' own credentials, then the owner's Custom
+     * Password login. UUID login leaves the URLs credential-free (the UUID in the
+     * path already grants access), and a disabled default login has none to give.
      *
-     * @param  Playlist|MergedPlaylist|CustomPlaylist  $playlist
-     * @return array
+     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
+     * @return object{username: string, password: string}|null
+     */
+    public static function getOutputCredentials($playlist): ?object
+    {
+        if (method_exists($playlist, 'playlistAuths')) {
+            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
+            if ($playlistAuth) {
+                return $playlistAuth;
+            }
+        }
+
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+            return $playlist->authObject;
+        }
+
+        return $playlist->getDefaultAuthMode() === DefaultAuthMode::Custom
+            ? $playlist->getDefaultAuthCredentials()
+            : null;
+    }
+
+    /**
+     * Get Xtream API info for the given playlist: the owner's default login
+     * (password = UUID or custom password, null when disabled), or an alias'
+     * own credentials when set (mode is then null).
+     *
+     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
+     * @return array{url: string, username: string, password: ?string, mode: ?DefaultAuthMode}
      */
     public static function getXtreamInfo($playlist)
     {
-        // For Xtream API, we use the playlist UUID as the password
-        // and the user's name as the username. This is valid of all playlist types.
         $auth = [
             'username' => $playlist->user->name,
-            'password' => $playlist->uuid,
+            'password' => $playlist->getDefaultAuthPassword(),
+            'mode' => $playlist->getDefaultAuthMode(),
         ];
-        if ($playlist instanceof PlaylistAlias) {
-            // For PlaylistAlias, override default auth if set
-            if ($playlist->username && $playlist->password) {
-                $auth = [
-                    'username' => $playlist->username,
-                    'password' => $playlist->password,
-                ];
-            }
+        // For PlaylistAlias, override default auth if set
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+            $auth = [
+                'username' => $playlist->authObject->username,
+                'password' => $playlist->authObject->password,
+                'mode' => null,
+            ];
         }
 
         // Return the results
@@ -250,20 +268,12 @@ class PlaylistService
      * Get the media flow proxy URLs for the given playlist
      *
      * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
-     * @return array{m3u: string, epg: string, xtream: array{server: string, username: string, password: string}|null, authEnabled: bool}
+     * @return array{m3u: string, epg: string, xtream: array{server: string, default: array{username: string, password: string}|null, default_mode: ?DefaultAuthMode, auths: list<array{name: string, username: string, password: string}>}, authEnabled: bool}
      */
     public function getMediaFlowProxyUrls($playlist)
     {
-        // Get the first enabled auth (URLs can only contain one set of credentials)
-        $playlistAuth = null;
-        if (method_exists($playlist, 'playlistAuths')) {
-            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
-        } elseif ($playlist instanceof PlaylistAlias) {
-            // If PlaylistAlias, check if direct authentication is set
-            $playlistAuth = $playlist->username && $playlist->password
-                ? (object) ['username' => $playlist->username, 'password' => $playlist->password]
-                : null;
-        }
+        // URLs can only contain one set of credentials
+        $playlistAuth = self::getOutputCredentials($playlist);
         $auth = '';
         if ($playlistAuth) {
             $auth = '?username='.urlencode($playlistAuth->username).'&password='.urlencode($playlistAuth->password);
@@ -298,20 +308,17 @@ class PlaylistService
         $appUrl = rtrim(url('/'), '/');
         $mfApiPassword = $settings['mediaflow_proxy_password'];
 
-        // Default credentials match getXtreamInfo(): user->name + uuid, or alias overrides if set.
-        $defaultXtreamUsername = $playlist->user->name;
-        $defaultXtreamPassword = $playlist->uuid;
-        if ($playlist instanceof PlaylistAlias && $playlist->username && $playlist->password) {
-            $defaultXtreamUsername = $playlist->username;
-            $defaultXtreamPassword = $playlist->password;
-        }
+        // Default credentials match getXtreamInfo(): the owner's default login, or alias overrides if set.
+        // Null when the default login is disabled.
+        $defaultXtream = self::getXtreamInfo($playlist);
 
         $xtream = [
             'server' => $proxyUrl,
-            'default' => [
-                'username' => base64_encode("{$appUrl}:{$defaultXtreamUsername}:{$mfApiPassword}"),
-                'password' => $defaultXtreamPassword,
+            'default' => $defaultXtream['password'] === null ? null : [
+                'username' => base64_encode("{$appUrl}:{$defaultXtream['username']}:{$mfApiPassword}"),
+                'password' => $defaultXtream['password'],
             ],
+            'default_mode' => $defaultXtream['mode'],
             'auths' => [],
         ];
 
@@ -558,69 +565,15 @@ class PlaylistService
             }
         }
 
-        // Method 2: Fall back to original authentication:
-        //      (username = playlist owner, password = playlist UUID)
+        // Method 2: Fall back to the owner's default login
+        //      (username = playlist owner, password = playlist UUID or custom password, per playlist)
         if (! $playlist) {
-            // Try to find playlist by UUID (password parameter)
-            try {
-                $playlist = Playlist::with([
-                    'user',
-                ])->where('uuid', $password)->firstOrFail();
-
-                // Verify username matches playlist owner's name
-                if ($playlist->user->name === $username) {
-                    $authMethod = 'owner_auth';
-                } else {
-                    $playlist = null;
-                }
-            } catch (ModelNotFoundException $e) {
-                // Try MergedPlaylist
-                try {
-                    $playlist = MergedPlaylist::with([
-                        'user',
-                    ])->where('uuid', $password)->firstOrFail();
-
-                    // Verify username matches playlist owner's name
-                    if ($playlist->user->name === $username) {
-                        $authMethod = 'owner_auth';
-                    } else {
-                        $playlist = null;
-                    }
-                } catch (ModelNotFoundException $e) {
-                    // Try CustomPlaylist
-                    try {
-                        $playlist = CustomPlaylist::with([
-                            'user',
-                        ])->where('uuid', $password)->firstOrFail();
-
-                        // Verify username matches playlist owner's name
-                        if ($playlist->user->name === $username) {
-                            $authMethod = 'owner_auth';
-                        } else {
-                            $playlist = null;
-                        }
-                    } catch (ModelNotFoundException $e) {
-                        // Try PlaylistAlias
-                        try {
-                            $playlist = PlaylistAlias::with([
-                                'user',
-                                'playlist',
-                                'customPlaylist',
-                                'mergedPlaylist',
-                            ])->where('uuid', $password)
-                                ->firstOrFail();
-
-                            // Verify username matches playlist alias owner's name
-                            if ($playlist->user->name === $username) {
-                                $authMethod = 'owner_auth';
-                            } else {
-                                $playlist = null;
-                            }
-                        } catch (ModelNotFoundException $e) {
-                            // No playlist found
-                        }
-                    }
-                }
+            $playlist = app(PlaylistCredentialResolver::class)->resolveDefaultLogin($username, $password);
+            if ($playlist instanceof PlaylistAlias) {
+                $playlist->load(['playlist', 'customPlaylist', 'mergedPlaylist']);
+            }
+            if ($playlist) {
+                $authMethod = 'owner_auth';
             }
         }
 

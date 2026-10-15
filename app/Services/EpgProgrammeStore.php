@@ -62,6 +62,9 @@ class EpgProgrammeStore
 
     private int $pendingRows = 0;
 
+    /** Rows inserted by this writer, to decide whether duplicate removal freed enough space to compact. */
+    private int $insertedRows = 0;
+
     private string $buildingPath = '';
 
     private string $finalPath = '';
@@ -158,6 +161,7 @@ class EpgProgrammeStore
         );
         $this->pdo->beginTransaction();
         $this->pendingRows = 0;
+        $this->insertedRows = 0;
     }
 
     /**
@@ -176,6 +180,7 @@ class EpgProgrammeStore
             $blob = '{}';
         }
         $this->insertStatement->execute([$channelId, $date, $startTs, $stopTs, $blob]);
+        $this->insertedRows++;
 
         if (++$this->pendingRows >= self::COMMIT_EVERY) {
             $this->pdo->commit();
@@ -185,29 +190,91 @@ class EpgProgrammeStore
     }
 
     /**
-     * Commit, build the lookup index, close, and atomically swap the built DB
-     * into place. Throws if the swap fails so the caller can flag the cache
-     * generation as failed rather than leaving a stale/missing store behind a
-     * "success" metadata write.
+     * Commit, build the lookup index, drop exact duplicate programmes (compacting
+     * the file when they were most of it), close, and atomically swap the built
+     * DB into place. Throws if the swap fails so
+     * the caller can flag the cache generation as failed rather than leaving a
+     * stale/missing store behind a "success" metadata write.
+     *
+     * @return int Number of exact duplicate programmes removed
      */
-    public function finish(): void
+    public function finish(): int
     {
         if ($this->pdo === null) {
-            return;
+            return 0;
         }
 
         if ($this->pdo->inTransaction()) {
             $this->pdo->commit();
         }
         $this->pdo->exec('CREATE INDEX programmes_date_channel ON programmes (date, channel_id, start_ts)');
+        $duplicatesRemoved = $this->removeExactDuplicates();
+        $compactPath = $duplicatesRemoved * 2 > $this->insertedRows ? $this->compactInto() : null;
         $this->insertStatement = null;
         $this->pdo = null;
+
+        if ($compactPath !== null) {
+            @unlink($this->buildingPath);
+            $this->buildingPath = $compactPath;
+        }
 
         if (! @rename($this->buildingPath, $this->finalPath)) {
             @unlink($this->buildingPath);
 
             throw new \RuntimeException("Failed to move EPG programme store into place at {$this->finalPath}");
         }
+
+        return $duplicatesRemoved;
+    }
+
+    /**
+     * Write a compacted copy of the store, so the pages freed by removing
+     * duplicates don't keep the file at its pre-dedupe size. `VACUUM INTO`
+     * streams straight to a new file; a plain `VACUUM` would build its copy in
+     * temp storage, which this connection keeps in memory. Compaction is only an
+     * optimization, so a failure (e.g. disk full) keeps the uncompacted store.
+     * A copy orphaned by a hard crash shares the `.building-*` prefix and is
+     * removed with the rest of the cache dir by the next rebuild's clearCache().
+     *
+     * @return string|null Path of the compacted copy, or null if it failed
+     */
+    private function compactInto(): ?string
+    {
+        $compactPath = $this->buildingPath.'.compact';
+
+        try {
+            $this->pdo->prepare('VACUUM INTO ?')->execute([$compactPath]);
+
+            return $compactPath;
+        } catch (\PDOException) {
+            @unlink($compactPath);
+
+            return null;
+        }
+    }
+
+    /**
+     * Delete rows whose channel, times and full payload exactly match an
+     * earlier row, keeping the first occurrence. Some feeds repeat the same
+     * schedule many times for one channel, and every copy would otherwise be
+     * emitted once per mapped output channel. Anything that differs (title,
+     * desc, episode, artwork, ...) is a different blob and survives.
+     *
+     * Runs after the lookup index exists so each row's duplicate probe is an
+     * index seek on (date, channel_id, start_ts) rather than a full-table sort.
+     */
+    private function removeExactDuplicates(): int
+    {
+        return (int) $this->pdo->exec(
+            'DELETE FROM programmes WHERE EXISTS ('
+            .'SELECT 1 FROM programmes earlier '
+            .'WHERE earlier.date = programmes.date '
+            .'AND earlier.channel_id = programmes.channel_id '
+            .'AND earlier.start_ts = programmes.start_ts '
+            .'AND earlier.stop_ts IS programmes.stop_ts '
+            .'AND earlier.data = programmes.data '
+            .'AND earlier.rowid < programmes.rowid)'
+        );
     }
 
     /**

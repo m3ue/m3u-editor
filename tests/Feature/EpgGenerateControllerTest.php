@@ -80,7 +80,7 @@ test('epg download does not crash when epg source file is missing', function () 
     $response->assertStatus(200);
     $response->assertHeader('Content-Type', 'application/gzip');
 
-    $content = gzdecode($response->getContent());
+    $content = gzdecode($response->streamedContent());
     expect($content)->toContain('<?xml version="1.0"');
     expect($content)->toContain('</tv>');
 });
@@ -121,7 +121,7 @@ test('epg download does not crash when epg source file is corrupted', function (
     $response->assertStatus(200);
     $response->assertHeader('Content-Type', 'application/gzip');
 
-    $content = gzdecode($response->getContent());
+    $content = gzdecode($response->streamedContent());
     expect($content)->toContain('<?xml version="1.0"');
     expect($content)->toContain('</tv>');
 
@@ -182,7 +182,7 @@ XML;
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
     $episodeNumbers = [];
@@ -247,7 +247,7 @@ XML;
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -289,7 +289,7 @@ test('xmlreader fallback reports a missing local SchedulesDirect XMLTV file when
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     NotificationFacade::assertSentTo(
         $user,
@@ -333,7 +333,7 @@ test('epg xml generation preserves albanian characters with explicit utf8 escapi
         $response->assertStatus(200);
         $response->assertHeader('Content-Type', 'application/gzip');
 
-        $content = gzdecode($response->getContent());
+        $content = gzdecode($response->streamedContent());
 
         expect($content)->toContain('<display-name>Çështje të Ëmbla &amp; &quot;Special&quot;</display-name>');
     } finally {
@@ -410,7 +410,7 @@ XML;
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $episodeNumbers = [];
     foreach ($document->getElementsByTagName('episode-num') as $episodeNumber) {
@@ -535,7 +535,7 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -609,7 +609,7 @@ test('cached Schedules Direct artwork built on a different host than the serving
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -684,7 +684,7 @@ test('legacy scalar episode numbers emit only valid xmltv namespace identities',
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $episodeNumbers = [];
     foreach ($document->getElementsByTagName('episode-num') as $episodeNumber) {
@@ -721,7 +721,7 @@ test('standard dummy programmes do not copy channel branding into programme artw
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -756,7 +756,7 @@ test('aed dummy programmes are generated even when the playlist dummy epg toggle
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -792,7 +792,7 @@ test('aed dummy programmes do not fall back to channel branding for programme ar
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -823,7 +823,7 @@ test('playlist dummy_epg_days controls the number of standard dummy programmes g
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -858,7 +858,7 @@ test('aed profile dummy_epg_days overrides the playlist dummy_epg_days for that 
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -887,7 +887,7 @@ test('custom playlist dummy_epg_days controls the number of standard dummy progr
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -918,7 +918,7 @@ test('merged playlist dummy_epg_days controls the number of standard dummy progr
     $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
 
@@ -964,7 +964,7 @@ test('aed pre-event padding stops at the dummy epg window for events far in the 
     $response->assertOk();
 
     $document = new DOMDocument;
-    expect($document->loadXML(gzdecode($response->getContent())))->toBeTrue();
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
 
     $xpath = new DOMXPath($document);
     $programmes = $xpath->query('//programme[@channel="aed-far-future-channel"]');
@@ -974,4 +974,267 @@ test('aed pre-event padding stops at the dummy epg window for events far in the 
         ->and($programmes->item(1)->getAttribute('stop'))->toStartWith('20260930000000');
 
     Carbon::setTestNow();
+});
+
+test('programme artwork keeps its role from XMLTV import through epg.xml output', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+        'enable_logo_proxy' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/artwork.xml',
+    ]);
+    $epgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'source.artwork',
+        'display_name' => 'Artwork Channel',
+        'lang' => 'en',
+    ]);
+
+    Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'epg_channel_id' => $epgChannel->id,
+        'stream_id' => 'artwork-channel',
+        'title' => 'Artwork Channel',
+        'channel' => 1,
+    ]);
+
+    $date = now()->format('Y-m-d');
+    $start = now()->startOfDay()->addHour()->format('YmdHis O');
+    $stop = now()->startOfDay()->addHours(2)->format('YmdHis O');
+    $later = now()->startOfDay()->addHours(3)->format('YmdHis O');
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="source.artwork"><display-name>Artwork Channel</display-name></channel>
+  <programme start="{$start}" stop="{$stop}" channel="source.artwork">
+    <title>Artwork Programme</title>
+    <credits>
+      <actor>Someone<image type="person">https://example.com/actor.jpg</image></actor>
+    </credits>
+    <icon src="https://example.com/primary.jpg" />
+    <icon src="https://example.com/untyped.jpg" />
+    <icon src="https://example.com/wide.jpg" width="1920" height="1080" />
+    <episode-num system="xmltv_ns">1 . 4 .</episode-num>
+    <new />
+    <rating system="VCHIP"><value>TV-14</value><icon src="https://example.com/tv14.png" /></rating>
+    <image type="poster" orient="P" size="3">https://example.com/poster.jpg</image>
+    <image type="still" size="2">https://example.com/still.jpg</image>
+  </programme>
+  <programme start="{$stop}" stop="{$later}" channel="source.artwork">
+    <title>Orientless Poster</title>
+    <image type="poster" size="3">https://example.com/orientless-poster.jpg</image>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    $cachedProgramme = app(EpgCacheService::class)
+        ->getCachedProgrammes($epg, $date, ['source.artwork'])['source.artwork'][0];
+
+    // Untyped icons are not assumed to be portrait posters, and nested
+    // credits/rating images are not programme artwork.
+    expect($cachedProgramme['icon'])->toBe('https://example.com/primary.jpg')
+        ->and($cachedProgramme['images'])->toBe([
+            ['url' => 'https://example.com/untyped.jpg', 'type' => '', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 0],
+            ['url' => 'https://example.com/wide.jpg', 'type' => '', 'width' => 1920, 'height' => 1080, 'orient' => '', 'size' => 0],
+            ['url' => 'https://example.com/poster.jpg', 'type' => 'poster', 'width' => 0, 'height' => 0, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://example.com/still.jpg', 'type' => 'still', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 2],
+        ]);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz")->assertOk();
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
+
+    $programme = (new DOMXPath($document))->query('//programme[@channel="artwork-channel"]')->item(0);
+    $children = [];
+    foreach ($programme->childNodes as $child) {
+        if ($child instanceof DOMElement) {
+            $attributes = [];
+            foreach ($child->attributes as $attribute) {
+                $attributes[$attribute->name] = $attribute->value;
+            }
+            $children[] = [$child->tagName, $attributes, in_array($child->tagName, ['image', 'title'], true) ? $child->textContent : null];
+        }
+    }
+
+    // DTD order (icon* before episode-num*, new before rating, image* last),
+    // and no non-standard type/orient/size attributes on <icon>.
+    expect($children)->toBe([
+        ['title', [], 'Artwork Programme'],
+        ['icon', ['src' => 'https://example.com/primary.jpg'], null],
+        ['icon', ['src' => 'https://example.com/untyped.jpg'], null],
+        ['icon', ['src' => 'https://example.com/wide.jpg', 'width' => '1920', 'height' => '1080'], null],
+        ['icon', ['src' => 'https://example.com/poster.jpg'], null],
+        ['icon', ['src' => 'https://example.com/still.jpg'], null],
+        ['episode-num', ['system' => 'xmltv_ns'], null],
+        ['new', [], null],
+        ['rating', [], null],
+        ['image', ['type' => 'poster', 'size' => '3', 'orient' => 'P'], 'https://example.com/poster.jpg'],
+        ['image', ['type' => 'backdrop', 'size' => '3', 'orient' => 'L'], 'https://example.com/wide.jpg'],
+        ['image', ['type' => 'still', 'size' => '2'], 'https://example.com/still.jpg'],
+    ]);
+
+    // XMLTV makes <image orient> optional: a typed poster without one keeps its role.
+    $xpath = new DOMXPath($document);
+    expect($xpath->query('//programme[title="Orientless Poster"]/image[@type="poster" and @size="3" and not(@orient) and .="https://example.com/orientless-poster.jpg"]'))->toHaveCount(1);
+});
+
+/**
+ * Two playlist channels share one repeated source schedule (issue #1607), plus a
+ * third channel on a different source carrying the same programme payload.
+ *
+ * @return array{playlist: Playlist, epg: Epg}
+ */
+function createSharedScheduleEpgFixture(bool $cached): array
+{
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'dummy_epg' => false,
+    ]);
+    $epg = Epg::factory()->for($user)->create([
+        'url' => 'https://example.com/shared-schedule.xml',
+        'is_cached' => false,
+    ]);
+
+    // The feed defines the shared channel twice, so import keeps two EPG channel records
+    $sharedEpgChannels = collect(['Demo Sports A', 'Demo Sports B'])->map(
+        fn (string $displayName) => EpgChannel::factory()->for($user)->for($epg)->create([
+            'channel_id' => 'demo:SharedSports.placeholder',
+            'display_name' => $displayName,
+            'lang' => 'en',
+        ])
+    );
+    $otherEpgChannel = EpgChannel::factory()->for($user)->for($epg)->create([
+        'channel_id' => 'demo:OtherSports.placeholder',
+        'display_name' => 'Demo Other Sports',
+        'lang' => 'en',
+    ]);
+
+    foreach ([
+        ['demo-output-a', $sharedEpgChannels[0]],
+        ['demo-output-b', $sharedEpgChannels[1]],
+        ['demo-output-c', $otherEpgChannel],
+    ] as $index => [$streamId, $epgChannel]) {
+        Channel::factory()->for($user)->for($playlist)->create([
+            'enabled' => true,
+            'is_vod' => false,
+            'epg_channel_id' => $epgChannel->id,
+            'stream_id' => $streamId,
+            'title' => $streamId,
+            'channel' => $index + 1,
+        ]);
+    }
+
+    $matchStart = now()->startOfDay()->addHours(12)->format('YmdHis O');
+    $matchStop = now()->startOfDay()->addHours(13)->format('YmdHis O');
+    $laterStop = now()->startOfDay()->addHours(14)->format('YmdHis O');
+    $match = <<<XML
+  <programme channel="demo:SharedSports.placeholder" start="{$matchStart}" stop="{$matchStop}">
+    <title>Demo Match</title>
+    <desc>Synthetic programme for duplicate testing.</desc>
+  </programme>
+XML;
+    $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="demo:SharedSports.placeholder"><display-name>Demo Sports A</display-name></channel>
+  <channel id="demo:SharedSports.placeholder"><display-name>Demo Sports B</display-name></channel>
+  <channel id="demo:OtherSports.placeholder"><display-name>Demo Other Sports</display-name></channel>
+{$match}
+{$match}
+  <programme channel="demo:SharedSports.placeholder" start="{$matchStop}" stop="{$laterStop}">
+    <title>Demo Studio</title>
+  </programme>
+{$match}
+  <programme channel="demo:SharedSports.placeholder" start="{$matchStart}" stop="{$matchStop}">
+    <title>Demo Match</title>
+    <desc>Same slot, different description.</desc>
+  </programme>
+  <programme channel="demo:OtherSports.placeholder" start="{$matchStart}" stop="{$matchStop}">
+    <title>Demo Match</title>
+    <desc>Synthetic programme for duplicate testing.</desc>
+  </programme>
+</tv>
+XML;
+
+    Storage::disk('local')->put($epg->file_path, gzencode($xml));
+
+    if ($cached) {
+        expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+    }
+
+    return ['playlist' => $playlist, 'epg' => $epg->refresh()];
+}
+
+test('exact duplicate source programmes are emitted once per mapped channel', function (bool $cached) {
+    ['playlist' => $playlist] = createSharedScheduleEpgFixture($cached);
+
+    $response = $this->get("/{$playlist->uuid}/epg.xml.gz");
+
+    $response->assertOk()->assertHeader('Content-Type', 'application/gzip');
+
+    $document = new DOMDocument;
+    expect($document->loadXML(gzdecode($response->streamedContent())))->toBeTrue();
+    $xpath = new DOMXPath($document);
+
+    foreach (['demo-output-a', 'demo-output-b'] as $outputChannel) {
+        expect($xpath->query("//programme[@channel=\"{$outputChannel}\"]"))->toHaveCount(3)
+            ->and($xpath->query("//programme[@channel=\"{$outputChannel}\" and title=\"Demo Match\"]"))->toHaveCount(2)
+            ->and($xpath->query("//programme[@channel=\"{$outputChannel}\" and desc=\"Same slot, different description.\"]"))->toHaveCount(1)
+            ->and($xpath->query("//programme[@channel=\"{$outputChannel}\" and title=\"Demo Studio\"]"))->toHaveCount(1);
+    }
+
+    expect($xpath->query('//programme[@channel="demo-output-c" and title="Demo Match"]'))->toHaveCount(1);
+})->with([
+    'cached programme store' => true,
+    'xmlreader fallback' => false,
+]);
+
+test('rebuilding the epg cache keeps deduplicated programme counts stable', function () {
+    ['epg' => $epg] = createSharedScheduleEpgFixture(cached: true);
+    $date = now()->format('Y-m-d');
+    $countShared = fn () => count(app(EpgCacheService::class)
+        ->getCachedProgrammes($epg, $date, ['demo:SharedSports.placeholder'])['demo:SharedSports.placeholder']);
+
+    // 6 source programmes, 2 of them exact duplicates
+    $assertStoredCounts = function () use ($epg, $countShared) {
+        $epg->refresh();
+
+        expect($countShared())->toBe(3)
+            ->and($epg->programme_count)->toBe(4)
+            ->and($epg->cache_meta['total_programmes'])->toBe(4);
+    };
+
+    $assertStoredCounts();
+
+    expect(app(EpgCacheService::class)->cacheEpgData($epg))->toBeTrue();
+
+    $assertStoredCounts();
+});
+
+test('compressed epg is streamed and cached as a valid gzip file', function () {
+    ['playlist' => $playlist] = createSharedScheduleEpgFixture(cached: true);
+
+    $firstResponse = $this->get("/{$playlist->uuid}/epg.xml.gz");
+    $firstResponse->assertOk()
+        ->assertHeader('Content-Type', 'application/gzip')
+        ->assertHeader('X-EPG-Cache', 'MISS');
+    $streamedXml = gzdecode($firstResponse->streamedContent());
+
+    expect($streamedXml)->toStartWith('<?xml')->toEndWith('</tv>');
+
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($playlist, true);
+    expect(Storage::disk('local')->exists($cachePath))->toBeTrue()
+        ->and(gzdecode(Storage::disk('local')->get($cachePath)))->toBe($streamedXml);
+
+    $cachedResponse = $this->get("/{$playlist->uuid}/epg.xml.gz");
+    $cachedResponse->assertOk()->assertHeader('X-EPG-Cache', 'HIT');
+
+    expect(gzdecode($cachedResponse->streamedContent()))->toBe($streamedXml);
 });

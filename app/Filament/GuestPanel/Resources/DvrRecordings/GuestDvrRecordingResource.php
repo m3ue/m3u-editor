@@ -326,7 +326,7 @@ class GuestDvrRecordingResource extends Resource
                             return;
                         }
 
-                        $livewire->dispatch('openFloatingStream', $record->getFloatingPlayerAttributes());
+                        $livewire->dispatch('openFloatingStream', static::playerAttributes($record));
                     }),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([]);

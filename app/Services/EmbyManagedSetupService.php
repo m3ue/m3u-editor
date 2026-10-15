@@ -12,11 +12,27 @@ class EmbyManagedSetupService
 {
     private const int CONTRACT_VERSION = 1;
 
+    private const string ORIGIN_BLOCKED_MESSAGE = 'Emby managed setup was blocked by the integration security policy.';
+
+    private const string CONNECTION_FAILED_MESSAGE = 'Emby managed setup could not connect. Check that Emby is reachable, then retry.';
+
+    private const string ENDPOINT_NOT_FOUND_MESSAGE = 'The Emby managed setup endpoint was not found. Check the companion installation, then retry.';
+
+    private const string REQUEST_REJECTED_MESSAGE = 'Emby rejected the managed setup request. Check the administrator credential and permissions, then retry.';
+
+    private const string BINDING_CONFLICT_MESSAGE = 'Emby reported a managed setup binding conflict. Reconnect the integration, then retry.';
+
+    private const string NOT_READY_MESSAGE = 'Emby is not ready for managed setup. Check the companion configuration, then retry.';
+
+    private const string INVALID_RESPONSE_MESSAGE = 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.';
+
+    private const string UNSUPPORTED_VERSION_MESSAGE = 'The Emby companion does not support managed setup version 1. Update the companion, then retry.';
+
     /** @return array{success: bool, message: string} */
     public function setup(MediaServerIntegration $integration): array
     {
         if (! $integration->isEmby() || ! $this->originIsAllowed($integration)) {
-            return $this->failure();
+            return $this->failure(self::ORIGIN_BLOCKED_MESSAGE);
         }
 
         try {
@@ -32,13 +48,47 @@ class EmbyManagedSetupService
                     'IntegrationId' => $integration->id,
                 ]);
         } catch (Throwable) {
-            return $this->failure();
+            return $this->failure(self::CONNECTION_FAILED_MESSAGE);
+        }
+
+        if (! $this->responseOriginIsValid($response, $integration)) {
+            return $this->failure(self::ORIGIN_BLOCKED_MESSAGE);
+        }
+
+        if ($response->status() === 404) {
+            return $this->failure(self::ENDPOINT_NOT_FOUND_MESSAGE);
+        }
+
+        if (! $response->successful()) {
+            return $this->failure(self::REQUEST_REJECTED_MESSAGE);
         }
 
         $data = $response->json();
-        $root = is_array($data) ? ($data['ConfirmedRoot'] ?? null) : null;
-        if (! $this->responseIsValid($response, $data, $integration, $root)) {
-            return $this->failure();
+
+        if (! is_array($data)) {
+            return $this->failure(self::INVALID_RESPONSE_MESSAGE);
+        }
+
+        if (($data['Ready'] ?? null) === false) {
+            return $this->failure(self::NOT_READY_MESSAGE);
+        }
+
+        if (($data['Ready'] ?? null) !== true) {
+            return $this->failure(self::INVALID_RESPONSE_MESSAGE);
+        }
+
+        if (($data['CapabilityVersion'] ?? null) !== self::CONTRACT_VERSION) {
+            return $this->failure(self::UNSUPPORTED_VERSION_MESSAGE);
+        }
+
+        if (($data['IntegrationId'] ?? null) !== $integration->id) {
+            return $this->failure(self::BINDING_CONFLICT_MESSAGE);
+        }
+
+        $root = $data['ConfirmedRoot'] ?? null;
+
+        if (! is_string($root) || ! MediaServerIntegration::isSafeWritablePath($root)) {
+            return $this->failure(self::INVALID_RESPONSE_MESSAGE);
         }
 
         $integration->updateQuietly([
@@ -87,23 +137,11 @@ class EmbyManagedSetupService
         return filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
     }
 
-    private function responseIsValid(
-        Response $response,
-        mixed $data,
-        MediaServerIntegration $integration,
-        mixed $root,
-    ): bool {
+    private function responseOriginIsValid(Response $response, MediaServerIntegration $integration): bool
+    {
         $effectiveUrl = $response->handlerStats()['url'] ?? null;
 
-        return $response->successful()
-            && ($effectiveUrl === null || $this->originsMatch($integration->base_url, $effectiveUrl))
-            && is_array($data)
-            && ($data['Ready'] ?? null) === true
-            && is_numeric($data['CapabilityVersion'] ?? null)
-            && (int) $data['CapabilityVersion'] === self::CONTRACT_VERSION
-            && ($data['IntegrationId'] ?? null) === $integration->id
-            && is_string($root)
-            && MediaServerIntegration::isSafeWritablePath($root);
+        return $effectiveUrl === null || $this->originsMatch($integration->base_url, $effectiveUrl);
     }
 
     private function originsMatch(string $expectedUrl, string $effectiveUrl): bool
@@ -124,11 +162,11 @@ class EmbyManagedSetupService
     }
 
     /** @return array{success: false, message: string} */
-    private function failure(): array
+    private function failure(string $message): array
     {
         return [
             'success' => false,
-            'message' => 'Install an Emby companion that supports managed setup version '.self::CONTRACT_VERSION.', then retry.',
+            'message' => $message,
         ];
     }
 }

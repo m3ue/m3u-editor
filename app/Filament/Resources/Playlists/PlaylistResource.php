@@ -13,12 +13,14 @@ use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Pages\EasyEditor;
+use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\Playlists\Pages\CreatePlaylist;
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Filament\Resources\Playlists\Pages\ListPlaylists;
 use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Filament\Resources\Playlists\Pages\ViewPlaylist;
+use App\Filament\Support\DefaultAuthFields;
 use App\Filament\Support\DvrRequestsAiostreamsTabs;
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
@@ -1994,50 +1996,13 @@ class PlaylistResource extends Resource implements CopilotResource
                     Repeater::make('dynamic_groups_config')
                         ->label(__('Dynamic Groups Configuration'))
                         ->columnSpanFull()
-                        ->schema([
-                            ...self::getDynamicGroupRuleSchema(),
-                            ...self::getDynamicGroupCacheSchema(),
-                        ])
+                        ->schema(self::getDynamicGroupRuleSchema())
                         ->columns(12)
                         ->reorderable()
                         ->reorderableWithButtons()
                         ->collapsible()
                         ->defaultItems(0)
                         ->addActionLabel(__('Add dynamic group'))
-                        ->extraItemActions([
-                            Action::make('preview_dynamic_group')
-                                ->label(__('Preview'))
-                                ->icon('heroicon-o-eye')
-                                ->color('info')
-                                ->tooltip(__('Preview the entries this rule currently matches'))
-                        // Matching runs against the playlist's synced VOD/series
-                        // rows, so there is nothing to preview until the
-                        // playlist exists.
-                                ->visible(fn (?Playlist $record): bool => $record !== null)
-                                ->modalHeading(function (array $arguments, Repeater $component): string {
-                                    $itemKey = $arguments['item'] ?? null;
-                                    $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
-                                    $name = trim((string) ($rule['name'] ?? ''));
-
-                                    return $name !== ''
-                                        ? __('Preview: :name', ['name' => $name])
-                                        : __('Preview dynamic group');
-                                })
-                                ->modalWidth('2xl')
-                                ->modalSubmitAction(false)
-                                ->modalCancelActionLabel(__('Close'))
-                                ->modalContent(function (array $arguments, Repeater $component, ?Playlist $record) {
-                                    // Raw (unvalidated) state so the preview reflects the
-                                    // rule as currently edited, before the form is saved.
-                                    $itemKey = $arguments['item'] ?? null;
-                                    $rule = $itemKey !== null ? (array) $component->getRawItemState($itemKey) : [];
-
-                                    return view(
-                                        'filament.forms.dynamic-group-preview',
-                                        self::getDynamicGroupPreviewData($rule, $record),
-                                    );
-                                }),
-                        ])
                         ->itemLabel(function (array $state): ?string {
                             $name = $state['name'] ?? null;
                             if (! $name) {
@@ -2045,18 +2010,13 @@ class PlaylistResource extends Resource implements CopilotResource
                             }
                             $type = $state['type'] ?? null;
                             $source = $state['source'] ?? null;
-                            $typeLabel = $type === 'series' ? 'Series' : ($type === 'vod' ? 'VOD' : null);
-                            $sourceLabel = match ($source) {
-                                'trending' => 'Trending',
-                                'popular' => 'Popular',
-                                'now_playing' => 'In Theatres',
-                                'upcoming' => 'Coming Soon',
-                                'top_genre' => 'Top Genre',
-                                'tmdb_network' => 'By Network',
-                                'provider' => 'By Provider',
-                                default => $source,
+                            $typeLabel = match ($type) {
+                                'series' => __('Series'),
+                                'vod' => __('VOD'),
+                                default => null,
                             };
-                            $disabled = ($state['enabled'] ?? true) ? '' : ' (disabled)';
+                            $sourceLabel = DynamicGroupResource::sourceLabelFor((string) $type)[$source] ?? $source;
+                            $disabled = ($state['enabled'] ?? true) ? '' : ' ('.__('Disabled').')';
 
                             return $typeLabel
                                 ? "{$name} ({$typeLabel} - {$sourceLabel}){$disabled}"
@@ -3625,6 +3585,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         }
                     }
                 })->dehydrated(false), // Don't save this field directly
+            ...DefaultAuthFields::schema(),
         ];
 
         $sections = ['Name' => $nameFields];
@@ -3641,18 +3602,22 @@ class PlaylistResource extends Resource implements CopilotResource
     }
 
     /**
-     * Reusable Dynamic Groups (TMDB) rule schema - the field set used inside
-     * the `dynamic_groups_config` Repeater on the Playlist form, exposed as a
-     * static method so other surfaces (notably the VOD / Series Dynamic
-     * Groups listing pages' CreateAction) can build the same rule shape
-     * without re-declaring each field. Returns only the *rule* fields -
-     * cache_* fields intentionally live on the Playlist form only and are not
-     * ported here as part of the creation-from-listing flow.
+     * Shared Dynamic Groups (TMDB) rule schema: the rule fields, the Caching
+     * fieldset and the Preview action. Used by the `dynamic_groups_config`
+     * Repeater on the Playlist form and by the create/edit actions on the
+     * VOD / Series Dynamic Groups listings (DynamicGroupRuleActions), so both
+     * surfaces always offer the same fields. Laid out for a 12-column grid,
+     * or a 10-column one with `$useTenCol` (the listing actions, which drop
+     * the Content Type field).
      *
      * @return array<int, Component>
      */
-    public static function getDynamicGroupRuleSchema(): array
+    public static function getDynamicGroupRuleSchema(bool $useTenCol = false): array
     {
+        $nameSpan = $useTenCol ? 7 : 9;
+        $cacheCols = $useTenCol ? 6 : 12;
+        $cachingEnabled = app(CachedContentDispatchService::class)->isEnabled();
+
         return [
             Toggle::make('enabled')
                 ->label(__('Enabled'))
@@ -3678,33 +3643,14 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->columnSpan(2),
             Select::make('source')
                 ->label(__('Source'))
-                ->options(function (Get $get): array {
-                    $type = $get('type');
-
-                    if ($type === 'series') {
-                        return [
-                            'trending' => __('Trending'),
-                            'popular' => __('Popular'),
-                            'top_genre' => __('Top Genre'),
-                            'tmdb_network' => __('By TV Network'),
-                            'provider' => __('By Streaming Service'),
-                        ];
-                    }
-
-                    return [
-                        'trending' => __('Trending'),
-                        'popular' => __('Popular'),
-                        'now_playing' => __('In Theatres'),
-                        'upcoming' => __('Coming Soon'),
-                        'top_genre' => __('Top Genre'),
-                        'provider' => __('By Streaming Service'),
-                    ];
-                })
+                ->searchable()
+                ->options(fn (Get $get): array => DynamicGroupResource::sourceLabelFor((string) $get('type')))
                 ->live()
                 ->required()
                 ->columnSpan(3),
             Select::make('tmdb_params.genre_id')
                 ->label(__('Genre'))
+                ->searchable()
                 ->options(function (Get $get): array {
                     $tmdb = app(TmdbService::class);
                     if (! $tmdb->isConfigured()) {
@@ -3718,15 +3664,17 @@ class PlaylistResource extends Resource implements CopilotResource
                 })
                 ->required()
                 ->visible(fn (Get $get): bool => $get('source') === 'top_genre')
-                ->columnSpan(5),
+                ->columnSpan(6),
             Select::make('tmdb_params.network_id')
                 ->label(__('TV Network'))
+                ->searchable()
                 ->options(TmdbService::TV_NETWORKS)
                 ->required()
                 ->visible(fn (Get $get): bool => $get('source') === 'tmdb_network')
-                ->columnSpan(5),
+                ->columnSpan(6),
             Select::make('tmdb_params.provider_id')
                 ->label(__('Streaming Service'))
+                ->searchable()
                 ->options(function (Get $get): array {
                     $tmdb = app(TmdbService::class);
                     if (! $tmdb->isConfigured()) {
@@ -3741,7 +3689,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->required()
                 ->live()
                 ->visible(fn (Get $get): bool => $get('source') === 'provider')
-                ->columnSpan(4),
+                ->columnSpan(5),
             TextInput::make('tmdb_params.region')
                 ->label(__('Region'))
                 ->placeholder('US')
@@ -3757,7 +3705,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ])
                 ->default('week')
                 ->visible(fn (Get $get): bool => $get('source') === 'trending')
-                ->columnSpan(5),
+                ->columnSpan(6),
             Select::make('tmdb_params.pages')
                 ->label(__('Pages to Fetch'))
                 ->hintIcon(
@@ -3774,35 +3722,40 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->label(__('Category Name'))
                 ->placeholder(__('e.g. Trending Now, Top Comedy, Netflix'))
                 ->required()
-                ->columnSpan(3),
-        ];
-    }
-
-    /**
-     * Per-rule auto-cache options, appended to getDynamicGroupRuleSchema()
-     * on the Playlist form only (not the Dynamic Groups listing CreateAction).
-     *
-     * @return array<int, Component>
-     */
-    public static function getDynamicGroupCacheSchema(): array
-    {
-        return [
+                ->columnSpan(fn (Get $get): int => in_array($get('source'), [
+                    'trending',
+                    'top_genre',
+                    'provider',
+                    'tmdb_network',
+                ], true) ? $nameSpan : 3),
             Fieldset::make(__('Caching'))
                 ->columnSpanFull()
-                ->columns(12)
+                ->columns($cacheCols)
                 ->schema([
+                    // With caching off in Settings nothing is cached, so the
+                    // rule's options are hidden behind a locked "off" toggle.
+                    // They still save as stored: a save meanwhile must not
+                    // wipe them, or retention would release the rule's files.
                     Toggle::make('cache_enabled')
                         ->label(__('Cache group members'))
                         ->hintIcon(
                             'heroicon-m-question-mark-circle',
                             tooltip: __("Automatically download this group's members via Cached Downloads. Series rules cache only each series' latest season."),
                         )
-                        ->helperText(fn (): string => app(CachedContentDispatchService::class)->isEnabled()
-                            ? ''
-                            : __('Caching is currently disabled in Settings.'))
                         ->live()
                         ->default(false)
                         ->inline(false)
+                        ->visible($cachingEnabled)
+                        ->dehydratedWhenHidden()
+                        ->columnSpan(3),
+                    Toggle::make('cache_enabled_locked')
+                        ->label(__('Cache group members'))
+                        ->helperText(__('Caching is currently disabled in Settings.'))
+                        ->formatStateUsing(fn (): bool => false)
+                        ->disabled()
+                        ->dehydrated(false)
+                        ->inline(false)
+                        ->hidden($cachingEnabled)
                         ->columnSpan(3),
                     Toggle::make('cache_never_expire')
                         ->label(__('Never expire'))
@@ -3813,7 +3766,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->live()
                         ->default(false)
                         ->inline(false)
-                        ->visible(fn (Get $get): bool => (bool) $get('cache_enabled'))
+                        ->visible(fn (Get $get): bool => $cachingEnabled && (bool) $get('cache_enabled'))
+                        ->dehydratedWhenHidden(fn (Get $get): bool => ! $cachingEnabled && (bool) $get('cache_enabled'))
                         ->columnSpan(3),
                     TextInput::make('cache_keep_days')
                         ->label(__('Keep after leaving (days)'))
@@ -3826,7 +3780,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(0)
                         ->disabled(fn (Get $get): bool => (bool) $get('cache_never_expire'))
                         ->dehydrated()
-                        ->visible(fn (Get $get): bool => (bool) $get('cache_enabled'))
+                        ->visible(fn (Get $get): bool => $cachingEnabled && (bool) $get('cache_enabled'))
+                        ->dehydratedWhenHidden(fn (Get $get): bool => ! $cachingEnabled && (bool) $get('cache_enabled'))
                         ->columnSpan(3),
                     TextInput::make('cache_max_items')
                         ->label(__('Top N members'))
@@ -3834,10 +3789,62 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->minValue(1)
                         ->default(20)
                         ->placeholder(__('No limit'))
-                        ->visible(fn (Get $get): bool => (bool) $get('cache_enabled'))
+                        ->visible(fn (Get $get): bool => $cachingEnabled && (bool) $get('cache_enabled'))
+                        ->dehydratedWhenHidden(fn (Get $get): bool => ! $cachingEnabled && (bool) $get('cache_enabled'))
                         ->columnSpan(3),
                 ]),
+            // Matching runs against the playlist's synced VOD/series rows, so
+            // there is nothing to preview until a playlist is known: the one
+            // being edited, the row's playlist, or the picked playlist_id.
+            Actions::make([
+                Action::make('preview_dynamic_group')
+                    ->label(__('Preview'))
+                    ->icon('heroicon-o-eye')
+                    ->color('primary')
+                    ->tooltip(__('Preview the entries this rule currently matches'))
+                    ->modalHeading(function (Get $get): string {
+                        $name = trim((string) $get('name'));
+
+                        return $name !== ''
+                            ? __('Preview: :name', ['name' => $name])
+                            : __('Preview dynamic group');
+                    })
+                    ->modalWidth('2xl')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel(__('Close'))
+                    // Raw form state so the preview reflects the rule as
+                    // currently edited, before anything is saved.
+                    ->modalContent(fn (Get $get, Actions $schemaComponent) => view(
+                        'filament.forms.dynamic-group-preview',
+                        self::getDynamicGroupPreviewData(
+                            [
+                                'type' => $get('type'),
+                                'source' => $get('source'),
+                                'tmdb_params' => (array) ($get('tmdb_params') ?? []),
+                            ],
+                            self::getDynamicGroupRulePlaylist($get, $schemaComponent->getRecord()),
+                        ),
+                    )),
+            ])
+                ->key('dynamic_group_preview')
+                ->columnSpanFull()
+                ->visible(fn (Get $get, ?Model $record): bool => $record !== null || filled($get('playlist_id'))),
         ];
+    }
+
+    /**
+     * The playlist a dynamic-group rule form belongs to: the Playlist being
+     * edited (Playlist form repeater), the row's playlist (listing edit), or
+     * the picked playlist (listing create, scoped to the user's own).
+     */
+    public static function getDynamicGroupRulePlaylist(Get $get, Model|array|null $record): ?Playlist
+    {
+        return match (true) {
+            $record instanceof Playlist => $record,
+            $record instanceof DynamicGroup => $record->playlist,
+            filled($get('playlist_id')) => Playlist::query()->where('user_id', Auth::id())->find($get('playlist_id')),
+            default => null,
+        };
     }
 
     /**
@@ -3848,7 +3855,7 @@ class PlaylistResource extends Resource implements CopilotResource
      * SyncDynamicGroups job, so the preview always shows exactly what a sync
      * would attach.
      *
-     * @param  array<string, mixed>  $rule  Raw (unvalidated) repeater item state
+     * @param  array<string, mixed>  $rule  Raw (unvalidated) rule form state
      * @return array{error: ?string, type: string, tmdbTotal: int, matched: array<int, string>, matchedTotal: int, unmatched: array<int, array<string, mixed>>, unmatchedTotal: int}
      */
     public static function getDynamicGroupPreviewData(array $rule, ?Playlist $record): array

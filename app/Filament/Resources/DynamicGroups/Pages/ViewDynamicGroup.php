@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DynamicGroups\Pages;
 
+use App\Filament\Actions\DynamicGroupRuleActions;
 use App\Filament\Resources\DynamicGroups\DynamicGroupResource;
 use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
@@ -29,8 +30,9 @@ use Illuminate\Contracts\Support\Htmlable;
  * series) - not at the older VOD Groups / Categories pages, which are
  * unrelated surfaces for managing regular group/category rules.
  *
- * Only the membership relation managers stay strictly read-only. Deleting
- * the DynamicGroup row itself is allowed - see `DeleteAction` below.
+ * Only the membership relation managers stay strictly read-only. Editing
+ * the group's rule (DynamicGroupRuleActions) and deleting the DynamicGroup
+ * row itself are allowed - see the header actions below.
  */
 class ViewDynamicGroup extends ViewRecord
 {
@@ -75,6 +77,8 @@ class ViewDynamicGroup extends ViewRecord
                 ->url(fn (): string => $this->rootIndexUrl($this->getRecord()))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray'),
+
+            DynamicGroupRuleActions::edit(),
 
             // The row itself is a plain user-owned record - deletable even
             // though membership underneath it is computed and read-only.

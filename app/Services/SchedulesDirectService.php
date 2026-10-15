@@ -1273,15 +1273,22 @@ class SchedulesDirectService
 
                     continue;
                 }
-                foreach ($lineup['map'] ?? [] as $mapping) {
+                if (! is_array($lineup['map'] ?? null) || ! is_array($lineup['stations'] ?? null)) {
+                    throw new Exception("SchedulesDirect returned an invalid lineup for {$lineupId}");
+                }
+                foreach ($lineup['map'] as $mapping) {
                     $map[$mapping['stationID']] ??= $mapping;
                 }
-                foreach ($lineup['stations'] ?? [] as $station) {
+                foreach ($lineup['stations'] as $station) {
                     $stations[$station['stationID']] ??= $station;
                 }
             }
             if (count($lineupErrors) === count($epg->sd_lineup_ids)) {
                 throw new Exception(implode(' ', array_column($lineupErrors, 'message')));
+            }
+            // An empty lineup would make the import delete every existing EPG channel and its mappings
+            if ($map === [] && $epg->channels()->exists()) {
+                throw new Exception('SchedulesDirect returned no stations; keeping the existing EPG data');
             }
             $lineupData = ['map' => array_values($map), 'stations' => array_values($stations)];
 
@@ -1942,8 +1949,10 @@ class SchedulesDirectService
             throw new SchedulesDirectTokenExpiredException('SchedulesDirect token expired (Code: 4006)');
         }
 
-        if ($response->failed()) {
-            $message = $body['message'] ?? $body['response'] ?? 'Unknown error';
+        // SD can report errors in an HTTP 200 body, so a non-zero code or a non-JSON body is a failure too
+        $invalidBody = ! is_array($body);
+        if ($response->failed() || $invalidBody || (is_numeric($responseCode) && (int) $responseCode !== 0)) {
+            $message = $invalidBody ? 'Invalid response body' : ($body['message'] ?? $body['response'] ?? 'Unknown error');
             $code = $responseCode ?? $response->status();
 
             Log::error('SchedulesDirect API error response', [

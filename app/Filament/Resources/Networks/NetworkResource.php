@@ -921,7 +921,7 @@ class NetworkResource extends Resource implements CopilotResource
                     ->checkFileExistence(false)
                     ->size('inherit', 'inherit')
                     ->extraImgAttributes(fn (): array => [
-                        'style' => 'height:2.5rem; width:auto; border-radius:4px;',
+                        'style' => 'height:2.5rem !important; width:auto !important; border-radius:4px;',
                     ])
                     ->defaultImageUrl(url('/placeholder.png'))
                     ->toggleable(),

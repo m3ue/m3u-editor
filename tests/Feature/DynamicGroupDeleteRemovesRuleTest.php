@@ -333,7 +333,7 @@ it('removeRuleFromPlaylistConfig does not write when no rule matched (no config 
 // user-initiated (model-level) deletes should touch dynamic_groups_config.
 // ──────────────────────────────────────────────────────────────────────────────
 
-it('keeps a disabled rule in dynamic_groups_config when the sync drops its stale row', function () {
+it('keeps a disabled rule and its row, turned off, when the sync runs', function () {
     $rules = [
         ['enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Active', 'tmdb_params' => []],
         ['enabled' => false, 'type' => 'vod', 'source' => 'trending', 'name' => 'Paused', 'tmdb_params' => []],
@@ -347,12 +347,14 @@ it('keeps a disabled rule in dynamic_groups_config when the sync drops its stale
             'type' => 'vod',
             'source' => 'trending',
             'name' => $name,
+            'enabled' => true,
         ]);
     }
 
     (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
 
-    expect(DynamicGroup::where('playlist_id', $this->playlist->id)->pluck('name')->all())->toBe(['Active'])
+    expect(DynamicGroup::where('playlist_id', $this->playlist->id)->orderBy('name')->pluck('enabled', 'name')->all())
+        ->toBe(['Active' => true, 'Paused' => false])
         ->and($this->playlist->fresh()->dynamic_groups_config)->toEqual($rules);
 });
 

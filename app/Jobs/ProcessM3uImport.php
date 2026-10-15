@@ -20,6 +20,7 @@ use App\Services\AlertService;
 use App\Services\SyncPipelineService;
 use App\Services\XtreamHealthService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
@@ -95,8 +96,14 @@ class ProcessM3uImport implements ShouldQueue
     // Included category prefixes for import
     public array $includedCategoryPrefixes;
 
-    // Groups we should auto-enable channels for
+    // Groups we should auto-enable channels for (M3U, any type)
     public Collection $enabledGroups;
+
+    // Live groups we should auto-enable channels for (Xtream API only)
+    public Collection $enabledLiveGroups;
+
+    // VOD groups we should auto-enable channels for (Xtream API only)
+    public Collection $enabledVodGroups;
 
     // Enabled URL find & replace rules for this playlist, applied to provider URLs during import
     public Collection $urlFindReplaceRules;
@@ -165,9 +172,15 @@ class ProcessM3uImport implements ShouldQueue
             $this->canMergeVodEnabled = $vodCanMergeEnabled !== null ? $vodCanMergeEnabled : true;
         }
 
-        // Get the enabled groups and categories for this playlist
-        $this->enabledGroups = $playlist->groups()->where('enabled', true)->get('name')->pluck('name');
-        $this->enabledCategories = $playlist->categories()->where('enabled', true)->get('name')->pluck('name');
+        // Get the enabled groups and categories for this playlist. Match on the provider
+        // name (name_internal), not the user-editable display name, so renamed groups and
+        // categories still auto-enable. Legacy rows without name_internal fall back to name.
+        $enabledGroups = $playlist->groups()->where('enabled', true)->get(['name', 'name_internal', 'type']);
+        $providerName = fn ($record): ?string => $record->name_internal ?: $record->name;
+        $this->enabledGroups = $enabledGroups->map($providerName)->filter()->values();
+        $this->enabledLiveGroups = $enabledGroups->where('type', 'live')->map($providerName)->filter()->values();
+        $this->enabledVodGroups = $enabledGroups->where('type', 'vod')->map($providerName)->filter()->values();
+        $this->enabledCategories = $playlist->categories()->where('enabled', true)->get(['name', 'name_internal'])->map($providerName)->filter()->values();
 
         // URL find & replace rules, applied to provider stream URLs before they're saved
         $this->urlFindReplaceRules = collect($playlist->url_find_replace_rules ?? [])
@@ -604,6 +617,7 @@ class ProcessM3uImport implements ShouldQueue
                 'logo' => null,
                 'logo_internal' => null, // internal logo path
                 'channel' => null,
+                'channel_minor' => null,
                 'group' => '',
                 'group_internal' => '',
                 'stream_id' => null,
@@ -623,6 +637,7 @@ class ProcessM3uImport implements ShouldQueue
                 'year' => null, // new field for year
                 'rating' => null, // new field for rating
                 'rating_5based' => null, // new field for 5-based rating
+                'source_added_at' => null, // provider `added` (VOD only)
                 'source_id' => null, // source ID for the channel
                 'can_merge' => $this->canMergeEnabled,
                 'epg_map_enabled' => $this->epgMapEnabled,
@@ -685,7 +700,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->epg_channel_id ?? $item->stream_id, // prefer EPG id for mapping, if set
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'catchup' => $item->tv_archive ?? null,
                             'shift' => (int) ($item->tv_archive_duration ?? 0) * 24,
                             // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
@@ -693,7 +708,7 @@ class ProcessM3uImport implements ShouldQueue
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;
                         }
-                        if ($liveEnabledByDefault || $this->enabledGroups->contains($category['category_name'] ?? '')) {
+                        if ($liveEnabledByDefault || $this->enabledLiveGroups->contains($category['category_name'] ?? '')) {
                             $channel['enabled'] = true;
                         }
                         yield $channel;
@@ -739,17 +754,20 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->stream_id,
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'is_vod' => true, // mark as VOD
                             'container_extension' => $extension, // store the container extension
                             'year' => $item->year ?? null, // new field for year
                             'rating' => $item->rating ?? null, // new field for rating
                             'rating_5based' => $item->rating_5based ?? null, // new field for 5-based rating
+                            'source_added_at' => is_numeric($item->added ?? null) && (int) $item->added > 0
+                                ? Carbon::createFromTimestamp((int) $item->added)->toDateTimeString()
+                                : null, // provider `added` (unix timestamp)
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;
                         }
-                        if ($vodEnabledByDefault || $this->enabledGroups->contains($category['category_name'] ?? '')) {
+                        if ($vodEnabledByDefault || $this->enabledVodGroups->contains($category['category_name'] ?? '')) {
                             $channel['enabled'] = true;
                         }
                         yield $channel;
@@ -878,6 +896,7 @@ class ProcessM3uImport implements ShouldQueue
                     'logo' => null,
                     'logo_internal' => null,
                     'channel' => null,
+                    'channel_minor' => null,
                     'group' => '',
                     'group_internal' => '',
                     'stream_id' => null,
@@ -975,7 +994,10 @@ class ProcessM3uImport implements ShouldQueue
                                 foreach ($attributes as $key => $attribute) {
                                     if ($extTag->hasAttribute($attribute)) {
                                         if ($attribute === 'tvg-chno') {
-                                            $channel[$key] = (int) $extTag->getAttribute($attribute);
+                                            // Over-the-air sub-channels ("5.1") keep their minor part. An
+                                            // empty value still imports as 0, as the plain int cast did.
+                                            [$major, $channel['channel_minor']] = ChannelNumber::parse($extTag->getAttribute($attribute));
+                                            $channel['channel'] = $major ?? 0;
                                         } elseif ($attribute === 'tvg-logo') {
                                             $channel[$key] = Str::replace(' ', '%20', trim($extTag->getAttribute($attribute)));
                                         } else {
@@ -1659,6 +1681,15 @@ class ProcessM3uImport implements ShouldQueue
         $categoryIds = $groups->pluck('category_id')->filter(fn ($id) => $id !== null)->unique();
         $currentNames = $groups->pluck('category_name');
 
+        // Names known before this sync, captured ahead of the prune: a category the
+        // provider re-issued under a new category_id loses its row to the prune, and
+        // must not then count as "new" and be re-appended to auto-include bouquets
+        // (undoing a user's manual removal on every such sync).
+        $namesBeforeSync = SourceGroup::where('playlist_id', $playlistId)
+            ->where('type', $type)
+            ->pluck('name')
+            ->flip();
+
         // Prune stale rows *before* rename/upsert runs, not after. Doing this first frees up
         // any name a doomed row is squatting on, so a genuine rename below can claim it directly
         // instead of hitting a same-run name collision (issue #1530: a renamed category colliding
@@ -1782,7 +1813,7 @@ class ProcessM3uImport implements ShouldQueue
 
         $newNames = $groups->pluck('category_name')
             ->unique()
-            ->reject(fn ($name) => $name === null || $nameIndex->has($name))
+            ->reject(fn ($name) => $name === null || $nameIndex->has($name) || $namesBeforeSync->has($name))
             ->values()
             ->all();
         Bouquet::appendNewGroupNames($playlistId, $type, $newNames);

@@ -1,11 +1,15 @@
 <?php
 
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
+use App\Jobs\SyncDynamicGroups;
+use App\Models\DynamicGroup;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\TmdbService;
+use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
@@ -110,4 +114,99 @@ it('EditPlaylist page class is still instantiable after the schema change', func
     // after the PlaylistResource schema change.
     expect(class_exists(EditPlaylist::class))->toBeTrue()
         ->and(TmdbService::MAX_DYNAMIC_GROUP_PAGES)->toBe(10);
+});
+
+it('updates the group rows in the request without calling TMDB, then queues a refresh, when a playlist form save changes the rules', function () {
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldNotReceive('collectDynamicGroupResults');
+    app()->instance(TmdbService::class, $tmdb);
+
+    $rule = [
+        'enabled' => true,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending Now',
+        'tmdb_params' => ['time_window' => 'week', 'pages' => 3],
+    ];
+    $this->playlist->updateQuietly(['dynamic_groups_config' => [$rule]]);
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending Now',
+        'enabled' => true,
+    ]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'user_agent' => 'Test Agent',
+            'dynamic_groups_config' => [
+                ['enabled' => false] + $rule,
+                ['source' => 'popular', 'name' => 'Popular Now', 'tmdb_params' => ['pages' => 3]] + $rule,
+            ],
+        ])
+        // Filling a new item sets its Content Type, whose afterStateUpdated
+        // resets the source, so set the source again afterwards.
+        ->set('data.dynamic_groups_config.1.source', 'popular')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($this->playlist->fresh()->dynamic_groups_config[0]['enabled'])->toBeFalse()
+        ->and($group->fresh()->enabled)->toBeFalse();
+
+    // A new rule gets its row now; the queued refresh fills in its members.
+    $created = DynamicGroup::where('playlist_id', $this->playlist->id)->where('name', 'Popular Now')->sole();
+    expect($created->enabled)->toBeTrue()
+        ->and($created->last_synced_at)->toBeNull();
+
+    Bus::assertDispatchedTimes(SyncDynamicGroups::class, 1);
+    Bus::assertDispatched(SyncDynamicGroups::class, fn (SyncDynamicGroups $job): bool => $job->playlistId === $this->playlist->id
+        && $job->refreshMembership
+        && $job->syncRunId === null
+        && $job->delay !== null);
+});
+
+it('does not re-sync the dynamic groups when a playlist form save leaves the rules alone', function () {
+    $this->playlist->updateQuietly(['dynamic_groups_config' => []]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'user_agent' => 'Test Agent',
+            'name' => 'Renamed Playlist',
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    Bus::assertNotDispatched(SyncDynamicGroups::class);
+});
+
+it('keeps each rule\'s stored cache options when the playlist form is saved while caching is off in Settings', function () {
+    app(GeneralSettings::class)->enable_cache = false;
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    app()->instance(TmdbService::class, $tmdb);
+
+    $rule = [
+        'enabled' => true,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending Now',
+        'tmdb_params' => ['time_window' => 'week', 'pages' => 3],
+        'cache_enabled' => true,
+        'cache_never_expire' => false,
+        'cache_keep_days' => 14,
+        'cache_max_items' => 10,
+    ];
+    $this->playlist->updateQuietly(['dynamic_groups_config' => [$rule]]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm(['user_agent' => 'Test Agent'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $saved = $this->playlist->fresh()->dynamic_groups_config[0];
+    expect($saved)->toMatchArray(array_diff_key($rule, ['tmdb_params' => true]))
+        ->and($saved)->not->toHaveKey('cache_enabled_locked');
 });

@@ -16,6 +16,7 @@ use App\Services\LocalMediaService;
 use App\Services\MediaServerService;
 use App\Services\TmdbService;
 use App\Support\TmdbEnrichment;
+use Carbon\Carbon;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -568,6 +569,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             'tmdb_id' => $movieTmdbId ?: ($isNew ? null : $channel->tmdb_id),
             'tvdb_id' => $movieTvdbId ?: ($isNew ? null : $channel->tvdb_id),
             'imdb_id' => $movieImdbId ?: ($isNew ? null : $channel->imdb_id),
+            'source_added_at' => $this->parseDateCreated($movie['DateCreated'] ?? null) ?? ($isNew ? null : $channel->source_added_at),
             'info' => $info,
         ]);
 
@@ -580,6 +582,25 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
         }
 
         $channel->save();
+    }
+
+    /**
+     * Parse a media server DateCreated value, ignoring the .NET
+     * "0001-01-01" placeholder Emby/Jellyfin return for unknown dates.
+     */
+    protected function parseDateCreated(mixed $value): ?Carbon
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        try {
+            $date = Carbon::parse($value);
+        } catch (Exception) {
+            return null;
+        }
+
+        return $date->year > 1970 ? $date : null;
     }
 
     /**

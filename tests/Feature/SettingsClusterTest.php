@@ -4,6 +4,7 @@ use App\Filament\Clusters\Settings\Pages\ManageAlertSettings;
 use App\Filament\Clusters\Settings\Pages\ManageApiSettings;
 use App\Filament\Clusters\Settings\Pages\ManageAssetSettings;
 use App\Filament\Clusters\Settings\Pages\ManageBackupSettings;
+use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Clusters\Settings\Pages\ManageCopilotSettings;
 use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
@@ -13,10 +14,14 @@ use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Clusters\Settings\Pages\ManageSyncSettings;
 use App\Filament\Clusters\Settings\Pages\ManageTvAppSettings;
 use App\Filament\Clusters\Settings\SettingsCluster;
+use App\Filament\Pages\Backups;
+use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
+use App\Jobs\RestartQueue;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Bus;
 use Livewire\Livewire;
 
 $allPages = [
@@ -29,6 +34,7 @@ $allPages = [
     ManageBackupSettings::class,
     ManageSmtpSettings::class,
     ManageApiSettings::class,
+    ManageCacheSettings::class,
     ManageIntegrationSettings::class,
     ManageCopilotSettings::class,
     ManageAlertSettings::class,
@@ -113,6 +119,73 @@ it('hides the proxy page when the proxy integration is disabled', function () {
 
     expect(ManageProxySettings::canAccess())->toBeFalse()
         ->and(ManageProxySettings::shouldRegisterNavigation())->toBeFalse();
+});
+
+it('shows only the header actions that belong to each settings sub-page', function (string $page, array $expected) {
+    $maintenanceActions = ['test_websocket', 'clear_expired_logo_cache', 'clear_logo_cache', 'reset_queue'];
+
+    $component = Livewire::test($page);
+
+    foreach ($expected as $action) {
+        $component->assertActionExists($action);
+    }
+
+    foreach (array_diff($maintenanceActions, $expected) as $action) {
+        $component->assertActionDoesNotExist($action);
+    }
+})->with([
+    'general' => [ManageGeneralSettings::class, ['test_websocket']],
+    'navigation' => [ManageNavigationSettings::class, ['restore_default', 'restore_simplified_default']],
+    'proxy' => [ManageProxySettings::class, ['test_connection', 'm3u_proxy_info', 'github']],
+    'tv app' => [ManageTvAppSettings::class, ['send_tv_notification', 'get_tv_app']],
+    'sync' => [ManageSyncSettings::class, ['reset_queue']],
+    'assets' => [ManageAssetSettings::class, ['manage_assets', 'clear_expired_logo_cache', 'clear_logo_cache']],
+    'backups' => [ManageBackupSettings::class, ['manage_backups']],
+    'smtp' => [ManageSmtpSettings::class, ['send_test_email']],
+    'api' => [ManageApiSettings::class, ['manage_api_keys', 'view_api_docs']],
+    'cache' => [ManageCacheSettings::class, ['manage_cached_items']],
+    'integrations' => [ManageIntegrationSettings::class, []],
+    'copilot' => [ManageCopilotSettings::class, []],
+    'alerts' => [ManageAlertSettings::class, []],
+]);
+
+it('links the backups page header to the backups manager', function () {
+    Livewire::test(ManageBackupSettings::class)
+        ->assertActionVisible('manage_backups')
+        ->assertActionHasUrl('manage_backups', Backups::getUrl());
+});
+
+it('only links to cached items while caching is enabled', function () {
+    $settings = app(GeneralSettings::class);
+    $settings->enable_cache = false;
+    $settings->save();
+
+    Livewire::test(ManageCacheSettings::class)
+        ->assertActionHidden('manage_cached_items');
+
+    $settings->enable_cache = true;
+    $settings->save();
+
+    Livewire::test(ManageCacheSettings::class)
+        ->assertActionVisible('manage_cached_items')
+        ->assertActionHasUrl('manage_cached_items', CachedContentFileResource::getUrl());
+});
+
+it('sends the SMTP test email from the page header using the form state', function () {
+    Livewire::test(ManageSmtpSettings::class)
+        ->fillForm(['smtp_host' => null, 'smtp_port' => null])
+        ->callAction('send_test_email', ['to_email' => 'admin@example.com'])
+        ->assertNotified(__('Missing SMTP Fields'));
+});
+
+it('resets the queue from the sync options page header', function () {
+    Bus::fake();
+
+    Livewire::test(ManageSyncSettings::class)
+        ->callAction('reset_queue')
+        ->assertNotified(__('Queue reset'));
+
+    Bus::assertDispatched(RestartQueue::class);
 });
 
 /**

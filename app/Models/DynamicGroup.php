@@ -215,6 +215,18 @@ class DynamicGroup extends Model
     }
 
     /**
+     * This group's rule in the playlist's `dynamic_groups_config`, or null
+     * when the rule is gone (removed, or renamed and not re-synced yet).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function configRule(): ?array
+    {
+        return collect($this->playlist?->dynamic_groups_config ?? [])
+            ->first(fn (array $rule): bool => $this->matchesRule($rule));
+    }
+
+    /**
      * Auto-cache settings from this group's rule in the playlist's
      * `dynamic_groups_config`, or null when the rule is gone (removed, or
      * renamed and not re-synced yet).
@@ -223,8 +235,7 @@ class DynamicGroup extends Model
      */
     public function cacheSettings(): ?array
     {
-        $rule = collect($this->playlist?->dynamic_groups_config ?? [])
-            ->first(fn (array $rule): bool => $this->matchesRule($rule));
+        $rule = $this->configRule();
 
         if ($rule === null) {
             return null;

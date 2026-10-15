@@ -509,7 +509,7 @@ it('EPG XML uses pivot channel_number for channel id when id_channel_by is Numbe
     $response = $this->get("/{$this->customPlaylist->uuid}/epg.xml.gz");
     $response->assertStatus(200);
 
-    $content = gzdecode($response->getContent());
+    $content = gzdecode($response->streamedContent());
 
     // EPG channel id must be pivot channel_number (42), not global channel (99)
     expect($content)->toContain('<channel id="42">')
@@ -531,7 +531,7 @@ it('EPG XML falls back to global channel number when pivot channel_number is nul
     $response = $this->get("/{$this->customPlaylist->uuid}/epg.xml.gz");
     $response->assertStatus(200);
 
-    $content = gzdecode($response->getContent());
+    $content = gzdecode($response->streamedContent());
 
     expect($content)->toContain('<channel id="77">');
 });
@@ -633,7 +633,7 @@ it('EPG channel ids match HDHR lineup GuideNumbers for custom playlists', functi
 
     // Get EPG XML (compressed — avoids streamed response ob_start conflicts)
     $epgResponse = $this->get("/{$this->customPlaylist->uuid}/epg.xml.gz");
-    $epgContent = gzdecode($epgResponse->getContent());
+    $epgContent = gzdecode($epgResponse->streamedContent());
 
     // Get HDHR lineup
     $hdhrResponse = $this->get("/{$this->customPlaylist->uuid}/hdhr/lineup.json");

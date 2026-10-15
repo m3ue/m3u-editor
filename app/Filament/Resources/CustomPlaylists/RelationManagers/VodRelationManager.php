@@ -145,7 +145,7 @@ class VodRelationManager extends RelationManager
                 $defaultColumns[$i] = TextInputColumn::make('custom_channel_number')
                     ->label(__('Channel'))
                     ->type('number')
-                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->rules(['nullable', 'integer', 'min:0'])
                     ->placeholder(fn ($record) => (string) $record->channel)
                     ->getStateUsing(function ($record) {
                         return $record->pivot?->channel_number ?? null;

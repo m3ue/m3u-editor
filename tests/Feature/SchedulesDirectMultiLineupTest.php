@@ -2,6 +2,7 @@
 
 use App\Enums\EpgSourceType;
 use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -56,6 +57,48 @@ it('merges stations from every selected lineup and keeps shared stations once', 
     app(SchedulesDirectService::class)->syncEpgData($epg);
 
     expect($epg->fresh()->sd_station_ids)->toBe(['1', '2', '3']);
+});
+
+it('keeps the existing EPG when a lineup response is unusable', function (mixed $response) {
+    $epg = ($this->makeEpg)(['USA-BAD'], ['sd_station_ids' => ['old']]);
+    Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
+
+    Http::fake(['json.schedulesdirect.org/20141201/lineups/USA-BAD' => $response]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))->toThrow(Exception::class);
+
+    expect($epg->fresh()->sd_station_ids)->toBe(['old'])
+        ->and(Storage::disk('local')->get($epg->file_path))->toBe('existing XMLTV data');
+})->with([
+    'error code in HTTP 200' => fn () => Http::response(['code' => 3000, 'message' => 'Service offline']),
+    'malformed JSON' => fn () => Http::response('{', 200),
+    'missing stations' => fn () => Http::response(['map' => []]),
+]);
+
+it('refuses an empty lineup for an EPG that already has channels', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY']);
+    $epgChannel = EpgChannel::factory()->for($this->user)->for($epg)->create();
+
+    Http::fake(['json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([]))]);
+
+    expect(fn () => app(SchedulesDirectService::class)->syncEpgData($epg))
+        ->toThrow(Exception::class, 'keeping the existing EPG data');
+
+    expect(EpgChannel::find($epgChannel->id))->not->toBeNull();
+});
+
+it('allows an empty lineup for an EPG with no channels yet', function () {
+    $epg = ($this->makeEpg)(['USA-EMPTY']);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/USA-EMPTY' => Http::response(sdLineupResponse([])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([]),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    expect($epg->fresh()->sd_station_ids)->toBe([]);
 });
 
 it('adds a selected lineup to the account when it is not subscribed yet', function () {

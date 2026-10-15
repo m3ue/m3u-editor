@@ -318,3 +318,55 @@ it('rejects a series rule for a channel that belongs to a different playlist', f
 
     expect(DvrRecordingRule::count())->toBe(0);
 });
+
+it('rejects invalid schedule_dvr windows with a stable code', function (array $times, string $code) {
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Evening News',
+        ...$times,
+    ]);
+
+    $response->assertStatus(422)
+        ->assertJsonPath('code', $code)
+        ->assertJsonStructure(['error', 'code']);
+
+    expect(DvrRecordingRule::count())->toBe(0);
+})->with([
+    'unparseable date' => [
+        fn () => ['start_time' => 'not-a-date', 'end_time' => now()->addHours(2)->toIso8601String()],
+        'invalid_datetime',
+    ],
+    'end before start' => [
+        fn () => ['start_time' => now()->addHours(2)->toIso8601String(), 'end_time' => now()->addHour()->toIso8601String()],
+        'invalid_time_window',
+    ],
+    'end equals start' => [
+        fn () => ['start_time' => now()->addHour()->toIso8601String(), 'end_time' => now()->addHour()->toIso8601String()],
+        'invalid_time_window',
+    ],
+    'window already ended' => [
+        fn () => ['start_time' => now()->subHours(2)->toIso8601String(), 'end_time' => now()->subHour()->toIso8601String()],
+        'window_in_past',
+    ],
+    'longer than 24 hours' => [
+        fn () => ['start_time' => now()->addHour()->toIso8601String(), 'end_time' => now()->addHours(26)->toIso8601String()],
+        'duration_too_long',
+    ],
+    'negative padding' => [
+        fn () => ['start_time' => now()->addHour()->toIso8601String(), 'end_time' => now()->addHours(2)->toIso8601String(), 'start_early_seconds' => -30],
+        'invalid_padding',
+    ],
+]);
+
+it('accepts a window that is already airing', function () {
+    $response = $this->postJson(scheduleDvrUrl($this->username, $this->password), [
+        'channel_id' => (string) $this->channel->id,
+        'title' => 'Live Match',
+        'start_time' => now()->subMinutes(30)->toIso8601String(),
+        'end_time' => now()->addHour()->toIso8601String(),
+    ]);
+
+    $response->assertOk()->assertJson(['success' => true]);
+
+    expect(DvrRecordingRule::where('series_title', 'Live Match')->exists())->toBeTrue();
+});

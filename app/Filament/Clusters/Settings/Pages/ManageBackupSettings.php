@@ -4,10 +4,12 @@ namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Actions\CronHelperAction;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Filament\Pages\Backups;
 use App\Rules\Cron;
 use App\Services\DateFormatService;
 use BackedEnum;
 use Cron\CronExpression;
+use Filament\Actions\Action;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Group;
@@ -30,6 +32,17 @@ class ManageBackupSettings extends BaseSettingsPage
     public function getTitle(): string
     {
         return __('Backups');
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('manage_backups')
+                ->label(__('Manage Backups'))
+                ->color('gray')
+                ->icon('heroicon-o-archive-box')
+                ->url(Backups::getUrl()),
+        ];
     }
 
     public function form(Schema $schema): Schema

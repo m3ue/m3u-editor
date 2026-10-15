@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PlaylistChannelId;
+use App\Traits\HasDefaultAuth;
 use App\Traits\ShortUrlTrait;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -23,6 +24,7 @@ use Spatie\Tags\Tag;
 
 class CustomPlaylist extends Model
 {
+    use HasDefaultAuth;
     use HasFactory;
     use HasTags;
     use ShortUrlTrait;
@@ -107,7 +109,7 @@ class CustomPlaylist extends Model
     public function channels(): BelongsToMany
     {
         return $this->belongsToMany(Channel::class, 'channel_custom_playlist')
-            ->withPivot(['channel_number', 'sort']);
+            ->withPivot(['channel_number', 'channel_minor', 'sort']);
     }
 
     public function enabled_channels(): BelongsToMany

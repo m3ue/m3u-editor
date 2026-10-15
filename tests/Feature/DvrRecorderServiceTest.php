@@ -16,6 +16,7 @@
 
 use App\Enums\DvrRecordingStatus;
 use App\Jobs\PostProcessDvrRecording;
+use App\Jobs\StartDvrRecording;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
@@ -308,4 +309,48 @@ it('DvrSetting use_proxy can be set to true', function () {
     $setting = DvrSetting::factory()->create(['use_proxy' => true]);
 
     expect($setting->fresh()->use_proxy)->toBeTrue();
+});
+
+// ── resume() ──────────────────────────────────────────────────────────────────
+
+it('resume() restarts the proxy capture without counting a new attempt', function () {
+    $recording = makeScheduledRecording();
+    $startedAt = now()->subMinutes(10)->startOfSecond();
+    $recording->update([
+        'status' => DvrRecordingStatus::Recording,
+        'proxy_network_id' => $recording->uuid,
+        'actual_start' => $startedAt,
+        'attempt_count' => 1,
+    ]);
+    $proxy = mockProxy($recording->uuid);
+
+    app(DvrRecorderService::class)->resume($recording->fresh());
+
+    $proxy->shouldHaveReceived('startDvrBroadcast')->once();
+    $fresh = $recording->fresh();
+    expect($fresh->status)->toBe(DvrRecordingStatus::Recording);
+    expect($fresh->attempt_count)->toBe(1);
+    expect($fresh->actual_start->equalTo($startedAt))->toBeTrue();
+});
+
+it('resume() does nothing for a recording that is no longer in progress', function () {
+    $recording = makeScheduledRecording();
+    $proxy = mockProxy();
+
+    app(DvrRecorderService::class)->resume($recording);
+
+    $proxy->shouldNotHaveReceived('startDvrBroadcast');
+});
+
+it('a failed resume leaves the recording in progress for the next tick to retry', function () {
+    $recording = makeScheduledRecording();
+    $recording->update(['status' => DvrRecordingStatus::Recording, 'proxy_network_id' => $recording->uuid]);
+    $proxy = Mockery::mock(M3uProxyService::class);
+    $proxy->shouldReceive('getActiveStreamIdForChannel')->andReturnNull();
+    $proxy->shouldReceive('startDvrBroadcast')->andThrow(new Exception('proxy down'));
+    app()->instance(M3uProxyService::class, $proxy);
+
+    (new StartDvrRecording($recording->id, resume: true))->handle(app(DvrRecorderService::class));
+
+    expect($recording->fresh()->status)->toBe(DvrRecordingStatus::Recording);
 });

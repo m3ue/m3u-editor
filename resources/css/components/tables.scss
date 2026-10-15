@@ -34,3 +34,91 @@ table {
     overflow-y: auto;
     overflow-x: hidden;
 }
+@layer components {
+    .fi-ta-ctn .fi-ta-table {
+        & > thead > tr {
+            @apply bg-gray-50/80 dark:bg-white/[0.02];
+        }
+
+        & > tbody {
+            @apply divide-(--m3u-hairline);
+        }
+
+        & > :is(thead, tbody, tfoot) {
+            border-color: var(--m3u-hairline);
+        }
+    }
+
+    .fi-ta-content-ctn .fi-ta-table {
+        @apply divide-(--m3u-hairline);
+    }
+
+    /* Quieter column headings, so the data reads first */
+    .fi-ta-header-cell {
+        @apply font-medium text-gray-500 dark:text-gray-400;
+    }
+
+    .fi-ta-header-cell-sort-btn {
+        @apply transition-colors duration-150 hover:text-gray-950 dark:hover:text-white;
+    }
+
+    .fi-ta-row {
+        @media (hover: hover) {
+            &:not(.fi-ta-group-header-row):hover {
+                background-color: var(--m3u-hover-tint);
+            }
+        }
+
+        &.fi-selected:not(.fi-striped) {
+            background-color: var(--m3u-active-tint);
+        }
+    }
+
+    /* Row actions: soft, tinted buttons rather than a column of solid blocks */
+    :is(.fi-ta-row, .fi-ta-record) .fi-ta-actions {
+        & .fi-btn.fi-color:not(.fi-outlined):not(label):not(.fi-disabled) {
+            background-color: color-mix(in oklab, var(--color-500) 12%, transparent);
+            background-image: none;
+            box-shadow: none;
+            color: var(--color-700);
+
+            & > .fi-icon {
+                color: var(--color-600);
+            }
+
+            &:hover,
+            &:focus-visible {
+                background-color: color-mix(in oklab, var(--color-500) 22%, transparent);
+            }
+
+            @variant dark {
+                background-color: color-mix(in oklab, var(--color-400) 14%, transparent);
+                color: var(--color-300);
+
+                & > .fi-icon {
+                    color: var(--color-400);
+                }
+
+                &:hover,
+                &:focus-visible {
+                    background-color: color-mix(in oklab, var(--color-400) 24%, transparent);
+                }
+            }
+        }
+
+        & .fi-btn:not(.fi-color):not(.fi-outlined):not(label):not(.fi-disabled) {
+            background-color: var(--m3u-hover-tint);
+            box-shadow: none;
+
+            &:hover,
+            &:focus-visible {
+                background-color: color-mix(in oklab, var(--gray-500) 16%, transparent);
+            }
+        }
+    }
+
+    /* Pagination */
+    .fi-pagination-item-btn {
+        @apply transition-colors duration-150;
+    }
+}

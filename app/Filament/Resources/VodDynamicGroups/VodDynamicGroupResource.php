@@ -33,8 +33,9 @@ class VodDynamicGroupResource extends Resource
 
     public static function canCreate(): bool
     {
-        // Rule config lives on the Playlist form's Dynamic Groups (TMDB)
-        // repeater; this resource is a list+view surface only.
+        // No resource create page: rules are created and edited from the
+        // listing's slide-over actions (DynamicGroupRuleActions) or the
+        // Playlist form's Dynamic Groups (TMDB) repeater.
         return false;
     }
 

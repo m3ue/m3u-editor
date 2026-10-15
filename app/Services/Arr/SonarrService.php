@@ -450,6 +450,30 @@ class SonarrService extends BaseArrService
     }
 
     /**
+     * Unmonitor a single episode without touching its file. Unlike deleting
+     * the series (which Sonarr can do with deleteFiles), this only stops
+     * Sonarr looking for that one episode.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function unmonitorEpisode(int $seriesId, int $seasonNumber, int $episodeNumber): array
+    {
+        return $this->safeCall(function () use ($seriesId, $seasonNumber, $episodeNumber) {
+            $episodeId = $this->resolveEpisodeId($seriesId, $seasonNumber, $episodeNumber);
+
+            if ($episodeId === null) {
+                return true; // Not indexed (yet); nothing to unmonitor.
+            }
+
+            $this->client()
+                ->put('/episode/monitor', ['episodeIds' => [$episodeId], 'monitored' => false])
+                ->throw();
+
+            return true;
+        }, 'unmonitor episode');
+    }
+
+    /**
      * Fetch releases for a specific episode via Sonarr's indexer search.
      *
      * @return array<int, array<string, mixed>>
@@ -569,6 +593,8 @@ class SonarrService extends BaseArrService
                     'protocol' => $item['protocol'] ?? null,
                     'indexer' => $item['indexer'] ?? null,
                     'episode' => $episodeLabel,
+                    'seasonNumber' => isset($episode['seasonNumber']) ? (int) $episode['seasonNumber'] : null,
+                    'episodeNumber' => isset($episode['episodeNumber']) ? (int) $episode['episodeNumber'] : null,
                     'trackedDownloadState' => $item['trackedDownloadState'] ?? null,
                 ];
             })

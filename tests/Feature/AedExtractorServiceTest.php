@@ -272,3 +272,19 @@ test('year rollover moves a late-december date seen in early january into last y
 
     expect($result->start->toDateString())->toBe('2026-12-30');
 });
+
+test('tries each pipe-separated date format with each time format', function () {
+    $profile = makeProfile([
+        'title_regex' => '^NFL Game Pass \d+:\s*(?!NO EVENT)(.+?)\s*@',
+        'time_regex' => '@\s*\d{1,2}\s+[A-Za-z]{3}\s+(\d{1,2}:\d{2}\s*[AP]M)',
+        'time_format' => 'h:i A|g:i A',
+        'date_regex' => '@\s*(\d{1,2}\s+[A-Za-z]{3})\s+\d{1,2}:\d{2}',
+        'date_format' => 'M j|j M',
+        'source_timezone' => 'America/New_York',
+        'output_timezone' => 'America/New_York',
+    ]);
+    $result = (new AedExtractorService)->extract($profile, 'NFL Game Pass 01: Buffalo Bills vs. Los Angeles Rams @ 30 Jun 4:25 PM');
+
+    expect($result->hasTime())->toBeTrue()
+        ->and($result->start->format('Y-m-d H:i'))->toBe('2026-06-30 16:25');
+});

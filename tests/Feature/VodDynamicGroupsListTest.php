@@ -11,6 +11,7 @@ use App\Models\DynamicGroup;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\TmdbService;
+use App\Settings\GeneralSettings;
 use Filament\Forms\Components\Hidden;
 use Filament\Pages\Page;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -122,7 +123,10 @@ it('links the view action to the shared DynamicGroupResource view route', functi
         ->assertTableActionHasUrl('view', $expectedUrl, $group);
 });
 
-it('exposes view and delete actions but no edit', function () {
+it('exposes view, edit and delete actions', function () {
+    $this->playlist->updateQuietly(['dynamic_groups_config' => [
+        ['enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Mine', 'tmdb_params' => []],
+    ]]);
     $group = DynamicGroup::create([
         'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
         'type' => 'vod', 'source' => 'trending', 'name' => 'Mine',
@@ -131,7 +135,7 @@ it('exposes view and delete actions but no edit', function () {
     Livewire::test(ListVodDynamicGroups::class)
         ->assertTableActionExists('view')
         ->assertTableActionExists('delete')
-        ->assertTableActionDoesNotExist('edit');
+        ->assertTableActionVisible('edit', $group);
 
     expect($group->refresh()->exists())->toBeTrue();
 });
@@ -162,6 +166,33 @@ it('the Items column counts channels', function () {
 
     Livewire::test(ListVodDynamicGroups::class)
         ->assertTableColumnStateSet('channels_count', 1, $group);
+});
+
+it('the Caching Enabled column shows the rule\'s cache toggle', function () {
+    // Every row reads off while caching is off in Settings.
+    app(GeneralSettings::class)->enable_cache = true;
+    $this->playlist->updateQuietly(['dynamic_groups_config' => [
+        ['enabled' => true, 'type' => 'vod', 'source' => 'trending', 'name' => 'Cached', 'tmdb_params' => [], 'cache_enabled' => true],
+        ['enabled' => true, 'type' => 'vod', 'source' => 'popular', 'name' => 'Not Cached', 'tmdb_params' => [], 'cache_enabled' => false],
+    ]]);
+    $cached = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Cached',
+    ]);
+    $notCached = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'popular', 'name' => 'Not Cached',
+    ]);
+    // Rule-less row (removed on the Playlist form, not re-synced yet).
+    $ruleless = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id, 'user_id' => $this->user->id,
+        'type' => 'vod', 'source' => 'trending', 'name' => 'Leftover',
+    ]);
+
+    Livewire::test(ListVodDynamicGroups::class)
+        ->assertTableColumnStateSet('cache_enabled', true, $cached)
+        ->assertTableColumnStateSet('cache_enabled', false, $notCached)
+        ->assertTableColumnStateSet('cache_enabled', false, $ruleless);
 });
 
 // --- Tabs --------------------------------------------------------------------
@@ -199,10 +230,13 @@ it('per-playlist sub-tabs scope the table by playlist_id without breaking groupB
 
 // --- Header CreateAction ------------------------------------------------------
 
-it('shows a New VOD Dynamic Group header action on the listing', function () {
+it('shows a Create VOD Dynamic Group header action without an icon', function () {
     Livewire::test(ListVodDynamicGroups::class)
         ->assertOk()
-        ->assertActionExists('create');
+        ->assertSee('Virtual categories built from TMDB lists')
+        ->assertActionExists('create')
+        ->assertActionHasLabel('create', 'Create VOD Dynamic Group')
+        ->assertActionDoesNotHaveIcon('create', 'heroicon-o-plus');
 });
 
 it('keeps the Enabled toggle in the create schema alongside the playlist picker', function () {

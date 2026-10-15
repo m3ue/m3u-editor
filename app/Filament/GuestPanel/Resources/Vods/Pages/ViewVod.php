@@ -63,12 +63,7 @@ class ViewVod extends ViewRecord
      */
     public function playFloatingStream(): void
     {
-        $auth = $this->getAuth();
-
-        $this->dispatch('openFloatingStream', $this->record->getFloatingPlayerAttributes(
-            username: $auth['username'] ?? null,
-            password: $auth['password'] ?? null,
-        ));
+        $this->dispatch('openFloatingStream', VodResource::playerAttributes($this->record));
     }
 
     protected function getHeaderActions(): array

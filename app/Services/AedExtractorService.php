@@ -166,23 +166,25 @@ class AedExtractorService
             $sourceTimezone = $profile->source_timezone ?: 'UTC';
             $outputTimezone = $profile->output_timezone ?: 'UTC';
 
-            // Try each pipe-separated time format until one parses successfully
+            // Try each pipe-separated date format with each pipe-separated time format
+            // until one pair parses successfully
             $startTime = null;
-            foreach (explode('|', $profile->time_format) as $fmt) {
-                $fmt = trim($fmt);
-                $combined = $dateString ? "{$dateString} {$timeString}" : $timeString;
-                $combinedFormat = $dateString && $profile->date_format
-                    ? trim($profile->date_format).' '.$fmt
-                    : $fmt;
+            $combined = $dateString ? "{$dateString} {$timeString}" : $timeString;
+            $dateFormats = $dateString ? array_map('trim', explode('|', $profile->date_format)) : [null];
+            $timeFormats = array_map('trim', explode('|', $profile->time_format));
+            foreach ($dateFormats as $dateFormat) {
+                foreach ($timeFormats as $timeFormat) {
+                    $combinedFormat = $dateFormat ? "{$dateFormat} {$timeFormat}" : $timeFormat;
 
-                try {
-                    $parsed = Carbon::createFromFormat($combinedFormat, $combined, $sourceTimezone);
-                    if ($parsed !== false) {
-                        $startTime = $parsed;
-                        break;
+                    try {
+                        $parsed = Carbon::createFromFormat($combinedFormat, $combined, $sourceTimezone);
+                        if ($parsed !== false) {
+                            $startTime = $parsed;
+                            break 2;
+                        }
+                    } catch (InvalidFormatException) {
+                        // Try the next format pair
                     }
-                } catch (InvalidFormatException) {
-                    continue;
                 }
             }
 

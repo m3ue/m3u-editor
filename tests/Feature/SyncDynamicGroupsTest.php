@@ -265,6 +265,78 @@ it('deletes the DynamicGroup row (and cascades its items) when the rule is remov
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Job: disabled rule keeps its row
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('keeps a disabled rule\'s row turned off with no members, and reuses it when re-enabled', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([
+            'results' => [
+                ['id' => 100, 'title' => 'Hot Movie', 'media_type' => 'movie', 'release_date' => '2024-01-01'],
+            ],
+        ], 200),
+    ]);
+
+    Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_vod' => true,
+        'enabled' => true,
+        'tmdb_id' => '100',
+    ]);
+
+    $rule = [
+        'enabled' => true,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Trending Now',
+        'tmdb_params' => [],
+    ];
+    $this->playlist->update(['dynamic_groups_config' => [$rule]]);
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    $group = DynamicGroup::where('playlist_id', $this->playlist->id)->sole();
+    expect($group->enabled)->toBeTrue()
+        ->and($group->channels()->count())->toBe(1);
+
+    $this->playlist->update(['dynamic_groups_config' => [['enabled' => false] + $rule]]);
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    $disabled = DynamicGroup::where('playlist_id', $this->playlist->id)->sole();
+    expect($disabled->id)->toBe($group->id)
+        ->and($disabled->enabled)->toBeFalse()
+        ->and($disabled->channels()->count())->toBe(0);
+
+    $this->playlist->update(['dynamic_groups_config' => [$rule]]);
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    $reenabled = DynamicGroup::where('playlist_id', $this->playlist->id)->sole();
+    expect($reenabled->id)->toBe($group->id)
+        ->and($reenabled->enabled)->toBeTrue()
+        ->and($reenabled->channels()->count())->toBe(1);
+});
+
+it('creates a turned-off row for a disabled rule without calling TMDB', function () {
+    Http::fake();
+
+    $this->playlist->update(['dynamic_groups_config' => [[
+        'enabled' => false,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Paused',
+        'tmdb_params' => [],
+    ]]]);
+
+    (new SyncDynamicGroups(playlistId: $this->playlist->id))->handle();
+
+    $group = DynamicGroup::where('playlist_id', $this->playlist->id)->sole();
+    expect($group->name)->toBe('Paused')
+        ->and($group->enabled)->toBeFalse()
+        ->and($group->last_synced_at)->toBeNull();
+    Http::assertNothingSent();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Job: TMDB unconfigured → still completes the pipeline phase
 // ──────────────────────────────────────────────────────────────────────────────
 

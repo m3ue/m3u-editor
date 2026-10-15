@@ -239,6 +239,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                         'tmdb_id' => 1396,
                         'youtube_trailer' => 'HhesaQXLuRY',
                         'episode_run_time' => '47',
+                        'mpaa_rating' => 'TV-MA',
                         'category_id' => '2',
                         'category_ids' => [2],
                     ],
@@ -304,6 +305,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'cover_big' => 'https://example.com/covers/breaking_bad_s01.jpg',
                             'releaseDate' => '2008-01-20',
                             'duration' => '0',
+                            'youtube_trailer' => 'https://www.youtube.com/watch?v=HhesaQXLuRY',
                         ],
                     ],
                 ],
@@ -361,7 +363,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
             ],
             'XtreamShortEpg' => [
                 'actions' => 'get_short_epg',
-                'description' => 'The current and next `limit` programmes for `stream_id`.',
+                'description' => 'The current and next `limit` programmes for `stream_id`. `poster_url` (portrait) and `backdrop_url` (landscape) are present only when the guide source has that artwork.',
                 'example' => [
                     'epg_listings' => [
                         [
@@ -378,6 +380,8 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'stop_timestamp' => '1755155700',
                             'now_playing' => 1,
                             'has_archive' => 0,
+                            'poster_url' => 'https://example.com/art/morning-news-poster.jpg',
+                            'backdrop_url' => 'https://example.com/art/morning-news-wide.jpg',
                         ],
                     ],
                 ],
@@ -400,6 +404,8 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'stop_timestamp' => '1755155700',
                             'now_playing' => 1,
                             'has_archive' => 0,
+                            'poster_url' => 'https://example.com/art/morning-news-poster.jpg',
+                            'backdrop_url' => 'https://example.com/art/morning-news-wide.jpg',
                         ],
                     ],
                 ],

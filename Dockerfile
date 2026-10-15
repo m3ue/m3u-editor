@@ -92,8 +92,10 @@ RUN NODE_ENV=production npm run build && \
 ########################################
 FROM alpine:3.22.6 AS proxy_builder
 
-# Cache bust arg - when this changes, Docker invalidates the layer cache
-# Pass the latest m3u-proxy commit SHA to ensure fresh clones
+# Optional pinned m3u-proxy commit (full 40-char SHA). When set, the clone is
+# checked out at exactly this commit and the build fails if it is invalid or
+# unavailable. When empty, the tip of M3U_PROXY_BRANCH is used (manual builds).
+# Also busts the layer cache whenever it changes.
 ARG M3U_PROXY_COMMIT=""
 
 # Re-declare ARGs for this stage
@@ -115,7 +117,17 @@ RUN --mount=type=bind,target=/build-context \
         cp -r "/build-context/${M3U_PROXY_LOCAL_DIR}/." . ; \
     else \
         echo "Cloning m3u-proxy from: ${M3U_PROXY_REPO} (branch: ${M3U_PROXY_BRANCH}, commit: ${M3U_PROXY_COMMIT})" && \
-        git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . ; \
+        git clone -b ${M3U_PROXY_BRANCH} ${M3U_PROXY_REPO} . && \
+        if [ -n "${M3U_PROXY_COMMIT}" ]; then \
+            if ! echo "${M3U_PROXY_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'; then \
+                echo "ERROR: M3U_PROXY_COMMIT must be a full 40-character commit SHA, got: ${M3U_PROXY_COMMIT}" >&2 && exit 1; \
+            fi && \
+            git -c advice.detachedHead=false checkout --quiet "${M3U_PROXY_COMMIT}" && \
+            if [ "$(git rev-parse HEAD)" != "${M3U_PROXY_COMMIT}" ]; then \
+                echo "ERROR: m3u-proxy HEAD does not match M3U_PROXY_COMMIT" >&2 && exit 1; \
+            fi && \
+            echo "Checked out pinned m3u-proxy commit: ${M3U_PROXY_COMMIT}" ; \
+        fi ; \
     fi && \
     rm -rf .git
 

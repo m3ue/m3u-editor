@@ -133,7 +133,7 @@ it('adds the confirmed managed root while preserving existing publisher roots an
     Http::assertSentCount(1);
 });
 
-it('fails closed without state changes for rejected or partial managed setup responses', function (mixed $body, int $status) {
+it('fails closed without state changes for rejected or partial managed setup responses', function (mixed $body, int $status, string $message) {
     Http::preventStrayRequests();
     Http::fake([
         'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response($body, $status),
@@ -143,48 +143,139 @@ it('fails closed without state changes for rejected or partial managed setup res
 
     expect($result)->toBe([
         'success' => false,
-        'message' => 'Install an Emby companion that supports managed setup version 1, then retry.',
+        'message' => $message,
     ])->and($this->integration->refresh())
         ->emby_managed_setup_binding_id->toBeNull()
         ->emby_managed_setup_root->toBeNull()
         ->emby_publisher_writable_paths->toBe(['/srv/emby']);
     Http::assertSentCount(1);
 })->with([
-    'unauthorized setup' => [[], 401],
-    'old companion endpoint' => [[], 404],
-    'redirect response' => [[], 302],
-    'scalar JSON response' => ['"not ready"', 200],
-    'list JSON response' => [['not ready'], 200],
-    'malformed JSON response' => ['{', 200],
-    'not ready' => [[
+    'unauthorized setup' => [[], 401, 'Emby rejected the managed setup request. Check the administrator credential and permissions, then retry.'],
+    'missing companion endpoint' => [[], 404, 'The Emby managed setup endpoint was not found. Check the companion installation, then retry.'],
+    'redirect response' => [[], 302, 'Emby rejected the managed setup request. Check the administrator credential and permissions, then retry.'],
+    'scalar JSON response' => ['"not ready"', 200, 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.'],
+    'list JSON response' => [['not ready'], 200, 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.'],
+    'response without a readiness state' => [[
         'CapabilityVersion' => 1,
         'IntegrationId' => 1,
         'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+    ], 200, 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.'],
+    'response with an invalid readiness state' => [[
+        'CapabilityVersion' => 1,
+        'IntegrationId' => 1,
+        'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+        'Ready' => 'false',
+    ], 200, 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.'],
+    'malformed JSON response' => ['{', 200, 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.'],
+    'not ready' => [[
+        'CapabilityVersion' => 1,
+        'IntegrationId' => 0,
+        'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
         'Ready' => false,
         'Result' => 'backend secret or local path',
-    ], 200],
+    ], 200, 'Emby is not ready for managed setup. Check the companion configuration, then retry.'],
+    'not ready without an integration binding' => [[
+        'CapabilityVersion' => 1,
+        'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+        'Ready' => false,
+        'Result' => 'backend secret or local path',
+    ], 200, 'Emby is not ready for managed setup. Check the companion configuration, then retry.'],
     'old capability version' => [[
         'CapabilityVersion' => 0,
         'IntegrationId' => 1,
         'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
         'Ready' => true,
         'Result' => 'Ready',
-    ], 200],
-    'wrong integration binding' => [[
-        'CapabilityVersion' => 1,
-        'IntegrationId' => 999,
+    ], 200, 'The Emby companion does not support managed setup version 1. Update the companion, then retry.'],
+    'fractional capability version' => [[
+        'CapabilityVersion' => 1.9,
+        'IntegrationId' => 1,
         'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
         'Ready' => true,
         'Result' => 'Ready',
-    ], 200],
-    'unsafe confirmed root' => [[
-        'CapabilityVersion' => 1,
+    ], 200, 'The Emby companion does not support managed setup version 1. Update the companion, then retry.'],
+    'string capability version' => [[
+        'CapabilityVersion' => '1.5',
         'IntegrationId' => 1,
-        'ConfirmedRoot' => '../private',
+        'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
         'Ready' => true,
         'Result' => 'Ready',
-    ], 200],
+    ], 200, 'The Emby companion does not support managed setup version 1. Update the companion, then retry.'],
+    'wrong integration binding' => [[
+        'CapabilityVersion' => 1,
+        'IntegrationId' => 0,
+        'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+        'Ready' => true,
+        'Result' => 'Ready',
+    ], 200, 'Emby reported a managed setup binding conflict. Reconnect the integration, then retry.'],
 ]);
+
+it('fails closed without state changes for a ready V1 response carrying an unsafe confirmed root', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $this->integration->id,
+            'ConfirmedRoot' => '../private',
+            'Ready' => true,
+            'Result' => 'Ready',
+        ]),
+    ]);
+
+    expect(app(EmbyManagedSetupService::class)->setup($this->integration))->toBe([
+        'success' => false,
+        'message' => 'Emby returned an invalid managed setup response. Check the companion configuration, then retry.',
+    ])->and($this->integration->refresh())
+        ->emby_managed_setup_binding_id->toBeNull()
+        ->emby_managed_setup_root->toBeNull()
+        ->emby_publisher_writable_paths->toBe(['/srv/emby']);
+    Http::assertSentCount(1);
+});
+
+it('reports a binding conflict only for a ready V1 response without exposing the response result', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $this->integration->id + 1,
+            'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
+            'Ready' => true,
+            'Result' => 'backend secret or local path',
+        ]),
+    ]);
+
+    expect(app(EmbyManagedSetupService::class)->setup($this->integration))->toBe([
+        'success' => false,
+        'message' => 'Emby reported a managed setup binding conflict. Reconnect the integration, then retry.',
+    ]);
+});
+
+it('reports an actual missing managed setup endpoint without suggesting that V1 is unavailable', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::response([], 404),
+    ]);
+
+    expect(app(EmbyManagedSetupService::class)->setup($this->integration))->toBe([
+        'success' => false,
+        'message' => 'The Emby managed setup endpoint was not found. Check the companion installation, then retry.',
+    ]);
+});
+
+it('reports a blocked transport without sending the administrator credential', function () {
+    $this->integration->update([
+        'host' => 'emby.example.com',
+        'ssl' => false,
+    ]);
+    Http::preventStrayRequests();
+
+    expect(app(EmbyManagedSetupService::class)->setup($this->integration))->toBe([
+        'success' => false,
+        'message' => 'Emby managed setup was blocked by the integration security policy.',
+    ]);
+
+    Http::assertNothingSent();
+});
 
 it('preserves fifty legacy writable roots across repeated managed setup', function () {
     $legacyRoots = array_map(fn (int $index): string => "/srv/legacy/{$index}", range(1, 50));
@@ -210,7 +301,7 @@ it('preserves fifty legacy writable roots across repeated managed setup', functi
     Http::assertSentCount(3);
 });
 
-it('returns the sanitized retry error when the managed companion is unavailable', function () {
+it('returns a sanitized connection error when the managed companion is unavailable', function () {
     Http::preventStrayRequests();
     Http::fake([
         'https://emby.test:8096/M3uEditor/Managed/Setup/V1' => Http::failedConnection(),
@@ -218,7 +309,7 @@ it('returns the sanitized retry error when the managed companion is unavailable'
 
     expect(app(EmbyManagedSetupService::class)->setup($this->integration))->toBe([
         'success' => false,
-        'message' => 'Install an Emby companion that supports managed setup version 1, then retry.',
+        'message' => 'Emby managed setup could not connect. Check that Emby is reachable, then retry.',
     ])->and($this->integration->refresh()->emby_managed_setup_root)->toBeNull();
 });
 

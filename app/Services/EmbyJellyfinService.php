@@ -415,7 +415,7 @@ class EmbyJellyfinService implements MediaServer
             $params = [
                 'IncludeItemTypes' => 'Movie',
                 'Recursive' => 'true',
-                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations,Studios,ProviderIds',
+                'Fields' => 'Genres,Path,MediaSources,Overview,CommunityRating,OfficialRating,ProductionYear,RunTimeTicks,People,OriginalTitle,PremiereDate,ProductionLocations,Studios,ProviderIds,DateCreated',
                 'EnableImages' => 'true',
                 'ImageTypeLimit' => 1,
             ];

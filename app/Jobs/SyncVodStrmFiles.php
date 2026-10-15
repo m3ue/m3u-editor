@@ -493,7 +493,7 @@ class SyncVodStrmFiles implements ShouldQueue
             } else {
                 $playlist = $this->playlist ?? $channel->getEffectivePlaylist();
                 $extension = $channel->container_extension ?? 'mkv';
-                $url = rtrim("/movie/{$playlist->user->name}/{$playlist->uuid}/".$channel->id.'.'.$extension, '.');
+                $url = rtrim("/movie/{$playlist->user->name}/{$playlist->getInternalAuthPassword()}/".$channel->id.'.'.$extension, '.');
                 $url = PlaylistService::getBaseUrl($url);
             }
 

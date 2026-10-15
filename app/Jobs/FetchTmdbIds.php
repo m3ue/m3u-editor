@@ -1250,18 +1250,23 @@ class FetchTmdbIds implements ShouldQueue
                 ->where('season_number', $seasonNumber)
                 ->first();
 
-            if ($seasonRecord && ! empty($seasonDetails['poster_path'])) {
-                $coverUrl = 'https://image.tmdb.org/t/p/w500'.$seasonDetails['poster_path'];
-                $coverBigUrl = 'https://image.tmdb.org/t/p/original'.$seasonDetails['poster_path'];
-
+            if ($seasonRecord) {
                 $seasonUpdateData = [];
 
-                if (empty($seasonRecord->cover) || $this->overwriteExisting) {
-                    $seasonUpdateData['cover'] = $coverUrl;
+                if (! empty($seasonDetails['poster_path'])) {
+                    if (empty($seasonRecord->cover) || $this->overwriteExisting) {
+                        $seasonUpdateData['cover'] = 'https://image.tmdb.org/t/p/w500'.$seasonDetails['poster_path'];
+                    }
+
+                    if (empty($seasonRecord->cover_big) || $this->overwriteExisting) {
+                        $seasonUpdateData['cover_big'] = 'https://image.tmdb.org/t/p/original'.$seasonDetails['poster_path'];
+                    }
                 }
 
-                if (empty($seasonRecord->cover_big) || $this->overwriteExisting) {
-                    $seasonUpdateData['cover_big'] = $coverBigUrl;
+                $seasonMetadata = $seasonRecord->metadata ?? [];
+                if (! empty($seasonDetails['youtube_trailer']) && (empty($seasonMetadata['youtube_trailer']) || $this->overwriteExisting)) {
+                    $seasonMetadata['youtube_trailer'] = $seasonDetails['youtube_trailer'];
+                    $seasonUpdateData['metadata'] = $seasonMetadata;
                 }
 
                 if (! empty($seasonUpdateData)) {

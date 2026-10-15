@@ -28,6 +28,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
     // Giving a timeout of 120 minutes to the Job to process the mapping
     public $timeout = 60 * 120;
 
+    // Channels handed to each MapPlaylistChannelsToEpgChunk job
+    public const CHUNK_SIZE = 50;
+
     /**
      * Create a new job instance.
      */
@@ -201,10 +204,9 @@ class MapPlaylistChannelsToEpg implements ShouldQueue
             // Create jobs array for batch processing
             $jobs = [];
 
-            // Process channels in chunks of 50
-            $chunkSize = 50;
+            // Process channels in chunks
             $channelIds = $channels->pluck('id')->toArray();
-            $chunks = array_chunk($channelIds, $chunkSize);
+            $chunks = array_chunk($channelIds, self::CHUNK_SIZE);
 
             // Create a processing job for each chunk
             foreach ($chunks as $chunk) {

@@ -30,7 +30,7 @@ class DvrStreamController extends Controller
      *
      * Authentication mirrors the Xtream stream pattern:
      * - Method 1: PlaylistAuth credentials
-     * - Method 2: username = playlist owner's name, password = playlist UUID
+     * - Method 2: the owner's default login (owner name + playlist UUID or custom password)
      *
      * Once authenticated, the recording must belong to that user.
      * Supports HTTP range requests for seeking.
@@ -172,7 +172,7 @@ class DvrStreamController extends Controller
      * Serve the HLS playlist for an in-progress DVR recording.
      *
      * Authentication mirrors stream(): PlaylistAuth credentials or
-     * username = owner's name / password = playlist UUID (Method 2).
+     * the owner's default login (Method 2).
      * Segment traffic never passes through the editor — only this playlist does.
      */
     public function hlsPlaylist(Request $request, string $username, string $password, string $uuid): Response
@@ -195,6 +195,51 @@ class DvrStreamController extends Controller
         }
 
         return $this->serveLivePlaylist($request, $recording);
+    }
+
+    /**
+     * Serve the HLS playlist for an in-progress DVR recording via a signed URL.
+     *
+     * GET /dvr/signed/{uuid}/live.m3u8
+     *
+     * M3uProxyService hands this URL to anyone watching a channel while it is being
+     * recorded, so they share the existing broadcast. The signature (checked by route
+     * middleware) authorizes this one recording only, so the redirect never exposes
+     * the owner's credentials to a guest. The DVR capability check matches the
+     * owner-credential route this replaces.
+     */
+    public function signedHlsPlaylist(Request $request, string $uuid): Response
+    {
+        $recording = DvrRecording::where('uuid', $uuid)
+            ->where('status', DvrRecordingStatus::Recording)
+            ->whereNotNull('proxy_network_id')
+            ->first();
+
+        if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {
+            abort(404, 'Recording not found or not in progress');
+        }
+
+        return $this->serveLivePlaylist($request, $recording);
+    }
+
+    /**
+     * Stream a DVR recording via a signed URL.
+     *
+     * GET /dvr/signed/{uuid}.{format?}
+     *
+     * DVR VOD entries store this URL, and it reaches guests unchanged (raw M3U
+     * output, or the Xtream redirect when the proxy is off), so it authorizes this
+     * one recording by signature instead of carrying the owner's credentials.
+     */
+    public function signedStream(Request $request, string $uuid): Response|StreamedResponse|RedirectResponse
+    {
+        $recording = DvrRecording::where('uuid', $uuid)->first();
+
+        if (! $recording || ! DvrCapabilityGate::granted($recording->dvrSetting, null, false)) {
+            abort(404, 'Recording not found');
+        }
+
+        return $this->serveRecording($request, $recording);
     }
 
     /**
@@ -260,7 +305,7 @@ class DvrStreamController extends Controller
     /**
      * Resolve a User from credentials using the same two-step auth as XtreamStreamController:
      * 1. PlaylistAuth username/password lookup
-     * 2. Fallback: username = user's name, password = any playlist UUID owned by that user
+     * 2. Fallback: the owner's default login for any playlist owned by that user
      *
      * The actual credential resolution is delegated to the shared
      * `PlaylistCredentialResolver` service. This wrapper remains here
@@ -285,8 +330,8 @@ class DvrStreamController extends Controller
             return [$playlist?->user, $playlistAuth, true];
         }
 
-        // Method 2: password = playlist UUID, username = owner's name
-        $playlist = $this->resolver->resolveByUuid($password, $username);
+        // Method 2: the owner's default login (UUID or custom password, per playlist)
+        $playlist = $this->resolver->resolveDefaultLogin($username, $password);
         if ($playlist) {
             return [$playlist->user, null, false];
         }

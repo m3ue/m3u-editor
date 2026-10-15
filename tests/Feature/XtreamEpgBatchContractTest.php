@@ -480,3 +480,103 @@ it('prefers the alternative image closest to 16:9 for the guide artwork', functi
     expect($listings['wide-1']['icon'])->toBe('https://images.example/wide.jpg')
         ->and($listings['tall-1']['icon'])->toBe('https://images.example/primary.jpg');
 });
+
+it('adds role-specific poster and backdrop artwork to detailed batch listings without changing the guide icon', function () {
+    $this->playlist->update(['enable_logo_proxy' => false]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.roles');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles', [
+        'id' => 'roles-1', 'title' => 'Role Art', 'desc' => '',
+        'start' => Carbon::now()->addMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'icon' => 'https://images.example/primary.jpg',
+        'images' => [
+            // Schedules Direct labels its 16:9 "Iconic" art `poster`; geometry wins.
+            ['url' => 'https://images.example/iconic-wide.jpg', 'type' => 'poster', 'width' => 1920, 'height' => 1080, 'orient' => 'L', 'size' => 3],
+            ['url' => 'https://images.example/small-poster.jpg', 'type' => 'poster', 'width' => 240, 'height' => 360, 'orient' => 'P', 'size' => 2],
+            ['url' => 'https://images.example/big-poster.jpg', 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/headshot.jpg', 'type' => 'person', 'width' => 2000, 'height' => 3000, 'orient' => 'P', 'size' => 3],
+        ],
+    ]);
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles', [
+        'id' => 'roles-2', 'title' => 'Landscape Only', 'desc' => '',
+        'start' => Carbon::now()->addHours(2)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHours(3)->format('Y-m-d H:i:s'),
+        'images' => [
+            ['url' => 'https://images.example/mislabelled.jpg', 'type' => 'poster', 'width' => 1280, 'height' => 720, 'orient' => 'P', 'size' => 3],
+        ],
+    ]);
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles', [
+        'id' => 'roles-3', 'title' => 'Orientless Poster', 'desc' => '',
+        'start' => Carbon::now()->addHours(4)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHours(5)->format('Y-m-d H:i:s'),
+        'images' => [
+            // From <image type="poster" size="3">: XMLTV makes orient optional.
+            ['url' => 'https://images.example/orientless.jpg', 'type' => 'poster', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 3],
+            ['url' => 'https://images.example/untyped.jpg', 'type' => '', 'width' => 0, 'height' => 0, 'orient' => '', 'size' => 0],
+        ],
+    ]);
+
+    $response = $this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => (string) $ctx['channel']->id,
+        'details' => 1,
+    ]))->assertOk();
+
+    $listings = collect($response->json((string) $ctx['channel']->id.'.epg_listings'))->keyBy('id');
+
+    expect($listings['roles-1'])->toMatchArray([
+        'icon' => 'https://images.example/iconic-wide.jpg',
+        'poster_url' => 'https://images.example/big-poster.jpg',
+        'backdrop_url' => 'https://images.example/iconic-wide.jpg',
+    ])
+        ->and($listings['roles-2']['backdrop_url'])->toBe('https://images.example/mislabelled.jpg')
+        ->and($listings['roles-2'])->not->toHaveKey('poster_url')
+        ->and($listings['roles-3']['poster_url'])->toBe('https://images.example/orientless.jpg');
+});
+
+it('keeps programme artwork out of batch listings unless details=1', function () {
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.roles-plain');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.roles-plain', [
+        'id' => 'roles-plain-1', 'title' => 'Plain', 'desc' => '',
+        'start' => Carbon::now()->addMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'images' => [
+            ['url' => 'https://images.example/poster.jpg', 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+        ],
+    ]);
+
+    $response = $this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => (string) $ctx['channel']->id,
+    ]))->assertOk();
+
+    expect($response->json((string) $ctx['channel']->id.'.epg_listings.0'))->not->toHaveKeys(['poster_url', 'backdrop_url']);
+});
+
+it('adds role-specific artwork to get_short_epg and get_simple_data_table through the logo proxy', function () {
+    $this->playlist->update(['enable_logo_proxy' => true]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.short');
+
+    putProgramme($ctx['epg'], Carbon::now()->format('Y-m-d'), 'channel.short', [
+        'id' => 'short-1', 'title' => 'Short Art', 'desc' => '',
+        'start' => Carbon::now()->addMinutes(5)->format('Y-m-d H:i:s'),
+        'stop' => Carbon::now()->addHour()->format('Y-m-d H:i:s'),
+        'images' => [
+            ['url' => 'https://images.example/poster.jpg', 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
+            ['url' => 'https://images.example/backdrop.jpg', 'type' => 'backdrop', 'width' => 1920, 'height' => 1080, 'orient' => 'L', 'size' => 3],
+        ],
+    ]);
+
+    foreach (['get_short_epg', 'get_simple_data_table'] as $action) {
+        $response = $this->getJson(batchUrl($this->username, $this->password, [
+            'action' => $action,
+            'stream_id' => (string) $ctx['channel']->id,
+        ]))->assertOk();
+
+        expect($response->json('epg_listings.0'))->toMatchArray([
+            'poster_url' => LogoProxyController::generateProxyUrl('https://images.example/poster.jpg'),
+            'backdrop_url' => LogoProxyController::generateProxyUrl('https://images.example/backdrop.jpg'),
+        ]);
+    }
+});

@@ -47,6 +47,145 @@ class ManageTvAppSettings extends BaseSettingsPage
         return __('TV App');
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('send_tv_notification')
+                ->label(__('Send Notification'))
+                ->icon('heroicon-o-paper-airplane')
+                ->modalWidth('2xl')
+                ->modalDescription(__('Send a test notification to a playlist target to verify the TV app notification system is connected and working.'))
+                ->schema([
+                    Grid::make()->columns(2)->schema([
+                        Select::make('notifiable_type')
+                            ->label(__('Playlist type'))
+                            ->options([
+                                'playlist' => __('Playlist'),
+                                'custom_playlist' => __('Custom Playlist'),
+                                'merged_playlist' => __('Merged Playlist'),
+                                'alias' => __('Alias'),
+                            ])
+                            ->default('playlist')
+                            ->required()
+                            ->live(),
+                        Select::make('notifiable_id')
+                            ->label(__('Target'))
+                            ->required()
+                            ->searchable()
+                            ->options(function (Get $get): array {
+                                return match ($get('notifiable_type')) {
+                                    'custom_playlist' => CustomPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                    'merged_playlist' => MergedPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                    'alias' => PlaylistAlias::whereHas('playlist', fn ($q) => $q->where('user_id', auth()->id()))->pluck('name', 'id')->all(),
+                                    default => Playlist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
+                                };
+                            }),
+                    ]),
+                    ToggleButtons::make('status')
+                        ->label(__('Level'))
+                        ->options([
+                            'info' => __('Info'),
+                            'success' => __('Success'),
+                            'warning' => __('Warning'),
+                            'danger' => __('Danger'),
+                        ])
+                        ->icons([
+                            'info' => 'heroicon-s-information-circle',
+                            'success' => 'heroicon-s-check-circle',
+                            'warning' => 'heroicon-s-exclamation-triangle',
+                            'danger' => 'heroicon-s-x-circle',
+                        ])
+                        ->colors([
+                            'info' => 'info',
+                            'success' => 'success',
+                            'warning' => 'warning',
+                            'danger' => 'danger',
+                        ])
+                        ->default('info')
+                        ->required()
+                        ->grouped()
+                        ->columnSpanFull(),
+                    TextInput::make('title')
+                        ->label(__('Title'))
+                        ->required()
+                        ->placeholder(__('Notification title'))
+                        ->columnSpanFull(),
+                    Textarea::make('body')
+                        ->label(__('Message'))
+                        ->rows(3)
+                        ->placeholder(__('Optional message body'))
+                        ->columnSpanFull(),
+                    Grid::make()->columns(2)->schema([
+                        Select::make('channel')
+                            ->label(__('Channel'))
+                            ->default('general')
+                            ->required()
+                            ->searchable()
+                            ->options(function (): array {
+                                $channels = app(GeneralSettings::class)->tv_notification_channels;
+
+                                return collect($channels)
+                                    ->filter(fn (array $c) => ! empty($c['name']))
+                                    ->mapWithKeys(fn (array $c) => [
+                                        $c['name'] => $c['label'] ?: $c['name'],
+                                    ])
+                                    ->all();
+                            })
+                            ->helperText(__('Category tag for the notification.')),
+                        Toggle::make('admin_only')
+                            ->inline(false)
+                            ->label(__('Admin only'))
+                            ->helperText(__('When enabled, only admin-scope TV sessions will receive this notification.')),
+                    ]),
+                ])
+                ->action(function (array $data): void {
+                    $model = match ($data['notifiable_type']) {
+                        'custom_playlist' => CustomPlaylist::find($data['notifiable_id']),
+                        'merged_playlist' => MergedPlaylist::find($data['notifiable_id']),
+                        'alias' => PlaylistAlias::find($data['notifiable_id']),
+                        default => Playlist::find($data['notifiable_id']),
+                    };
+
+                    if (! $model) {
+                        Notification::make()
+                            ->danger()
+                            ->title(__('Target not found'))
+                            ->body(__('The selected playlist could not be found.'))
+                            ->send();
+
+                        return;
+                    }
+
+                    $notification = AppNotification::make()->title($data['title']);
+
+                    if (! empty($data['body'])) {
+                        $notification->body($data['body']);
+                    }
+
+                    match ($data['status']) {
+                        'success' => $notification->success(),
+                        'warning' => $notification->warning(),
+                        'danger' => $notification->danger(),
+                        default => $notification->info(),
+                    };
+
+                    $notification->tvBroadcast($model, $data['channel'], $data['admin_only'] ?? false);
+
+                    Notification::make()
+                        ->success()
+                        ->title(__('Notification sent'))
+                        ->body(__("Dispatched to \"{$model->name}\" on channel \"{$data['channel']}\"."))
+                        ->send();
+                }),
+            Action::make('get_tv_app')
+                ->label(__('Get the app'))
+                ->color('gray')
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->url(config('dev.tv_releases_url'))
+                ->openUrlInNewTab(true),
+        ];
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema
@@ -55,149 +194,6 @@ class ManageTvAppSettings extends BaseSettingsPage
                     ->warning()
                     ->description(__('Enhanced Xtream API output is disabled. Please enable that in the "General" settings tab to use the TV app.'))
                     ->hidden(fn (): bool => (bool) (app(GeneralSettings::class)->app_output_enabled ?? true)),
-                Section::make(__('TV Notification Tester'))
-                    ->description(__('Send a test notification to a playlist target to verify the TV app notification system is connected and working.'))
-                    ->icon('heroicon-m-bell-alert')
-                    ->headerActions([
-                        Action::make('send_tv_notification')
-                            ->label(__('Send Notification'))
-                            ->icon('heroicon-o-paper-airplane')
-                            ->modalWidth('2xl')
-                            ->schema([
-                                Grid::make()->columns(2)->schema([
-                                    Select::make('notifiable_type')
-                                        ->label(__('Playlist type'))
-                                        ->options([
-                                            'playlist' => __('Playlist'),
-                                            'custom_playlist' => __('Custom Playlist'),
-                                            'merged_playlist' => __('Merged Playlist'),
-                                            'alias' => __('Alias'),
-                                        ])
-                                        ->default('playlist')
-                                        ->required()
-                                        ->live(),
-                                    Select::make('notifiable_id')
-                                        ->label(__('Target'))
-                                        ->required()
-                                        ->searchable()
-                                        ->options(function (Get $get): array {
-                                            return match ($get('notifiable_type')) {
-                                                'custom_playlist' => CustomPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
-                                                'merged_playlist' => MergedPlaylist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
-                                                'alias' => PlaylistAlias::whereHas('playlist', fn ($q) => $q->where('user_id', auth()->id()))->pluck('name', 'id')->all(),
-                                                default => Playlist::where('user_id', auth()->id())->pluck('name', 'id')->all(),
-                                            };
-                                        }),
-                                ]),
-                                ToggleButtons::make('status')
-                                    ->label(__('Level'))
-                                    ->options([
-                                        'info' => __('Info'),
-                                        'success' => __('Success'),
-                                        'warning' => __('Warning'),
-                                        'danger' => __('Danger'),
-                                    ])
-                                    ->icons([
-                                        'info' => 'heroicon-s-information-circle',
-                                        'success' => 'heroicon-s-check-circle',
-                                        'warning' => 'heroicon-s-exclamation-triangle',
-                                        'danger' => 'heroicon-s-x-circle',
-                                    ])
-                                    ->colors([
-                                        'info' => 'info',
-                                        'success' => 'success',
-                                        'warning' => 'warning',
-                                        'danger' => 'danger',
-                                    ])
-                                    ->default('info')
-                                    ->required()
-                                    ->grouped()
-                                    ->columnSpanFull(),
-                                TextInput::make('title')
-                                    ->label(__('Title'))
-                                    ->required()
-                                    ->placeholder(__('Notification title'))
-                                    ->columnSpanFull(),
-                                Textarea::make('body')
-                                    ->label(__('Message'))
-                                    ->rows(3)
-                                    ->placeholder(__('Optional message body'))
-                                    ->columnSpanFull(),
-                                Grid::make()->columns(2)->schema([
-                                    Select::make('channel')
-                                        ->label(__('Channel'))
-                                        ->default('general')
-                                        ->required()
-                                        ->searchable()
-                                        ->options(function (): array {
-                                            $channels = app(GeneralSettings::class)->tv_notification_channels;
-
-                                            return collect($channels)
-                                                ->filter(fn (array $c) => ! empty($c['name']))
-                                                ->mapWithKeys(fn (array $c) => [
-                                                    $c['name'] => $c['label'] ?: $c['name'],
-                                                ])
-                                                ->all();
-                                        })
-                                        ->helperText(__('Category tag for the notification.')),
-                                    Toggle::make('admin_only')
-                                        ->inline(false)
-                                        ->label(__('Admin only'))
-                                        ->helperText(__('When enabled, only admin-scope TV sessions will receive this notification.')),
-                                ]),
-                            ])
-                            ->action(function (array $data): void {
-                                $model = match ($data['notifiable_type']) {
-                                    'custom_playlist' => CustomPlaylist::find($data['notifiable_id']),
-                                    'merged_playlist' => MergedPlaylist::find($data['notifiable_id']),
-                                    'alias' => PlaylistAlias::find($data['notifiable_id']),
-                                    default => Playlist::find($data['notifiable_id']),
-                                };
-
-                                if (! $model) {
-                                    Notification::make()
-                                        ->danger()
-                                        ->title(__('Target not found'))
-                                        ->body(__('The selected playlist could not be found.'))
-                                        ->send();
-
-                                    return;
-                                }
-
-                                $notification = AppNotification::make()->title($data['title']);
-
-                                if (! empty($data['body'])) {
-                                    $notification->body($data['body']);
-                                }
-
-                                match ($data['status']) {
-                                    'success' => $notification->success(),
-                                    'warning' => $notification->warning(),
-                                    'danger' => $notification->danger(),
-                                    default => $notification->info(),
-                                };
-
-                                $notification->tvBroadcast($model, $data['channel'], $data['admin_only'] ?? false);
-
-                                Notification::make()
-                                    ->success()
-                                    ->title(__('Notification sent'))
-                                    ->body(__("Dispatched to \"{$model->name}\" on channel \"{$data['channel']}\"."))
-                                    ->send();
-                            }),
-                        Action::make('get_tv_app')
-                            ->label(__('Get the app'))
-                            ->color('gray')
-                            ->icon('heroicon-o-arrow-top-right-on-square')
-                            ->url(config('dev.tv_releases_url'))
-                            ->openUrlInNewTab(true),
-                    ])
-                    ->schema([
-                        Callout::make()
-                            ->info()
-                            ->description(__('Use the "Send Notification" button above to dispatch a test TV notification to any playlist target.')),
-                    ]),
-
                 Section::make(__('Push Notifications (Mobile)'))
                     ->description(__('Deliver TV notifications to phone/tablet devices when the app is backgrounded or closed.'))
                     ->icon('heroicon-m-device-phone-mobile')

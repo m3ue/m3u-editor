@@ -2,6 +2,7 @@
 
 namespace App\Services\Arr;
 
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 
 class RadarrService extends BaseArrService
@@ -174,7 +175,7 @@ class RadarrService extends BaseArrService
     }
 
     /**
-     * @return array{exists: bool, id?: int}
+     * @return array{exists: bool, id?: int, hasFile?: bool}
      */
     public function checkExists(int $externalId): array
     {
@@ -191,7 +192,7 @@ class RadarrService extends BaseArrService
             return ['exists' => false];
         }
 
-        return ['exists' => true, 'id' => (int) $first['id']];
+        return ['exists' => true, 'id' => (int) $first['id'], 'hasFile' => ($first['hasFile'] ?? false) === true];
     }
 
     /**
@@ -280,6 +281,68 @@ class RadarrService extends BaseArrService
     public function supportsEpisodes(): bool
     {
         return false;
+    }
+
+    /**
+     * One library movie, or null when it's gone. Throws when Radarr can't be
+     * reached.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fetchMovie(int $movieId): ?array
+    {
+        try {
+            return $this->client()->get('/movie/'.$movieId)->throw()->json();
+        } catch (RequestException $e) {
+            if ($e->response->status() === 404) {
+                return null;
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Unmonitor a movie without touching its files. Unlike deleteMovie(),
+     * this never deletes anything from disk.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function unmonitorMovie(int $movieId): array
+    {
+        return $this->safeCall(function () use ($movieId) {
+            $movie = $this->fetchMovie($movieId);
+
+            if ($movie === null) {
+                return true; // Already gone; nothing to unmonitor.
+            }
+
+            $this->client()
+                ->put('/movie/'.$movieId, [...$movie, 'monitored' => false])
+                ->throw();
+
+            return true;
+        }, 'unmonitor movie');
+    }
+
+    /**
+     * Remove a movie and its files from Radarr, without an import exclusion
+     * so it can be added again later.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function deleteMovie(int $movieId): array
+    {
+        return $this->safeCall(
+            function () use ($movieId) {
+                $this->client()
+                    ->delete('/movie/'.$movieId.'?deleteFiles=true&addImportExclusion=false')
+                    ->throw();
+
+                return true;
+            },
+            'delete movie'
+        );
     }
 
     /**

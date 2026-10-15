@@ -295,6 +295,8 @@ class PlexService implements MediaServer
             'Type' => ucfirst($item['type']),
             'ProductionYear' => $item['year'] ?? null,
             'PremiereDate' => $item['originallyAvailableAt'] ?? null,
+            // When the item was added to the library (Emby/Jellyfin shape)
+            'DateCreated' => ! empty($item['addedAt']) ? gmdate('Y-m-d\TH:i:s\Z', (int) $item['addedAt']) : null,
             'Path' => $item['Media'][0]['Part'][0]['file'] ?? null,
             'CommunityRating' => $communityRating,
             'OfficialRating' => $item['contentRating'] ?? null,

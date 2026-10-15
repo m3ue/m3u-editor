@@ -54,6 +54,8 @@ use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
+use App\Support\EpgProgrammeArtwork;
 use App\Support\EpisodeNumberParser;
 use App\Support\SeriesKey;
 use App\Support\TmdbRating;
@@ -113,6 +115,8 @@ class XtreamApiController extends Controller
      */
     private const int MAX_RECENT_EPISODES = 40;
 
+    private const int SCHEDULE_DVR_MAX_DURATION_SECONDS = 86400;
+
     /**
      * Xtream API request handler.
      *
@@ -134,7 +138,7 @@ class XtreamApiController extends Controller
      * Supports optional category filtering via `category_id` parameter.
      * Each stream object contains: `num`, `name`, `stream_type`, `stream_id`, `stream_icon`, `epg_channel_id`,
      * `added`, `category_id`, `category_ids`, `tv_archive`, `tv_archive_duration`, `custom_sid`, `thumbnail`, `direct_source`.
-     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style stream URL.
+     * `direct_source` is always an empty string (kept for Xtream compatibility). Clients build playback URLs from `stream_id`, so upstream provider URLs and credentials are never exposed.
      * The `thumbnail` field contains the same value as `stream_icon`.
      * `tv_archive_duration` is in days. It falls back to `dev.default_epg_catchup_days` (env `DEFAULT_EPG_CATCHUP_DAYS`,
      * default 7) when `tv_archive` is `1` but the actual retention window is unknown (catchup enabled with no known
@@ -145,7 +149,7 @@ class XtreamApiController extends Controller
      * Supports optional category filtering via `category_id` parameter.
      * Each object contains: `num`, `name`, `title`, `year`, `stream_type` (always "movie"), `stream_id`, `stream_icon`,
      * `rating`, `rating_5based`, `added`, `category_id`, `category_ids`, `tmdb`, `tmdb_id`, `container_extension`, `custom_sid`, `direct_source`.
-     * The `direct_source` field contains the proxy URL when proxy is enabled, otherwise the Xtream-style movie URL.
+     * `direct_source` is always an empty string (kept for Xtream compatibility), same as for live streams and series episodes.
      *
      * ### get_series
      * Returns a JSON array of series objects. Only enabled series are included.
@@ -569,6 +573,10 @@ class XtreamApiController extends Controller
                     ->selectRaw(
                         '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
                         [$customPlaylistId]
+                    )
+                    ->selectRaw(
+                        '(SELECT ccp.channel_minor FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_minor',
+                        [$customPlaylistId]
                     );
             }
 
@@ -635,9 +643,12 @@ class XtreamApiController extends Controller
                         $channelCategoryId = XtreamCategoryService::channelStreamCategoryId($channel);
                     }
 
-                    $channelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
-                        ? (int) $channel->ccp_channel_number
-                        : $channel->channel;
+                    $channelNo = ChannelNumber::resolve(
+                        $channel->channel,
+                        $channel->channel_minor,
+                        $isCustomPlaylist ? $channel->ccp_channel_number : null,
+                        $isCustomPlaylist ? $channel->ccp_channel_minor : null,
+                    );
                     $channelNo = $categoryNumbers !== null
                         ? ($categoryNumbers[$channel->id] ?? $channelNo)
                         : $numberSequence->next($channelNo);
@@ -652,7 +663,9 @@ class XtreamApiController extends Controller
                     $tvgId = preg_replace(config('dev.tvgid.regex'), '', $tvgId);
 
                     $liveStream = [
-                        'num' => $channelNo,
+                        // Xtream clients parse `num` as an integer, so a sub-channel
+                        // ("5.1") reports its major number here; tvg-id keeps the full one.
+                        'num' => ChannelNumber::major($channelNo),
                         'name' => $channel->title_custom ?? $channel->title,
                         'stream_type' => 'live',
                         'stream_id' => $channel->id,
@@ -710,6 +723,10 @@ class XtreamApiController extends Controller
                     )
                     ->selectRaw(
                         '(SELECT ccp.channel_number FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_number',
+                        [$customPlaylistId]
+                    )
+                    ->selectRaw(
+                        '(SELECT ccp.channel_minor FROM channel_custom_playlist ccp WHERE ccp.channel_id = channels.id AND ccp.custom_playlist_id = ?) as ccp_channel_minor',
                         [$customPlaylistId]
                     );
             }
@@ -804,15 +821,18 @@ class XtreamApiController extends Controller
                     }
 
                     $tmdb = $channel->info['tmdb_id'] ?? $channel->movie_data['tmdb_id'] ?? 0;
-                    $vodChannelNo = ($isCustomPlaylist && ! empty($channel->ccp_channel_number))
-                        ? (int) $channel->ccp_channel_number
-                        : $channel->channel;
+                    $vodChannelNo = ChannelNumber::resolve(
+                        $channel->channel,
+                        $channel->channel_minor,
+                        $isCustomPlaylist ? $channel->ccp_channel_number : null,
+                        $isCustomPlaylist ? $channel->ccp_channel_minor : null,
+                    );
                     $vodChannelNo = $categoryNumbers !== null
                         ? ($categoryNumbers[$channel->id] ?? $vodChannelNo)
                         : $numberSequence->next($vodChannelNo);
 
                     echo json_encode([
-                        'num' => $vodChannelNo,
+                        'num' => ChannelNumber::major($vodChannelNo),
                         'name' => $channel->title_custom ?? $channel->title,
                         'title' => $channel->title_custom ?? $channel->title,
                         'year' => $vodFileNameService->resolveMovieYearAsInt($channel),
@@ -824,7 +844,7 @@ class XtreamApiController extends Controller
                             $channel->info['vote_count'] ?? null
                         ),
                         'rating_5based' => $channel->rating_5based ?? 0,
-                        'added' => (string) $channel->created_at->timestamp,
+                        'added' => (string) ($channel->source_added_at ?? $channel->created_at)->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => array_values(array_unique(array_merge(
                             [(int) $channelCategoryId],
@@ -1010,6 +1030,7 @@ class XtreamApiController extends Controller
                         'tmdb_id' => (int) ($tmdb ?: 0),
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                         'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
+                        'mpaa_rating' => $seriesItem->getContentRating() ?? '',
                         'category_id' => $seriesCategoryId,
                         'category_ids' => array_values(array_unique(array_merge(
                             [(int) $seriesCategoryId],
@@ -1229,6 +1250,7 @@ class XtreamApiController extends Controller
                         'cover_big' => $coverBig,
                         'releaseDate' => $season->metadata['release_date'] ?? $season->metadata['releaseDate'] ?? $season->metadata['air_date'] ?? '',
                         'duration' => (string) ($season->metadata['duration'] ?? 0),
+                        'youtube_trailer' => $season->metadata['youtube_trailer'] ?? '',
                     ];
                     $seasonEpisodes = [];
                     if ($season->episodes && $season->episodes->isNotEmpty()) {
@@ -1773,7 +1795,7 @@ class XtreamApiController extends Controller
                 'name' => $movieData['name'] ?? $channel->name,
                 'title' => $movieData['title'] ?? $channel->name,
                 'year' => app(VodFileNameService::class)->resolveMovieYearAsInt($channel),
-                'added' => $movieData['added'] ?? (string) ($channel->created_at ? $channel->created_at->timestamp : time()),
+                'added' => $movieData['added'] ?? (string) (($channel->source_added_at ?? $channel->created_at)?->timestamp ?? time()),
                 'category_id' => (string) ($channel->group_id ?? ''),
                 'category_ids' => ($channel->group_id ? [(int) $channel->group_id] : []),
                 'container_extension' => $extension,
@@ -1913,7 +1935,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist);
                     $count++;
                 }
             }
@@ -1993,7 +2015,7 @@ class XtreamApiController extends Controller
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
                         'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ];
+                    ] + $this->epgProgrammeArtwork($programme, $playlist);
                 }
             }
 
@@ -2525,18 +2547,15 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
+     * @return array{poster_url?: string, backdrop_url?: string, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
-        $details = [];
+        $details = $this->epgProgrammeArtwork($programme, $playlist);
 
-        $icon = $this->epgWideProgrammeImage($programme['images'] ?? null)
-            ?? trim((string) ($programme['icon'] ?? ''));
+        $icon = trim((string) (EpgProgrammeArtwork::wide($programme['images'] ?? null)['url'] ?? $programme['icon'] ?? ''));
         if ($icon !== '' && filter_var($icon, FILTER_VALIDATE_URL)) {
-            $details['icon'] = $playlist->enable_logo_proxy && ! str_starts_with($icon, url('/'))
-                ? LogoProxyController::generateProxyUrl($icon)
-                : $icon;
+            $details['icon'] = $this->epgProgrammeImageUrl($icon, $playlist);
         }
 
         foreach (['category', 'rating'] as $key) {
@@ -2568,42 +2587,34 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * The guide frames programme art at 16:9, so when the source carries
-     * alternative images (Schedules Direct sends several aspect ratios, and
-     * the cache keeps every <icon> after the first under `images`), pick the
-     * landscape one closest to 16:9, largest first on ties. Null when there
-     * is none, leaving the primary icon in place.
+     * Role-specific programme artwork for Xtream EPG listings: a portrait
+     * `poster_url` and a landscape `backdrop_url`, each only when the cached
+     * images actually contain one (see {@see EpgProgrammeArtwork}).
+     *
+     * @param  array<string, mixed>  $programme
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return array{poster_url?: string, backdrop_url?: string}
      */
-    private function epgWideProgrammeImage(mixed $images): ?string
+    private function epgProgrammeArtwork(array $programme, $playlist): array
     {
-        if (! is_array($images)) {
-            return null;
+        $artwork = [];
+        $images = $programme['images'] ?? null;
+        if ($poster = EpgProgrammeArtwork::poster($images)) {
+            $artwork['poster_url'] = $this->epgProgrammeImageUrl(trim($poster['url']), $playlist);
+        }
+        if ($backdrop = EpgProgrammeArtwork::backdrop($images)) {
+            $artwork['backdrop_url'] = $this->epgProgrammeImageUrl(trim($backdrop['url']), $playlist);
         }
 
-        $bestUrl = null;
-        $bestDistance = null;
-        $bestWidth = 0;
-        foreach ($images as $image) {
-            if (! is_array($image)) {
-                continue;
-            }
+        return $artwork;
+    }
 
-            $url = trim((string) ($image['url'] ?? ''));
-            $width = (int) ($image['width'] ?? 0);
-            $height = (int) ($image['height'] ?? 0);
-            if ($url === '' || $height <= 0 || $width <= $height || ! filter_var($url, FILTER_VALIDATE_URL)) {
-                continue;
-            }
-
-            $distance = round(abs($width / $height - 16 / 9), 2);
-            if ($bestDistance === null || $distance < $bestDistance || ($distance === $bestDistance && $width > $bestWidth)) {
-                $bestUrl = $url;
-                $bestDistance = $distance;
-                $bestWidth = $width;
-            }
-        }
-
-        return $bestUrl;
+    /** @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist */
+    private function epgProgrammeImageUrl(string $url, $playlist): string
+    {
+        return $playlist->enable_logo_proxy && ! str_starts_with($url, url('/'))
+            ? LogoProxyController::generateProxyUrl($url)
+            : $url;
     }
 
     /**
@@ -4511,6 +4522,17 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * 422 for an invalid schedule_dvr request. Keeps the legacy `error` string and adds a stable `code`.
+     */
+    private function scheduleDvrRejection(string $code, string $message): JsonResponse
+    {
+        return response()->json([
+            'error' => $message,
+            'code' => $code,
+        ], 422);
+    }
+
+    /**
      * Schedule a one-shot DVR recording rule from the TV app.
      */
     private function scheduleDvr(Request $request, $playlist, ?PlaylistAuth $playlistAuth): \Illuminate\Http\JsonResponse
@@ -4522,6 +4544,33 @@ class XtreamApiController extends Controller
 
         if (! $channelId || ! $title || ! $startTime || ! $endTime) {
             return response()->json(['error' => 'channel_id, title, start_time, and end_time are required'], 400);
+        }
+
+        try {
+            $requestedStart = Carbon::parse((string) $startTime);
+            $requestedEnd = Carbon::parse((string) $endTime);
+        } catch (\Throwable) {
+            return $this->scheduleDvrRejection('invalid_datetime', 'start_time and end_time must be ISO 8601 date-times');
+        }
+
+        if ($requestedEnd->lte($requestedStart)) {
+            return $this->scheduleDvrRejection('invalid_time_window', 'end_time must be after start_time');
+        }
+
+        // A start in the past is fine (recording something already airing); an end in the past is not.
+        if ($requestedEnd->lte(now())) {
+            return $this->scheduleDvrRejection('window_in_past', 'The requested recording window has already ended');
+        }
+
+        if ($requestedStart->diffInSeconds($requestedEnd) > self::SCHEDULE_DVR_MAX_DURATION_SECONDS) {
+            return $this->scheduleDvrRejection('duration_too_long', 'Recordings can be at most 24 hours long');
+        }
+
+        foreach (['start_early_seconds', 'end_late_seconds'] as $paddingField) {
+            $padding = $request->input($paddingField);
+            if ($padding !== null && filter_var($padding, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 65535]]) === false) {
+                return $this->scheduleDvrRejection('invalid_padding', "{$paddingField} must be a whole number of seconds between 0 and 65535");
+            }
         }
 
         $dvrSetting = $this->resolveDvrSettingForWrite($playlist, $channelId);
@@ -4547,8 +4596,8 @@ class XtreamApiController extends Controller
         // app.timezone's wall-clock before Eloquent formats them for storage, or the
         // round-trip re-read will reconstruct the wrong absolute instant.
         $appTz = config('app.timezone', 'UTC');
-        $manualStart = Carbon::parse($startTime)->setTimezone($appTz);
-        $manualEnd = Carbon::parse($endTime)->setTimezone($appTz);
+        $manualStart = $requestedStart->copy()->setTimezone($appTz);
+        $manualEnd = $requestedEnd->copy()->setTimezone($appTz);
 
         // Duplicate guard: same dvr_setting, same channel, same auth, overlapping
         // manual_start/manual_end window. Mirrors createDvrSeriesRule's pattern

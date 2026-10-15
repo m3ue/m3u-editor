@@ -109,3 +109,39 @@ it('does not find the typo candidate on non-Postgres drivers (documents current 
 
     expect(collect($result['candidates'])->pluck('epg_channel_id'))->not->toContain($match->id);
 });
+
+it('credits a trigram-only row in a batch prefetch to the channel whose terms found it', function () {
+    if (DB::connection()->getDriverName() !== 'pgsql') {
+        test()->markTestSkipped('Requires the pgsql connection (DB_CONNECTION=pgsql) to exercise pg_trgm.');
+    }
+
+    DB::statement('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+
+    // Only pg_trgm links "Sportsnet" to "Soprtsnet" (no shared substring), so
+    // after a batch prefetch the row has to be attributed back to the
+    // Sportsnet channel from Postgres' own trigram result.
+    $match = trigramEpgChannel([
+        'name' => 'Soprtsnet',
+        'display_name' => 'Soprtsnet',
+        'channel_id' => 'soprtsnet.us',
+    ]);
+    $sportsnet = trigramChannel('Sportsnet');
+    $weather = trigramChannel('Weatherline');
+
+    $matcher = app(SimilaritySearchService::class);
+    $prefetched = $matcher->loadEpgCandidates(
+        $this->epg,
+        [...$matcher->searchTermsFor($sportsnet), ...$matcher->searchTermsFor($weather)],
+        trigramMatchingEnabled: true,
+    );
+    $candidateIds = fn (Channel $channel) => collect($matcher->findEpgChannelCandidates(
+        $channel,
+        $this->epg,
+        prefetchedCandidates: $prefetched,
+        trigramMatchingEnabled: true,
+    )['candidates'])->pluck('epg_channel_id');
+
+    expect($candidateIds($sportsnet))->toContain($match->id)
+        ->and($candidateIds($weather))->not->toContain($match->id)
+        ->and($prefetched->first()->getAttributes())->not->toHaveKey('trigram_positions');
+});

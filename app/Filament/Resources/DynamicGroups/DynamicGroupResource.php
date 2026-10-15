@@ -23,8 +23,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
 /**
- * Read-only Filament resource for a DynamicGroup row. Rule config lives on
- * the Playlist form's Dynamic Groups (TMDB) repeater, not here. Only the
+ * Read-only Filament resource for a DynamicGroup row. Rule config lives in
+ * the Playlist's `dynamic_groups_config`, edited from the Playlist form's
+ * Dynamic Groups (TMDB) repeater or the listing/view Edit actions
+ * (DynamicGroupRuleActions), not via a resource form. Only the
  * `view` route is registered - the per-type listing surfaces live on
  * `VodDynamicGroupResource` and `SeriesDynamicGroupResource` (each
  * scoped to one type in their own `getEloquentQuery()`). The breadcrumb
@@ -65,10 +67,10 @@ class DynamicGroupResource extends Resource
     }
 
     /**
-     * Source slugs → human labels. Must stay in sync with the `Select::make('source')`
-     * options in `PlaylistResource.php:1958-1974` (the Playlist form's Dynamic
-     * Groups (TMDB) section). Used by the per-playlist widgets to render the
-     * source badge.
+     * Source slugs → human labels for a rule type. The single source of
+     * truth for the rule form's Source options
+     * (PlaylistResource::getDynamicGroupRuleSchema()), the Playlist form's
+     * repeater item labels, and the listing/view source badges.
      *
      * @return array<string, string>
      */
@@ -251,13 +253,14 @@ class DynamicGroupResource extends Resource
         $query = parent::getEloquentQuery()
             ->withCount(['channels', 'series'])
             // The View page's infolist only ever reads `playlist.name` and
-            // `playlist.source_type` - scope the eager load to just those
-            // columns so viewing/searching a DynamicGroup never pulls a full
-            // Playlist row. Avoids being on the hook for anything a future
-            // Playlist accessor/attribute might do (e.g. `xtream_status`,
-            // which dispatches a stats-refresh job on a cache miss) - this
-            // page has no business touching Playlist beyond its name/type.
-            ->with(['playlist:id,name,source_type']);
+            // `playlist.source_type`, and its Edit action the playlist's
+            // `dynamic_groups_config` - scope the eager load to just those
+            // columns so viewing a DynamicGroup never pulls a full Playlist
+            // row. Avoids being on the hook for anything a future Playlist
+            // accessor/attribute might do (e.g. `xtream_status`, which
+            // dispatches a stats-refresh job on a cache miss) - this page has
+            // no business touching Playlist beyond these columns.
+            ->with(['playlist:id,name,source_type,dynamic_groups_config']);
 
         // Per this repo's convention (see CLAUDE.md "Scope both `getEloquentQuery`
         // and `getGlobalSearchEloquentQuery()`"), admins see every user's rows,

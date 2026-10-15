@@ -48,7 +48,7 @@ class ManageProxySettings extends BaseSettingsPage
         return (bool) config('proxy.proxy_integration_enabled', true);
     }
 
-    public function form(Schema $schema): Schema
+    protected function getHeaderActions(): array
     {
         $m3uPublicUrl = rtrim(config('proxy.m3u_proxy_public_url'), '/');
         $m3uToken = config('proxy.m3u_proxy_token', null);
@@ -57,6 +57,122 @@ class ManageProxySettings extends BaseSettingsPage
         }
         $m3uProxyDocs = $m3uPublicUrl.'/docs';
 
+        return [
+            Action::make('test_connection')
+                ->label(__('Test connection'))
+                ->icon('heroicon-m-signal')
+                ->action(function () {
+                    $service = new M3uProxyService;
+                    $mode = $service->mode();
+
+                    try {
+                        $result = $service->getProxyInfo();
+
+                        if ($result['success']) {
+                            $info = $result['info'];
+
+                            // Build a nice detailed message
+                            $mode = ucfirst($mode);
+                            $details = "**Version:** {$info['version']}\n\n";
+                            if ($service->mode() === 'external') {
+                                $details .= "**Deployment Mode:** ✅ {$mode}\n\n";
+                                $details .= " Standalone external proxy service\n\n";
+                            } else {
+                                $details .= "**Deployment Mode:** ⚠️ {$mode}\n\n";
+                                $details .= " Embedded proxy service\n\n";
+                            }
+
+                            // Hardware Acceleration
+                            $hwStatus = $info['hardware_acceleration']['enabled'] ? '✅ Enabled' : '❌ Disabled';
+                            $details .= "**Hardware Acceleration:** {$hwStatus}\n";
+                            if ($info['hardware_acceleration']['enabled']) {
+                                $details .= "- Type: {$info['hardware_acceleration']['type']}\n";
+                                $details .= "- Device: {$info['hardware_acceleration']['device']}\n";
+                            }
+                            $details .= "\n";
+
+                            // Transcoding is available in all modes
+                            $details .= "**Transcoding:** ✅ Available\n";
+                            $details .= "\n";
+
+                            // FFmpeg Version
+                            $ffmpegVersion = $info['ffmpeg_version'] ?? 'Unknown';
+                            $details .= "**FFmpeg Version:** \n\n{$ffmpegVersion}\n\n";
+
+                            // Streamlink
+                            $streamlinkVersion = $info['streamlink_version'] ?? null;
+                            $streamlinkStatus = $streamlinkVersion ? "✅ {$streamlinkVersion}" : '❌ Not installed';
+                            $details .= "**Streamlink:** {$streamlinkStatus}\n\n";
+
+                            // yt-dlp
+                            $ytdlpVersion = $info['ytdlp_version'] ?? null;
+                            $ytdlpStatus = $ytdlpVersion ? "✅ {$ytdlpVersion}" : '❌ Not installed';
+                            $details .= "**yt-dlp:** {$ytdlpStatus}\n\n";
+
+                            // Redis Pooling
+                            $poolingEnabled = $info['redis']['pooling_enabled'];
+                            $redisStatus = $poolingEnabled ? '✅ Enabled' : '❌ Disabled';
+                            $details .= "**Redis Pooling:** {$redisStatus}\n";
+                            if ($poolingEnabled) {
+                                $details .= "- Max clients per stream: {$info['redis']['max_clients_per_stream']}\n";
+                                $details .= "- Sharing strategy: {$info['redis']['sharing_strategy']}\n";
+                            }
+                            $details .= "\n";
+
+                            // Ignore this for now, not sure if it will confuse...
+                            // // Transcoding Profiles
+                            // $profileCount = count($info['transcoding']['profiles']);
+                            // $details .= "**Transcoding Profiles:** {$profileCount} available\n";
+                            // $details .= "- " . implode(', ', array_keys($info['transcoding']['profiles']));
+
+                            Notification::make()
+                                ->title(__('Connection Successful'))
+                                ->body(Str::markdown($details))
+                                ->success()
+                                ->persistent()
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->title(__('Connection Failed'))
+                                ->body($result['error'] ?? 'Could not connect to the m3u proxy instance. Please check the URL and ensure the service is running.')
+                                ->danger()
+                                ->send();
+                        }
+                    } catch (Exception $e) {
+                        Notification::make()
+                            ->title(__('Connection Failed'))
+                            ->body('Could not connect to the m3u proxy instance. '.$e->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
+            Action::make('get_api_key')
+                ->label(__('API key'))
+                ->icon('heroicon-m-key')
+                ->action(function () use ($m3uToken) {
+                    Notification::make()
+                        ->title(__('Your m3u proxy API key'))
+                        ->body($m3uToken)
+                        ->info()
+                        ->send();
+                })->hidden(! $m3uToken),
+            Action::make('m3u_proxy_info')
+                ->label(__('API docs'))
+                ->color('gray')
+                ->url($m3uProxyDocs)
+                ->openUrlInNewTab(true)
+                ->icon('heroicon-m-arrow-top-right-on-square'),
+            Action::make('github')
+                ->label(__('GitHub'))
+                ->color('gray')
+                ->url('https://github.com/sparkison/m3u-proxy')
+                ->openUrlInNewTab(true)
+                ->icon('heroicon-m-arrow-top-right-on-square'),
+        ];
+    }
+
+    public function form(Schema $schema): Schema
+    {
         // Setup the service
         $service = new M3uProxyService;
         $mode = $service->mode();
@@ -67,115 +183,6 @@ class ManageProxySettings extends BaseSettingsPage
                 Section::make(__('URL & Connection'))
                     ->description(__('Configure how the proxy is accessed and how stream URLs are resolved.'))
                     ->columnSpanFull()
-                    ->headerActions([
-                        Action::make('test_connection')
-                            ->label(__('Test connection'))
-                            ->icon('heroicon-m-signal')
-                            ->action(function () use ($service, $mode) {
-                                try {
-                                    $result = $service->getProxyInfo();
-
-                                    if ($result['success']) {
-                                        $info = $result['info'];
-
-                                        // Build a nice detailed message
-                                        $mode = ucfirst($mode);
-                                        $details = "**Version:** {$info['version']}\n\n";
-                                        if ($service->mode() === 'external') {
-                                            $details .= "**Deployment Mode:** ✅ {$mode}\n\n";
-                                            $details .= " Standalone external proxy service\n\n";
-                                        } else {
-                                            $details .= "**Deployment Mode:** ⚠️ {$mode}\n\n";
-                                            $details .= " Embedded proxy service\n\n";
-                                        }
-
-                                        // Hardware Acceleration
-                                        $hwStatus = $info['hardware_acceleration']['enabled'] ? '✅ Enabled' : '❌ Disabled';
-                                        $details .= "**Hardware Acceleration:** {$hwStatus}\n";
-                                        if ($info['hardware_acceleration']['enabled']) {
-                                            $details .= "- Type: {$info['hardware_acceleration']['type']}\n";
-                                            $details .= "- Device: {$info['hardware_acceleration']['device']}\n";
-                                        }
-                                        $details .= "\n";
-
-                                        // Transcoding is available in all modes
-                                        $details .= "**Transcoding:** ✅ Available\n";
-                                        $details .= "\n";
-
-                                        // FFmpeg Version
-                                        $ffmpegVersion = $info['ffmpeg_version'] ?? 'Unknown';
-                                        $details .= "**FFmpeg Version:** \n\n{$ffmpegVersion}\n\n";
-
-                                        // Streamlink
-                                        $streamlinkVersion = $info['streamlink_version'] ?? null;
-                                        $streamlinkStatus = $streamlinkVersion ? "✅ {$streamlinkVersion}" : '❌ Not installed';
-                                        $details .= "**Streamlink:** {$streamlinkStatus}\n\n";
-
-                                        // yt-dlp
-                                        $ytdlpVersion = $info['ytdlp_version'] ?? null;
-                                        $ytdlpStatus = $ytdlpVersion ? "✅ {$ytdlpVersion}" : '❌ Not installed';
-                                        $details .= "**yt-dlp:** {$ytdlpStatus}\n\n";
-
-                                        // Redis Pooling
-                                        $poolingEnabled = $info['redis']['pooling_enabled'];
-                                        $redisStatus = $poolingEnabled ? '✅ Enabled' : '❌ Disabled';
-                                        $details .= "**Redis Pooling:** {$redisStatus}\n";
-                                        if ($poolingEnabled) {
-                                            $details .= "- Max clients per stream: {$info['redis']['max_clients_per_stream']}\n";
-                                            $details .= "- Sharing strategy: {$info['redis']['sharing_strategy']}\n";
-                                        }
-                                        $details .= "\n";
-
-                                        // Ignore this for now, not sure if it will confuse...
-                                        // // Transcoding Profiles
-                                        // $profileCount = count($info['transcoding']['profiles']);
-                                        // $details .= "**Transcoding Profiles:** {$profileCount} available\n";
-                                        // $details .= "- " . implode(', ', array_keys($info['transcoding']['profiles']));
-
-                                        Notification::make()
-                                            ->title(__('Connection Successful'))
-                                            ->body(Str::markdown($details))
-                                            ->success()
-                                            ->persistent()
-                                            ->send();
-                                    } else {
-                                        Notification::make()
-                                            ->title(__('Connection Failed'))
-                                            ->body($result['error'] ?? 'Could not connect to the m3u proxy instance. Please check the URL and ensure the service is running.')
-                                            ->danger()
-                                            ->send();
-                                    }
-                                } catch (Exception $e) {
-                                    Notification::make()
-                                        ->title(__('Connection Failed'))
-                                        ->body('Could not connect to the m3u proxy instance. '.$e->getMessage())
-                                        ->danger()
-                                        ->send();
-                                }
-                            }),
-                        Action::make('get_api_key')
-                            ->label(__('API key'))
-                            ->icon('heroicon-m-key')
-                            ->action(function () use ($m3uToken) {
-                                Notification::make()
-                                    ->title(__('Your m3u proxy API key'))
-                                    ->body($m3uToken)
-                                    ->info()
-                                    ->send();
-                            })->hidden(! $m3uToken),
-                        Action::make('m3u_proxy_info')
-                            ->label(__('API docs'))
-                            ->color('gray')
-                            ->url($m3uProxyDocs)
-                            ->openUrlInNewTab(true)
-                            ->icon('heroicon-m-arrow-top-right-on-square'),
-                        Action::make('github')
-                            ->label(__('GitHub'))
-                            ->color('gray')
-                            ->url('https://github.com/sparkison/m3u-proxy')
-                            ->openUrlInNewTab(true)
-                            ->icon('heroicon-m-arrow-top-right-on-square'),
-                    ])
                     ->schema([
                         TextInput::make('url_override')
                             ->label(__('Override URL'))

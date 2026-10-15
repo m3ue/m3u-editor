@@ -11,6 +11,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Services\PlaylistUrlService;
+use App\Support\ChannelNumber;
 use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Dedoc\Scramble\Attributes\Response as ApiResponse;
 use Illuminate\Http\JsonResponse;
@@ -154,7 +155,8 @@ class DispatcharrController extends Controller
         $channelsQuery = $playlist->channels()
             ->where('channels.enabled', true)
             ->where('channels.is_vod', false)
-            ->orderBy('channels.channel');
+            ->orderBy('channels.channel')
+            ->orderByRaw('COALESCE(channels.channel_minor, 0)');
 
         $total = $channelsQuery->count();
 
@@ -169,7 +171,10 @@ class DispatcharrController extends Controller
                 'id' => $channel->id,
                 'uuid' => $channel->uuid,
                 'name' => $channel->name_custom ?? $channel->name,
-                'channel_number' => $channel->channel ?: null,
+                // Dispatcharr stores channel numbers as floats, so a sub-channel reports as 5.1
+                'channel_number' => $channel->channel
+                    ? ($channel->channel_minor ? (float) ChannelNumber::format($channel->channel, $channel->channel_minor) : $channel->channel)
+                    : null,
                 'tvg_id' => $channel->source_id ?? $channel->stream_id ?? (string) $channel->id,
                 'tvc_guide_stationid' => '',
             ];

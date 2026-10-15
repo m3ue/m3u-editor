@@ -3,6 +3,7 @@
 namespace App\Filament\Navigation;
 
 use App\Filament\Clusters\Devices\DevicesCluster;
+use App\Filament\Clusters\MediaServers\MediaServersCluster;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Clusters\Settings\SettingsCluster;
 use App\Filament\Pages\Backups;
@@ -13,7 +14,6 @@ use App\Filament\Pages\LogViewer;
 use App\Filament\Pages\M3uProxyStreamMonitor;
 use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Pages\ReleaseLogs;
-use App\Filament\Pages\RequestContent;
 use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
@@ -27,7 +27,6 @@ use App\Filament\Resources\EpgChannels\EpgChannelResource;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Filament\Resources\Epgs\EpgResource;
 use App\Filament\Resources\Groups\GroupResource;
-use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use App\Filament\Resources\MergedEpgs\MergedEpgResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Networks\NetworkResource;
@@ -139,8 +138,7 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-server-stack',
                 'available' => fn () => true,
                 'items' => [
-                    'media_server_integrations' => ['resolve' => fn () => MediaServerIntegrationResource::getNavigationItems()],
-                    'request_content' => ['resolve' => fn () => RequestContent::getNavigationItems()],
+                    'media_server_integrations' => ['resolve' => fn () => MediaServersCluster::getNavigationItems()],
                     'networks' => [
                         'available' => fn () => config('proxy.proxy_integration_enabled', true),
                         'resolve' => fn () => NetworkResource::getNavigationItems(),

@@ -86,6 +86,23 @@ it('builds candidate rows for unresolved channels via the job', function () {
         ->and($map->refresh()->candidates_built_at)->not->toBeNull();
 });
 
+it('uses the default quality indicators when the custom list is left empty, like the mapping job', function () {
+    candidatesEpgChannel([
+        'name' => 'Sports Central',
+        'display_name' => 'Sports Central',
+        'channel_id' => 'sports-central.us',
+    ]);
+    $channel = candidatesChannel('Sports Central HD');
+
+    // An empty TagsInput saves [], which the form documents as "use the
+    // built-in defaults" rather than "strip nothing"
+    $map = candidatesMap(['remove_quality_indicators' => true, 'quality_indicators' => []]);
+
+    (new BuildEpgMapCandidatesJob($map->id))->handle();
+
+    expect($map->candidates()->where('channel_id', $channel->id)->value('normalized_name'))->toBe('sports central');
+});
+
 it('clears candidates_building on the early-return path when the map is no longer reviewable', function () {
     $map = candidatesMap(['remove_quality_indicators' => true]);
     $map->update(['candidates_building' => true]);

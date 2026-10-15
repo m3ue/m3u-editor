@@ -66,6 +66,7 @@ class DvrSchedulerService
             // Minute-level precision for trigger and stop.
             $this->triggerPendingRecordings();
             $this->stopExpiredRecordings();
+            $this->resumeLostRecordings();
         } catch (Exception $e) {
             Log::error('DVR scheduler tick failed: '.$e->getMessage(), [
                 'exception' => $e,
@@ -903,6 +904,42 @@ class DvrSchedulerService
         foreach ($expired as $recording) {
             Log::info("DvrSchedulerService: Stopping expired recording {$recording->id} ({$recording->title})");
             StopDvrRecording::dispatch($recording->id)->onQueue('dvr');
+        }
+    }
+
+    /**
+     * Resume in-progress recordings the proxy no longer has a broadcast for,
+     * which happens when the proxy restarts mid-recording. Without this the
+     * recording silently stops capturing and ends up truncated at scheduled_end.
+     *
+     * Skipped entirely when the proxy can't be asked, and recordings that only
+     * just started or are about to end are left alone.
+     */
+    private function resumeLostRecordings(): void
+    {
+        $now = now();
+        $candidates = DvrRecording::recording()
+            ->whereNotNull('proxy_network_id')
+            ->where('actual_start', '<=', UtcDateTime::forQuery($now->copy()->subMinute()))
+            ->where('scheduled_end', '>', UtcDateTime::forQuery($now->copy()->addSeconds(30)))
+            ->get(['id', 'proxy_network_id', 'title']);
+
+        if ($candidates->isEmpty()) {
+            return;
+        }
+
+        $activeIds = app(M3uProxyService::class)->activeBroadcastIds();
+        if ($activeIds === null) {
+            return;
+        }
+
+        foreach ($candidates as $recording) {
+            if (in_array($recording->proxy_network_id, $activeIds, true)) {
+                continue;
+            }
+
+            Log::warning("DvrSchedulerService: Recording {$recording->id} ({$recording->title}) is missing from the proxy, resuming");
+            StartDvrRecording::dispatch($recording->id, resume: true)->onQueue('dvr');
         }
     }
 
