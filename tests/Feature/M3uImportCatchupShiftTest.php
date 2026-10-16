@@ -8,6 +8,10 @@
  * overwrote the first ('tvg-shift'), so the 'tvg-shift' fallback never actually ran despite
  * the comment claiming it did. The map also never recognized 'catchup-days'/'tvg-rec', which
  * many catch-up providers (e.g. EPGenius) use to express the window in days instead of hours.
+ *
+ * Follow-up (#1627): 'timeshift' is the SIPTV attribute and is also days (Kodi IPTV Simple,
+ * TiviMate, IPTVnator), and 'tvg-shift' is the EPG time offset, so it is no longer read as
+ * the catch-up window.
  */
 
 use App\Jobs\ProcessM3uImport;
@@ -71,23 +75,24 @@ function importedChannelPayloadRow(User $user, string $extinfAttributes, string 
     return Job::firstOrFail()->payload[0];
 }
 
-it('reads the timeshift attribute (hours) into shift', function () {
+it('reads the SIPTV timeshift attribute (days) into shift as hours', function () {
     $user = User::factory()->create();
 
     $row = importedChannelPayloadRow($user, 'catchup="append" timeshift="4"');
 
-    expect((int) $row['shift'])->toBe(4);
+    expect((int) $row['shift'])->toBe(4 * 24);
 });
 
-it('falls back to tvg-shift (hours) when timeshift is absent', function () {
+it('does not treat tvg-shift (the EPG offset) as a catch-up window', function () {
     $user = User::factory()->create();
 
     $row = importedChannelPayloadRow($user, 'catchup="append" tvg-shift="3"');
 
-    expect((int) $row['shift'])->toBe(3);
+    expect((int) $row['shift'])->toBe(0)
+        ->and((int) $row['tvg_shift'])->toBe(3);
 });
 
-it('converts catchup-days (days) to hours when no hour-based attribute is present', function () {
+it('converts catchup-days (days) to hours', function () {
     $user = User::factory()->create();
 
     $row = importedChannelPayloadRow($user, 'catchup="append" catchup-days="7"');
@@ -95,7 +100,7 @@ it('converts catchup-days (days) to hours when no hour-based attribute is presen
     expect((int) $row['shift'])->toBe(7 * 24);
 });
 
-it('converts tvg-rec (days) to hours when no other shift attribute is present', function () {
+it('converts tvg-rec (days) to hours when catchup-days is absent', function () {
     $user = User::factory()->create();
 
     $row = importedChannelPayloadRow($user, 'catchup="append" tvg-rec="2"');
@@ -103,10 +108,10 @@ it('converts tvg-rec (days) to hours when no other shift attribute is present', 
     expect((int) $row['shift'])->toBe(2 * 24);
 });
 
-it('prefers timeshift over tvg-shift and catchup-days when multiple are present', function () {
+it('prefers catchup-days over tvg-rec and timeshift when multiple are present', function () {
     $user = User::factory()->create();
 
-    $row = importedChannelPayloadRow($user, 'catchup="append" timeshift="5" tvg-shift="99" catchup-days="99"');
+    $row = importedChannelPayloadRow($user, 'catchup="append" timeshift="5" tvg-rec="9" catchup-days="3"');
 
-    expect((int) $row['shift'])->toBe(5);
+    expect((int) $row['shift'])->toBe(3 * 24);
 });
