@@ -685,12 +685,13 @@ class PlaylistService
 
     /**
      * Whether the request asks for catchup (timeshift) rather than the live stream: Xtream
-     * timeshift_duration/timeshift_date (merged in by the /timeshift/ route) or TiviMate utc.
+     * timeshift_duration + timeshift_date (merged in by the /timeshift/ route) or the SIPTV/TiviMate
+     * utc (+ lutc) query. These are exactly the requests generateTimeshiftUrl() rewrites.
      */
     public static function isTimeshiftRequest(?Request $request): bool
     {
         return $request !== null
-            && ($request->filled('timeshift_duration') || $request->filled('timeshift_date') || $request->filled('utc'));
+            && ($request->filled('utc') || ($request->filled('timeshift_duration') && $request->filled('timeshift_date')));
     }
 
     /**
@@ -700,15 +701,13 @@ class PlaylistService
      */
     public static function generateTimeshiftUrl(Request $request, string $streamUrl, $playlist, ?Channel $channel = null): string
     {
-        // TiviMate sends utc/lutc as UNIX epochs (UTC). We only convert TZ + format.
-        $utcPresent = $request->filled('utc');
-
-        // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS)
-        $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
-
-        if (! $utcPresent && ! $xtreamTimeshiftPresent) {
+        if (! self::isTimeshiftRequest($request)) {
             return $streamUrl;
         }
+
+        // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS);
+        // SIPTV/TiviMate sends utc/lutc as UNIX epochs (UTC)
+        $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
         // Use the portal/provider timezone (DST-aware). Standard playlists carry their own
         // server_timezone; Custom/Merged/Alias playlists can be composed of channels from
@@ -742,13 +741,9 @@ class PlaylistService
             $startEpoch = $startInstant->getTimestamp();
             $stamp = $startInstant->setTimezone($providerTz)->format('Y-m-d:H-i');
 
-            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/timeshift/u/p/duration/stamp/<id>.<ext>"
-            if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.([^/]+)$~', $streamUrl, $m)) {
-                [$_, $base, $user, $pass, $id, $ext] = $m;
-                $streamUrl = sprintf('%s/timeshift/%s/%s/%d/%s/%s.%s', $base, $user, $pass, $duration, $stamp, $id, $ext);
-            } else {
-                $streamUrl = self::buildProviderCatchupUrl($channel, $streamUrl, $startEpoch, $duration * 60, now()->getTimestamp(), $providerTz) ?? $streamUrl;
-            }
+            $streamUrl = self::xtreamTimeshiftUrl($streamUrl, $duration, $stamp)
+                ?? self::buildProviderCatchupUrl($channel, $streamUrl, $startEpoch, $duration * 60, now()->getTimestamp(), $providerTz)
+                ?? $streamUrl;
 
             // Helpful debug for verification
             Log::debug(sprintf(
@@ -766,26 +761,14 @@ class PlaylistService
             // duration (minutes) from start → now; ceil avoids off-by-one near edges
             $offset = max(1, (int) ceil(max(0, $lutc - $utc) / 60));
 
-            // Convert the absolute UTC epoch from TiviMate to provider-local time string expected by timeshift.php
+            // Convert the absolute UTC epoch to the provider-local time string the timeshift URL expects
             $stamp = Carbon::createFromTimestampUTC($utc)
                 ->setTimezone($providerTz)
                 ->format('Y-m-d:H-i');
 
-            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/streaming/timeshift.php?username=u&password=p&stream=id&start=stamp&duration=offset"
-            if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.[^/]+$~', $streamUrl, $m)) {
-                [$_, $base, $user, $pass, $id] = $m;
-                $streamUrl = sprintf(
-                    '%s/streaming/timeshift.php?username=%s&password=%s&stream=%s&start=%s&duration=%d',
-                    $base,
-                    $user,
-                    $pass,
-                    $id,
-                    $stamp,
-                    $offset
-                );
-            } else {
-                $streamUrl = self::buildProviderCatchupUrl($channel, $streamUrl, $utc, max(0, $lutc - $utc), $lutc, $providerTz) ?? $streamUrl;
-            }
+            $streamUrl = self::xtreamTimeshiftUrl($streamUrl, $offset, $stamp)
+                ?? self::buildProviderCatchupUrl($channel, $streamUrl, $utc, max(0, $lutc - $utc), $lutc, $providerTz)
+                ?? $streamUrl;
 
             // Helpful debug for verification
             Log::debug(sprintf(
@@ -800,6 +783,23 @@ class PlaylistService
         }
 
         return $streamUrl;
+    }
+
+    /**
+     * Rewrite an Xtream live URL to its catchup URL:
+     * `…://host/live/u/p/<id>.<ext>` >>> `…://host/timeshift/u/p/<minutes>/<stamp>/<id>.<ext>`.
+     * Both catchup request styles use this form, which m3u-proxy recognises as catchup (not a
+     * live stream) by its `/timeshift/` path. Null when the URL isn't Xtream-shaped.
+     */
+    private static function xtreamTimeshiftUrl(string $streamUrl, int $durationMinutes, string $stamp): ?string
+    {
+        if (! preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.([^/]+)$~', $streamUrl, $m)) {
+            return null;
+        }
+
+        [$_, $base, $user, $pass, $id, $ext] = $m;
+
+        return sprintf('%s/timeshift/%s/%s/%d/%s/%s.%s', $base, $user, $pass, $durationMinutes, $stamp, $id, $ext);
     }
 
     /**

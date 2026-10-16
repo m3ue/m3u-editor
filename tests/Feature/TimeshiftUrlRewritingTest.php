@@ -101,9 +101,11 @@ it('converts unix timestamp date parameter and produces correct timeshift URL', 
     expect($response->headers->get('Location'))->toContain('/timeshift/');
 });
 
-it('rewrites TiviMate utc timeshift URL from /live/ to /streaming/timeshift.php', function () {
-    $utc = time() - 1800; // 30 minutes ago
-    $lutc = time();
+it('rewrites TiviMate utc timeshift URL from /live/ to /timeshift/', function () {
+    // m3u-proxy only treats a URL as catchup (Range/416 handling, no live failover) when it
+    // has a /timeshift/ path, so utc requests must not use /streaming/timeshift.php
+    $utc = 1733067000; // 2024-12-01 15:30:00 UTC
+    $lutc = $utc + 1800; // 30 minutes later
 
     $request = Request::create('/live/user/pass/123.ts', 'GET', [
         'utc' => $utc,
@@ -114,13 +116,19 @@ it('rewrites TiviMate utc timeshift URL from /live/ to /streaming/timeshift.php'
 
     $result = PlaylistService::generateTimeshiftUrl($request, $streamUrl, $this->playlist);
 
-    expect($result)
-        ->toContain('/streaming/timeshift.php')
-        ->not->toContain('/live/')
-        ->toContain('username=user')
-        ->toContain('password=pass')
-        ->toContain('stream=464938');
+    expect($result)->toBe('https://provider.domain/timeshift/user/pass/30/2024-12-01:15-30/464938.ts');
 });
+
+it('only treats utc or both Xtream timeshift parameters as a catchup request', function (array $query, bool $expected) {
+    expect(PlaylistService::isTimeshiftRequest(Request::create('/live/user/pass/1.ts', 'GET', $query)))->toBe($expected);
+})->with([
+    'utc' => [['utc' => 1733067000], true],
+    'utc and lutc' => [['utc' => 1733067000, 'lutc' => 1733068800], true],
+    'both xtream parameters' => [['timeshift_duration' => 30, 'timeshift_date' => '2024-12-01:15-30-00'], true],
+    'duration only' => [['timeshift_duration' => 30], false],
+    'date only' => [['timeshift_date' => '2024-12-01:15-30-00'], false],
+    'none' => [[], false],
+]);
 
 it('redirects timeshift request with correct /timeshift/ URL when proxy is disabled', function () {
     $channel = Channel::factory()->create([
@@ -229,8 +237,8 @@ it('uses the failover channel with catchup for utc catchup requests on the live 
 
     $response->assertRedirect();
     expect($response->headers->get('Location'))
-        ->toContain('/streaming/timeshift.php')
-        ->toContain('stream=sd-stream')
+        ->toContain('/timeshift/user/pass/30/')
+        ->toContain('/sd-stream.ts')
         ->not->toContain('hd-stream');
 
     // A plain live request still plays the primary
