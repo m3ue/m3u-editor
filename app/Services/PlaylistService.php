@@ -65,6 +65,20 @@ class PlaylistService
     public const CUSTOM_PLAYLIST_CHUNK_SIZE = 1000;
 
     /**
+     * Kodi IPTV Simple catchup date specifiers mapped to PHP date() characters.
+     *
+     * @var array<string, string>
+     */
+    private const CATCHUP_DATE_SPECIFIERS = [
+        'Y' => 'Y',
+        'm' => 'm',
+        'd' => 'd',
+        'H' => 'H',
+        'M' => 'i',
+        'S' => 's',
+    ];
+
+    /**
      * Get the base URL of the application, including port if set
      *
      * @return string
@@ -692,6 +706,10 @@ class PlaylistService
         // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS)
         $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
+        if (! $utcPresent && ! $xtreamTimeshiftPresent) {
+            return $streamUrl;
+        }
+
         // Use the portal/provider timezone (DST-aware). Standard playlists carry their own
         // server_timezone; Custom/Merged/Alias playlists can be composed of channels from
         // several different source playlists, so resolve via the channel's own originating
@@ -701,99 +719,11 @@ class PlaylistService
             ?? $timezoneSource?->xtream_status['server_info']['timezone']
             ?? 'Etc/UTC';
 
-        /* ── Timeshift SETUP (TiviMate → portal format) ───────────────────── */
-        if ($utcPresent && ! $xtreamTimeshiftPresent) {
-            $utc = (int) $request->query('utc'); // programme start (UTC epoch)
-            $lutc = (int) ($request->query('lutc') ?? time()); // “live” now (UTC epoch)
-
-            // duration (minutes) from start → now; ceil avoids off-by-one near edges
-            $offset = max(1, (int) ceil(max(0, $lutc - $utc) / 60));
-
-            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/streaming/timeshift.php?username=u&password=p&stream=id&start=stamp&duration=offset"
-            $rewrite = static function (string $url, string $stamp, int $offset) use ($channel, $utc, $lutc): string {
-                if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.[^/]+$~', $url, $m)) {
-                    [$_, $base, $user, $pass, $id] = $m;
-
-                    return sprintf(
-                        '%s/streaming/timeshift.php?username=%s&password=%s&stream=%s&start=%s&duration=%d',
-                        $base,
-                        $user,
-                        $pass,
-                        $id,
-                        $stamp,
-                        $offset
-                    );
-                }
-
-                // Upstream isn't itself an Xtream server, so there's no `/timeshift/` endpoint to
-                // rewrite to. Fall back to the provider's own catchup-source URL template, if one
-                // was captured on import (e.g. plain M3U catch-up providers like EPGenius).
-                if ($channel?->catchup_source) {
-                    return self::applyCatchupSourceTemplate($channel->catchup_source, $utc, $lutc, $offset);
-                }
-
-                return $url; // fallback if pattern does not match and no catchup_source template available
-            };
-        } elseif ($xtreamTimeshiftPresent) {
+        if ($xtreamTimeshiftPresent) {
             /* ── Timeshift SETUP (Xtream API → Xtream API format) ─────────────────── */
-
-            // Handle Xtream API timeshift format
             $duration = (int) $request->get('timeshift_duration'); // Duration in minutes
             $date = $request->get('timeshift_date'); // Format: YYYY-MM-DD:HH-MM-SS
 
-            // Programme start as a UTC epoch, used only for the catchup_source template fallback
-            // below. Set once the date has been parsed, further down.
-            $startEpoch = null;
-
-            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/timeshift/u/p/duration/stamp/<id>.<ext>"
-            $rewrite = static function (string $url, string $stamp, int $offset) use ($channel, &$startEpoch): string {
-                if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.([^/]+)$~', $url, $m)) {
-                    [$_, $base, $user, $pass, $id, $ext] = $m;
-
-                    return sprintf(
-                        '%s/timeshift/%s/%s/%d/%s/%s.%s',
-                        $base,
-                        $user,
-                        $pass,
-                        $offset,
-                        $stamp,
-                        $id,
-                        $ext
-                    );
-                }
-
-                // Upstream isn't itself an Xtream server, so there's no `/timeshift/` endpoint to
-                // rewrite to. Fall back to the provider's own catchup-source URL template, if one
-                // was captured on import (e.g. plain M3U catch-up providers like EPGenius).
-                if ($channel?->catchup_source && $startEpoch !== null) {
-                    return self::applyCatchupSourceTemplate($channel->catchup_source, $startEpoch, $startEpoch + ($offset * 60), $offset);
-                }
-
-                return $url; // fallback if pattern does not match and no catchup_source template available
-            };
-        }
-        /* ─────────────────────────────────────────────────────────────────── */
-
-        // ── Apply timeshift rewriting AFTER we know the provider timezone ──
-        if ($utcPresent && ! $xtreamTimeshiftPresent) {
-            // Convert the absolute UTC epoch from TiviMate to provider-local time string expected by timeshift.php
-            $stamp = Carbon::createFromTimestampUTC($utc)
-                ->setTimezone($providerTz)
-                ->format('Y-m-d:H-i');
-
-            $streamUrl = $rewrite($streamUrl, $stamp, $offset);
-
-            // Helpful debug for verification
-            Log::debug(sprintf(
-                '[TIMESHIFT-M3U] utc=%d lutc=%d tz=%s start=%s offset(min)=%d final_url=%s',
-                $utc,
-                $lutc,
-                $providerTz,
-                $stamp,
-                $offset,
-                $streamUrl
-            ));
-        } elseif ($xtreamTimeshiftPresent) {
             // Convert Xtream API date format to timeshift URL format
             // Input: YYYY-MM-DD:HH-MM-SS, Output: YYYY-MM-DD:HH-MM
             if (preg_match('/^(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})-(\d{2})$/', $date, $matches)) {
@@ -812,7 +742,13 @@ class PlaylistService
             $startEpoch = $startInstant->getTimestamp();
             $stamp = $startInstant->setTimezone($providerTz)->format('Y-m-d:H-i');
 
-            $streamUrl = $rewrite($streamUrl, $stamp, $duration);
+            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/timeshift/u/p/duration/stamp/<id>.<ext>"
+            if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.([^/]+)$~', $streamUrl, $m)) {
+                [$_, $base, $user, $pass, $id, $ext] = $m;
+                $streamUrl = sprintf('%s/timeshift/%s/%s/%d/%s/%s.%s', $base, $user, $pass, $duration, $stamp, $id, $ext);
+            } else {
+                $streamUrl = self::buildProviderCatchupUrl($channel, $streamUrl, $startEpoch, $duration * 60, now()->getTimestamp(), $providerTz) ?? $streamUrl;
+            }
 
             // Helpful debug for verification
             Log::debug(sprintf(
@@ -822,30 +758,212 @@ class PlaylistService
                 $stamp,
                 $streamUrl
             ));
+        } else {
+            /* ── Timeshift SETUP (TiviMate → portal format) ───────────────────── */
+            $utc = (int) $request->query('utc'); // programme start (UTC epoch)
+            $lutc = (int) ($request->query('lutc') ?? time()); // “live” now (UTC epoch)
+
+            // duration (minutes) from start → now; ceil avoids off-by-one near edges
+            $offset = max(1, (int) ceil(max(0, $lutc - $utc) / 60));
+
+            // Convert the absolute UTC epoch from TiviMate to provider-local time string expected by timeshift.php
+            $stamp = Carbon::createFromTimestampUTC($utc)
+                ->setTimezone($providerTz)
+                ->format('Y-m-d:H-i');
+
+            // "…://host/live/u/p/<id>.<ext>" >>> "…://host/streaming/timeshift.php?username=u&password=p&stream=id&start=stamp&duration=offset"
+            if (preg_match('~^(https?://[^/]+)/live/([^/]+)/([^/]+)/([^/]+)\.[^/]+$~', $streamUrl, $m)) {
+                [$_, $base, $user, $pass, $id] = $m;
+                $streamUrl = sprintf(
+                    '%s/streaming/timeshift.php?username=%s&password=%s&stream=%s&start=%s&duration=%d',
+                    $base,
+                    $user,
+                    $pass,
+                    $id,
+                    $stamp,
+                    $offset
+                );
+            } else {
+                $streamUrl = self::buildProviderCatchupUrl($channel, $streamUrl, $utc, max(0, $lutc - $utc), $lutc, $providerTz) ?? $streamUrl;
+            }
+
+            // Helpful debug for verification
+            Log::debug(sprintf(
+                '[TIMESHIFT-M3U] utc=%d lutc=%d tz=%s start=%s offset(min)=%d final_url=%s',
+                $utc,
+                $lutc,
+                $providerTz,
+                $stamp,
+                $offset,
+                $streamUrl
+            ));
         }
 
         return $streamUrl;
     }
 
     /**
-     * Fill a provider's catchup-source URL template with the requested timeshift window.
-     *
-     * Providers advertise their own catchup URL grammar via the M3U `catchup-source` attribute,
-     * using placeholder tokens in either `{token}` or `${token}` form (both are seen in the wild).
+     * Build the catchup URL for an upstream that isn't itself an Xtream server, so has no
+     * `/live/` URL to rewrite (e.g. plain M3U catch-up providers like EPGenius). Follows the
+     * channel's own `catchup` mode and `catchup-source` template captured on import, the way
+     * Kodi IPTV Simple does. Returns null when the channel has no usable catchup source.
      */
-    private static function applyCatchupSourceTemplate(string $template, int $startEpoch, int $endEpoch, int $durationMinutes): string
+    private static function buildProviderCatchupUrl(?Channel $channel, string $streamUrl, int $startEpoch, int $durationSeconds, int $nowEpoch, string $timezone): ?string
     {
-        $tokens = [
-            'start' => $startEpoch,
+        $template = $channel ? self::resolveCatchupSourceTemplate($channel, $streamUrl) : null;
+
+        return $template === null
+            ? null
+            : self::applyCatchupSourceTemplate($template, $startEpoch, $durationSeconds, $nowEpoch, $timezone);
+    }
+
+    /**
+     * Resolve the catchup URL template for a channel from its `catchup` mode:
+     * - default (or unrecognised): the `catchup-source` is the whole URL
+     * - append: the `catchup-source` is appended to the stream URL
+     * - shift/timeshift: the SIPTV `utc={utc}&lutc={lutc}` query is appended to the stream URL
+     * - flussonic/flussonic-hls/flussonic-ts/fs: built from the Flussonic stream URL
+     * - xc: built from the Xtream Codes stream URL
+     *
+     * A relative `catchup-source` (`?utc=...`) is always appended and an absolute one always
+     * used as is, whatever the mode says, since neither is usable any other way.
+     */
+    private static function resolveCatchupSourceTemplate(Channel $channel, string $streamUrl): ?string
+    {
+        $mode = strtolower(trim((string) $channel->catchup));
+        $source = trim((string) $channel->catchup_source);
+        $isAbsoluteSource = preg_match('~^[a-z][a-z0-9+.-]*://~i', $source) === 1;
+
+        return match ($mode) {
+            'shift', 'timeshift' => $streamUrl.(str_contains($streamUrl, '?') ? '&' : '?').'utc={utc}&lutc={lutc}',
+            'flussonic', 'flussonic-hls', 'flussonic-ts', 'fs' => self::flussonicCatchupSource($streamUrl, in_array($mode, ['flussonic-ts', 'fs'], true)),
+            'xc' => self::xtreamCodesCatchupSource($streamUrl),
+            default => match (true) {
+                $source === '' => null,
+                $isAbsoluteSource => $source,
+                default => $streamUrl.$source,
+            },
+        };
+    }
+
+    /**
+     * Flussonic catchup template from a stream URL, e.g.
+     * `…/151/mpegts?token=t` >>> `…/151/timeshift_abs-${start}.ts?token=t`,
+     * `…/325/index.m3u8` >>> `…/325/timeshift_rel-{offset:1}.m3u8`,
+     * `…/325/mono.m3u8` >>> `…/325/mono-timeshift_rel-{offset:1}.m3u8`.
+     */
+    private static function flussonicCatchupSource(string $streamUrl, bool $isTsStream): ?string
+    {
+        if (preg_match('~^(https?://[^/]+)/(.*)/([^/]*)(mpegts|\.m3u8)(\?.+=.+)?$~', $streamUrl, $m)) {
+            [$host, $channelId, $listType, $streamType, $query] = [$m[1], $m[2], $m[3], $m[4], $m[5] ?? ''];
+
+            if ($streamType === 'mpegts') {
+                return "{$host}/{$channelId}/timeshift_abs-\${start}.ts{$query}";
+            }
+
+            return $listType === 'index'
+                ? "{$host}/{$channelId}/timeshift_rel-{offset:1}.m3u8{$query}"
+                : "{$host}/{$channelId}/{$listType}-timeshift_rel-{offset:1}.m3u8{$query}";
+        }
+
+        // Flussonic serves a stream under any name after the channel id
+        if (preg_match('~^(https?://[^/]+)/(.*)/([^?]*)(\?.+=.+)?$~', $streamUrl, $m)) {
+            [$host, $channelId, $query] = [$m[1], $m[2], $m[4] ?? ''];
+
+            return $isTsStream
+                ? "{$host}/{$channelId}/timeshift_abs-\${start}.ts{$query}"
+                : "{$host}/{$channelId}/timeshift_rel-{offset:1}.m3u8{$query}";
+        }
+
+        return null;
+    }
+
+    /**
+     * Xtream Codes catchup template from a stream URL, e.g.
+     * `…/live/u/p/1477.m3u8` (or `…/u/p/1477`) >>> `…/timeshift/u/p/{duration:60}/{Y}-{m}-{d}:{H}-{M}/1477.m3u8`.
+     */
+    private static function xtreamCodesCatchupSource(string $streamUrl): ?string
+    {
+        if (! preg_match('~^(https?://[^/]+)/(?:live/)?([^/]+)/([^/]+)/([^/.]+)(\.m3u8?)?$~', $streamUrl, $m)) {
+            return null;
+        }
+
+        $extension = ($m[5] ?? '') !== '' ? $m[5] : '.ts';
+
+        return "{$m[1]}/timeshift/{$m[2]}/{$m[3]}/{duration:60}/{Y}-{m}-{d}:{H}-{M}/{$m[4]}{$extension}";
+    }
+
+    /**
+     * Fill a catchup URL template with the requested timeshift window, using the Kodi IPTV
+     * Simple format specifiers (https://github.com/kodi-pvr/pvr.iptvsimple#catchup-format-specifiers):
+     * - `{utc}` / `${start}`: programme start, `{utcend}` / `${end}`: start + duration,
+     *   `{lutc}` / `${now}` / `${timestamp}`: now (all UNIX epochs)
+     * - `{Y}` `{m}` `{d}` `{H}` `{M}` `{S}`: programme start parts, in the provider timezone
+     * - `{utc:Y-m-d}`-style formats of any of the above timestamps
+     * - `{duration}` / `${duration}`: duration in seconds, `${offset}`: seconds from start to now
+     * - `{duration:X}` / `{offset:X}`: the same divided by X (e.g. `{duration:60}` for minutes)
+     *
+     * Bare `{start}`, `{end}`, `{now}`, `{timestamp}` and `{offset}` are also accepted.
+     */
+    private static function applyCatchupSourceTemplate(string $template, int $startEpoch, int $durationSeconds, int $nowEpoch, string $timezone): string
+    {
+        $endEpoch = $startEpoch + $durationSeconds;
+        $offsetSeconds = max(0, $nowEpoch - $startEpoch);
+
+        $timestamps = [
             'utc' => $startEpoch,
-            'timestamp' => $startEpoch,
+            'start' => $startEpoch,
+            'utcend' => $endEpoch,
             'end' => $endEpoch,
-            'offset' => $durationMinutes,
-            'duration' => $durationMinutes,
+            'lutc' => $nowEpoch,
+            'now' => $nowEpoch,
+            'timestamp' => $nowEpoch,
         ];
 
-        $replacements = [];
-        foreach ($tokens as $token => $value) {
+        $formatDate = static function (int $epoch, string $format) use ($timezone): string {
+            $date = Carbon::createFromTimestamp($epoch, $timezone);
+
+            return preg_replace_callback(
+                '/[YmdHMS]/',
+                static fn (array $m): string => $date->format(self::CATCHUP_DATE_SPECIFIERS[$m[0]]),
+                $format
+            );
+        };
+
+        // {Y}, {m}, ... (programme start)
+        $template = preg_replace_callback(
+            '/\{([YmdHMS])\}/',
+            static fn (array $m): string => $formatDate($startEpoch, $m[1]),
+            $template
+        );
+
+        // {utc:Y-m-d:H-M}, ${start:...}, {lutc:...}, ...
+        $template = preg_replace_callback(
+            '/\$?\{('.implode('|', array_keys($timestamps)).'):([^}]*)\}/',
+            static fn (array $m): string => $formatDate($timestamps[$m[1]], $m[2]),
+            $template
+        );
+
+        // {duration:60}, {offset:1}, ...
+        $template = preg_replace_callback(
+            '/\$?\{(duration|offset):(\d+)\}/',
+            static function (array $m) use ($durationSeconds, $offsetSeconds): string {
+                $divider = (int) $m[2];
+
+                return $divider > 0
+                    ? (string) intdiv($m[1] === 'duration' ? $durationSeconds : $offsetSeconds, $divider)
+                    : $m[0];
+            },
+            $template
+        );
+
+        $replacements = [
+            '{duration}' => $durationSeconds,
+            '${duration}' => $durationSeconds,
+            '{offset}' => $offsetSeconds,
+            '${offset}' => $offsetSeconds,
+        ];
+        foreach ($timestamps as $token => $value) {
             $replacements['{'.$token.'}'] = $value;
             $replacements['${'.$token.'}'] = $value;
         }

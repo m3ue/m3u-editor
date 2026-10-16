@@ -212,11 +212,11 @@ class PlaylistGenerateController extends Controller
                     }
                     $url = rtrim($url, '.');
 
-                    // The catchup-source URL always points at our own timeshift endpoint when the
-                    // proxy is enabled, regardless of whether the main URL above used the internal
-                    // Xtream format, so its extension must independently reflect the proxy's
-                    // configured output format rather than reusing $extension (which is only
-                    // proxy-aware inside the $useInternalXtreamFormat branch).
+                    // The catchup-source URL always points at our own endpoint when the proxy is
+                    // enabled, regardless of whether the main URL above used the internal Xtream
+                    // format, so its extension must independently reflect the proxy's configured
+                    // output format rather than reusing $extension (which is only proxy-aware
+                    // inside the $useInternalXtreamFormat branch).
                     $catchupExtension = ($channelProxyEnabled && ! $channel->is_vod)
                         ? self::resolveProxyOutputFormat($channelSourcePlaylist, $playlist)
                         : $extension;
@@ -227,27 +227,34 @@ class PlaylistGenerateController extends Controller
                     // Output the channel
                     $extInf = '#EXTINF:-1';
                     if (! $playlist->disable_catchup) {
-                        if ($channel->catchup) {
-                            $extInf .= " catchup=\"$channel->catchup\"";
-                        }
-
-                        // Determine the catchup-source to output.
                         // When the proxy is enabled, or when the channel URL is served via the
                         // internal Xtream format (default), we generate a catchup-source that
-                        // points to our own timeshift endpoint so catchup requests flow through
-                        // m3u-editor rather than going directly to the provider.
-                        // This also ensures catchup works for Xtream-imported channels that have
-                        // tv_archive=1 but no catchup_source URL template stored.
+                        // points to our own endpoint so catchup requests flow through m3u-editor
+                        // rather than going directly to the provider. This also ensures catchup
+                        // works for Xtream-imported channels that have tv_archive=1 but no
+                        // catchup_source URL template stored.
+                        // It uses the SIPTV utc/lutc query (programme start and now, as UNIX
+                        // epochs) on the live URL: the one catchup form Kodi, TiviMate and
+                        // IPTVnator all fill in the same way. The live endpoint turns it into the
+                        // provider's own catchup URL. As a complete URL, its mode is "default".
                         if (($channelProxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
                             $catchupExt = $catchupExtension ?: 'ts';
-                            $catchupSource = "{$baseUrl}/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.{$catchupExt}";
-                            $extInf .= " catchup-source=\"{$catchupSource}\"";
-                        } elseif ($channel->catchup_source) {
-                            $extInf .= " catchup-source=\"$channel->catchup_source\"";
+                            $catchupSource = "{$baseUrl}/live/{$username}/{$password}/{$channel->id}.{$catchupExt}?utc={utc}&lutc={lutc}";
+                            $extInf .= " catchup=\"default\" catchup-source=\"{$catchupSource}\"";
+                        } else {
+                            if ($channel->catchup) {
+                                $extInf .= " catchup=\"$channel->catchup\"";
+                            }
+                            if ($channel->catchup_source) {
+                                $extInf .= " catchup-source=\"$channel->catchup_source\"";
+                            }
                         }
 
+                        // The archive window: shift is stored in hours, while catchup-days and
+                        // the SIPTV timeshift attribute are both read as days by clients
                         if ($timeshift) {
-                            $extInf .= " timeshift=\"$timeshift\"";
+                            $catchupDays = (int) ceil($timeshift / 24);
+                            $extInf .= " catchup-days=\"$catchupDays\" timeshift=\"$catchupDays\"";
                         }
                     }
                     if ($stationId) {

@@ -191,6 +191,52 @@ it('uses failover channel URL when primary channel has no catchup support', func
         ->not->toContain('hd-stream');
 });
 
+it('uses the failover channel with catchup for utc catchup requests on the live route', function () {
+    // The M3U output's catchup-source is the live URL plus ?utc=&lutc=, so the live route has to
+    // pick the catchup failover the same way the /timeshift/ route does.
+    $primaryChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/hd-stream.ts',
+        'catchup' => null,
+    ]);
+
+    $failoverChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/sd-stream.ts',
+        'catchup' => '1',
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $primaryChannel->id,
+        'channel_failover_id' => $failoverChannel->id,
+        'sort' => 1,
+        'metadata' => '{}',
+    ]);
+
+    $liveUrl = route('xtream.stream.live.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'streamId' => $primaryChannel->id,
+        'format' => 'ts',
+    ]);
+
+    $response = $this->get($liveUrl.'?utc='.(time() - 1800).'&lutc='.time());
+
+    $response->assertRedirect();
+    expect($response->headers->get('Location'))
+        ->toContain('/streaming/timeshift.php')
+        ->toContain('stream=sd-stream')
+        ->not->toContain('hd-stream');
+
+    // A plain live request still plays the primary
+    expect($this->get($liveUrl)->headers->get('Location'))->toContain('hd-stream');
+});
+
 it('uses primary channel URL for timeshift when it has catchup support', function () {
     $primaryChannel = Channel::factory()->create([
         'playlist_id' => $this->playlist->id,
@@ -259,7 +305,8 @@ it('falls back to the channel catchup_source template when the upstream URL is n
     expect($result)
         ->toContain('https://provider.example/archive/464938')
         ->not->toContain('${start}')
-        ->toContain('offset=30');
+        // ${duration} is seconds (Kodi IPTV Simple), so a 30 minute window is 1800
+        ->toContain('offset=1800');
 });
 
 it('falls back to the channel catchup_source template when the upstream URL is not Xtream-shaped (TiviMate utc request)', function () {
@@ -284,7 +331,7 @@ it('falls back to the channel catchup_source template when the upstream URL is n
     expect($result)
         ->toContain('https://provider.example/archive/464938')
         ->toContain('utc='.$utc)
-        ->toContain('duration=30');
+        ->toContain('duration=1800');
 });
 
 it('still prefers the standard Xtream rewrite over catchup_source when the upstream URL matches the Xtream shape', function () {

@@ -172,7 +172,7 @@ it('uses the proxy output format for the catchup-source extension even when the 
     $username = urlencode($this->user->name);
     $password = urlencode($playlist->uuid);
     expect($response->streamedContent())
-        ->toContain("/timeshift/{$username}/{$password}/{duration}/{start}/{$channel->id}.m3u8");
+        ->toContain("/live/{$username}/{$password}/{$channel->id}.m3u8?utc={utc}&lutc={lutc}");
 });
 
 it('resolves the proxy output format for a PlaylistAlias via its wrapped playlist, not the alias own xtream_config list', function () {

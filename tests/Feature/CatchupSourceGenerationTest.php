@@ -35,14 +35,14 @@ it('points catchup source to internal timeshift when xtream format enabled', fun
     // Should contain catchup attribute
     $this->assertStringContainsString('catchup="default"', $content);
 
-    // Should generate an internal catchup-source pointing to /timeshift/ endpoint
+    // Should generate an internal catchup-source on the live endpoint
     $this->assertStringContainsString('catchup-source="', $content);
-    $this->assertStringContainsString('/timeshift/', $content);
+    $this->assertStringContainsString('/live/', $content);
     $this->assertStringContainsString("/{$channel->id}.", $content);
 
-    // Should use standard {duration} and {start} placeholders
-    $this->assertStringContainsString('{duration}', $content);
-    $this->assertStringContainsString('{start}', $content);
+    // Should use the SIPTV utc/lutc placeholders every client fills the same way
+    $this->assertStringContainsString('?utc={utc}&lutc={lutc}', $content);
+    $this->assertStringNotContainsString('{duration}', $content);
 
     // Should NOT contain the original provider URL in catchup-source
     $this->assertStringNotContainsString('provider.com', $content);
@@ -64,9 +64,11 @@ it('generates catchup source for xtream import channel with tv archive', functio
     $response->assertSuccessful();
     $content = $response->streamedContent();
 
-    // Should generate an internal catchup-source even without catchup_source in DB
+    // Should generate an internal catchup-source even without catchup_source in DB, and the
+    // standard "default" mode instead of the non-standard "1"
+    $this->assertStringContainsString('catchup="default"', $content);
     $this->assertStringContainsString('catchup-source="', $content);
-    $this->assertStringContainsString('/timeshift/', $content);
+    $this->assertStringContainsString('?utc={utc}&lutc={lutc}', $content);
 });
 
 it('does not output catchup source when disable catchup is true', function () {

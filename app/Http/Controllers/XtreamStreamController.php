@@ -249,6 +249,15 @@ class XtreamStreamController extends Controller
         }
 
         if ($channel instanceof Channel) {
+            // Catchup (utc/lutc) requests are served from a failover with catchup when this
+            // channel has none, the same as the /timeshift/ route.
+            $isTimeshiftRequest = PlaylistService::isTimeshiftRequest($request);
+            $streamChannel = $channel;
+            if ($isTimeshiftRequest) {
+                $request->attributes->set('requested_channel_id', $channel->id);
+                $streamChannel = $this->resolveCatchupChannel($channel);
+            }
+
             // When the channel's source playlist pools provider profiles, the proxy path
             // must be taken even if enable_proxy is off on both the channel and the
             // (possibly merged/custom) playlist being streamed through - profile
@@ -275,22 +284,16 @@ class XtreamStreamController extends Controller
                 $method = $request->input('player') === 'true' ? 'channelPlayer' : 'channel';
 
                 return app()->call([app(M3uProxyApiController::class), $method], [
-                    'id' => $streamId,
+                    'id' => $streamChannel->id,
                     'uuid' => $playlist->uuid,
                 ]);
             } else {
-                // Check if this is a timeshift request
-                // TiviMate sends utc/lutc as UNIX epochs (UTC). We only convert TZ + format.
-                $utcPresent = $request->filled('utc');
-
-                // Xtream API sends timeshift_duration (minutes) and timeshift_date (YYYY-MM-DD:HH-MM-SS)
-                $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
-
                 // Get the base stream URL
-                $streamUrl = PlaylistUrlService::getChannelUrl($channel, $playlist);
-                if ($utcPresent || $xtreamTimeshiftPresent) {
-                    // Timeshift stream request
-                    return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $channel));
+                $streamUrl = PlaylistUrlService::getChannelUrl($streamChannel, $playlist);
+                if ($isTimeshiftRequest) {
+                    // Timeshift stream request: TiviMate/M3U utc+lutc (UNIX epochs), or Xtream
+                    // timeshift_duration (minutes) + timeshift_date (YYYY-MM-DD:HH-MM-SS)
+                    return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $streamChannel));
                 }
 
                 // Regular live stream request, redirect to the stream URL (via MediaFlow Proxy if enabled)
@@ -458,20 +461,7 @@ class XtreamStreamController extends Controller
         // channel it asked for (see M3uProxyService::getChannelUrl's requested_channel_id).
         $request->attributes->set('requested_channel_id', $channel->id);
 
-        // If the primary channel doesn't support catchup, defer to the first failover that does.
-        // This allows an HD primary (no catchup) to fall back to a lower-res failover for timeshift.
-        $timeshiftChannel = $channel;
-        if (! $channel->catchup || $channel->catchup == 0) {
-            $failoverWithCatchup = $channel->failoverChannels()
-                ->whereNotNull('catchup')
-                ->where('catchup', '!=', '0')
-                ->where('catchup', '!=', '')
-                ->first();
-
-            if ($failoverWithCatchup) {
-                $timeshiftChannel = $failoverWithCatchup;
-            }
-        }
+        $timeshiftChannel = $this->resolveCatchupChannel($channel);
 
         // Convert Unix timestamp to Xtream format if the player sends a numeric date string
         if (ctype_digit($date)) {
@@ -503,6 +493,24 @@ class XtreamStreamController extends Controller
 
             return $this->timeshiftRedirect(PlaylistService::generateTimeshiftUrl($request, $streamUrl, $playlist, $timeshiftChannel));
         }
+    }
+
+    /**
+     * The channel to serve catchup from: the requested one, or when it doesn't support catchup,
+     * its first failover that does. This allows an HD primary (no catchup) to fall back to a
+     * lower-res failover for timeshift.
+     */
+    private function resolveCatchupChannel(Channel $channel): Channel
+    {
+        if ($channel->catchup && $channel->catchup != 0) {
+            return $channel;
+        }
+
+        return $channel->failoverChannels()
+            ->whereNotNull('catchup')
+            ->where('catchup', '!=', '0')
+            ->where('catchup', '!=', '')
+            ->first() ?? $channel;
     }
 
     /**
