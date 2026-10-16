@@ -436,6 +436,7 @@ it('backfills the US certification once for a VOD title enriched before it exist
             'release_dates' => ['results' => [
                 ['iso_3166_1' => 'US', 'release_dates' => [['certification' => 'R', 'type' => 3]]],
             ]],
+            'keywords' => ['keywords' => [['id' => 1, 'name' => 'Dystopia']]],
         ], 200),
     ]);
 
@@ -463,7 +464,8 @@ it('backfills the US certification once for a VOD title enriched before it exist
         ->assertOk()
         ->assertJsonPath('info.mpaa_rating', 'R');
 
-    expect($channel->refresh()->info['tmdb_certification'])->toBe('R');
+    expect($channel->refresh()->info['tmdb_certification'])->toBe('R')
+        ->and($channel->info['tmdb_keywords'])->toBe(['dystopia']);
 
     $tmdbCalls = 0;
     Http::fake(function () use (&$tmdbCalls) {
@@ -507,7 +509,8 @@ it('backfills the rating and networks once for a series enriched before they exi
     $metadata = $series->refresh()->metadata;
     expect($metadata)->toHaveKey('content_rating')
         ->and($metadata['content_rating'])->toBeNull()
-        ->and($metadata['networks'])->toBe([]);
+        ->and($metadata['networks'])->toBe([])
+        ->and($metadata['tmdb_keywords'])->toBe([]);
 
     // A series TMDB has no rating or networks for must not be re-fetched on every view.
     $tmdbCalls = 0;

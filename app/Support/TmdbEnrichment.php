@@ -18,7 +18,7 @@ class TmdbEnrichment
      * mirrored to tmdb_certification instead, and series use content_rating.
      * Media server syncs also write studios/networks (like cast_list/clearlogo).
      */
-    public const PROVIDER_ABSENT_KEYS = ['cast_list', 'clearlogo', 'related_tmdb', 'content_rating', 'networks', 'tmdb_certification', 'studios'];
+    public const PROVIDER_ABSENT_KEYS = ['cast_list', 'clearlogo', 'related_tmdb', 'content_rating', 'networks', 'tmdb_certification', 'studios', 'tmdb_keywords'];
 
     /**
      * VOD `info` keys TMDB enrichment overwrites with its own value (as opposed to

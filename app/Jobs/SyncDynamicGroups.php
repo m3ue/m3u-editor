@@ -11,6 +11,7 @@ use App\Models\Series;
 use App\Services\CachedContentDispatchService;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
+use App\Support\DynamicGroupThemes;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -145,12 +146,20 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
         // remove stale rows whose rule no longer exists.
         $validKeys = [];
 
-        if ($tmdb->isConfigured() && $rules->isNotEmpty()) {
+        // TMDB-backed sources need a configured API key; theme sources match the
+        // local library only and run even when TMDB is unset (see the per-rule skip).
+        if ($rules->isNotEmpty()) {
             foreach ($rules as $index => $rule) {
                 ['type' => $type, 'source' => $source, 'name' => $name] = DynamicGroup::ruleIdentity($rule);
                 $params = (array) ($rule['tmdb_params'] ?? []);
 
                 if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
+                    continue;
+                }
+
+                // TMDB-backed rule with no API key: skipped, so - as before theme
+                // sources existed - the cleanup pass below drops its row.
+                if ($source !== 'theme' && ! $tmdb->isConfigured()) {
                     continue;
                 }
 
@@ -199,20 +208,23 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
      *
      * Returns:
      *  - null when the rule is invalid (no usable type/source/name), or when
-     *    TMDB returned no ids AND no pre-existing DynamicGroup row for this
-     *    (playlist, type, source, name) tuple. The latter matches the
-     *    existing batch-job behavior: a rule with empty TMDB results is a
-     *    no-op for new rules (the next sync will retry once TMDB is healthy)
-     *    but is also a no-op for existing rules (keeps the Xtream category id
-     *    stable).
+     *    the source is TMDB-backed and TMDB returned no ids AND no
+     *    pre-existing DynamicGroup row for this (playlist, type, source,
+     *    name) tuple. The latter matches the existing batch-job behavior: a
+     *    TMDB rule with empty results is a no-op for new rules (the next sync
+     *    will retry once TMDB is healthy) but is also a no-op for existing
+     *    rules (keeps the Xtream category id stable). Theme sources never
+     *    return early on empty results — empty membership is a real signal,
+     *    so the row is created/updated and `syncMembership()` runs with []
+     *    to clear any prior membership.
      *  - the DynamicGroup row otherwise. `last_synced_at` is set, sort_order
-     *    is recorded, and membership is rewritten from the current TMDB
-     *    snapshot.
+     *    is recorded, and membership is rewritten from the current snapshot.
      *
      * A disabled rule keeps its row (so it stays listed and editable, and its
      * Xtream category id survives being re-enabled) but skips TMDB and has
      * its membership cleared. Xtream output, the Emby picker and auto-cache
-     * already ignore disabled groups.
+     * already ignore disabled groups. A theme rule is also disabled this way
+     * while outside its seasonal window.
      *
      * With `$refreshMembership` false (a rule saved from a form), the row is
      * updated from the rule without calling TMDB: a new group starts empty
@@ -232,6 +244,16 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
     ): ?DynamicGroup {
         if (! in_array($type, ['vod', 'series'], true) || $source === '' || $name === '') {
             return null;
+        }
+
+        // Out of season a theme rule is treated like a disabled one: the row
+        // is kept (stable Xtream category id) and its membership is cleared.
+        if ($source === 'theme') {
+            $enabled = $enabled && DynamicGroupThemes::isWithinWindow(
+                is_string($params['active_from'] ?? null) ? $params['active_from'] : null,
+                is_string($params['active_until'] ?? null) ? $params['active_until'] : null,
+                now(),
+            );
         }
 
         $identity = [
@@ -257,6 +279,10 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
             return $group;
         }
 
+        if ($source === 'theme') {
+            return $this->materializeThemeRule($playlist, $type, $identity, $attributes, $params);
+        }
+
         $tmdbIds = $this->collectTmdbIds($tmdb, $type, $source, $params);
         $existingForTriple = DynamicGroup::where($identity)->first();
 
@@ -277,16 +303,74 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
         $group = DynamicGroup::updateOrCreate($identity, [...$attributes, 'last_synced_at' => now()]);
 
-        $this->syncMembership($group, $type, $playlist->id, $tmdbIds, $this->syncRunId);
+        // TMDB returns ids best-first; keep each id's first rank so members
+        // list in TMDB order (trending rank, popularity, ...).
+        $rankByTmdbId = [];
+        foreach ($tmdbIds as $rank => $tmdbId) {
+            $rankByTmdbId[$tmdbId] ??= $rank;
+        }
 
-        // Rules that cache their members queue the downloads in their own
-        // job so a large series group can't hold up this pipeline phase.
+        $tmdbIdByItemId = DynamicGroup::itemsMatchingTmdbIds($type, $playlist->id, $tmdbIds)
+            ->pluck('tmdb_id', 'id')
+            ->all();
+        $itemIds = array_map('intval', array_keys($tmdbIdByItemId));
+
+        $positionByItemId = [];
+        foreach ($itemIds as $itemId) {
+            $positionByItemId[$itemId] = $rankByTmdbId[(string) $tmdbIdByItemId[$itemId]] ?? 0;
+        }
+
+        $this->syncMembership($group, $type, $itemIds, $this->syncRunId, $positionByItemId);
+
+        $this->queueCacheDownloads($group, $playlist);
+
+        return $group;
+    }
+
+    /**
+     * Materialize a single in-season, enabled theme rule. Membership is computed
+     * locally via DynamicGroup::itemsMatchingTheme(), so no TMDB call is made.
+     * The seasonal window is applied by materializeRule() before this runs.
+     *
+     * @param  array<string, mixed>  $identity
+     * @param  array<string, mixed>  $attributes
+     * @param  array<string, mixed>  $params
+     */
+    private function materializeThemeRule(
+        Playlist $playlist,
+        string $type,
+        array $identity,
+        array $attributes,
+        array $params,
+    ): DynamicGroup {
+        $lists = DynamicGroupThemes::resolveLists($params);
+
+        $itemIds = DynamicGroup::itemsMatchingTheme($type, $playlist->id, $lists['keywords'], $lists['terms'])
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
+        $group = DynamicGroup::updateOrCreate($identity, [...$attributes, 'last_synced_at' => now()]);
+
+        // An empty local match is a real result (unlike an empty TMDB response),
+        // so membership is always rewritten, clearing members that no longer match.
+        $this->syncMembership($group, $type, $itemIds, $this->syncRunId);
+
+        $this->queueCacheDownloads($group, $playlist);
+
+        return $group;
+    }
+
+    /**
+     * Rules that cache their members queue the downloads in their own job so
+     * a large series group can't hold up this pipeline phase.
+     */
+    private function queueCacheDownloads(DynamicGroup $group, Playlist $playlist): void
+    {
         $group->setRelation('playlist', $playlist);
         if (($group->cacheSettings()['enabled'] ?? false) && app(CachedContentDispatchService::class)->isEnabled()) {
             dispatch(new QueueDynamicGroupCacheDownloads($group->id));
         }
-
-        return $group;
     }
 
     /**
@@ -317,22 +401,13 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
      * runs, and the cron path runs multiple times per day so its snapshots
      * would dominate storage with low signal.
      *
-     * @param  array<int, string>  $tmdbIds
+     * @param  array<int, int>  $itemIds
+     * @param  array<int, int>  $positionByItemId  TMDB-rank position per item id; items
+     *                                             without a rank (theme rules) default to 0.
      */
-    private function syncMembership(DynamicGroup $group, string $type, int $playlistId, array $tmdbIds, ?int $syncRunId = null): void
+    private function syncMembership(DynamicGroup $group, string $type, array $itemIds, ?int $syncRunId = null, array $positionByItemId = []): void
     {
         $morphClass = $type === 'vod' ? Channel::class : Series::class;
-        // TMDB returns ids best-first; keep each id's first rank so members
-        // list in TMDB order (trending rank, popularity, ...).
-        $rankByTmdbId = [];
-        foreach ($tmdbIds as $rank => $tmdbId) {
-            $rankByTmdbId[$tmdbId] ??= $rank;
-        }
-
-        $tmdbIdByItemId = DynamicGroup::itemsMatchingTmdbIds($type, $playlistId, $tmdbIds)
-            ->pluck('tmdb_id', 'id')
-            ->all();
-        $itemIds = array_map('intval', array_keys($tmdbIdByItemId));
 
         // Remove stale membership — anything not in the freshly-computed set.
         DB::table('dynamic_group_items')
@@ -364,7 +439,7 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
                     'dynamic_group_id' => $group->id,
                     'item_type' => $morphClass,
                     'item_id' => $id,
-                    'position' => $rankByTmdbId[(string) $tmdbIdByItemId[$id]] ?? 0,
+                    'position' => $positionByItemId[$id] ?? 0,
                 ], $chunk),
                 ['dynamic_group_id', 'item_type', 'item_id'],
                 ['position'],

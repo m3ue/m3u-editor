@@ -83,6 +83,7 @@ class DynamicGroupResource extends Resource
             'upcoming' => __('Coming Soon'),
             'top_genre' => __('Top Genre'),
             'provider' => __('By Streaming Service'),
+            'theme' => __('Holiday / Theme'),
         ];
         $series = [
             'trending' => __('Trending'),
@@ -90,6 +91,7 @@ class DynamicGroupResource extends Resource
             'top_genre' => __('Top Genre'),
             'tmdb_network' => __('By TV Network'),
             'provider' => __('By Streaming Service'),
+            'theme' => __('Holiday / Theme'),
         ];
 
         return $type === 'series' ? $series : $vod;

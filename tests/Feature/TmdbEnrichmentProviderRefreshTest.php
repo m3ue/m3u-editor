@@ -24,6 +24,7 @@ function tmdbEnrichmentFixture(): array
         ],
         'clearlogo' => 'https://image.tmdb.org/t/p/original/logo.png',
         'related_tmdb' => [['tmdb_id' => 604, 'type' => 'movie']],
+        'tmdb_keywords' => ['christmas', 'heist'],
     ];
 }
 
@@ -70,7 +71,8 @@ it('keeps TMDB enrichment on a VOD channel when the provider metadata is refresh
         ->and($info['cover_big'])->toBe('http://xtream.test/cover.jpg')
         ->and($info['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list'])
         ->and($info['clearlogo'])->toBe(tmdbEnrichmentFixture()['clearlogo'])
-        ->and($info['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb']);
+        ->and($info['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb'])
+        ->and($info['tmdb_keywords'])->toBe(tmdbEnrichmentFixture()['tmdb_keywords']);
 });
 
 it('lets provider-sent values win over preserved TMDB enrichment keys', function () {
@@ -118,7 +120,8 @@ it('keeps TMDB enrichment on a series when the provider metadata is refreshed', 
     expect($metadata['plot'])->toBe('Provider plot')
         ->and($metadata['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list'])
         ->and($metadata['clearlogo'])->toBe(tmdbEnrichmentFixture()['clearlogo'])
-        ->and($metadata['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb']);
+        ->and($metadata['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb'])
+        ->and($metadata['tmdb_keywords'])->toBe(tmdbEnrichmentFixture()['tmdb_keywords']);
 });
 
 it('keeps the TMDB series rating and networks when the provider metadata is refreshed', function () {
@@ -158,13 +161,14 @@ it('keeps null TMDB sentinels on a VOD channel through a provider refresh and se
             'tmdb_certification' => 'R',
             'studios' => [['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]],
             'related_tmdb' => [],
+            'tmdb_keywords' => ['christmas'],
         ],
     ]);
     $unrated = Channel::factory()->for($playlist)->for($this->user)->create([
         'is_vod' => true,
         'source_id' => 'vod-2',
         'last_metadata_fetch' => now(),
-        'info' => ['tmdb_certification' => null, 'studios' => [], 'related_tmdb' => []],
+        'info' => ['tmdb_certification' => null, 'studios' => [], 'related_tmdb' => [], 'tmdb_keywords' => []],
     ]);
 
     $channel->fetchMetadata(providerVodInfoXtream(), refresh: true, skipTmdb: true);
@@ -174,7 +178,8 @@ it('keeps null TMDB sentinels on a VOD channel through a provider refresh and se
     expect($channel->refresh()->info['mpaa_rating'])->toBe('')
         ->and($channel->info['tmdb_certification'])->toBe('R')
         ->and($channel->info['studios'])->toEqual([['id' => 79, 'name' => 'Village Roadshow Pictures', 'logo' => null]])
-        ->and($unrated->refresh()->info)->toHaveKeys(['tmdb_certification', 'studios']);
+        ->and($channel->info['tmdb_keywords'])->toBe(['christmas'])
+        ->and($unrated->refresh()->info)->toHaveKeys(['tmdb_certification', 'studios', 'tmdb_keywords']);
 });
 
 it('keeps null/empty TMDB series sentinels through a provider refresh', function () {
@@ -182,7 +187,7 @@ it('keeps null/empty TMDB series sentinels through a provider refresh', function
     $series = Series::factory()->for($playlist)->for($this->user)->create([
         'source_series_id' => '999',
         'is_custom' => false,
-        'metadata' => ['plot' => 'Old plot', 'content_rating' => null, 'networks' => [], 'related_tmdb' => []],
+        'metadata' => ['plot' => 'Old plot', 'content_rating' => null, 'networks' => [], 'related_tmdb' => [], 'tmdb_keywords' => []],
     ]);
 
     Http::preventStrayRequests();
@@ -197,7 +202,8 @@ it('keeps null/empty TMDB series sentinels through a provider refresh', function
     expect($series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false))->toBeTrue();
 
     expect($series->refresh()->metadata)->toHaveKey('content_rating')
-        ->toHaveKey('networks');
+        ->toHaveKey('networks')
+        ->toHaveKey('tmdb_keywords');
 });
 
 it('returns cast_list and clearlogo from get_vod_info when auto_fetch_vod_metadata is off', function () {
