@@ -59,6 +59,60 @@ it('merges stations from every selected lineup and keeps shared stations once', 
     expect($epg->fresh()->sd_station_ids)->toBe(['1', '2', '3']);
 });
 
+it('sends the documented method, path, headers and JSON body on every request of a full sync', function () {
+    $epg = ($this->makeEpg)(['USA-A'], ['sd_token' => null, 'sd_token_expires_at' => null]);
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'fresh-token', 'tokenExpires' => now()->addDay()->timestamp]),
+        'json.schedulesdirect.org/20141201/lineups/USA-A' => Http::response(sdLineupResponse(['1', '2'])),
+        'json.schedulesdirect.org/20141201/schedules' => Http::response([
+            ['stationID' => '1', 'programs' => [['programID' => 'EP0000000001', 'airDateTime' => now()->toIso8601ZuluString(), 'duration' => 1800]]],
+            ['stationID' => '2', 'programs' => [['programID' => 'EP0000000002', 'airDateTime' => now()->toIso8601ZuluString(), 'duration' => 1800]]],
+        ]),
+        'json.schedulesdirect.org/20141201/programs' => fn (Request $request) => Http::response(array_map(
+            fn (string $programId) => ['programID' => $programId, 'titles' => [['title120' => "Synthetic {$programId}"]]],
+            $request->data(),
+        )),
+    ]);
+
+    app(SchedulesDirectService::class)->syncEpgData($epg);
+
+    $isJsonPost = fn (Request $request, string $path) => $request->method() === 'POST'
+        && $request->url() === "https://json.schedulesdirect.org/20141201{$path}"
+        && $request->isJson()
+        && str_starts_with($request->header('User-Agent')[0] ?? '', 'm3u-editor/');
+
+    // SD expects the SHA1 hex digest of the password, never the plain text
+    Http::assertSent(fn (Request $request) => $isJsonPost($request, '/token')
+        && $request->data() === ['username' => 'test@example.com', 'password' => sha1('password')]
+        && ! $request->hasHeader('token'));
+
+    Http::assertSent(fn (Request $request) => $request->method() === 'GET'
+        && $request->url() === 'https://json.schedulesdirect.org/20141201/lineups/USA-A'
+        && $request->header('token') === ['fresh-token']);
+
+    Http::assertSent(fn (Request $request) => $isJsonPost($request, '/schedules')
+        && $request->header('token') === ['fresh-token']
+        && $request->data() === [
+            ['stationID' => '1', 'date' => [now()->format('Y-m-d')]],
+            ['stationID' => '2', 'date' => [now()->format('Y-m-d')]],
+        ]);
+
+    // Programs are requested as a bare JSON list of IDs, one request per schedule sub-chunk
+    foreach (['EP0000000001', 'EP0000000002'] as $programId) {
+        Http::assertSent(fn (Request $request) => $isJsonPost($request, '/programs')
+            && $request->header('token') === ['fresh-token']
+            && $request->data() === [$programId]);
+    }
+    Http::assertSentCount(5);
+
+    expect(Storage::disk('local')->get($epg->file_path))
+        ->toContain('<programme channel="1"')
+        ->toContain('<programme channel="2"')
+        ->toContain('Synthetic EP0000000001')
+        ->toContain('Synthetic EP0000000002');
+});
+
 it('keeps the existing EPG when a lineup response is unusable', function (mixed $response) {
     $epg = ($this->makeEpg)(['USA-BAD'], ['sd_station_ids' => ['old']]);
     Storage::disk('local')->put($epg->file_path, 'existing XMLTV data');
@@ -127,7 +181,9 @@ it('adds a selected lineup to the account when it is not subscribed yet', functi
 
     app(SchedulesDirectService::class)->syncEpgData($epg);
 
-    Http::assertSent(fn (Request $request) => $request->method() === 'PUT' && str_ends_with($request->url(), '/lineups/USA-NEW'));
+    Http::assertSent(fn (Request $request) => $request->method() === 'PUT'
+        && $request->url() === 'https://json.schedulesdirect.org/20141201/lineups/USA-NEW'
+        && $request->header('token') === ['valid-token']);
     expect($epg->fresh()->sd_station_ids)->toBe(['10']);
 });
 

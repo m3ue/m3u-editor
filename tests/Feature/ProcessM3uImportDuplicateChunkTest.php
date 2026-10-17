@@ -77,3 +77,58 @@ it('keeps duplicate-title channels that span 50-item chunk boundaries', function
             'http://example.test/stream/80',
         ]);
 });
+
+it('keeps every channel row and source id stable when a multi-chunk playlist is reimported', function () {
+    $user = User::factory()->create();
+
+    // 120 channels across two groups, with "Dup" titles in every 50-item chunk
+    $writePlaylist = function (array $urlOverrides = [], int $count = 120) {
+        $lines = ['#EXTM3U'];
+        foreach (range(1, $count) as $i) {
+            $title = $i % 40 === 0 ? 'Dup' : "Channel {$i}";
+            $group = $i <= 60 ? 'News' : 'Sports';
+            $lines[] = "#EXTINF:-1 tvg-id=\"ch-{$i}\" tvg-name=\"{$title}\" group-title=\"{$group}\",{$title}";
+            $lines[] = $urlOverrides[$i] ?? "http://example.test/stream/{$i}";
+        }
+        file_put_contents($this->tempM3uPath, implode("\n", $lines));
+    };
+
+    $this->tempM3uPath = sys_get_temp_dir().'/playlist_reimport_chunks_'.uniqid().'.m3u';
+    $writePlaylist();
+
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($user)->create([
+        'url' => $this->tempM3uPath,
+        'xtream' => false,
+        'import_prefs' => [],
+        'auto_sort' => false,
+    ]));
+
+    $runImport = function (bool $isNew) use ($playlist) {
+        Bus::fake();
+        Job::query()->delete();
+        (new ProcessM3uImport($playlist->fresh(), force: true, isNew: $isNew))->handle();
+        (new ProcessM3uImportChunk(Job::pluck('id')->all(), batchCount: 1))->handle();
+    };
+
+    $runImport(isNew: true);
+
+    $firstImport = $playlist->channels()->pluck('source_id', 'id')->all();
+    expect($firstImport)->toHaveCount(120)
+        ->and(array_unique($firstImport))->toHaveCount(120)
+        ->and($playlist->groups()->count())->toBe(2);
+    $movedChannelId = $playlist->channels()->where('url', 'http://example.test/stream/80')->value('id');
+
+    // Reimport with one changed stream URL and one new channel appended
+    $writePlaylist(urlOverrides: [80 => 'http://example.test/stream/80-moved'], count: 121);
+    $runImport(isNew: false);
+
+    $secondImport = $playlist->channels()->pluck('source_id', 'id')->all();
+    $added = array_diff_key($secondImport, $firstImport);
+
+    expect($secondImport)->toHaveCount(121)
+        ->and(array_intersect_key($secondImport, $firstImport))->toEqual($firstImport)
+        ->and($added)->toHaveCount(1)
+        ->and($playlist->channels()->whereKey(array_keys($added))->value('title'))->toBe('Channel 121')
+        ->and($playlist->channels()->find($movedChannelId)->url)->toBe('http://example.test/stream/80-moved')
+        ->and($playlist->groups()->count())->toBe(2);
+});
