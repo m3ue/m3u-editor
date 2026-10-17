@@ -396,6 +396,29 @@ class ManageProxySettings extends BaseSettingsPage
                                     }),
                             ]),
 
+                        Toggle::make('silent_close_retry_enabled')
+                            ->label(__('Retry the same stream before failing over'))
+                            ->columnSpanFull()
+                            ->live()
+                            ->default(true)
+                            ->hintIcon(
+                                'heroicon-m-question-mark-circle',
+                                tooltip: __('Providers often drop a live connection while the channel itself is fine. Reconnecting to the same stream avoids switching to a different failover feed mid-playback, which can make players freeze or reconnect. If the stream drops again within the retry window, or the retry delivers no data, the proxy fails over as normal.')
+                            )
+                            ->helperText(__('When a provider closes a healthy live stream, reconnect to it once before using a failover. Requires a recent m3u-proxy version.')),
+
+                        TextInput::make('silent_close_retry_window')
+                            ->label(__('Retry window (seconds)'))
+                            ->columnSpanFull()
+                            ->numeric()
+                            ->integer()
+                            ->default(60)
+                            ->minValue(1)
+                            ->step(1)
+                            ->suffix('s')
+                            ->hidden(fn (Get $get) => ! (bool) $get('silent_close_retry_enabled'))
+                            ->helperText(__('If the stream drops again within this many seconds of a retry, fail over instead of retrying. Default: 60 seconds.')),
+
                         Toggle::make('enable_silence_detection')
                             ->label(__('Enable silence detection'))
                             ->columnSpanFull()
