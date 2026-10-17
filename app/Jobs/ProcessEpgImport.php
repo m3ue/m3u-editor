@@ -414,6 +414,41 @@ class ProcessEpgImport implements ShouldQueue
                 // Close the XMLReaders, all done!
                 $channelReader->close();
 
+                // Parse errors are suppressed above, so an HTML error page or other non-XMLTV
+                // body reads as zero channels. Completing that import would delete every
+                // existing EPG channel and its mappings, so fail and keep the current data.
+                if ($channelCount === 0 && $epg->channels()->exists()) {
+                    $error = 'No channels found in the EPG file. The source may have returned an error page instead of XMLTV guide data. The existing EPG data was kept.';
+                    logger()->error("Error processing \"{$this->epg->name}\": {$error}");
+
+                    Notification::make()
+                        ->danger()
+                        ->title("Error processing \"{$this->epg->name}\"")
+                        ->body('Please view your notifications for details.')
+                        ->broadcast($this->epg->user);
+                    Notification::make()
+                        ->danger()
+                        ->title("Error processing \"{$this->epg->name}\"")
+                        ->body($error)
+                        ->sendToDatabase($this->epg->user);
+
+                    $this->epg->update([
+                        'status' => Status::Failed,
+                        'synced' => now(),
+                        'errors' => $error,
+                        'progress' => 100,
+                        'processing' => false,
+                        'processing_started_at' => null,
+                        'processing_phase' => null,
+                    ]);
+
+                    event(new SyncCompleted($this->epg));
+
+                    static::scheduleResyncIfNeeded($this->epg);
+
+                    return;
+                }
+
                 // Update progress
                 $epg->update([
                     'progress' => 15,

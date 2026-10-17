@@ -140,11 +140,39 @@ it('fails and keeps the existing channels when the XMLTV download is truncated',
     Bus::assertNotDispatched(ProcessEpgImportComplete::class);
 });
 
-it('keeps the existing channels when the source returns an HTML error page instead of XMLTV', function () {
+it('fails and keeps the existing channels when the source returns an HTML error page instead of XMLTV', function () {
     $existing = EpgChannel::factory()->for($this->user)->for($this->epg)->create(['import_batch_no' => 'previous-batch']);
     file_put_contents($this->xmltvPath, '<html><body><h1>503 Service Unavailable</h1></body></html>');
 
     ($this->runImport)();
 
-    expect(EpgChannel::find($existing->id))->not->toBeNull();
+    $epg = $this->epg->fresh();
+    expect($epg->status)->toBe(Status::Failed)
+        ->and($epg->errors)->toContain('No channels found in the EPG file')
+        ->and($epg->processing)->toBeFalse()
+        ->and(EpgChannel::find($existing->id))->not->toBeNull();
+    Bus::assertNotDispatched(ProcessEpgImportComplete::class);
+});
+
+it('schedules a resync when an HTML error page replaces a previously imported EPG', function () {
+    EpgChannel::factory()->for($this->user)->for($this->epg)->create(['import_batch_no' => 'previous-batch']);
+    $this->epg->updateQuietly(['auto_resync_on_failure' => true, 'auto_resync_retries' => 3, 'resync_attempt' => 0]);
+    file_put_contents($this->xmltvPath, '<html><body><h1>503 Service Unavailable</h1></body></html>');
+
+    ($this->runImport)();
+
+    expect($this->epg->fresh()->resync_attempt)->toBe(1);
+    Bus::assertDispatched(ProcessEpgImport::class);
+});
+
+it('still completes an empty feed for an EPG that has no channels yet', function () {
+    file_put_contents($this->xmltvPath, '<?xml version="1.0"?><tv></tv>');
+
+    ($this->runImport)();
+
+    $epg = $this->epg->fresh();
+    expect($epg->errors)->toBeNull()
+        ->and($epg->channel_count)->toBe(0)
+        ->and($epg->synced)->not->toBeNull();
+    Bus::assertDispatched(ProcessEpgImportComplete::class);
 });
