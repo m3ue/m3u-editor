@@ -18,6 +18,8 @@ use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
     $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
@@ -175,4 +177,41 @@ it('still completes an empty feed for an EPG that has no channels yet', function
         ->and($epg->channel_count)->toBe(0)
         ->and($epg->synced)->not->toBeNull();
     Bus::assertDispatched(ProcessEpgImportComplete::class);
+});
+
+describe('URL download', function () {
+    beforeEach(function () {
+        Storage::fake('local');
+        Http::preventStrayRequests();
+        $this->epg->updateQuietly(['url' => 'http://epg.example.test/guide.xml']);
+        EpgChannel::factory()->for($this->user)->for($this->epg)->create(['import_batch_no' => 'previous-batch']);
+        Storage::disk('local')->put($this->epg->file_path, 'last good guide');
+    });
+
+    it('replaces the guide file once the new download parses as XMLTV', function () {
+        writeXmltv($this->xmltvPath, 3);
+        Http::fake(['epg.example.test/*' => Http::response(file_get_contents($this->xmltvPath))]);
+
+        ($this->runImport)();
+
+        expect(Storage::disk('local')->get($this->epg->file_path))->toBe(file_get_contents($this->xmltvPath))
+            ->and(Storage::disk('local')->exists("{$this->epg->file_path}.download"))->toBeFalse()
+            ->and($this->epg->fresh()->channels()->count())->toBe(3);
+    });
+
+    it('keeps the last good guide file when the download fails or is not XMLTV', function (Closure $response) {
+        Http::fake(['epg.example.test/*' => $response]);
+
+        ($this->runImport)();
+
+        $epg = $this->epg->fresh();
+        expect($epg->status)->toBe(Status::Failed)
+            ->and($epg->channels()->count())->toBe(1)
+            ->and(Storage::disk('local')->get($epg->file_path))->toBe('last good guide')
+            ->and(Storage::disk('local')->exists("{$epg->file_path}.download"))->toBeFalse();
+    })->with([
+        'HTML error page' => fn () => fn () => Http::response('<html><body><h1>Maintenance</h1></body></html>'),
+        'truncated download' => fn () => fn () => Http::response('<?xml version="1.0"?><tv><channel id="ch1.test"><display-na'),
+        'HTTP 503' => fn () => fn () => Http::response('<html><body>503</body></html>', 503),
+    ]);
 });

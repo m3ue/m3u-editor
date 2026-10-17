@@ -12,14 +12,11 @@ use App\Filament\Resources\Epgs\Pages\ListEpgs;
 use App\Models\Epg;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
-
-uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Bus::fake();
