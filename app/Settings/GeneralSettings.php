@@ -87,6 +87,11 @@ class GeneralSettings extends Settings
 
     public ?int $failover_fail_conditions_timeout = 5;
 
+    // Retry the same stream URL once before failing over when a provider drops a healthy live stream
+    public ?bool $silent_close_retry_enabled = true;
+
+    public ?int $silent_close_retry_window = 60;
+
     // Logo cache and placeholders
     public ?bool $logo_cache_permanent = false;
 

@@ -2765,6 +2765,9 @@ class M3uProxyService
                     $payload['silence_failover_threshold'] = $generalSettings->silence_failover_threshold ?? 3;
                     $payload['silence_monitoring_grace_period'] = $generalSettings->silence_monitoring_grace_period ?? 15.0;
                 }
+                $payload['silent_close_retry_window'] = $generalSettings->silent_close_retry_enabled
+                    ? max(0, (int) ($generalSettings->silent_close_retry_window ?? 60))
+                    : 0;
             } catch (Exception $e) {
             }
 
@@ -2926,6 +2929,9 @@ class M3uProxyService
                     $payload['silence_failover_threshold'] = $generalSettings->silence_failover_threshold ?? 3;
                     $payload['silence_monitoring_grace_period'] = $generalSettings->silence_monitoring_grace_period ?? 15.0;
                 }
+                $payload['silent_close_retry_window'] = $generalSettings->silent_close_retry_enabled
+                    ? max(0, (int) ($generalSettings->silent_close_retry_window ?? 60))
+                    : 0;
             } catch (Exception $e) {
             }
 
