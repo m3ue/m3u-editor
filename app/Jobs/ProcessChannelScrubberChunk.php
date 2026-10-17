@@ -19,6 +19,7 @@ use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process as SymfonyProcess;
 use Throwable;
@@ -108,7 +109,9 @@ class ProcessChannelScrubberChunk implements ShouldQueue
                 ChannelScrubberLogChannel::create([
                     'channel_scrubber_log_id' => $this->logId,
                     'channel_id' => $channel->id,
-                    'title' => $channel->title ?? $channel->name_custom ?? $channel->name ?? '',
+                    // channel_scrubber_log_channels.title is varchar(255); provider event titles can
+                    // be far longer, and a failed insert here also skipped marking the channel dead.
+                    'title' => Str::limit($channel->title ?? $channel->name_custom ?? $channel->name ?? '', 255, ''),
                     'url' => ($channel->url_custom ?? $channel->url) ?? '',
                 ]);
 

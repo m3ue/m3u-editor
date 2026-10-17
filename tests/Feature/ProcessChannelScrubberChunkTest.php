@@ -353,3 +353,34 @@ it('re-enables a disabled live failover channel when failover protection is disa
     expect($failover->last_scrubbed_at)->not->toBeNull();
     expect($this->log->fresh()->live_count)->toBe(1);
 });
+
+it('logs and marks a dead channel whose title is longer than the log column', function () {
+    // Provider event slots can carry 300+ character titles; the log title column is
+    // varchar(255), and a failed insert used to skip marking the channel as well.
+    $title = 'Example Event Channel | '.str_repeat('Long event description ', 14);
+    expect(strlen($title))->toBeGreaterThan(255);
+
+    $channel = ($this->channel)([
+        'group_id' => $this->group->id,
+        'enabled' => true,
+        'title' => $title,
+        'url' => null,
+        'url_custom' => null,
+        'stream_stats' => null,
+    ]);
+
+    ($this->handleChunk)(new ProcessChannelScrubberChunk(
+        channelIds: [$channel->id],
+        scrubberId: $this->scrubber->id,
+        logId: $this->log->id,
+        checkMethod: 'ffprobe',
+        batchNo: $this->scrubber->uuid,
+        totalChannels: 1,
+    ));
+
+    $logged = $this->log->deadChannels()->where('channel_id', $channel->id)->first();
+    expect($logged)->not->toBeNull()
+        ->and(mb_strlen($logged->title))->toBe(255)
+        ->and($logged->title)->toBe(mb_substr($title, 0, 255))
+        ->and($channel->fresh()->last_scrubbed_at)->not->toBeNull();
+});
