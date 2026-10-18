@@ -21,6 +21,16 @@ class TmdbEnrichment
     public const PROVIDER_ABSENT_KEYS = ['cast_list', 'clearlogo', 'related_tmdb', 'content_rating', 'networks', 'tmdb_certification', 'studios'];
 
     /**
+     * FetchTmdbIds bookkeeping markers (genre already compared with TMDB, episodes last
+     * looked up). Carried over a provider refresh like PROVIDER_ABSENT_KEYS, otherwise
+     * every refresh would bring back the repeat TMDB lookups they exist to stop - but
+     * kept out of that list, since they don't mean the row holds TMDB data (isEnriched()).
+     * tmdb_search_failed is deliberately not here: a refresh (e.g. a renamed title) is
+     * what earns a no-match title another search.
+     */
+    public const TMDB_MARKER_KEYS = ['tmdb_genre_checked', 'tmdb_episodes_checked_at'];
+
+    /**
      * VOD `info` keys TMDB enrichment overwrites with its own value (as opposed to
      * only filling when empty, like plot/cover_big), so on an enriched row the
      * persisted value is TMDB's. Kept over the provider's value when TMDB is preferred.
@@ -90,7 +100,7 @@ class TmdbEnrichment
             return $incoming;
         }
 
-        foreach (self::PROVIDER_ABSENT_KEYS as $key) {
+        foreach ([...self::PROVIDER_ABSENT_KEYS, ...self::TMDB_MARKER_KEYS] as $key) {
             if (array_key_exists($key, $existing) && ! array_key_exists($key, $incoming)) {
                 $incoming[$key] = $existing[$key];
             }

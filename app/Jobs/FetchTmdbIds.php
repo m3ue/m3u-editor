@@ -952,8 +952,8 @@ class FetchTmdbIds implements ShouldQueue
                 && empty($seriesMetadataArr['tmdb_genre_checked'])) {
                 // Fetch TMDB details to check if the current genre matches a TMDB genre
                 $details = $tmdb->getTvSeriesDetails((int) $existingTmdbId);
-                $freshMetadata = $series->fresh()?->metadata;
-                $genreMetadata = is_array($freshMetadata) ? $freshMetadata : [];
+                // Read after processSeriesEpisodes() above, which may have stamped tmdb_episodes_checked_at.
+                $genreMetadata = is_array($series->metadata) ? $series->metadata : [];
                 if ($details) {
                     $genreMetadata['tmdb_genre_checked'] = true;
                 }
@@ -1273,12 +1273,14 @@ class FetchTmdbIds implements ShouldQueue
                 'series_id' => $series->id,
                 'tmdb_id' => $tmdbId,
             ]);
-            $this->markSeriesEpisodesChecked($series);
 
             return;
         }
 
         $episodeCount = 0;
+        // A failed season fetch must not mark the series as checked, or it would be
+        // skipped until new episodes arrive or the weekly re-check comes round.
+        $allSeasonsFetched = true;
 
         foreach ($seasons as $season) {
             $seasonNumber = $season['season_number'] ?? 0;
@@ -1291,7 +1293,13 @@ class FetchTmdbIds implements ShouldQueue
             // Fetch detailed season data with episodes
             $seasonDetails = $tmdb->getSeasonDetails($tmdbId, $seasonNumber);
 
-            if (! $seasonDetails || empty($seasonDetails['episodes'])) {
+            if (! $seasonDetails) {
+                $allSeasonsFetched = false;
+
+                continue;
+            }
+
+            if (empty($seasonDetails['episodes'])) {
                 continue;
             }
 
@@ -1420,7 +1428,9 @@ class FetchTmdbIds implements ShouldQueue
             }
         }
 
-        $this->markSeriesEpisodesChecked($series);
+        if ($allSeasonsFetched) {
+            $this->markSeriesEpisodesChecked($series);
+        }
 
         Log::info('FetchTmdbIds: Completed episode data fetch for series', [
             'series_id' => $series->id,
@@ -1458,8 +1468,7 @@ class FetchTmdbIds implements ShouldQueue
      */
     protected function markSeriesEpisodesChecked(Series $series): void
     {
-        $fresh = $series->fresh();
-        $metadata = is_array($fresh?->metadata) ? $fresh->metadata : [];
+        $metadata = is_array($series->metadata) ? $series->metadata : [];
         $metadata['tmdb_episodes_checked_at'] = now()->toIso8601String();
         $series->update(['metadata' => $metadata]);
     }

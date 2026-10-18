@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
+use App\Support\TmdbEnrichment;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -2580,12 +2581,13 @@ it('looks up unmatched episodes again only when new episodes arrive or a week ha
     $calls = 0;
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    // TMDB has nothing for this episode, so it stays without a tmdb_id.
     $tmdb->shouldReceive('getAllSeasons')->andReturnUsing(function () use (&$calls) {
         $calls++;
 
-        return [];
+        return [['season_number' => 1]];
     });
+    // TMDB has nothing for this episode, so it stays without a tmdb_id.
+    $tmdb->shouldReceive('getSeasonDetails')->andReturn(['episodes' => [['episode_number' => 99, 'id' => 1]]]);
     $run = fn () => (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
 
     $run();
@@ -2603,6 +2605,72 @@ it('looks up unmatched episodes again only when new episodes arrive or a week ha
     $this->travel(8)->days();
     $run();
     expect($calls)->toBe(3);
+});
+
+it('looks up episodes again on the next run when a TMDB season lookup failed', function (array $seasons, ?array $seasonDetails) {
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Example Cartoon',
+        'tmdb_id' => 900104,
+        'plot' => 'Plot.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/cartoon.jpg',
+        'genre' => 'Animation, Action',
+        'metadata' => ['tmdb_id' => 900104, 'related_tmdb' => []],
+    ]);
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+    ]);
+    Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'tmdb_id' => null,
+        'info' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    // getAllSeasons() returns [] on a failed request, and getSeasonDetails() null.
+    $tmdb->shouldReceive('getAllSeasons')->twice()->andReturn($seasons);
+    $tmdb->shouldReceive('getSeasonDetails')->andReturn($seasonDetails);
+
+    foreach ([1, 2] as $run) {
+        (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
+    }
+
+    expect($series->fresh()->metadata)->not->toHaveKey('tmdb_episodes_checked_at');
+})->with([
+    'seasons request failed' => [[], null],
+    'season details request failed' => [[['season_number' => 1]], null],
+]);
+
+it('keeps the TMDB lookup markers through a provider metadata refresh', function () {
+    $existing = [
+        'related_tmdb' => [],
+        'tmdb_genre_checked' => true,
+        'tmdb_episodes_checked_at' => '2026-10-01T00:00:00+00:00',
+        'tmdb_search_failed' => true,
+    ];
+
+    $refreshed = TmdbEnrichment::preserveOnProviderRefresh($existing, ['plot' => 'From the provider.']);
+
+    expect($refreshed)
+        ->toMatchArray([
+            'plot' => 'From the provider.',
+            'tmdb_genre_checked' => true,
+            'tmdb_episodes_checked_at' => '2026-10-01T00:00:00+00:00',
+        ])
+        // A refresh is what earns a no-match title another search.
+        ->not->toHaveKey('tmdb_search_failed')
+        // The markers alone don't mean the row holds TMDB data.
+        ->and(TmdbEnrichment::isEnriched(['tmdb_genre_checked' => true, 'tmdb_episodes_checked_at' => '2026-10-01T00:00:00+00:00']))->toBeFalse();
 });
 
 it('runs the series library-name genre check only once per series', function () {
