@@ -357,6 +357,9 @@ fi
 [ ! -d "${user_plugins_dir}" ] && mkdir -p "${user_plugins_dir}"
 [ ! -d "${plugin_data_dir}" ] && mkdir -p "${plugin_data_dir}"
 
+# Start the scheduler's opcache file cache (see the crontab in the Dockerfile) clean on every boot
+rm -rf /tmp/opcache-cli
+
 # Create environment file if missing
 if [ ! -f "${env_file}" ]; then
     echo "-- Missing environment file, creating now..."

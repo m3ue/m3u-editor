@@ -267,8 +267,10 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
 RUN addgroup ${WWWGROUP} && \
     adduser -h /var/www/html -s /bin/bash -G ${WWWGROUP} -D ${WWWUSER}
 
-# Setup cron for Laravel scheduler
-RUN echo '* * * * * cd /var/www/html && /usr/bin/php artisan schedule:run >> /dev/null 2>&1' | crontab -
+# Setup cron for Laravel scheduler. opcache is off for CLI by default, so each run
+# recompiled the framework; a file cache halves the boot cost. Timestamps are checked
+# so the cache never serves stale code (start-container also clears it on boot).
+RUN echo '* * * * * cd /var/www/html && mkdir -p /tmp/opcache-cli && /usr/bin/php -d opcache.enable_cli=1 -d opcache.file_cache=/tmp/opcache-cli -d opcache.validate_timestamps=1 artisan schedule:run >> /dev/null 2>&1' | crontab -
 
 # Create required directories with proper ownership
 RUN mkdir -p \
