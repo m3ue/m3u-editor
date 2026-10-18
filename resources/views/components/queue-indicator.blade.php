@@ -36,9 +36,19 @@
             this.loading = false;
         }
     },
+    timer: null,
+    onVisibilityChange: null,
     init() {
         this.refresh();
-        setInterval(() => this.refresh(), 5000);
+        // Skip polls while the tab is hidden and catch up as soon as it's shown again.
+        this.timer = setInterval(() => document.hidden || this.refresh(), 5000);
+        this.onVisibilityChange = () => document.hidden || this.refresh();
+        document.addEventListener('visibilitychange', this.onVisibilityChange);
+    },
+    // SPA navigation re-renders the topbar, so stop this copy's polling when it's removed.
+    destroy() {
+        clearInterval(this.timer);
+        document.removeEventListener('visibilitychange', this.onVisibilityChange);
     },
 }"
     x-cloak

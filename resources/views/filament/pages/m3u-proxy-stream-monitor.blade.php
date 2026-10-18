@@ -21,6 +21,12 @@
                 clearInterval(this.intervalId);
                 this.intervalId = null;
             }
+        },
+        onVisibilityChange: null,
+        // Alpine calls this when SPA navigation removes the page; there's no alpine:destroy event.
+        destroy() {
+            this.stopPolling();
+            document.removeEventListener('visibilitychange', this.onVisibilityChange);
         }
     }"
         x-init="
@@ -32,15 +38,12 @@
             $watch('showUrls', (value) => {
                 localStorage.setItem('streamMonitor.showUrls', value ? '1' : '0');
             });
-            const onVisibilityChange = () => {
+            onVisibilityChange = () => {
                 if (document.visibilityState === 'visible' && intervalSeconds > 0) {
                     $wire.refreshData();
                 }
             };
             document.addEventListener('visibilitychange', onVisibilityChange);
-            $el.addEventListener('alpine:destroy', () =>
-                document.removeEventListener('visibilitychange', onVisibilityChange),
-            );
         "
         x-on:beforeunload.window="stopPolling()"
     >
