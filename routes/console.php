@@ -58,9 +58,8 @@ $inProcess('app:refresh-epg')
     ->everyMinute();
 
 // EPG cache health
-Schedule::command('app:epg-cache-health-check')
-    ->everyFifteenMinutes()
-    ->withoutOverlapping();
+$inProcess('app:epg-cache-health-check')
+    ->everyFifteenMinutes();
 
 // Check backup
 $inProcess('app:run-scheduled-backups')
@@ -99,14 +98,12 @@ Schedule::command('app:prune-old-notifications --days=7')
 Schedule::command('model:prune')->daily();
 
 // Ensure m3u-proxy webhook is registered (handles proxy restarts, delayed startup, etc.)
-Schedule::command('m3u-proxy:register-webhook')
-    ->everyFiveMinutes()
-    ->withoutOverlapping();
+$inProcess('m3u-proxy:register-webhook')
+    ->everyFiveMinutes();
 
 // Refresh provider profile info (every 15 minutes)
-Schedule::command('app:refresh-playlist-profiles')
-    ->everyFifteenMinutes()
-    ->withoutOverlapping();
+$inProcess('app:refresh-playlist-profiles')
+    ->everyFifteenMinutes();
 
 // Run scheduled plugin invocations
 $inProcess('plugins:run-scheduled')

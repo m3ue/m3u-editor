@@ -27,10 +27,13 @@ it('runs the frequent checks in the scheduler process with a short overlap lock'
     ['app:refresh-playlist', '* * * * *'],
     ['app:refresh-media-server-integrations', '* * * * *'],
     ['app:refresh-epg', '* * * * *'],
+    ['app:epg-cache-health-check', '*/15 * * * *'],
     ['app:run-scheduled-backups', '*/2 * * * *'],
     ['plugins:run-scheduled', '* * * * *'],
     ['plugins:recover-stale-runs', '* * * * *'],
     ['app:dvr-scheduler-tick', '* * * * *'],
+    ['m3u-proxy:register-webhook', '*/5 * * * *'],
+    ['app:refresh-playlist-profiles', '*/15 * * * *'],
 ]);
 
 it('no longer starts a separate process for the frequent checks', function () {

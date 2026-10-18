@@ -357,7 +357,7 @@ fi
 [ ! -d "${user_plugins_dir}" ] && mkdir -p "${user_plugins_dir}"
 [ ! -d "${plugin_data_dir}" ] && mkdir -p "${plugin_data_dir}"
 
-# Start the scheduler's opcache file cache (see the crontab in the Dockerfile) clean on every boot
+# Start the scheduler's opcache file cache (docker/8.4/php-scheduler.ini) clean on every boot
 rm -rf /tmp/opcache-cli
 
 # Create environment file if missing
