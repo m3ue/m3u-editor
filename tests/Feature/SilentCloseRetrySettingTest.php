@@ -54,10 +54,10 @@ beforeEach(function () {
     };
 });
 
-it('defaults the same-URL retry to enabled with a 60 second window', function () {
+it('defaults the same-URL retry to disabled with a 60 second window', function () {
     $settings = app(GeneralSettings::class);
 
-    expect($settings->silent_close_retry_enabled)->toBeTrue()
+    expect($settings->silent_close_retry_enabled)->toBeFalse()
         ->and($settings->silent_close_retry_window)->toBe(60);
 });
 
@@ -68,6 +68,10 @@ it('sends the configured retry window to the proxy when enabled', function () {
     $settings->save();
 
     expect(($this->createStreamPayload)()['silent_close_retry_window'] ?? null)->toBe(90);
+});
+
+it('sends a zero retry window to the proxy by default so the proxy keeps its old failover behavior', function () {
+    expect(($this->createStreamPayload)()['silent_close_retry_window'] ?? null)->toBe(0);
 });
 
 it('sends a zero retry window to the proxy when disabled', function () {

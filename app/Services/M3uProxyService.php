@@ -2754,22 +2754,7 @@ class M3uProxyService
                 unset($metadata['use_sticky_session']);
             }
 
-            // Apply global silence detection settings from GeneralSettings
-            try {
-                $generalSettings = app(GeneralSettings::class);
-                if ($generalSettings->enable_silence_detection) {
-                    $payload['enable_silence_detection'] = true;
-                    $payload['silence_threshold_db'] = $generalSettings->silence_threshold_db ?? -50.0;
-                    $payload['silence_duration'] = $generalSettings->silence_duration ?? 3.0;
-                    $payload['silence_check_interval'] = $generalSettings->silence_check_interval ?? 10.0;
-                    $payload['silence_failover_threshold'] = $generalSettings->silence_failover_threshold ?? 3;
-                    $payload['silence_monitoring_grace_period'] = $generalSettings->silence_monitoring_grace_period ?? 15.0;
-                }
-                $payload['silent_close_retry_window'] = $generalSettings->silent_close_retry_enabled
-                    ? max(0, (int) ($generalSettings->silent_close_retry_window ?? 60))
-                    : 0;
-            } catch (Exception $e) {
-            }
+            $this->applyGlobalStreamSettings($payload);
 
             // If using failovers, provide the callback URL for smart failover handling, or list of URLs
             if ($failovers) {
@@ -2918,22 +2903,7 @@ class M3uProxyService
                 unset($metadata['use_sticky_session']);
             }
 
-            // Apply global silence detection settings from GeneralSettings
-            try {
-                $generalSettings = app(GeneralSettings::class);
-                if ($generalSettings->enable_silence_detection) {
-                    $payload['enable_silence_detection'] = true;
-                    $payload['silence_threshold_db'] = $generalSettings->silence_threshold_db ?? -50.0;
-                    $payload['silence_duration'] = $generalSettings->silence_duration ?? 3.0;
-                    $payload['silence_check_interval'] = $generalSettings->silence_check_interval ?? 10.0;
-                    $payload['silence_failover_threshold'] = $generalSettings->silence_failover_threshold ?? 3;
-                    $payload['silence_monitoring_grace_period'] = $generalSettings->silence_monitoring_grace_period ?? 15.0;
-                }
-                $payload['silent_close_retry_window'] = $generalSettings->silent_close_retry_enabled
-                    ? max(0, (int) ($generalSettings->silent_close_retry_window ?? 60))
-                    : 0;
-            } catch (Exception $e) {
-            }
+            $this->applyGlobalStreamSettings($payload);
 
             // If using failovers, provide the callback URL for smart failover handling, or list of URLs
             if ($failovers) {
@@ -3013,6 +2983,31 @@ class M3uProxyService
                 'exception_code' => $e->getCode(),
             ]);
             throw $e;
+        }
+    }
+
+    /**
+     * Apply the global failover settings from GeneralSettings (silence detection and
+     * same-URL retry on a silent close) to a stream creation payload.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function applyGlobalStreamSettings(array &$payload): void
+    {
+        try {
+            $generalSettings = app(GeneralSettings::class);
+            if ($generalSettings->enable_silence_detection) {
+                $payload['enable_silence_detection'] = true;
+                $payload['silence_threshold_db'] = $generalSettings->silence_threshold_db ?? -50.0;
+                $payload['silence_duration'] = $generalSettings->silence_duration ?? 3.0;
+                $payload['silence_check_interval'] = $generalSettings->silence_check_interval ?? 10.0;
+                $payload['silence_failover_threshold'] = $generalSettings->silence_failover_threshold ?? 3;
+                $payload['silence_monitoring_grace_period'] = $generalSettings->silence_monitoring_grace_period ?? 15.0;
+            }
+            $payload['silent_close_retry_window'] = $generalSettings->silent_close_retry_enabled
+                ? max(0, (int) ($generalSettings->silent_close_retry_window ?? 60))
+                : 0;
+        } catch (Exception $e) {
         }
     }
 

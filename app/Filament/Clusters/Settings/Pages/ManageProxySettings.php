@@ -400,7 +400,7 @@ class ManageProxySettings extends BaseSettingsPage
                             ->label(__('Retry the same stream before failing over'))
                             ->columnSpanFull()
                             ->live()
-                            ->default(true)
+                            ->default(false)
                             ->hintIcon(
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('Providers often drop a live connection while the channel itself is fine. Reconnecting to the same stream avoids switching to a different failover feed mid-playback, which can make players freeze or reconnect. If the stream drops again within the retry window, or the retry delivers no data, the proxy fails over as normal.')
