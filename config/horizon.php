@@ -12,7 +12,7 @@ $horizonIntEnv = static function (string $key, int $default): int {
     return is_numeric($value) ? (int) $value : $default;
 };
 
-return [
+$config = [
 
     /*
     |--------------------------------------------------------------------------
@@ -298,3 +298,12 @@ return [
         ],
     ],
 ];
+
+// Horizon can't scale a queue below one worker, so with DVR switched off the DVR
+// supervisor would still keep an idle worker on each of its three queues. Mirrors
+// the global DVR gate (User::canUseDvr): DVR_ENABLED and proxy integration.
+if (! (env('DVR_ENABLED', true) && env('M3U_PROXY_INTEGRATION_ENABLED', true))) {
+    unset($config['defaults']['dvr-queue']);
+}
+
+return $config;
