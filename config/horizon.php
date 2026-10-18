@@ -258,11 +258,14 @@ $config = [
         // low-concurrency and isolated from the general queue on purpose: bursts of
         // resolution jobs (e.g. bulk-add, or many exhausted failover chains around the
         // same time) hit AIOStreams and, transitively, debrid backends that penalize
-        // aggressive/concurrent request patterns.
+        // aggressive/concurrent request patterns. Auto balancing idles at one worker
+        // and adds the second only while jobs are waiting ('simple' kept both running).
         'aiostreams-queue' => [
             'connection' => 'redis',
             'queue' => ['aiostreams-resolve'],
-            'balance' => 'simple',
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => 1,
             'maxProcesses' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_PROCESSES', 2),
             'maxTime' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_TIME', 1800), // recycle every 30 min, jobs are short
             'maxJobs' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_JOBS', 300),
