@@ -29,7 +29,6 @@ it('runs the frequent checks in the scheduler process with a short overlap lock'
     ['app:refresh-epg', '* * * * *'],
     ['app:epg-cache-health-check', '*/15 * * * *'],
     ['app:run-scheduled-backups', '*/2 * * * *'],
-    ['plugins:run-scheduled', '* * * * *'],
     ['plugins:recover-stale-runs', '* * * * *'],
     ['app:dvr-scheduler-tick', '* * * * *'],
     ['m3u-proxy:register-webhook', '*/5 * * * *'],
@@ -45,6 +44,16 @@ it('no longer starts a separate process for the frequent checks', function () {
             || str_ends_with($command, ' app:dvr-scheduler-tick'));
 
     expect($spawned)->toBeEmpty();
+});
+
+it('keeps scheduled plugin invocations in their own process', function () {
+    $event = collect(app(Schedule::class)->events())
+        ->first(fn (Event $event) => str_ends_with((string) $event->command, ' plugins:run-scheduled'));
+
+    expect($event)->not->toBeNull()
+        ->and($event)->not->toBeInstanceOf(CallbackEvent::class)
+        ->and($event->expression)->toBe('* * * * *')
+        ->and($event->withoutOverlapping)->toBeTrue();
 });
 
 it('runs the command when the event fires', function () {

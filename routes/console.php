@@ -105,9 +105,12 @@ $inProcess('m3u-proxy:register-webhook')
 $inProcess('app:refresh-playlist-profiles')
     ->everyFifteenMinutes();
 
-// Run scheduled plugin invocations
-$inProcess('plugins:run-scheduled')
-    ->everyMinute();
+// Run scheduled plugin invocations. Kept as its own process: it loads plugin code to
+// ask each plugin what's due, and a plugin that exits or runs out of memory must not
+// take down schedule:run and skip the checks after it (e.g. the DVR scheduler tick).
+Schedule::command('plugins:run-scheduled')
+    ->everyMinute()
+    ->withoutOverlapping();
 
 // Mark abandoned plugin runs stale so operators can resume them.
 $inProcess('plugins:recover-stale-runs')
