@@ -5026,7 +5026,7 @@ class XtreamApiController extends Controller
             return null;
         }
 
-        $baseUrl = config('app.url');
+        $baseUrl = ProxyFacade::getBaseUrl();
 
         return "{$baseUrl}/dvr/{$username}/{$password}/{$recording->uuid}/edl";
     }
@@ -5043,7 +5043,9 @@ class XtreamApiController extends Controller
             ? ($recording->dvrSetting?->dvr_output_format ?? 'mp4')
             : 'mp4';
 
-        $baseUrl = config('app.url');
+        // Same base URL as every other Xtream stream URL (URL override, or
+        // APP_URL plus APP_PORT), so clients reach the app on the right port.
+        $baseUrl = ProxyFacade::getBaseUrl();
 
         $streamUrl = $isCompleted
             ? "{$baseUrl}/dvr/{$username}/{$password}/{$recording->uuid}.{$format}"

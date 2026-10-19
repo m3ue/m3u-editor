@@ -433,7 +433,7 @@ class EmbyPublicationCatalogService
                 'original_title' => $originalTitle,
                 'year' => $year,
                 'plot' => $series->plot,
-                'genres' => array_values(array_filter(array_map('trim', explode(',', (string) $series->genre)))),
+                'genres' => $this->genreList($series->genre),
                 'ids' => $ids,
             ],
             'episodes' => [],
@@ -597,7 +597,7 @@ class EmbyPublicationCatalogService
                 'original_title' => $originalTitle,
                 'year' => $year,
                 'plot' => $info['plot'] ?? $movieData['plot'] ?? $movieData['description'] ?? null,
-                'genres' => $info['genres'] ?? $movieData['genre'] ?? [],
+                'genres' => $this->genreList($info['genre'] ?? $movieData['genre'] ?? null),
                 'ids' => $ids,
             ],
             'variants' => [],
@@ -623,6 +623,27 @@ class EmbyPublicationCatalogService
         }
 
         return [$displayTitle, 'display_title'];
+    }
+
+    /**
+     * Normalize a provider genre value (a comma-separated string, or a list
+     * after a TMDB metadata fetch) into NFO genre names. "Uncategorized" is
+     * the placeholder AppliesTmdbSelection treats as no genre, so it is
+     * never published.
+     *
+     * @return list<string>
+     */
+    private function genreList(mixed $value): array
+    {
+        $genres = is_array($value) ? $value : explode(',', (string) $value);
+
+        return collect($genres)
+            ->filter(fn (mixed $genre): bool => is_string($genre))
+            ->map(fn (string $genre): string => trim($genre))
+            ->reject(fn (string $genre): bool => $genre === '' || strcasecmp($genre, 'Uncategorized') === 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function movieYear(Channel $channel): ?int

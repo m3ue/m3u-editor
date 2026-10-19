@@ -38,7 +38,7 @@ it('builds a deterministic managed movie catalog with safe metadata and playback
         'info' => [
             'original_title' => 'John Wick: Chapter 4',
             'plot' => 'John Wick uncovers a path to defeating The High Table.',
-            'genres' => ['Action', 'Thriller'],
+            'genre' => 'Action, Thriller',
         ],
         'stream_stats' => [
             ['stream' => [
@@ -94,6 +94,7 @@ it('builds a deterministic managed movie catalog with safe metadata and playback
         ->and($item['relative_folder'])->toBe('john-wick-chapter-4-2023')
         ->and($item['base_filename'])->toBe('john-wick-chapter-4-2023')
         ->and($item['nfo']['plot'])->toContain('High Table')
+        ->and($item['nfo']['genres'])->toBe(['Action', 'Thriller'])
         ->and($variant['key'])->toBe('2160p-hdr-hevc-eac3-eng-theatrical')
         ->and($variant['preferred']['playback_url'])->toBe(
             "https://m3u-editor.test/movie/tuner/secret/{$channel->id}.mkv?proxy=true"
@@ -103,6 +104,41 @@ it('builds a deterministic managed movie catalog with safe metadata and playback
         ->and(json_encode($first))->not->toContain('provider.invalid')
         ->and(json_encode($first))->not->toContain('provider-secret');
 });
+
+it('publishes movie genres from provider strings and TMDB lists without the placeholder', function (mixed $genre, array $expected) {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->createQuietly();
+    $group = Group::factory()->for($user)->for($playlist)->create(['name' => 'Action', 'type' => 'vod']);
+    Channel::factory()->for($user)->for($playlist)->for($group)->createQuietly([
+        'enabled' => true,
+        'is_vod' => true,
+        'title' => 'Alita: Battle Angel',
+        'tmdb_id' => 399579,
+        'info' => ['genre' => $genre],
+    ]);
+    $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
+    $mapping = EmbyLibraryMapping::create([
+        'media_server_integration_id' => $integration->id,
+        'user_id' => $user->id,
+        'source_kind' => 'vod_group',
+        'source_identifier' => (string) $group->id,
+        'source_label' => $group->name,
+        'target_library_name' => 'Managed Movies',
+        'collection_type' => 'movies',
+        'output_path' => '/srv/emby/managed/movies',
+        'is_managed' => true,
+        'options' => ['nfo' => true],
+    ]);
+
+    $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($mapping, 'tuner', 'secret');
+
+    expect($catalog['items'][0]['nfo']['genres'])->toBe($expected);
+})->with([
+    'provider string' => ['Action, Science Fiction , Adventure', ['Action', 'Science Fiction', 'Adventure']],
+    'TMDB list' => [['Action', 'Science Fiction'], ['Action', 'Science Fiction']],
+    'placeholder only' => ['Uncategorized', []],
+    'missing' => [null, []],
+]);
 
 it('keeps uncertain movie identities separate and excludes disabled or foreign sources', function () {
     config(['app.url' => 'https://m3u-editor.test', 'app.port' => null]);
