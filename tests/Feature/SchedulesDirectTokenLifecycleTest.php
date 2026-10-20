@@ -539,7 +539,8 @@ it('lifts the block when the credentials change', function () {
     $fresh = $epg->fresh();
     expect($fresh->isSchedulesDirectAuthBlocked())->toBeFalse();
     expect($fresh->sd_auth_blocked_message)->toBeNull();
-    expect($fresh->sd_backoff_attempts)->toBe(0);
+    // A server-error backoff is about SD, not the credentials, so it stays.
+    expect($fresh->sd_backoff_attempts)->toBe(2);
 });
 
 it('keeps the block when unrelated fields change', function () {
@@ -695,3 +696,54 @@ it('reports permanent rejections from raw-credential logins with an actionable m
     expect(fn () => (new SchedulesDirectService)->authenticate('person@example.com', 'super-secret-password'))
         ->toThrow(SchedulesDirectAuthBlockedException::class, 'Renew it at schedulesdirect.org');
 });
+
+it('backs off instead of blocking when SD is offline for maintenance (3000)', function (int $status) {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 3000, 'response' => 'SERVICE_OFFLINE', 'message' => 'Server offline for maintenance.'], $status),
+    ]);
+
+    $epg = sdEpg();
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_SERVER_ERROR);
+    }
+
+    $fresh = $epg->fresh();
+    expect($fresh->isSchedulesDirectAuthBlocked())->toBeFalse()
+        ->and($fresh->sd_backoff_attempts)->toBe(1);
+})->with(['HTTP 200' => [200], 'HTTP 400' => [400]]);
+
+it('backs off a data endpoint that reports SERVICE_OFFLINE in a 200 body', function () {
+    Storage::fake('local');
+    fakeLineupSyncEndpoints([
+        'json.schedulesdirect.org/20141201/lineups/*' => Http::response(['code' => 3000, 'response' => 'SERVICE_OFFLINE', 'message' => 'Server offline for maintenance.']),
+    ]);
+
+    $epg = sdEpg(['sd_token' => 'still-good', 'sd_token_expires_at' => now()->addHours(6)]);
+
+    expect(fn () => (new SchedulesDirectService)->syncEpgData($epg))
+        ->toThrow(SchedulesDirectRateLimitException::class);
+    expect($epg->fresh()->sd_backoff_attempts)->toBe(1);
+});
+
+it('names the active cooldown correctly on suppressed attempts', function (array $state, string $reason) {
+    Http::fake();
+
+    $epg = sdEpg($state);
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe($reason);
+    }
+
+    Http::assertNothingSent();
+})->with([
+    'daily login limit' => [fn () => ['sd_login_cooldown_until' => now('UTC')->addDay()->startOfDay()->setTimezone(config('app.timezone'))], SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS],
+    'account lockout' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(10)], SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT],
+    'server backoff' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_backoff_attempts' => 3], SchedulesDirectRateLimitException::REASON_BACKOFF],
+]);

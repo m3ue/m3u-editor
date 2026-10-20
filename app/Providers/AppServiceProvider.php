@@ -627,10 +627,10 @@ class AppServiceProvider extends ServiceProvider
                 if ($epg->isDirty(['sd_username', 'sd_password'])) {
                     $epg->sd_auth_blocked_code = null;
                     $epg->sd_auth_blocked_message = null;
-                    $epg->sd_backoff_attempts = 0;
                 }
                 if ($epg->isDirty('sd_username')) {
                     $epg->sd_login_cooldown_until = null;
+                    $epg->sd_backoff_attempts = 0;
                 }
 
                 return $epg;

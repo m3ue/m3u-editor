@@ -323,6 +323,12 @@ class SchedulesDirectService
             throw new SchedulesDirectServerException("SchedulesDirect authentication failed with HTTP {$response->status()}", $response->status());
         }
 
+        // Maintenance (3000 SERVICE_OFFLINE) is temporary whatever HTTP status it
+        // arrives with, so it is backed off rather than treated as a rejection.
+        if ($this->isServiceOffline($data)) {
+            throw new SchedulesDirectServerException('SchedulesDirect is offline for maintenance (code '.($data['code'] ?? 'SERVICE_OFFLINE').')', (int) ($data['code'] ?? 0));
+        }
+
         // Schedules Direct returns its rejections (4001, 4009, ...) with an HTTP
         // 4xx and a `code` in the body, which callers inspect. A 4xx without a
         // code came from something in between (proxy, WAF), so it is backed off
@@ -582,13 +588,36 @@ class SchedulesDirectService
         }
 
         if ($retryAt = $epg->activeSchedulesDirectAccountCooldownUntil()) {
-            throw new SchedulesDirectRateLimitException(
-                $retryAt,
-                reason: $epg->sd_backoff_attempts > 0
-                    ? SchedulesDirectRateLimitException::REASON_BACKOFF
-                    : SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS,
-            );
+            throw new SchedulesDirectRateLimitException($retryAt, reason: $this->activeCooldownReason($epg, $retryAt));
         }
+    }
+
+    /**
+     * Which kind of cooldown is active, from its shape: the 4009/4010 daily
+     * limits end exactly at a UTC midnight, a server-error backoff has recorded
+     * attempts, and anything else is the 15 minute 4004 lockout.
+     */
+    private function activeCooldownReason(Epg $epg, Carbon $retryAt): string
+    {
+        return match (true) {
+            $retryAt->copy()->utc()->isStartOfDay(checkMicroseconds: false) => SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS,
+            $epg->sd_backoff_attempts > 0 => SchedulesDirectRateLimitException::REASON_BACKOFF,
+            default => SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT,
+        };
+    }
+
+    /**
+     * True for Schedules Direct's maintenance response (3000 SERVICE_OFFLINE, or
+     * any other 3xxx service code).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function isServiceOffline(array $data): bool
+    {
+        $code = $data['code'] ?? null;
+
+        return ($data['response'] ?? null) === 'SERVICE_OFFLINE'
+            || (is_numeric($code) && (int) $code >= 3000 && (int) $code < 4000);
     }
 
     /**
@@ -2249,7 +2278,7 @@ class SchedulesDirectService
                 'message' => $message,
                 'full_response' => $response->body(),
             ]);
-            if ($response->serverError()) {
+            if ($response->serverError() || (is_array($body) && $this->isServiceOffline($body))) {
                 throw new SchedulesDirectServerException("SchedulesDirect API error: {$message} (Code: {$code})", (int) $code);
             }
             throw new Exception("SchedulesDirect API error: {$message} (Code: {$code})", (int) $code);
