@@ -12,17 +12,21 @@
  */
 
 use App\Enums\Status;
+use App\Enums\SyncRunPhase;
+use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Jobs\ProcessM3uVodImportChunk;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
 use App\Models\PlaylistSyncStatus;
 use App\Models\PlaylistSyncStatusLog;
 use App\Models\User;
+use App\Services\SyncPipelineService;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -306,6 +310,89 @@ describe('channels moved by the provider', function () {
         expect(providerGroupMoveChannel($playlist, 100)->group_id)->toBe(providerGroupMoveGroup($playlist, 'Sports')->id);
     });
 
+    it('moves a stream listed in several categories once when another category lists it first', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $categories = [
+            ['category_id' => '1', 'category_name' => 'Sports'],
+            ['category_id' => '2', 'category_name' => 'Football'],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => $categories,
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '2'],
+            ],
+        ], isNew: true);
+
+        $flipped = [
+            'live_categories' => $categories,
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '2'],
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+            ],
+        ];
+        $football = providerGroupMoveGroup($playlist, 'Football');
+        foreach (range(1, 3) as $sync) {
+            providerGroupMoveSync($playlist, $this->feed, $flipped);
+
+            expect(providerGroupMoveChannel($playlist, 100))
+                ->group_id->toBe($football->id)
+                ->group_internal->toBe('Football');
+        }
+    });
+
+    it('follows a stream listed in several categories when the provider drops it from the first one', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $categories = [
+            ['category_id' => '1', 'category_name' => 'Sports'],
+            ['category_id' => '2', 'category_name' => 'Football'],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => $categories,
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '2'],
+                ['stream_id' => 101, 'name' => 'BT Sport', 'category_id' => '1'],
+            ],
+        ], isNew: true);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => $categories,
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '2'],
+                ['stream_id' => 101, 'name' => 'BT Sport', 'category_id' => '1'],
+            ],
+        ]);
+
+        expect(providerGroupMoveChannel($playlist, 100)->group_id)->toBe(providerGroupMoveGroup($playlist, 'Football')->id);
+    });
+
+    it('does not move channels into a blank category when the category list comes back empty', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $streams = [
+            ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+            ['stream_id' => 200, 'name' => 'BBC News', 'category_id' => '2'],
+        ];
+        $categories = [
+            ['category_id' => '1', 'category_name' => 'Sports'],
+            ['category_id' => '2', 'category_name' => 'News'],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, ['live_categories' => $categories, 'live_streams' => $streams], isNew: true);
+        $sports = providerGroupMoveGroup($playlist, 'Sports');
+        $news = providerGroupMoveGroup($playlist, 'News');
+
+        providerGroupMoveSync($playlist, $this->feed, ['live_categories' => [], 'live_streams' => $streams]);
+
+        expect(providerGroupMoveChannel($playlist, 100)->group_id)->toBe($sports->id)
+            ->and(providerGroupMoveChannel($playlist, 200)->group_id)->toBe($news->id)
+            ->and(providerGroupMoveGroup($playlist, '')->channels()->count())->toBe(0);
+
+        providerGroupMoveSync($playlist, $this->feed, ['live_categories' => $categories, 'live_streams' => $streams]);
+
+        expect(providerGroupMoveChannel($playlist, 100)->group_id)->toBe($sports->id)
+            ->and($sports->fresh()->trashed())->toBeFalse();
+    });
+
     it('moves a VOD channel into the category the provider moved it to', function () {
         $playlist = providerGroupMovePlaylist($this->user, ['vod']);
         providerGroupMoveSync($playlist, $this->feed, [
@@ -394,6 +481,34 @@ describe('groups added by a sync', function () {
 
         expect($news->fresh()->new)->toBeFalsy()
             ->and(providerGroupMoveGroup($playlist, 'Sports')->new)->toBeTruthy();
+    });
+
+    it('only hands groups created this run to New Groups Only auto-sync rules', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+        $playlist->updateQuietly(['auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'custom_playlist_id' => $customPlaylist->id,
+            'type' => 'live_groups',
+            'group_filter' => 'new_only',
+        ]]]);
+
+        // Restored from the trash this run: flagged new for the sync log, but not a new group
+        $this->travelTo(now()->subDay());
+        Group::factory()->for($playlist)->for($this->user)->create(['type' => 'live', 'new' => true]);
+        $this->travelBack();
+
+        $pipeline = app(SyncPipelineService::class);
+        $run = $pipeline->startImport($playlist);
+        $created = Group::factory()->for($playlist)->for($this->user)->create(['type' => 'live', 'new' => true]);
+
+        Bus::fake();
+        $pipeline->dispatchPhase($run, SyncRunPhase::CustomPlaylistSync);
+
+        Bus::assertDispatched(
+            AutoSyncGroupsToCustomPlaylist::class,
+            fn (AutoSyncGroupsToCustomPlaylist $job): bool => $job->groupIds === [$created->id],
+        );
     });
 });
 

@@ -1850,48 +1850,83 @@ class ProcessM3uImport implements ShouldQueue
     }
 
     /**
-     * Move channels the provider has moved to another category into this run's group.
+     * Prepare a chunk's upsert rows for channels the provider moved between categories.
      *
      * Xtream channels are keyed by stream_id, so a channel moved by the provider keeps its
-     * row, and `group_id` is left out of the chunk upsert so manual moves survive a sync.
-     * A row is moved here only when it has not been seen yet this run (a stream listed in
-     * several categories stays in the first one) and its current group is missing,
-     * soft-deleted, or still the provider group it was last imported into. A channel the
-     * user moved to another group fails that last check and stays put.
+     * row, and `group_id` is left out of the upsert so manual moves survive a sync.
      *
-     * @param  array<int, int|string>  $sourceIds
+     * - Streams an earlier category already imported this run are dropped from the rows, so
+     *   the first category listing a stream owns its row and `group_internal` names it.
+     * - Any other existing row in a different group is moved here when that group is missing,
+     *   soft-deleted, or still the provider group it was last imported into. A channel the
+     *   user moved to another group fails that check and stays put.
+     * - Nothing is moved into a blank category: it can't be told apart from a failed or
+     *   partial category lookup, which would pull every channel into one group.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
      */
-    public static function moveChannelsToProviderGroup(
+    public static function applyProviderGroupMoves(
         int $playlistId,
         int $groupId,
         ?string $groupName,
-        array $sourceIds,
+        array $rows,
         string $batchNo,
-    ): void {
-        $sourceIds = array_values(array_map('strval', array_filter($sourceIds, fn ($id) => $id !== null)));
+    ): array {
+        $sourceIds = array_values(array_filter(
+            array_map(fn (array $row): string => (string) ($row['source_id'] ?? ''), $rows),
+            fn (string $sourceId): bool => $sourceId !== '',
+        ));
         if ($sourceIds === []) {
-            return;
+            return $rows;
         }
 
-        $channelIds = Channel::query()
+        $existing = Channel::query()
             ->leftJoin('groups', 'groups.id', '=', 'channels.group_id')
             ->where('channels.playlist_id', $playlistId)
             ->where('channels.is_custom', false)
             ->whereIn('channels.source_id', $sourceIds)
-            ->where(fn ($query) => $query->whereNull('channels.group_id')->orWhere('channels.group_id', '!=', $groupId))
-            ->where(fn ($query) => $query->whereNull('channels.import_batch_no')->orWhere('channels.import_batch_no', '!=', $batchNo))
-            ->where(fn ($query) => $query->whereNull('groups.id')
-                ->orWhereNotNull('groups.deleted_at')
-                ->orWhere(fn ($query) => $query->where('groups.custom', false)
-                    ->whereColumn('groups.name_internal', 'channels.group_internal')))
-            ->pluck('channels.id');
+            ->get([
+                'channels.id',
+                'channels.source_id',
+                'channels.group_id',
+                'channels.group_internal',
+                'channels.import_batch_no',
+                'groups.id as current_group_id',
+                'groups.deleted_at as group_deleted_at',
+                'groups.custom as group_custom',
+                'groups.name_internal as group_name_internal',
+            ]);
 
-        if ($channelIds->isNotEmpty()) {
-            Channel::whereIn('id', $channelIds)->update([
+        $importedThisRun = $existing->where('import_batch_no', $batchNo)
+            ->map(fn (Channel $channel): string => (string) $channel->source_id)
+            ->all();
+        if ($importedThisRun !== []) {
+            $rows = array_values(array_filter(
+                $rows,
+                fn (array $row): bool => ! in_array((string) ($row['source_id'] ?? ''), $importedThisRun, true),
+            ));
+        }
+
+        if (($rows[0]['group_internal'] ?? '') === '') {
+            return $rows;
+        }
+
+        $movedIds = $existing
+            ->filter(fn (Channel $channel): bool => $channel->import_batch_no !== $batchNo
+                && $channel->group_id !== $groupId
+                && ($channel->current_group_id === null
+                    || $channel->group_deleted_at !== null
+                    || (! $channel->group_custom && $channel->group_name_internal === $channel->group_internal)))
+            ->pluck('id');
+        if ($movedIds->isNotEmpty()) {
+            Channel::whereIn('id', $movedIds)->update([
                 'group_id' => $groupId,
                 'group' => $groupName,
             ]);
         }
+
+        return $rows;
     }
 
     /**

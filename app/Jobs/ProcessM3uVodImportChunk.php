@@ -144,11 +144,11 @@ class ProcessM3uVodImportChunk implements ShouldQueue
 
             // `group_id` is not in the update list, so re-home channels the provider moved here first
             if ($groupId) {
-                ProcessM3uImport::moveChannelsToProviderGroup(
+                $bulk = ProcessM3uImport::applyProviderGroupMoves(
                     (int) $job->variables['playlistId'],
                     (int) $groupId,
                     $groupName,
-                    array_column($bulk, 'source_id'),
+                    $bulk,
                     $job->batch_no,
                 );
             }
