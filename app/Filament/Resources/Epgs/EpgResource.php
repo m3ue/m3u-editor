@@ -309,6 +309,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-uturn-left')
                         ->modalDescription(__('Reset EPG status so it can be processed again. Only perform this action if you are having problems with the EPG syncing.'))
                         ->modalSubmitActionLabel(__('Yes, reset now')),
+                    self::getRetrySdLoginAction(),
                     self::getManageSdLineupsAction(),
                     self::getSdDeleteAction(),
                 ])->button()->hiddenLabel()->size('sm'),
@@ -435,6 +436,11 @@ class EpgResource extends Resource implements CopilotResource
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value)
                 ->schema([
+                    Callout::make(__('SchedulesDirect login rejected'))
+                        ->danger()
+                        ->columnSpanFull()
+                        ->visible(fn (?Epg $record): bool => (bool) $record?->isSchedulesDirectAuthBlocked())
+                        ->description(fn (?Epg $record): ?string => $record?->sd_auth_blocked_message),
                     Grid::make()
                         ->columns(2)
                         ->schema([
@@ -894,6 +900,44 @@ class EpgResource extends Resource implements CopilotResource
         }
 
         return ! in_array($epgHost, $providerHosts, true);
+    }
+
+    /**
+     * Shared "Retry SchedulesDirect Login" action used in the table, edit page, and view page.
+     * Lifts a recorded permanent login rejection (e.g. after the account was renewed)
+     * and runs one sync, which tries the login again.
+     */
+    public static function getRetrySdLoginAction(): Action
+    {
+        return Action::make('retry_sd_login')
+            ->label(__('Retry SchedulesDirect Login'))
+            ->icon('heroicon-o-key')
+            ->color('warning')
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && $record->isSchedulesDirectAuthBlocked())
+            ->requiresConfirmation()
+            ->modalIcon('heroicon-o-key')
+            ->modalDescription(fn (Epg $record): string => (string) $record->sd_auth_blocked_message)
+            ->modalSubmitActionLabel(__('Yes, retry login'))
+            ->action(function (Epg $record): void {
+                app(SchedulesDirectService::class)->clearAuthBlock($record);
+
+                $record->update([
+                    'status' => Status::Processing,
+                    'progress' => 0,
+                    'sd_progress' => 0,
+                    'cache_progress' => 0,
+                    'resync_attempt' => 0,
+                ]);
+                app('Illuminate\Contracts\Bus\Dispatcher')
+                    ->dispatch(new ProcessEpgImport($record, force: true));
+
+                Notification::make()
+                    ->success()
+                    ->title(__('EPG is processing'))
+                    ->body(__('EPG is being processed in the background. Depending on the size of the guide data, this may take a while. You will be notified on completion.'))
+                    ->duration(10000)
+                    ->send();
+            });
     }
 
     /**

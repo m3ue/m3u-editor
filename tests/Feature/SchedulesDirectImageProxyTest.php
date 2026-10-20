@@ -114,3 +114,17 @@ it('serves the cached copy past the download limit once optimization is turned o
     expect($response->streamedContent())->toBe($cached);
     Http::assertSentCount(1);
 });
+
+it('never logs in from the image proxy while the account login is blocked', function () {
+    $this->epg->forceFill([
+        'sd_token' => null,
+        'sd_token_expires_at' => null,
+        'sd_auth_blocked_code' => 4001,
+        'sd_auth_blocked_message' => 'expired',
+    ])->saveQuietly();
+
+    $this->get("/schedules-direct/{$this->epg->uuid}/image/blocked.jpg")->assertForbidden();
+    $this->get("/schedules-direct/{$this->epg->uuid}/image/blocked-2.jpg")->assertForbidden();
+
+    Http::assertNothingSent();
+});

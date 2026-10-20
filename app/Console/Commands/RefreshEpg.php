@@ -87,10 +87,18 @@ class RefreshEpg extends Command
                 $cronExpression = new CronExpression($interval);
 
                 // Skip Schedules Direct EPGs that are in a provider login-limit
-                // (4009) cooldown: dispatching would just re-trigger a /token
-                // request and keep the account rate-limited. It resumes on its
-                // own once the cooldown clears.
+                // (4009/4010) cooldown or server-error backoff: dispatching would
+                // just re-trigger a /token request and keep the account
+                // rate-limited. It resumes on its own once the cooldown clears.
                 if ($epg->isInSchedulesDirectLoginCooldown()) {
+                    return;
+                }
+
+                // Skip Schedules Direct EPGs whose login was permanently rejected
+                // (expired, invalid user, disabled or inactive account). Retrying
+                // cannot succeed; they resume once the user updates the
+                // credentials or uses "Retry SchedulesDirect Login".
+                if ($epg->isSchedulesDirectAuthBlocked()) {
                     return;
                 }
 

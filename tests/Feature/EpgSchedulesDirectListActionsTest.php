@@ -9,6 +9,7 @@
 
 use App\Enums\EpgSourceType;
 use App\Filament\Resources\Epgs\Pages\ListEpgs;
+use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
@@ -245,4 +246,28 @@ it('still deletes the EPG when SchedulesDirect refuses the lineup removal', func
         ->assertHasNoActionErrors();
 
     expect(Epg::find($epg->id))->toBeNull();
+});
+
+it('shows the retry login action only while the account login is blocked', function () {
+    $healthy = ($this->makeSdEpg)(['USA-A']);
+    $blocked = ($this->makeSdEpg)(['USA-B'], ['sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'Your SchedulesDirect account expired.']);
+
+    Livewire::test(ListEpgs::class)
+        ->assertActionHidden(TestAction::make('retry_sd_login')->table($healthy))
+        ->assertActionVisible(TestAction::make('retry_sd_login')->table($blocked));
+});
+
+it('lifts the block across the account and queues one sync when the user retries the login', function () {
+    $blocked = ($this->makeSdEpg)(['USA-A'], ['sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'expired', 'resync_attempt' => 3]);
+    $sibling = ($this->makeSdEpg)(['USA-B'], ['sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'expired']);
+
+    Livewire::test(ListEpgs::class)
+        ->callAction(TestAction::make('retry_sd_login')->table($blocked))
+        ->assertNotified();
+
+    expect($blocked->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse()
+        ->and($blocked->fresh()->resync_attempt)->toBe(0)
+        ->and($sibling->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
+    Bus::assertDispatched(ProcessEpgImport::class, 1);
+    Http::assertNothingSent();
 });

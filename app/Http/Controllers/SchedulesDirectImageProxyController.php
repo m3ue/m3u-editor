@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ImageProfile;
+use App\Exceptions\SchedulesDirectAuthBlockedException;
 use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
 use App\Services\LogoCacheService;
@@ -141,8 +142,8 @@ class SchedulesDirectImageProxyController extends Controller
                 return $this->imageResponse($cachedCopy);
             }
 
-            // Provider login-limit cooldown is active; do not attempt to log in.
-            Log::warning('SchedulesDirect image proxy skipped during login-limit cooldown', [
+            // Provider login-limit cooldown or backoff is active; do not attempt to log in.
+            Log::warning('SchedulesDirect image proxy skipped during login cooldown', [
                 'epg_id' => $epgId,
                 'retry_at' => $e->retryAt->toIso8601String(),
             ]);
@@ -151,6 +152,14 @@ class SchedulesDirectImageProxyController extends Controller
                 'error' => 'SchedulesDirect login limit reached; try again later',
                 'retry_at' => $e->retryAt->toIso8601String(),
             ], 429);
+        } catch (SchedulesDirectAuthBlockedException) {
+            // The account's login was permanently rejected; never retry it per image.
+            $cachedCopy = LogoCacheService::findAnyCopy($sourceKey);
+            if ($cachedCopy) {
+                return $this->imageResponse($cachedCopy);
+            }
+
+            return response()->json(['error' => 'SchedulesDirect login rejected for this account'], 403);
         } catch (\Exception $e) {
             Log::error('Exception in SchedulesDirect image proxy', [
                 'epg_id' => $epgId,

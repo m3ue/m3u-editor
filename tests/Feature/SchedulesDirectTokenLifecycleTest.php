@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\EpgSourceType;
+use App\Exceptions\SchedulesDirectAuthBlockedException;
 use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Exceptions\SchedulesDirectTokenExpiredException;
 use App\Jobs\ProcessEpgImport;
@@ -8,6 +9,8 @@ use App\Models\Epg;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -117,7 +120,7 @@ it('is single-flight per account: a second authentication reuses the token anoth
     Http::assertSentCount(1);
 });
 
-it('enters a bounded 24 hour cooldown on TOO_MANY_LOGINS (4009)', function () {
+it('enters a cooldown until the next UTC day on TOO_MANY_LOGINS (4009)', function () {
     Http::fake([
         'json.schedulesdirect.org/20141201/token' => Http::response([
             'response' => 'TOO_MANY_LOGINS',
@@ -133,9 +136,7 @@ it('enters a bounded 24 hour cooldown on TOO_MANY_LOGINS (4009)', function () {
 
     $cooldown = $epg->fresh()->sd_login_cooldown_until;
     expect($cooldown)->not->toBeNull();
-    expect($cooldown->timestamp)
-        ->toBeGreaterThan(now()->addHours(23)->timestamp)
-        ->toBeLessThanOrEqual(now()->addHours(24)->addMinute()->timestamp);
+    expect($cooldown->timestamp)->toBe(now('UTC')->addDay()->startOfDay()->timestamp);
 });
 
 it('suppresses /token requests while a 4009 cooldown is active without moving the window', function () {
@@ -343,4 +344,265 @@ it('clears the stale cooldown from sibling EPGs after a later successful login',
 
     expect($recovering->fresh()->sd_login_cooldown_until)->toBeNull();
     expect($sibling->fresh()->sd_login_cooldown_until)->toBeNull();
+});
+
+function fakeAccountExpired(): void
+{
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response([
+            'code' => 4001,
+            'response' => 'ACCOUNT_EXPIRED',
+            'message' => 'Account expired on 2026-05-04T16:52:36Z',
+            'serverID' => '20141201.web',
+            'datetime' => '2026-10-20T05:42:03Z',
+            'accountExpiration' => 1777913556,
+            'serverTime' => 1792474923,
+        ], 400),
+    ]);
+}
+
+it('blocks the account on ACCOUNT_EXPIRED (4001) and never calls /token again', function () {
+    fakeAccountExpired();
+
+    $epg = sdEpg();
+    $service = new SchedulesDirectService;
+
+    expect(fn () => $service->authenticateFromEpg($epg))
+        ->toThrow(SchedulesDirectAuthBlockedException::class, 'expired on May 4, 2026');
+
+    $fresh = $epg->fresh();
+    expect($fresh->sd_auth_blocked_code)->toBe(4001);
+    expect($fresh->sd_auth_blocked_message)->toContain('schedulesdirect.org');
+
+    // A later attempt (sync, image proxy, sibling worker) is refused locally.
+    expect(fn () => $service->authenticateFromEpg($fresh))
+        ->toThrow(SchedulesDirectAuthBlockedException::class);
+    Http::assertSentCount(1);
+});
+
+it('blocks the account on each permanent /token error', function (int $code, string $response) {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => $code, 'response' => $response, 'message' => $response], 400),
+    ]);
+
+    $epg = sdEpg();
+
+    expect(fn () => (new SchedulesDirectService)->authenticateFromEpg($epg))
+        ->toThrow(SchedulesDirectAuthBlockedException::class);
+    expect($epg->fresh()->sd_auth_blocked_code)->toBe($code);
+})->with([
+    'invalid user' => [4003, 'INVALID_USER'],
+    'application disabled' => [4007, 'APPLICATION_DISABLED'],
+    'account inactive' => [4008, 'ACCOUNT_INACTIVE'],
+]);
+
+it('blocks every EPG on the provider account, not just the one that hit the rejection', function () {
+    fakeAccountExpired();
+
+    $userId = User::factory()->create()->id;
+    $first = sdEpg(['user_id' => $userId]);
+    $second = sdEpg(['user_id' => $userId]);
+
+    expect(fn () => (new SchedulesDirectService)->authenticateFromEpg($first))
+        ->toThrow(SchedulesDirectAuthBlockedException::class);
+
+    expect($second->fresh()->isSchedulesDirectAuthBlocked())->toBeTrue();
+});
+
+it('does not schedule any resync when the login is permanently rejected', function () {
+    Storage::fake('local');
+
+    $epg = sdEpg([
+        'auto_resync_on_failure' => true,
+        'auto_resync_retries' => 3,
+        'resync_attempt' => 0,
+    ]);
+
+    Queue::fake();
+    fakeAccountExpired();
+
+    (new ProcessEpgImport($epg, force: true))->handle(new SchedulesDirectService);
+
+    $fresh = $epg->fresh();
+    expect($fresh->status->value)->toBe('failed');
+    expect($fresh->resync_attempt)->toBe(0);
+    expect($fresh->errors)->toContain('expired on May 4, 2026');
+    expect($fresh->errors)->not->toContain('super-secret-password');
+    Queue::assertNotPushed(ProcessEpgImport::class);
+});
+
+it('skips blocked EPGs in the scheduled refresh', function () {
+    $epg = sdEpg([
+        'auto_sync' => true,
+        'status' => 'failed',
+        'sd_auth_blocked_code' => 4001,
+        'sd_auth_blocked_message' => 'expired',
+    ]);
+    $epg->forceFill(['updated_at' => now()->subDay()])->saveQuietly();
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    Queue::assertNotPushed(ProcessEpgImport::class);
+});
+
+it('lifts the block when the credentials change', function () {
+    $epg = sdEpg(['sd_auth_blocked_code' => 4003, 'sd_auth_blocked_message' => 'bad password', 'sd_backoff_attempts' => 2]);
+
+    $epg->update(['sd_password' => 'a-new-password']);
+
+    $fresh = $epg->fresh();
+    expect($fresh->isSchedulesDirectAuthBlocked())->toBeFalse();
+    expect($fresh->sd_auth_blocked_message)->toBeNull();
+    expect($fresh->sd_backoff_attempts)->toBe(0);
+});
+
+it('keeps the block when unrelated fields change', function () {
+    $epg = sdEpg(['sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'expired']);
+
+    $epg->update(['name' => 'Renamed']);
+
+    expect($epg->fresh()->isSchedulesDirectAuthBlocked())->toBeTrue();
+});
+
+it('clears the block on every EPG of the account when the user retries', function () {
+    $userId = User::factory()->create()->id;
+    $first = sdEpg(['user_id' => $userId, 'sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'expired']);
+    $second = sdEpg(['user_id' => $userId, 'sd_auth_blocked_code' => 4001, 'sd_auth_blocked_message' => 'expired']);
+
+    (new SchedulesDirectService)->clearAuthBlock($first);
+
+    expect($first->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
+    expect($second->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
+});
+
+it('enters a cooldown until the next UTC day on TOO_MANY_UNIQUE_IPS (4010)', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 4010, 'response' => 'TOO_MANY_UNIQUE_IPS', 'message' => 'Too many unique IPs.'], 400),
+    ]);
+
+    $epg = sdEpg();
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS);
+    }
+
+    expect($epg->fresh()->sd_login_cooldown_until->timestamp)->toBe(now('UTC')->addDay()->startOfDay()->timestamp);
+});
+
+it('backs off exponentially up to 60 minutes on /token server errors', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response('Service Unavailable', 503),
+    ]);
+
+    $epg = sdEpg();
+    $service = new SchedulesDirectService;
+    $observed = [];
+
+    foreach (range(1, 8) as $attempt) {
+        Epg::whereKey($epg->id)->update(['sd_login_cooldown_until' => null]);
+
+        try {
+            $service->authenticateFromEpg($epg->fresh());
+        } catch (SchedulesDirectRateLimitException $e) {
+            expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_SERVER_ERROR);
+            $observed[] = (int) round(now()->diffInMinutes($e->retryAt));
+        }
+    }
+
+    expect($observed)->toBe([1, 2, 4, 8, 16, 32, 60, 60]);
+    expect($epg->fresh()->sd_backoff_attempts)->toBe(8);
+});
+
+it('treats a /token timeout as a server error and backs off', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => fn () => throw new ConnectionException('cURL error 28: Operation timed out'),
+    ]);
+
+    $epg = sdEpg();
+
+    expect(fn () => (new SchedulesDirectService)->authenticateFromEpg($epg))
+        ->toThrow(SchedulesDirectRateLimitException::class);
+
+    expect($epg->fresh()->sd_backoff_attempts)->toBe(1);
+    expect($epg->fresh()->isInSchedulesDirectLoginCooldown())->toBeTrue();
+});
+
+it('suppresses /token while a server-error backoff is active', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'x', 'tokenExpires' => now()->addDay()->timestamp]),
+    ]);
+
+    $epg = sdEpg(['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_backoff_attempts' => 3]);
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_BACKOFF);
+    }
+
+    Http::assertNothingSent();
+});
+
+it('resets the backoff after a successful login', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'ok', 'tokenExpires' => now()->addDay()->timestamp]),
+    ]);
+
+    $epg = sdEpg(['sd_login_cooldown_until' => now()->subMinute(), 'sd_backoff_attempts' => 4]);
+
+    (new SchedulesDirectService)->authenticateFromEpg($epg);
+
+    expect($epg->fresh()->sd_backoff_attempts)->toBe(0);
+    expect($epg->fresh()->sd_login_cooldown_until)->toBeNull();
+});
+
+it('backs off on a data endpoint server error and retries the sync when the backoff ends', function () {
+    Storage::fake('local');
+
+    $epg = sdEpg([
+        'sd_token' => 'still-good',
+        'sd_token_expires_at' => now()->addHours(6),
+        'auto_resync_on_failure' => true,
+        'auto_resync_retries' => 3,
+        'resync_attempt' => 0,
+    ]);
+
+    Queue::fake();
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/*' => Http::response('Bad Gateway', 502),
+    ]);
+
+    (new ProcessEpgImport($epg, force: true))->handle(new SchedulesDirectService);
+
+    $fresh = $epg->fresh();
+    expect($fresh->status->value)->toBe('failed');
+    expect($fresh->sd_backoff_attempts)->toBe(1);
+    expect($fresh->resync_attempt)->toBe(1);
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/20141201/token'));
+    Queue::assertPushed(ProcessEpgImport::class, 1);
+});
+
+it('reuses a cached token for repeated raw-credential logins', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'form-token', 'tokenExpires' => now()->addDay()->timestamp]),
+    ]);
+
+    $service = new SchedulesDirectService;
+    $service->authenticate('person@example.com', 'super-secret-password');
+    $result = $service->authenticate('person@example.com', 'super-secret-password');
+
+    expect($result['token'])->toBe('form-token');
+    Http::assertSentCount(1);
+});
+
+it('reports permanent rejections from raw-credential logins with an actionable message', function () {
+    fakeAccountExpired();
+
+    expect(fn () => (new SchedulesDirectService)->authenticate('person@example.com', 'super-secret-password'))
+        ->toThrow(SchedulesDirectAuthBlockedException::class, 'Renew it at schedulesdirect.org');
 });

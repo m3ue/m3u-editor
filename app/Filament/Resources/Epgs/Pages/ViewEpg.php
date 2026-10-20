@@ -35,6 +35,7 @@ class ViewEpg extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            EpgResource::getRetrySdLoginAction(),
             EpgResource::getManageSdLineupsAction(),
 
             Action::make('refresh')

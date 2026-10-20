@@ -38,6 +38,8 @@ class Epg extends Model
         'source_type' => EpgSourceType::class,
         'sd_token_expires_at' => 'datetime',
         'sd_login_cooldown_until' => 'datetime',
+        'sd_auth_blocked_code' => 'integer',
+        'sd_backoff_attempts' => 'integer',
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
         'sd_lineup_ids' => 'array',
@@ -132,6 +134,16 @@ class Epg extends Model
     {
         return $this->sd_login_cooldown_until
             && $this->sd_login_cooldown_until->isFuture();
+    }
+
+    /**
+     * True when Schedules Direct permanently rejected this account's login
+     * (expired, invalid user, application disabled or inactive). No /token
+     * request is made until the credentials change or the user retries.
+     */
+    public function isSchedulesDirectAuthBlocked(): bool
+    {
+        return $this->sd_auth_blocked_code !== null;
     }
 
     /**

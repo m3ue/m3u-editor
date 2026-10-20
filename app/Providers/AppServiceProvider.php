@@ -621,6 +621,17 @@ class AppServiceProvider extends ServiceProvider
                 if (! $epg->sync_interval) {
                     $epg->sync_interval = '0 */6 * * *';
                 }
+                // New Schedules Direct credentials lift a recorded permanent login
+                // rejection, so the next sync tries them. A different username is a
+                // different provider account, so its login cooldown no longer applies.
+                if ($epg->isDirty(['sd_username', 'sd_password'])) {
+                    $epg->sd_auth_blocked_code = null;
+                    $epg->sd_auth_blocked_message = null;
+                    $epg->sd_backoff_attempts = 0;
+                }
+                if ($epg->isDirty('sd_username')) {
+                    $epg->sd_login_cooldown_until = null;
+                }
 
                 return $epg;
             });

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
+use App\Exceptions\SchedulesDirectAuthBlockedException;
 use App\Exceptions\SchedulesDirectRateLimitException;
 use App\Models\Epg;
 use App\Models\EpgChannel;
@@ -12,6 +13,7 @@ use App\Models\Job;
 use App\Services\SchedulesDirectService;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -446,37 +448,28 @@ class ProcessEpgImport implements ShouldQueue
                 $this->failImport('Invalid EPG file. Unable to read or download your EPG file. Please check the URL or uploaded file and try again.');
             }
         } catch (SchedulesDirectRateLimitException $e) {
-            // Schedules Direct login limit (4009). A bounded cooldown is already
-            // recorded on the EPG. Do NOT schedule the 60/120/180s resync and do
-            // NOT retry: that is exactly what exhausts the provider's 24h limit.
+            // Schedules Direct login limit (4009/4010) or server-error backoff.
+            // The cooldown is already recorded on the EPG, so do NOT run the
+            // 60/120/180s resync ladder: that is exactly what exhausts the
+            // provider's daily limit. A server-error backoff instead retries once
+            // the backoff ends, when the EPG allows automatic resyncs.
             // Show one actionable notification with the next eligible retry time.
             $retryAt = $e->retryAt;
-            $error = "SchedulesDirect login limit reached. Automatic retries are paused until {$retryAt->toDayDateTimeString()} UTC.";
 
-            logger()->warning("SchedulesDirect login limit for \"{$this->epg->name}\"; cooldown until {$retryAt->toIso8601String()}");
+            logger()->warning("SchedulesDirect paused for \"{$this->epg->name}\" ({$e->reason}); cooldown until {$retryAt->toIso8601String()}");
 
-            Notification::make()
-                ->warning()
-                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
-                ->body($error)
-                ->broadcast($this->epg->user);
-            Notification::make()
-                ->warning()
-                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
-                ->body($error)
-                ->sendToDatabase($this->epg->user);
+            $this->failSchedulesDirectSync($e->userTitle($this->epg->name), $e->userMessage());
 
-            $this->epg->update([
-                'status' => Status::Failed,
-                'synced' => now(),
-                'errors' => $error,
-                'progress' => 100,
-                'processing' => false,
-                'processing_started_at' => null,
-                'processing_phase' => null,
-            ]);
+            if (in_array($e->reason, [SchedulesDirectRateLimitException::REASON_SERVER_ERROR, SchedulesDirectRateLimitException::REASON_LOGIN_FAILED], true)) {
+                static::scheduleResyncIfNeeded($this->epg, $retryAt);
+            }
+        } catch (SchedulesDirectAuthBlockedException $e) {
+            // Schedules Direct permanently rejected the login (expired, invalid
+            // user, disabled or inactive). Retrying cannot succeed, so scheduled
+            // syncs stop until the user updates the credentials or retries.
+            logger()->warning("SchedulesDirect login rejected for \"{$this->epg->name}\" (code {$e->getCode()}); scheduled syncs stopped");
 
-            event(new SyncCompleted($this->epg));
+            $this->failSchedulesDirectSync("SchedulesDirect login rejected for \"{$this->epg->name}\"", $e->getMessage());
         } catch (Exception $e) {
             $this->failImport($e->getMessage(), $batchNo);
         } finally {
@@ -486,6 +479,36 @@ class ProcessEpgImport implements ShouldQueue
             }
         }
 
+    }
+
+    /**
+     * Mark a Schedules Direct sync as failed with one warning notification and
+     * no resync. The caller decides whether a retry is allowed.
+     */
+    private function failSchedulesDirectSync(string $title, string $error): void
+    {
+        Notification::make()
+            ->warning()
+            ->title($title)
+            ->body($error)
+            ->broadcast($this->epg->user);
+        Notification::make()
+            ->warning()
+            ->title($title)
+            ->body($error)
+            ->sendToDatabase($this->epg->user);
+
+        $this->epg->update([
+            'status' => Status::Failed,
+            'synced' => now(),
+            'errors' => $error,
+            'progress' => 100,
+            'processing' => false,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+        ]);
+
+        event(new SyncCompleted($this->epg));
     }
 
     /**
@@ -529,8 +552,10 @@ class ProcessEpgImport implements ShouldQueue
     /**
      * Schedule an automatic resync with linear backoff if the EPG is configured for it.
      * Returns true if a retry was dispatched (caller should skip further processing).
+     *
+     * @param  CarbonInterface|null  $at  run the retry at this time instead of the linear backoff delay
      */
-    public static function scheduleResyncIfNeeded(Epg $epg): bool
+    public static function scheduleResyncIfNeeded(Epg $epg, ?CarbonInterface $at = null): bool
     {
         $epg->refresh();
 
@@ -539,7 +564,7 @@ class ProcessEpgImport implements ShouldQueue
         }
 
         $newAttempt = $epg->resync_attempt + 1;
-        $delaySeconds = $newAttempt * 60;
+        $delaySeconds = $at ? max(1, (int) ceil(now()->diffInSeconds($at, false))) : $newAttempt * 60;
 
         $epg->update(['resync_attempt' => $newAttempt]);
 
