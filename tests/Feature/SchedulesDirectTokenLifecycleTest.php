@@ -8,10 +8,12 @@ use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Models\User;
 use App\Services\SchedulesDirectService;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -391,10 +393,93 @@ it('blocks the account on each permanent /token error', function (int $code, str
         ->toThrow(SchedulesDirectAuthBlockedException::class);
     expect($epg->fresh()->sd_auth_blocked_code)->toBe($code);
 })->with([
+    'invalid hash' => [4002, 'INVALID_HASH'],
     'invalid user' => [4003, 'INVALID_USER'],
+    'json access disabled' => [4005, 'JSON_ACCOUNT_ACCESS_DISABLED'],
     'application disabled' => [4007, 'APPLICATION_DISABLED'],
     'account inactive' => [4008, 'ACCOUNT_INACTIVE'],
 ]);
+
+it('only blocks the EPGs sending the same bad credentials on INVALID_USER (4003)', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 4003, 'response' => 'INVALID_USER', 'message' => 'Invalid username or password.'], 400),
+    ]);
+
+    $userId = User::factory()->create()->id;
+    $mistyped = sdEpg(['user_id' => $userId, 'sd_password' => 'typo-password']);
+    $sameTypo = sdEpg(['user_id' => $userId, 'sd_password' => 'typo-password']);
+    $working = sdEpg(['user_id' => $userId]);
+
+    expect(fn () => (new SchedulesDirectService)->authenticateFromEpg($mistyped))
+        ->toThrow(SchedulesDirectAuthBlockedException::class);
+
+    expect($mistyped->fresh()->isSchedulesDirectAuthBlocked())->toBeTrue()
+        ->and($sameTypo->fresh()->isSchedulesDirectAuthBlocked())->toBeTrue()
+        ->and($working->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
+});
+
+it('waits out the 15 minute ACCOUNT_LOCKOUT (4004) instead of backing off', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 4004, 'response' => 'ACCOUNT_LOCKOUT', 'message' => 'Too many login failures. Locked for 15 minutes.'], 400),
+    ]);
+
+    $epg = sdEpg();
+    $service = new SchedulesDirectService;
+
+    try {
+        $service->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT);
+        expect((int) round(now()->diffInMinutes($e->retryAt)))->toBe(15);
+    }
+
+    $fresh = $epg->fresh();
+    expect($fresh->sd_backoff_attempts)->toBe(0);
+
+    // No further login while the account is locked.
+    expect(fn () => $service->authenticateFromEpg($fresh))->toThrow(SchedulesDirectRateLimitException::class);
+    Http::assertSentCount(1);
+});
+
+it('blocks the account on an unrecognised /token error code instead of retrying it', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 4999, 'response' => 'SOMETHING_NEW', 'message' => 'Something new went wrong.'], 400),
+    ]);
+
+    $userId = User::factory()->create()->id;
+    $epg = sdEpg(['user_id' => $userId]);
+    $sibling = sdEpg(['user_id' => $userId]);
+    $service = new SchedulesDirectService;
+
+    expect(fn () => $service->authenticateFromEpg($epg))
+        ->toThrow(SchedulesDirectAuthBlockedException::class, 'Something new went wrong. (code 4999)');
+
+    expect($epg->fresh()->sd_auth_blocked_code)->toBe(4999)
+        ->and($epg->fresh()->sd_backoff_attempts)->toBe(0)
+        ->and($sibling->fresh()->isSchedulesDirectAuthBlocked())->toBeTrue();
+
+    expect(fn () => $service->authenticateFromEpg($sibling->fresh()))->toThrow(SchedulesDirectAuthBlockedException::class);
+    Http::assertSentCount(1);
+});
+
+it('backs off on a /token 4xx that carries no Schedules Direct error code', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response('<html>Forbidden</html>', 403),
+    ]);
+
+    $epg = sdEpg();
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_SERVER_ERROR);
+    }
+
+    expect($epg->fresh()->sd_backoff_attempts)->toBe(1)
+        ->and($epg->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
+});
 
 it('blocks every EPG on the provider account, not just the one that hit the rejection', function () {
     fakeAccountExpired();
@@ -573,6 +658,7 @@ it('backs off on a data endpoint server error and retries the sync when the back
     ]);
 
     Queue::fake();
+    NotificationFacade::fake();
     Http::fake([
         'json.schedulesdirect.org/20141201/lineups/*' => Http::response('Bad Gateway', 502),
     ]);
@@ -585,6 +671,9 @@ it('backs off on a data endpoint server error and retries the sync when the back
     expect($fresh->resync_attempt)->toBe(1);
     Http::assertNotSent(fn ($request) => str_contains($request->url(), '/20141201/token'));
     Queue::assertPushed(ProcessEpgImport::class, 1);
+
+    // A server error is a real failure, so it keeps the danger notification.
+    NotificationFacade::assertSentTo($fresh->user, DatabaseNotification::class, fn (DatabaseNotification $notification) => ($notification->data['status'] ?? null) === 'danger');
 });
 
 it('reuses a cached token for repeated raw-credential logins', function () {

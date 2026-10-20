@@ -458,9 +458,13 @@ class ProcessEpgImport implements ShouldQueue
 
             logger()->warning("SchedulesDirect paused for \"{$this->epg->name}\" ({$e->reason}); cooldown until {$retryAt->toIso8601String()}");
 
-            $this->failSchedulesDirectSync($e->userTitle($this->epg->name), $e->userMessage());
+            // Server and unrecognised errors are real failures, so they keep the
+            // danger notification and the opt-in resync; limits are a warning.
+            $isFailure = in_array($e->reason, [SchedulesDirectRateLimitException::REASON_SERVER_ERROR, SchedulesDirectRateLimitException::REASON_LOGIN_FAILED], true);
 
-            if (in_array($e->reason, [SchedulesDirectRateLimitException::REASON_SERVER_ERROR, SchedulesDirectRateLimitException::REASON_LOGIN_FAILED], true)) {
+            $this->failSchedulesDirectSync($e->userTitle($this->epg->name), $e->userMessage(), danger: $isFailure);
+
+            if ($isFailure) {
                 static::scheduleResyncIfNeeded($this->epg, $retryAt);
             }
         } catch (SchedulesDirectAuthBlockedException $e) {
@@ -482,18 +486,19 @@ class ProcessEpgImport implements ShouldQueue
     }
 
     /**
-     * Mark a Schedules Direct sync as failed with one warning notification and
-     * no resync. The caller decides whether a retry is allowed.
+     * Mark a Schedules Direct sync as failed with one notification (a warning,
+     * or danger for real failures) and no resync. The caller decides whether a
+     * retry is allowed.
      */
-    private function failSchedulesDirectSync(string $title, string $error): void
+    private function failSchedulesDirectSync(string $title, string $error, bool $danger = false): void
     {
         Notification::make()
-            ->warning()
+            ->status($danger ? 'danger' : 'warning')
             ->title($title)
             ->body($error)
             ->broadcast($this->epg->user);
         Notification::make()
-            ->warning()
+            ->status($danger ? 'danger' : 'warning')
             ->title($title)
             ->body($error)
             ->sendToDatabase($this->epg->user);

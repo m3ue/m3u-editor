@@ -70,7 +70,11 @@ class SchedulesDirectService
     // above), so they are only interpreted on a /token response.
     public const ACCOUNT_EXPIRED_CODE = 4001;
 
+    public const INVALID_HASH_CODE = 4002;
+
     public const INVALID_USER_CODE = 4003;
+
+    public const JSON_ACCESS_DISABLED_CODE = 4005;
 
     public const APPLICATION_DISABLED_CODE = 4007;
 
@@ -78,10 +82,23 @@ class SchedulesDirectService
 
     private const PERMANENT_LOGIN_ERRORS = [
         self::ACCOUNT_EXPIRED_CODE => 'ACCOUNT_EXPIRED',
+        self::INVALID_HASH_CODE => 'INVALID_HASH',
         self::INVALID_USER_CODE => 'INVALID_USER',
+        self::JSON_ACCESS_DISABLED_CODE => 'JSON_ACCOUNT_ACCESS_DISABLED',
         self::APPLICATION_DISABLED_CODE => 'APPLICATION_DISABLED',
         self::ACCOUNT_INACTIVE_CODE => 'ACCOUNT_INACTIVE',
     ];
+
+    /**
+     * Permanent rejections of one EPG's credentials rather than of the account,
+     * so they only block the rows that send the same username and password.
+     */
+    private const CREDENTIAL_LOGIN_ERRORS = [self::INVALID_HASH_CODE, self::INVALID_USER_CODE];
+
+    /** Too many failed logins; Schedules Direct locks the account for 15 minutes. */
+    public const ACCOUNT_LOCKOUT_CODE = 4004;
+
+    private const ACCOUNT_LOCKOUT_MINUTES = 15;
 
     /** Upper bound, in minutes, of the exponential backoff after a server error. */
     private const BACKOFF_MAX_MINUTES = 60;
@@ -306,11 +323,12 @@ class SchedulesDirectService
             throw new SchedulesDirectServerException("SchedulesDirect authentication failed with HTTP {$response->status()}", $response->status());
         }
 
-        // Fold the HTTP status into the body so callers only inspect one place.
-        // Schedules Direct returns 4009 with an HTTP 4xx and a `response` string
-        // rather than a `message`, so normalize that here.
+        // Schedules Direct returns its rejections (4001, 4009, ...) with an HTTP
+        // 4xx and a `code` in the body, which callers inspect. A 4xx without a
+        // code came from something in between (proxy, WAF), so it is backed off
+        // like a server error.
         if ($response->failed() && ! isset($data['code'])) {
-            throw new Exception('Authentication failed: '.$response->body());
+            throw new SchedulesDirectServerException("SchedulesDirect authentication failed with HTTP {$response->status()}", $response->status());
         }
 
         return $data;
@@ -352,7 +370,7 @@ class SchedulesDirectService
         $data = $this->postToken($username, hash('sha1', $password), withEpgHeaders: false);
 
         if ($reason = $this->loginLimitReason($data)) {
-            throw new SchedulesDirectRateLimitException($this->nextUtcDay(), reason: $reason);
+            throw new SchedulesDirectRateLimitException($this->loginCooldownEndsAt($reason), reason: $reason);
         }
 
         if ($code = $this->permanentLoginErrorCode($data)) {
@@ -459,8 +477,8 @@ class SchedulesDirectService
             }
 
             if ((isset($data['code']) && $data['code'] !== 0) || empty($data['token'])) {
-                // Unrecognised rejection: back off exponentially rather than
-                // retrying on the fixed schedule.
+                // Malformed response (no token, or a non-numeric code): back off
+                // exponentially rather than retrying on the fixed schedule.
                 $message = 'SchedulesDirect login failed: '.($data['message'] ?? $data['response'] ?? 'Unknown error');
                 throw new SchedulesDirectRateLimitException($this->beginBackoff($epg), $message, reason: SchedulesDirectRateLimitException::REASON_LOGIN_FAILED);
             }
@@ -574,7 +592,7 @@ class SchedulesDirectService
     }
 
     /**
-     * The rate-limit reason for a 4009/4010 /token rejection, or null.
+     * The rate-limit reason for a 4004/4009/4010 /token rejection, or null.
      *
      * @param  array<string, mixed>  $data
      */
@@ -586,12 +604,16 @@ class SchedulesDirectService
         return match (true) {
             $code === self::TOO_MANY_LOGINS_CODE || $response === 'TOO_MANY_LOGINS' => SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS,
             $code === self::TOO_MANY_UNIQUE_IPS_CODE || $response === 'TOO_MANY_UNIQUE_IPS' => SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS,
+            $code === self::ACCOUNT_LOCKOUT_CODE || $response === 'ACCOUNT_LOCKOUT' => SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT,
             default => null,
         };
     }
 
     /**
-     * The code of a /token rejection that retrying cannot fix, or null.
+     * The code of a /token rejection that must not be retried automatically, or
+     * null. Besides the known permanent codes this includes any other error code
+     * Schedules Direct returns: only 5xx, timeouts and the 4004/4009/4010 limits
+     * are worth retrying, so an unrecognised rejection waits for the user too.
      *
      * @param  array<string, mixed>  $data
      */
@@ -603,8 +625,11 @@ class SchedulesDirectService
         }
 
         $byResponse = array_search($data['response'] ?? null, self::PERMANENT_LOGIN_ERRORS, true);
+        if ($byResponse !== false) {
+            return $byResponse;
+        }
 
-        return $byResponse === false ? null : $byResponse;
+        return is_numeric($code) && (int) $code !== 0 ? (int) $code : null;
     }
 
     /**
@@ -620,24 +645,35 @@ class SchedulesDirectService
 
         return match ($code) {
             self::ACCOUNT_EXPIRED_CODE => "Your SchedulesDirect account expired{$expiredOn}".'. Renew it at schedulesdirect.org, then use "Retry SchedulesDirect Login" (or update the credentials) to resume syncing.',
+            self::INVALID_HASH_CODE => 'SchedulesDirect rejected the password format. Update the credentials to resume syncing.',
             self::INVALID_USER_CODE => 'SchedulesDirect rejected the username or password. Update the credentials to resume syncing.',
+            self::JSON_ACCESS_DISABLED_CODE => 'SchedulesDirect has disabled API access for this account. Contact SchedulesDirect support, then use "Retry SchedulesDirect Login" to resume syncing.',
             self::APPLICATION_DISABLED_CODE => 'SchedulesDirect has disabled access for this application. Contact SchedulesDirect support, then use "Retry SchedulesDirect Login" to resume syncing.',
-            default => 'Your SchedulesDirect account is inactive. Check it at schedulesdirect.org, then use "Retry SchedulesDirect Login" to resume syncing.',
+            self::ACCOUNT_INACTIVE_CODE => 'Your SchedulesDirect account is inactive. Check it at schedulesdirect.org, then use "Retry SchedulesDirect Login" to resume syncing.',
+            default => 'SchedulesDirect rejected the login: '.($data['message'] ?? $data['response'] ?? 'Unknown error')." (code {$code}). Check the account at schedulesdirect.org, then use \"Retry SchedulesDirect Login\" to resume syncing.",
         };
     }
 
     /**
-     * Record a permanent /token rejection on every EPG that shares this provider
-     * account, so no further login is attempted until the user acts.
+     * Record a permanent /token rejection so no further login is attempted until
+     * the user acts. Account-level rejections block every EPG on the provider
+     * account; a bad username or password only blocks the rows sending those
+     * same credentials, so a mistyped sibling cannot block a working EPG.
      */
     private function blockAccount(Epg $epg, int $code, string $message): void
     {
-        $this->updateAccount($epg, [
-            'sd_token' => null,
-            'sd_token_expires_at' => null,
-            'sd_auth_blocked_code' => $code,
-            'sd_auth_blocked_message' => $message,
-        ]);
+        $this->updateAccount(
+            $epg,
+            [
+                'sd_token' => null,
+                'sd_token_expires_at' => null,
+                'sd_auth_blocked_code' => $code,
+                'sd_auth_blocked_message' => $message,
+            ],
+            in_array($code, self::CREDENTIAL_LOGIN_ERRORS, true)
+                ? fn ($query) => $query->where('sd_password', $epg->sd_password)
+                : null,
+        );
 
         Log::warning('SchedulesDirect permanently rejected the login; scheduled syncs stopped until the user acts', [
             'epg_id' => $epg->id,
@@ -725,8 +761,19 @@ class SchedulesDirectService
     }
 
     /**
-     * Enter a cooldown until the next UTC day after a 4009/4010 rejection. The
-     * limit is enforced by the provider per account, so every EPG that shares
+     * When a login cooldown for $reason ends: 15 minutes for an account lockout
+     * (4004), otherwise the next UTC day, when the daily limits reset (4009/4010).
+     */
+    private function loginCooldownEndsAt(string $reason): Carbon
+    {
+        return $reason === SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT
+            ? now()->addMinutes(self::ACCOUNT_LOCKOUT_MINUTES)
+            : $this->nextUtcDay();
+    }
+
+    /**
+     * Enter a cooldown after a 4004/4009/4010 rejection (see loginCooldownEndsAt()).
+     * The limit is enforced by the provider per account, so every EPG that shares
      * this login is fenced, not just the one that hit it. An already-active
      * cooldown is never pushed forward, so attempts that are locally suppressed
      * during the window cannot extend it.
@@ -737,7 +784,7 @@ class SchedulesDirectService
             return $active;
         }
 
-        $retryAt = $this->nextUtcDay();
+        $retryAt = $this->loginCooldownEndsAt($reason);
 
         $fenced = $this->updateAccount($epg, ['sd_login_cooldown_until' => $retryAt, 'sd_backoff_attempts' => 0]);
 
