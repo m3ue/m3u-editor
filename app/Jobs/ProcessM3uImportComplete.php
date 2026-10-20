@@ -517,8 +517,10 @@ class ProcessM3uImportComplete implements ShouldQueue
             ],
         ]);
 
-        $logQueries['newGroups']->forceDelete();
+        // Soft-delete this run's created/restored groups (restored ones return to the trash they
+        // came from), keeping any an existing channel was already moved into.
         $logQueries['newChannels']->delete();
+        $logQueries['newGroups']->whereDoesntHave('channels')->delete();
         Job::where('batch_no', $this->batchNo)->delete();
 
         Notification::make()

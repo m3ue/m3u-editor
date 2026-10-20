@@ -142,6 +142,17 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 $updateColumns[] = 'sort';
             }
 
+            // `group_id` is not in the update list, so re-home channels the provider moved here first
+            if ($groupId) {
+                ProcessM3uImport::moveChannelsToProviderGroup(
+                    (int) $job->variables['playlistId'],
+                    (int) $groupId,
+                    $groupName,
+                    array_column($bulk, 'source_id'),
+                    $job->batch_no,
+                );
+            }
+
             // Keep locally enriched years when a provider omits the field on later syncs,
             // while still accepting non-empty provider year updates.
             [$bulkWithYear, $bulkWithoutYear] = collect($bulk)

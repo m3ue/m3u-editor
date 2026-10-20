@@ -126,6 +126,17 @@ class ProcessM3uImportChunk implements ShouldQueue
                 $updateColumns[] = 'sort';
             }
 
+            // `group_id` is not in the update list, so re-home channels the provider moved here first
+            if ($groupId) {
+                ProcessM3uImport::moveChannelsToProviderGroup(
+                    (int) $job->variables['playlistId'],
+                    (int) $groupId,
+                    $groupName,
+                    array_column($bulk, 'source_id'),
+                    $job->batch_no,
+                );
+            }
+
             // Upsert the channels
             Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: $updateColumns);
         }
