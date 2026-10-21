@@ -54,7 +54,7 @@ it('preserves the last good merged download when every selected source file is m
 
     expect($this->merged->status)->toBe(Status::Failed)
         ->and($this->merged->processing)->toBeFalse()
-        ->and($this->merged->errors)->not->toBeNull()
+        ->and($this->merged->errors)->toStartWith('Unable to build merged EPG.')
         ->and($this->merged->channel_count)->toBe(2)
         ->and($this->merged->programme_count)->toBe(2)
         ->and(Storage::disk('local')->get($this->merged->file_path))->toBe($original)
@@ -62,14 +62,17 @@ it('preserves the last good merged download when every selected source file is m
     $this->get(route('epg.file', $this->merged->uuid))->assertOk()->assertStreamedContent($original);
 });
 
-it('preserves the last good guide when a selected source cannot be parsed as complete XMLTV', function (string $contents) {
+it('preserves the last good guide when no selected source can be parsed as complete XMLTV', function (string $contents) {
     ($this->runMerge)();
     $original = Storage::disk('local')->get($this->merged->file_path);
-    Storage::disk('local')->put($this->sources->first()->file_path, $contents);
+    foreach ($this->sources as $source) {
+        Storage::disk('local')->put($source->file_path, $contents);
+    }
 
     ($this->runMerge)();
 
     expect($this->merged->status)->toBe(Status::Failed)
+        ->and($this->merged->errors)->not->toBeNull()
         ->and($this->merged->channel_count)->toBe(2)
         ->and($this->merged->programme_count)->toBe(2)
         ->and(Storage::disk('local')->get($this->merged->file_path))->toBe($original)
@@ -79,6 +82,33 @@ it('preserves the last good guide when a selected source cannot be parsed as com
     'HTML error' => '<html><body>Service unavailable</body></html>',
     'truncated XMLTV' => '<tv><channel id="broken.test"><display-name>Broken</display-name></channel>',
 ]);
+
+it('keeps merging the complete source when another source is empty or not XMLTV', function (string $contents) {
+    Storage::disk('local')->put($this->sources->first()->file_path, $contents);
+
+    ($this->runMerge)();
+
+    $xml = simplexml_load_string(Storage::disk('local')->get($this->merged->file_path));
+    expect($this->merged->status)->toBe(Status::Completed)
+        ->and($this->merged->channel_count)->toBe(1)
+        ->and((string) $xml->channel['id'])->toBe('second.test')
+        ->and(Storage::disk('local')->files($this->merged->folder_path))->toBe([$this->merged->file_path]);
+})->with([
+    'empty file' => '',
+    'HTML error' => '<html><body>Service unavailable</body></html>',
+]);
+
+it('reports the configuration error and keeps the guide when no source EPGs are selected', function () {
+    ($this->runMerge)();
+    $original = Storage::disk('local')->get($this->merged->file_path);
+    $this->merged->sourceEpgs()->detach();
+
+    ($this->runMerge)();
+
+    expect($this->merged->status)->toBe(Status::Failed)
+        ->and($this->merged->errors)->toStartWith('Invalid merged EPG configuration.')
+        ->and(Storage::disk('local')->get($this->merged->file_path))->toBe($original);
+});
 
 it('keeps the old download visible until the replacement is promoted and cleans up a failed promotion', function () {
     ($this->runMerge)();

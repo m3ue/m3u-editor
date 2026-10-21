@@ -17,6 +17,7 @@ use Carbon\CarbonInterface;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\File;
@@ -609,10 +610,18 @@ class ProcessEpgImport implements ShouldQueue
 
     private function processMergedEpg(Epg $epg, Carbon $start): void
     {
-        $merged = $this->buildMergedEpgFile($epg);
+        $sourceEpgs = $epg->sourceEpgs()
+            ->where('epgs.id', '!=', $epg->id)
+            ->where('epgs.is_merged', false)
+            ->orderBy('merged_epg_epg.sort_order')
+            ->get();
+
+        $merged = $sourceEpgs->isNotEmpty() ? $this->buildMergedEpgFile($epg, $sourceEpgs) : null;
 
         if (! $merged) {
-            $error = 'Unable to build merged EPG. Ensure the selected sources have readable, valid XMLTV files and try again. The existing merged guide was kept.';
+            $error = $sourceEpgs->isEmpty()
+                ? 'Invalid merged EPG configuration. Please ensure you selected at least 2 valid source EPGs and try again.'
+                : 'Unable to build merged EPG. Ensure the selected sources have readable, valid XMLTV files and try again. The existing merged guide was kept.';
 
             Notification::make()
                 ->danger()
@@ -677,18 +686,11 @@ class ProcessEpgImport implements ShouldQueue
         event(new SyncCompleted($epg));
     }
 
-    private function buildMergedEpgFile(Epg $epg): ?array
+    /**
+     * @param  Collection<int, Epg>  $sourceEpgs
+     */
+    private function buildMergedEpgFile(Epg $epg, Collection $sourceEpgs): ?array
     {
-        $sourceEpgs = $epg->sourceEpgs()
-            ->where('epgs.id', '!=', $epg->id)
-            ->where('epgs.is_merged', false)
-            ->orderBy('merged_epg_epg.sort_order')
-            ->get();
-
-        if ($sourceEpgs->isEmpty()) {
-            return null;
-        }
-
         Storage::disk('local')->makeDirectory($epg->folder_path);
 
         // Build beside the current guide so failed imports never replace a working download.
@@ -764,10 +766,12 @@ class ProcessEpgImport implements ShouldQueue
                 $reader->close();
                 $reader = null;
 
-                if (! $readToEnd) {
-                    return null;
+                // Like a missing source, one that isn't complete XMLTV (an empty file or an HTML
+                // error page) doesn't stop the merge, but only complete sources count towards
+                // replacing the guide.
+                if ($readToEnd) {
+                    $sourceCount++;
                 }
-                $sourceCount++;
             }
 
             if ($sourceCount === 0) {
