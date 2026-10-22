@@ -47,6 +47,7 @@ use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Services\TagRenamePropagationService;
 use App\Settings\GeneralSettings;
+use App\Socialite\OidcProvider;
 use App\Support\ApiDocs\DocumentDvrAuthenticationErrors;
 use App\Support\ApiDocs\DocumentXtreamApiResponses;
 use App\Support\ApiDocs\MergeSameStatusResponses;
@@ -92,7 +93,6 @@ use Laravel\Ai\AiManager;
 use Livewire\Livewire;
 use PDO;
 use SocialiteProviders\Manager\SocialiteWasCalled;
-use SocialiteProviders\OIDC\OIDCExtendSocialite;
 use Spatie\Tags\Tag;
 use Throwable;
 
@@ -1228,10 +1228,9 @@ class AppServiceProvider extends ServiceProvider
             return;
         }
 
-        Event::listen(
-            SocialiteWasCalled::class,
-            [OIDCExtendSocialite::class, 'handle'],
-        );
+        Event::listen(SocialiteWasCalled::class, function (SocialiteWasCalled $event): void {
+            $event->extendSocialite('oidc', OidcProvider::class);
+        });
     }
 
     private function registerLocaleListener(): void

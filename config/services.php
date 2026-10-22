@@ -82,6 +82,8 @@ return [
         'client_id' => env('OIDC_CLIENT_ID'),
         'client_secret' => env('OIDC_CLIENT_SECRET'),
         'base_url' => env('OIDC_ISSUER_URL'),
+        'expected_issuer' => env('OIDC_EXPECTED_ISSUER', env('OIDC_ISSUER_URL')),
+        'verify_jwt' => true,
         'redirect' => '/auth/oidc/callback',
         'scopes' => implode(' ', array_filter(array_map('trim', explode(',', env('OIDC_SCOPES', 'openid,profile,email'))))),
         'auto_redirect' => env('OIDC_AUTO_REDIRECT', false),

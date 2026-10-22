@@ -2,12 +2,31 @@
 
 namespace App\Filament\Auth;
 
+use App\Http\Controllers\Auth\OidcController;
+use Filament\Actions\Action;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 class EditProfile extends \Filament\Auth\Pages\EditProfile
 {
+    protected function getFormActions(): array
+    {
+        return [
+            ...parent::getFormActions(),
+            Action::make('linkOidc')
+                ->label(__('oidc.link_account'))
+                ->color('gray')
+                ->visible(fn (): bool => config('services.oidc.enabled') && ! config('auth.auto_login') && auth()->user()?->oidc_issuer === null)
+                ->requiresConfirmation()
+                ->modalDescription(__('oidc.link_description'))
+                ->action(function (): void {
+                    $response = app(OidcController::class)->link();
+                    $this->redirect($response->getTargetUrl());
+                }),
+        ];
+    }
+
     /**
      * After the profile is saved, clear the must_change_password flag
      * if the user just fulfilled a forced-password-change requirement.

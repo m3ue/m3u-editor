@@ -20,6 +20,12 @@ function mockOidcUser(array $attributes = []): SocialiteUser
     $socialiteUser->name = $attributes['name'];
     $socialiteUser->email = $attributes['email'];
     $socialiteUser->avatar = $attributes['avatar'];
+    $socialiteUser->setRaw([
+        'iss' => 'https://issuer.example.test',
+        'sub' => $attributes['id'],
+        'aud' => 'fixture-client',
+        'email_verified' => true,
+    ]);
 
     return $socialiteUser;
 }
@@ -27,6 +33,8 @@ function mockOidcUser(array $attributes = []): SocialiteUser
 beforeEach(function () {
     config()->set('services.oidc.enabled', true);
     config()->set('services.oidc.auto_create_users', true);
+    config()->set('services.oidc.expected_issuer', 'https://issuer.example.test');
+    config()->set('services.oidc.client_id', 'fixture-client');
 });
 
 // --- Route guards ---
@@ -46,7 +54,7 @@ it('returns 404 for callback when OIDC is disabled', function () {
 // --- User matching ---
 
 it('matches existing user by oidc_id', function () {
-    $user = User::factory()->create(['oidc_id' => 'oidc-123']);
+    $user = User::factory()->create(['oidc_id' => 'oidc-123', 'oidc_issuer' => 'https://issuer.example.test']);
     $countBefore = User::count();
 
     Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser());
@@ -58,7 +66,7 @@ it('matches existing user by oidc_id', function () {
     expect(User::count())->toBe($countBefore);
 });
 
-it('matches existing user by email', function () {
+it('does not implicitly link an existing user by email', function () {
     $user = User::factory()->create(['email' => 'oidc-test@example.com']);
 
     Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser());
@@ -66,11 +74,11 @@ it('matches existing user by email', function () {
     $this->get('/auth/oidc/callback')
         ->assertRedirect();
 
-    expect(auth()->id())->toBe($user->id);
-    expect($user->fresh()->oidc_id)->toBe('oidc-123');
+    expect(auth()->check())->toBeFalse();
+    expect($user->fresh()->oidc_id)->toBeNull();
 });
 
-it('matches existing user by username as fallback', function () {
+it('does not implicitly link an existing user by username', function () {
     $user = User::factory()->create([
         'name' => 'Test User',
         'email' => 'different@example.com',
@@ -81,12 +89,12 @@ it('matches existing user by username as fallback', function () {
     $this->get('/auth/oidc/callback')
         ->assertRedirect();
 
-    expect(auth()->id())->toBe($user->id);
-    expect($user->fresh()->oidc_id)->toBe('oidc-123');
+    expect(auth()->check())->toBeFalse();
+    expect($user->fresh()->oidc_id)->toBeNull();
 });
 
 it('prefers oidc_id match over email match', function () {
-    $oidcUser = User::factory()->create(['oidc_id' => 'oidc-123', 'email' => 'other@example.com']);
+    $oidcUser = User::factory()->create(['oidc_id' => 'oidc-123', 'oidc_issuer' => 'https://issuer.example.test', 'email' => 'other@example.com']);
     $emailUser = User::factory()->create(['email' => 'someone-else@example.com']);
 
     // Mock OIDC user returns a unique email that won't conflict
@@ -133,6 +141,7 @@ it('denies login when no match and auto-create is disabled', function () {
 it('syncs email and avatar from IdP but preserves name', function () {
     $user = User::factory()->create([
         'oidc_id' => 'oidc-123',
+        'oidc_issuer' => 'https://issuer.example.test',
         'name' => 'admin',
         'email' => 'old@example.com',
     ]);
@@ -176,6 +185,7 @@ it('redirects with error when OIDC user has no email', function () {
 it('preserves admin status when OIDC syncs profile', function () {
     $admin = User::factory()->create([
         'oidc_id' => 'oidc-123',
+        'oidc_issuer' => 'https://issuer.example.test',
         'is_admin' => true,
         'email' => 'myadmin@example.com',
     ]);

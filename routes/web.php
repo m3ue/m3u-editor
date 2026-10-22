@@ -52,6 +52,7 @@ Route::get('/pdt', function () {
 // OIDC SSO authentication
 Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('auth.oidc.redirect');
 Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
+Route::post('/auth/oidc/link', [OidcController::class, 'link'])->middleware('auth')->name('auth.oidc.link');
 
 // In-app watch progress tracking (admin panel + guest panel)
 Route::middleware(['throttle:60,1'])->group(function () {

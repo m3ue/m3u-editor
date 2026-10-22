@@ -31,6 +31,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'app_authentication_secret',
         'app_authentication_recovery_codes',
         'oidc_id',
+        'oidc_issuer',
     ];
 
     /**
