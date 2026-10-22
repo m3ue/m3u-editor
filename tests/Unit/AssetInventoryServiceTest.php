@@ -23,6 +23,19 @@ it('indexes existing cached and uploaded files from storage', function () {
     expect(Asset::query()->where('disk', 'public')->where('path', 'placeholder.png')->where('source', 'placeholder')->exists())->toBeTrue();
 });
 
+it('keeps legacy SVG and document files indexed without inline raster previews', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+    Storage::disk('public')->put('assets/library/legacy.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    Storage::disk('public')->put('assets/library/notes.html', '<!doctype html><title>Notes</title>');
+
+    expect(app(AssetInventoryService::class)->sync())->toBe(2);
+    foreach (Asset::all() as $asset) {
+        expect(Storage::disk($asset->disk)->exists($asset->path))->toBeTrue()
+            ->and($asset->isInlinePreviewable())->toBeFalse();
+    }
+});
+
 it('prunes records for files removed from storage', function () {
     Storage::fake('local');
 

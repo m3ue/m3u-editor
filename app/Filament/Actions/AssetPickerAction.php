@@ -3,6 +3,8 @@
 namespace App\Filament\Actions;
 
 use App\Models\Asset;
+use App\Rules\AllowedAssetFile;
+use App\Services\AssetFilePolicy;
 use App\Services\AssetInventoryService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -24,6 +26,10 @@ class AssetPickerAction
                 FileUpload::make('logo_file')
                     ->label(__('Logo image'))
                     ->image()
+                    ->acceptedFileTypes(AssetFilePolicy::mimeTypes(imagesOnly: true))
+                    ->rules([new AllowedAssetFile(imagesOnly: true)])
+                    ->maxSize(AssetFilePolicy::MAX_UPLOAD_KILOBYTES)
+                    ->preventFilePathTampering()
                     ->required()
                     ->disk('public')
                     ->directory('assets/library')

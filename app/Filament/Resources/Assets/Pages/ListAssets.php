@@ -5,6 +5,8 @@ namespace App\Filament\Resources\Assets\Pages;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\Assets\Widgets\AssetStatsOverview;
 use App\Models\Asset;
+use App\Rules\AllowedAssetFile;
+use App\Services\AssetFilePolicy;
 use App\Services\AssetInventoryService;
 use App\Services\LogoRepositoryService;
 use App\Settings\GeneralSettings;
@@ -45,7 +47,11 @@ class ListAssets extends ListRecords
                         ->required()
                         ->disk('public')
                         ->directory('assets/library')
-                        ->preserveFilenames(),
+                        ->acceptedFileTypes(AssetFilePolicy::mimeTypes())
+                        ->rules([new AllowedAssetFile])
+                        ->maxSize(AssetFilePolicy::MAX_UPLOAD_KILOBYTES)
+                        ->preventFilePathTampering()
+                        ->helperText(__('assets.upload_formats')),
                 ])
                 ->action(function (array $data): void {
                     $asset = app(AssetInventoryService::class)->indexFile('public', $data['file'], 'upload');

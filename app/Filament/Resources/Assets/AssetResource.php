@@ -71,7 +71,7 @@ class AssetResource extends Resource implements CopilotResource
             ->columns([
                 ImageColumn::make('preview')
                     ->label(__('Preview'))
-                    ->getStateUsing(fn (Asset $record): ?string => $record->is_image ? $record->preview_url : null)
+                    ->getStateUsing(fn (Asset $record): ?string => $record->isInlinePreviewable() ? $record->preview_url : null)
                     ->square()
                     ->extraImgAttributes(fn ($record): array => ['style' => 'height:2.5rem; width:auto; border-radius:4px;'])
                     ->defaultImageUrl(url('/placeholder.png')),

@@ -5,6 +5,9 @@ namespace App\Filament\Clusters\Settings\Pages;
 use App\Enums\ImageProfile;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Filament\Resources\Assets\AssetResource;
+use App\Rules\AllowedAssetFile;
+use App\Services\AssetFilePolicy;
+use App\Settings\GeneralSettings;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -150,6 +153,10 @@ class ManageAssetSettings extends BaseSettingsPage
                         FileUpload::make('logo_placeholder_url')
                             ->label(__('Logo placeholder'))
                             ->image()
+                            ->acceptedFileTypes(AssetFilePolicy::mimeTypes(imagesOnly: true))
+                            ->rules([new AllowedAssetFile(imagesOnly: true)])
+                            ->maxSize(AssetFilePolicy::MAX_UPLOAD_KILOBYTES)
+                            ->preventFilePathTampering(allowFilePathUsing: fn (string $file): bool => $file === app(GeneralSettings::class)->logo_placeholder_url)
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')
@@ -163,6 +170,10 @@ class ManageAssetSettings extends BaseSettingsPage
                         FileUpload::make('episode_placeholder_url')
                             ->label(__('Episode preview placeholder'))
                             ->image()
+                            ->acceptedFileTypes(AssetFilePolicy::mimeTypes(imagesOnly: true))
+                            ->rules([new AllowedAssetFile(imagesOnly: true)])
+                            ->maxSize(AssetFilePolicy::MAX_UPLOAD_KILOBYTES)
+                            ->preventFilePathTampering(allowFilePathUsing: fn (string $file): bool => $file === app(GeneralSettings::class)->episode_placeholder_url)
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')
@@ -176,6 +187,10 @@ class ManageAssetSettings extends BaseSettingsPage
                         FileUpload::make('vod_series_poster_placeholder_url')
                             ->label(__('VOD/Series poster placeholder'))
                             ->image()
+                            ->acceptedFileTypes(AssetFilePolicy::mimeTypes(imagesOnly: true))
+                            ->rules([new AllowedAssetFile(imagesOnly: true)])
+                            ->maxSize(AssetFilePolicy::MAX_UPLOAD_KILOBYTES)
+                            ->preventFilePathTampering(allowFilePathUsing: fn (string $file): bool => $file === app(GeneralSettings::class)->vod_series_poster_placeholder_url)
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')

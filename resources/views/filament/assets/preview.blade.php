@@ -1,6 +1,6 @@
 <div class="space-y-4">
     <div class="">
-        @if ($asset->is_image)
+        @if ($asset->isInlinePreviewable())
             <img
                 src="{{ $asset->preview_url }}"
                 alt="{{ $asset->name }}"
@@ -8,7 +8,10 @@
             />
         @else
             <div class="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-                Preview is only available for image assets.
+                {{ __('assets.no_inline_preview') }}
+                <x-filament::button tag="a" :href="$asset->preview_url" icon="heroicon-o-arrow-down-tray" class="mt-3">
+                    {{ __('assets.download') }}
+                </x-filament::button>
             </div>
         @endif
     </div>

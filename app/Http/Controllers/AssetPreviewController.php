@@ -18,12 +18,21 @@ class AssetPreviewController extends Controller
         $disk = Storage::disk($asset->disk);
         abort_unless($disk->exists($asset->path), 404);
 
-        return response()->file(
-            $disk->path($asset->path),
-            [
-                'Content-Type' => $asset->mime_type ?? 'application/octet-stream',
-                'Cache-Control' => 'private, max-age=3600',
-            ]
-        );
+        // Re-sniff storage content; inventory metadata can be stale or incorrect.
+        $inlineMimeType = $asset->inlinePreviewMimeType();
+        $headers = [
+            'Content-Type' => $inlineMimeType ?? 'application/octet-stream',
+            'Cache-Control' => 'private, max-age=3600',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
+        ];
+
+        if ($inlineMimeType === null) {
+            return response()->download($disk->path($asset->path), $asset->name, $headers)->setPrivate();
+        }
+
+        return response()->file($disk->path($asset->path), $headers)
+            ->setPrivate()
+            ->setContentDisposition('inline', $asset->name);
     }
 }
