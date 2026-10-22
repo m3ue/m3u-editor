@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>EPG tooltip browser regression</title>
+    <link rel="stylesheet" href="/filament-support.css">
+    <script src="/epg-viewer.js"></script>
+    <script src="/filament-support.js"></script>
+    <script src="/livewire.js" data-csrf="fixture" data-update-uri="/unused" defer></script>
+</head>
+<body>
+    <h1>EPG tooltip browser regression</h1>
+    <div x-data="tooltipFixture()">
+        <template x-for="(programme, index) in programmes" :key="index">
+            <button :id="'programme-' + index" x-tooltip.html="getTooltipContent(programme)" style="margin: 2rem">
+                <span x-text="programme.title"></span>
+            </button>
+        </template>
+    </div>
+    <pre id="results">Running</pre>
+    <script>
+        function tooltipFixture() {
+            return {
+                ...epgViewer({ apiUrl: '/unused' }),
+                init() {},
+                formatProgrammeTime() { return '12:00 - 13:00'; },
+                programmes: [
+                    {
+                        title: '<b>News & Culture</b> "today" 日本語',
+                        desc: "A <em>literal</em> tag & someone's café",
+                        category: '<i>Arts</i> & culture',
+                    },
+                    { title: 'Ordinary programme', desc: '', category: '' },
+                    {},
+                    { title: '&lt;b&gt;literal&lt;/b&gt;' },
+                ],
+            };
+        }
+
+        window.addEventListener('load', async () => {
+            const assertions = [];
+            const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+                assertions.push(message);
+            };
+            try {
+                for (let attempt = 0; attempt < 100 && !document.querySelector('#programme-0')?._tippy; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                const programmes = tooltipFixture().programmes;
+                for (const [index, programme] of programmes.entries()) {
+                    const button = document.querySelector('#programme-' + index);
+                    assert(Boolean(button?._tippy), `programme ${index}: actual Filament tooltip initialized`);
+                    assert(button.querySelector('span').textContent === (programme.title ?? ''), `programme ${index}: grid text preserved`);
+                    button._tippy.show();
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    const tooltip = button._tippy.popper.querySelector('.tippy-content');
+                    assert(tooltip.querySelector('strong').textContent === (programme.title ?? ''), `programme ${index}: tooltip title preserved`);
+                    assert(tooltip.querySelectorAll('b, em, i').length === 0, `programme ${index}: provider markup stays text`);
+                    if (programme.desc) assert(tooltip.textContent.includes(programme.desc), 'description preserved as literal text');
+                    if (programme.category) assert(tooltip.textContent.includes(programme.category), 'category preserved as literal text');
+                    button._tippy.hide();
+                }
+                window.tooltipRegression = { passed: true, assertions };
+                document.documentElement.dataset.result = 'passed';
+            } catch (error) {
+                window.tooltipRegression = { passed: false, assertions, error: error.message };
+                document.documentElement.dataset.result = 'failed';
+            }
+            document.querySelector('#results').textContent = JSON.stringify(window.tooltipRegression, null, 2);
+        });
+    </script>
+</body>
+</html>

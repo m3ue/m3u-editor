@@ -502,9 +502,20 @@ function epgViewer(config) {
             return this.channelOrder;
         },
 
+        escapeTooltipText(value) {
+            return String(value ?? '').replace(/[&<>"']/g, character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;',
+            })[character]);
+        },
+
         getTooltipContent(programme) {
-            let content = '<p><strong>' + programme.title + '</strong></p>';
-            content += '<small>' + this.formatProgrammeTime(programme) + '</small><br/>';
+            // Only the layout is HTML. Provider values are always plain text.
+            let content = '<p><strong>' + this.escapeTooltipText(programme.title) + '</strong></p>';
+            content += '<small>' + this.escapeTooltipText(this.formatProgrammeTime(programme)) + '</small><br/>';
             if (programme.new) {
                 content += '<small>New Episode</small><br/>';
             }
@@ -527,10 +538,10 @@ function epgViewer(config) {
                 }
             }
             if (programme.desc && programme.desc.trim()) {
-                content += '<p>' + programme.desc + '</p>';
+                content += '<p>' + this.escapeTooltipText(programme.desc) + '</p>';
             }
             if (programme.category && programme.category.trim()) {
-                content += '<small>Category: ' + programme.category + '</small>';
+                content += '<small>Category: ' + this.escapeTooltipText(programme.category) + '</small>';
             }
             return content;
         },

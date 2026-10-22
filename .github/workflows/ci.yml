@@ -202,6 +202,9 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      - name: Test EPG tooltip text rendering
+        run: npm run test:epg-tooltip
+
       - name: Prepare Laravel Application
         env:
           DB_CONNECTION: pg_test

@@ -3,7 +3,9 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "test:epg-tooltip": "node --test tests/JavaScript/epg-tooltip.test.mjs",
+        "test:epg-tooltip:browser": "node tests/Browser/epg-tooltip-server.mjs"
     },
     "devDependencies": {
         "@tailwindcss/forms": "^0.5.10",
