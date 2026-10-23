@@ -212,7 +212,8 @@ $config = [
             'balance' => 'simple',
             'maxProcesses' => $horizonIntEnv('HORIZON_PLUGIN_MAX_PROCESSES', 1),
             'maxTime' => $horizonIntEnv('HORIZON_PLUGIN_MAX_TIME', 3600),
-            'maxJobs' => $horizonIntEnv('HORIZON_PLUGIN_MAX_JOBS', 50),
+            // PHP cannot replace a loaded plugin class; every invocation needs a fresh process.
+            'maxJobs' => 1,
             'memory' => $horizonIntEnv('HORIZON_PLUGIN_MEMORY', 256),
             'tries' => 1,
             // Must stay shorter than the 'plugin' connection retry_after in config/queue.php.

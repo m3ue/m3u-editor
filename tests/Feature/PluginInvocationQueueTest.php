@@ -355,7 +355,7 @@ it('allows only one claimant to transition a pending resumed run', function (): 
     }
 });
 
-it('isolates plugin invocations on a dedicated long-running queue worker', function () {
+it('isolates plugin invocations on a dedicated single-job queue worker', function () {
     $job = new ExecutePluginInvocation(1, 'action', 'health_check');
     $connection = config('queue.connections.plugin');
     $supervisor = config('horizon.defaults.m3u-editor-plugin-queue');
@@ -378,17 +378,36 @@ it('isolates plugin invocations on a dedicated long-running queue worker', funct
         ->and($supervisor['queue'])->toBe(['plugin-invocations'])
         ->and($supervisor['timeout'])->toBe(21600)
         ->and($supervisor['tries'])->toBe(1)
+        ->and($supervisor['maxJobs'])->toBe(1)
         ->and($connection['retry_after'])->toBeGreaterThan($supervisor['timeout'])
         ->and(config('horizon.defaults.m3u-editor-queue.queue'))->not->toContain('plugin-invocations');
 });
 
-it('documents every dedicated plugin supervisor tuning default', function () {
+it('ignores legacy plugin max jobs overrides to keep each invocation in a fresh process', function (string $maxJobs): void {
+    $previous = $_ENV['HORIZON_PLUGIN_MAX_JOBS'] ?? null;
+    $_ENV['HORIZON_PLUGIN_MAX_JOBS'] = $maxJobs;
+
+    try {
+        $horizon = require config_path('horizon.php');
+
+        expect($horizon['defaults']['m3u-editor-plugin-queue']['maxJobs'])->toBe(1);
+    } finally {
+        if ($previous === null) {
+            unset($_ENV['HORIZON_PLUGIN_MAX_JOBS']);
+        } else {
+            $_ENV['HORIZON_PLUGIN_MAX_JOBS'] = $previous;
+        }
+    }
+})->with(['50', '0', '1', '']);
+
+it('documents the fixed single-job plugin worker boundary', function () {
     $environment = file_get_contents(base_path('.env.example'));
 
     expect($environment)
         ->toContain('# HORIZON_PLUGIN_MAX_PROCESSES=1')
         ->toContain('# HORIZON_PLUGIN_MAX_TIME=3600')
-        ->toContain('# HORIZON_PLUGIN_MAX_JOBS=50')
+        ->toContain('HORIZON_PLUGIN_MAX_JOBS is ignored')
+        ->toContain('one invocation per process')
         ->toContain('# HORIZON_PLUGIN_MEMORY=256');
 });
 
