@@ -18,6 +18,7 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Spatie\Tags\Tag;
 
 uses(RefreshDatabase::class);
@@ -27,16 +28,30 @@ beforeEach(function () {
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
 
-    // PostgreSQL sequences survive transaction rollbacks, so the collision
-    // must be explicit rather than depending on both sequences starting at 1.
+    // The fallback provider group and the custom tag are rows in independent
+    // auto-increment sequences. On a fresh database they'd naturally land on the
+    // same primary key, but RefreshDatabase doesn't reset sequences between tests
+    // in the same worker process, and padding one sequence up to meet the other
+    // proved unreliable under a real full-suite/parallel run (something keeps
+    // advancing one side between our read and our inserts). Forcing both rows
+    // onto the same explicit, unused id sidesteps that race entirely - model
+    // factories bypass mass-assignment guarding (Model::unguarded()), so 'id'
+    // can be set directly regardless of either model's $guarded/$fillable.
+    $collisionId = (int) max(
+        DB::table('groups')->max('id') ?? 0,
+        DB::table('tags')->max('id') ?? 0,
+    ) + 1;
+
     $this->fallbackGroup = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'id' => $collisionId,
         'type' => 'live',
         'name' => 'Provider fallback',
     ]);
 
-    $this->taggedChannel = Channel::factory()->for($this->user)->for($this->playlist)->create([
-        'enabled' => true, 'is_vod' => false, 'title' => 'Tagged Channel',
-    ]);
+    $this->taggedChannel = Channel::factory()->for($this->user)->for($this->playlist)
+        ->for(Group::factory()->for($this->user)->for($this->playlist)->state(['id' => $collisionId + 1]))->create([
+            'enabled' => true, 'is_vod' => false, 'title' => 'Tagged Channel',
+        ]);
     $this->fallbackChannel = Channel::factory()->for($this->user)->for($this->playlist)->for($this->fallbackGroup)->create([
         'enabled' => true, 'is_vod' => false, 'title' => 'Fallback Channel',
     ]);
@@ -44,9 +59,9 @@ beforeEach(function () {
     $this->customPlaylist->channels()->attach($this->taggedChannel->id);
     $this->customPlaylist->channels()->attach($this->fallbackChannel->id);
 
-    $this->tag = Tag::forceCreate([
-        'id' => $this->fallbackGroup->id,
-        'name' => 'My Sports',
+    $this->tag = Tag::create([
+        'id' => $collisionId,
+        'name' => [app()->getLocale() => 'My Sports'],
         'type' => $this->customPlaylist->uuid,
     ]);
     $this->customPlaylist->attachTag($this->tag);
