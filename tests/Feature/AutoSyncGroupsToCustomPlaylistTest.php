@@ -14,6 +14,7 @@
 
 use App\Enums\Status;
 use App\Events\SyncCompleted;
+use App\Jobs\AddItemsToCustomPlaylistChunk;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -22,12 +23,19 @@ use App\Models\Playlist;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Schema;
 use Spatie\Tags\Tag;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Notification::fake();
+    Http::preventStrayRequests();
+
     $this->user = User::factory()->create();
     $this->playlist = Playlist::factory()->for($this->user)->createQuietly([
         'status' => Status::Completed,
@@ -188,6 +196,175 @@ it('does not detach a manually attached groupless custom channel the rule never 
 
     expect($this->customPlaylist->channels()->where('channels.id', $activeChannel->id)->exists())->toBeTrue();
     expect($this->customPlaylist->channels()->where('channels.id', $manualChannel->id)->exists())->toBeTrue();
+});
+
+it('removes auto-added channels moved outside the selected groups during full_sync', function (bool $isCustom) {
+    $moved = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'is_custom' => $isCustom,
+    ]);
+    $otherGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+    ]);
+    $sync = new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+        syncMode: 'full_sync',
+    );
+    $sync->handle();
+    expect($this->customPlaylist->channels()->whereKey($moved->id)->exists())->toBeTrue();
+
+    $moved->update(['group_id' => $otherGroup->id]);
+    $sync->handle();
+
+    expect($this->customPlaylist->channels()->whereKey($moved->id)->exists())->toBeFalse()
+        ->and($moved->fresh()->group_id)->toBe($otherGroup->id);
+})->with([false, true]);
+
+it('preserves explicitly re-added channels after they move outside a rule', function () {
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'is_custom' => true,
+    ]);
+    $sync = new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+    );
+    $sync->handle();
+
+    (new AddItemsToCustomPlaylistChunk($this->customPlaylist->id, [$channel->id]))->handle();
+    $channel->update(['group_id' => null]);
+    $sync->handle();
+
+    expect($this->customPlaylist->channels()->whereKey($channel->id)->exists())->toBeTrue()
+        ->and(DB::table('channel_custom_playlist')->where('channel_id', $channel->id)->value('auto_sync_group_id'))->toBeNull();
+});
+
+it('does not prune a groupless channel tracked by another group rule', function () {
+    $otherGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+    ]);
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $otherGroup->id,
+        'is_custom' => false,
+    ]);
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$otherGroup->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+    ))->handle();
+    $channel->update(['group_id' => null]);
+
+    (new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+    ))->handle();
+
+    expect($this->customPlaylist->channels()->whereKey($channel->id)->exists())->toBeTrue();
+});
+
+it('tracks legacy memberships without changing their output overrides', function () {
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+    ]);
+    $this->customPlaylist->channels()->attach($channel->id, ['channel_number' => 105, 'sort' => 4]);
+    $migration = require database_path('migrations/2026_10_23_052217_add_auto_sync_group_id_to_channel_custom_playlist_table.php');
+    $migration->down();
+    expect(Schema::hasColumn('channel_custom_playlist', 'auto_sync_group_id'))->toBeFalse();
+    $migration->up();
+
+    $sync = new AutoSyncGroupsToCustomPlaylist(
+        userId: $this->user->id,
+        playlistId: $this->playlist->id,
+        groupIds: [$this->group->id],
+        customPlaylistId: $this->customPlaylist->id,
+        data: ['mode' => 'original'],
+    );
+    $sync->handle();
+    $sync->handle();
+
+    $pivot = DB::table('channel_custom_playlist')->where('channel_id', $channel->id)->first();
+    expect((int) $pivot->channel_number)->toBe(105)
+        ->and((int) $pivot->sort)->toBe(4)
+        ->and((int) $pivot->auto_sync_group_id)->toBe($this->group->id)
+        ->and($this->customPlaylist->channels()->count())->toBe(1);
+});
+
+it('updates M3U membership through the completed source sync lifecycle', function () {
+    config(['queue.default' => 'sync']);
+    $this->actingAs($this->user);
+    $manual = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => null,
+        'title' => 'Synthetic manual channel',
+        'name' => 'Synthetic manual channel',
+        'enabled' => true,
+        'is_custom' => true,
+        'is_vod' => false,
+    ]);
+    (new AddItemsToCustomPlaylistChunk($this->customPlaylist->id, [$manual->id]))->handle();
+    $moved = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'title' => 'Synthetic auto channel',
+        'name' => 'Synthetic auto channel',
+        'enabled' => true,
+        'is_custom' => true,
+        'is_vod' => false,
+    ]);
+    $otherGroup = Group::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'type' => 'live',
+    ]);
+    $this->playlist->updateQuietly([
+        'auto_sync_to_custom_config' => [[
+            'enabled' => true,
+            'type' => 'live_groups',
+            'groups' => [$this->group->id],
+            'custom_playlist_id' => $this->customPlaylist->id,
+            'sync_mode' => 'full_sync',
+            'mode' => 'original',
+        ]],
+    ]);
+
+    event(new SyncCompleted($this->playlist));
+    $before = $this->get("/{$this->customPlaylist->uuid}/playlist.m3u")->assertOk()->streamedContent();
+    expect($before)->toContain('Synthetic manual channel', 'Synthetic auto channel');
+
+    $moved->update(['group_id' => $otherGroup->id]);
+    event(new SyncCompleted($this->playlist->fresh()));
+    $after = $this->get("/{$this->customPlaylist->uuid}/playlist.m3u")->assertOk()->streamedContent();
+
+    expect($after)->toContain('Synthetic manual channel')
+        ->not->toContain('Synthetic auto channel')
+        ->and($this->customPlaylist->channels()->count())->toBe(1)
+        ->and($moved->fresh()->group_id)->toBe($otherGroup->id);
 });
 
 it('does not remove channels from other groups in full_sync mode', function () {

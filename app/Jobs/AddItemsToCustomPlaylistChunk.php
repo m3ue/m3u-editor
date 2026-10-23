@@ -62,6 +62,13 @@ class AddItemsToCustomPlaylistChunk implements ShouldQueue
             ], $this->itemIds)
         );
 
+        if (! $meta['isSeries']) {
+            DB::table($meta['pivotTable'])
+                ->where($meta['pivotForeignKey'], $this->customPlaylistId)
+                ->whereIn($meta['pivotRelatedKey'], $this->itemIds)
+                ->update(['auto_sync_group_id' => null]);
+        }
+
         $tag = $this->tagId !== null ? Tag::find($this->tagId) : null;
         if ($tag) {
             $playlistTagIds = $playlist->{$meta['tagFunction']}()->pluck('tags.id')->all();
