@@ -188,8 +188,15 @@ it('keeps the full listing numbers for a custom playlist Xtream category', funct
     $url = '/player_api.php?username='.urlencode($this->user->name).'&password='.urlencode($customPlaylist->uuid).'&action=get_live_streams';
     $numbers = fn (string $query = '') => collect($this->getJson($url.$query)->assertStatus(200)->json())->pluck('num', 'name')->all();
 
+    $categories = $this->getJson('/player_api.php?'.http_build_query([
+        'username' => $this->user->name,
+        'password' => $customPlaylist->uuid,
+        'action' => 'get_live_categories',
+    ]))->assertOk()->json();
+    $categoryId = collect($categories)->firstWhere('category_name', $this->groupB->name)['category_id'];
+
     expect($numbers())->toBe(['A30' => 1, 'B20' => 50, 'A-none' => 100, 'B-zero' => 101])
-        ->and($numbers('&category_id='.$this->groupB->id))->toBe(['B20' => 50, 'B-zero' => 101]);
+        ->and($numbers('&category_id='.$categoryId))->toBe(['B20' => 50, 'B-zero' => 101]);
 });
 
 it('applies forced numbering to the EPG channel ids', function () {
