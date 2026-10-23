@@ -27,9 +27,8 @@ beforeEach(function () {
     $this->playlist = Playlist::factory()->for($this->user)->create();
     $this->customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
 
-    // The fallback provider group and the custom tag are rows in independent
-    // tables, so on a fresh database they both naturally land on primary key 1 -
-    // exactly the overlap the issue describes, with no ids forced by hand.
+    // PostgreSQL sequences survive transaction rollbacks, so the collision
+    // must be explicit rather than depending on both sequences starting at 1.
     $this->fallbackGroup = Group::factory()->for($this->user)->for($this->playlist)->create([
         'type' => 'live',
         'name' => 'Provider fallback',
@@ -45,7 +44,11 @@ beforeEach(function () {
     $this->customPlaylist->channels()->attach($this->taggedChannel->id);
     $this->customPlaylist->channels()->attach($this->fallbackChannel->id);
 
-    $this->tag = Tag::findOrCreate('My Sports', $this->customPlaylist->uuid);
+    $this->tag = Tag::forceCreate([
+        'id' => $this->fallbackGroup->id,
+        'name' => 'My Sports',
+        'type' => $this->customPlaylist->uuid,
+    ]);
     $this->customPlaylist->attachTag($this->tag);
     $this->taggedChannel->attachTag($this->tag);
 

@@ -22,13 +22,12 @@ beforeEach(function () {
 });
 
 it('resolves a network playlist stream via the projected channel network_id, even when their primary keys collide', function () {
-    // Pre-existing ordinary channel so it claims Channel id=1.
-    Channel::factory()->for($this->user)->for($this->playlist)->create([
+    $ordinaryChannel = Channel::factory()->for($this->user)->for($this->playlist)->create([
         'enabled' => true,
     ]);
 
-    // Network gets id=1 (independent sequence) while its projected Channel gets id=2.
     $network = Network::factory()->for($this->user)->create([
+        'id' => $ordinaryChannel->id,
         'network_playlist_id' => $this->playlist->id,
         'enabled' => true,
         'broadcast_enabled' => true,
@@ -36,12 +35,18 @@ it('resolves a network playlist stream via the projected channel network_id, eve
 
     $projectedChannel = Channel::where('network_id', $network->id)->first();
 
-    expect($network->id)->toBe(1)
-        ->and($projectedChannel->id)->toBe(2)
+    $otherNetwork = Network::factory()->for($this->user)->create([
+        'id' => $projectedChannel->id,
+        'network_playlist_id' => $this->playlist->id,
+        'enabled' => true,
+        'broadcast_enabled' => true,
+    ]);
+
+    expect($network->id)->toBe($ordinaryChannel->id)
+        ->and($otherNetwork->id)->toBe($projectedChannel->id)
         ->and($projectedChannel->id)->not->toBe($network->id);
 
-    // The HDHR lineup/Xtream URL for this network playlist uses the projected
-    // Channel's own id (2), not the Network's id (1).
+    // The route must not reinterpret the projected channel id as the other network.
     $response = $this->get("/live/{$this->user->name}/{$this->playlist->uuid}/{$projectedChannel->id}.m3u8");
 
     $response->assertRedirect($network->stream_url);
