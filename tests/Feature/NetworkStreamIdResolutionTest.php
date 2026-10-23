@@ -40,7 +40,11 @@ it('resolves a network playlist stream via the projected channel network_id, eve
         'broadcast_enabled' => true,
     ]);
 
-    $projectedChannel = Channel::where('network_id', $network->id)->latest('id')->first();
+    $projectedChannel = tap(Channel::where('network_id', $network->id)->latest('id')->first(), function (Channel $channel) use ($network): void {
+        if ($channel->id !== $network->id) {
+            $channel->update(['network_id' => null]);
+        }
+    });
 
     if ($projectedChannel->id !== $network->id) {
         $collisionId = (int) max(
@@ -48,7 +52,6 @@ it('resolves a network playlist stream via the projected channel network_id, eve
             DB::table('networks')->max('id') ?? 0,
         ) + 1;
 
-        DB::table('channels')->where('id', $projectedChannel->id)->update(['network_id' => null]);
         DB::table('networks')->where('id', $network->id)->update(['id' => $collisionId]);
         DB::table('channels')->where('id', $projectedChannel->id)->update([
             'id' => $collisionId,
