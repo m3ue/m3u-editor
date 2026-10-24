@@ -45,7 +45,15 @@ class CachedContentDispatchService
      */
     public function isEnabled(): bool
     {
-        return (bool) (app(GeneralSettings::class)->enable_cache ?? false);
+        /** @var GeneralSettings $settings */
+        $settings = app(GeneralSettings::class);
+        // Tests and callers may deliberately bind a partial settings double;
+        // only real settings instances can be reloaded from persistent state.
+        if ($settings::class === GeneralSettings::class) {
+            $settings->refresh();
+        }
+
+        return (bool) ($settings->enable_cache ?? false);
     }
 
     /**
@@ -83,7 +91,7 @@ class CachedContentDispatchService
      * `$viaArr` false keeps the provider even when a caching Radarr/Sonarr
      * is set up.
      */
-    public function dispatch(Channel|Episode $item, bool $automatic = false, bool $viaArr = true): CacheDispatchResult
+    public function dispatch(Channel|Episode $item, bool $automatic = false, bool $viaArr = true, ?CachedContentManagedBy $managedBy = null): CacheDispatchResult
     {
         if (! $this->isEnabled()) {
             return CacheDispatchResult::Disabled;
@@ -96,7 +104,7 @@ class CachedContentDispatchService
         $existing = $item->cachedContentFile()->first();
 
         if ($existing) {
-            if (! $automatic) {
+            if (! $automatic && $managedBy === null) {
                 $existing->keep();
 
                 // Cache Now on a title still waiting on the arr uses the
@@ -140,6 +148,7 @@ class CachedContentDispatchService
                 'user_id' => $playlist->user_id,
                 'playlist_id' => $playlist->id,
                 ...CachedContentFile::buildAttributes($item, $automatic),
+                ...($managedBy === null ? [] : ['managed_by' => $managedBy]),
                 'status' => CachedContentFileStatus::Pending,
             ]);
         } catch (UniqueConstraintViolationException) {
@@ -150,6 +159,16 @@ class CachedContentDispatchService
         dispatch(new DownloadCachedContentFile($file->id));
 
         return CacheDispatchResult::Queued;
+    }
+
+    /**
+     * Queue a provider download for the managed-publishing cache contract.
+     * Existing cache rows retain their original ownership so shared, manual,
+     * dynamic-group and Arr files are never reclassified by this path.
+     */
+    public function dispatchManaged(Channel|Episode $item): CacheDispatchResult
+    {
+        return $this->dispatch($item, viaArr: false, managedBy: CachedContentManagedBy::ManagedPublishing);
     }
 
     /**

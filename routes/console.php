@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\DvrRetentionCleanup;
+use App\Jobs\ReleaseWatchedManagedCache;
 use App\Jobs\SweepArrCacheFailback;
 use Illuminate\Console\Command;
 use Illuminate\Console\Scheduling\CallbackEvent;
@@ -88,6 +89,11 @@ Schedule::command('cache:cleanup-orphans')
 // (failed download, or not downloaded or downloading within 24h) to the provider.
 Schedule::job(new SweepArrCacheFailback)
     ->everyTenMinutes()
+    ->withoutOverlapping();
+
+// Release watched managed publishing cache files after their grace period.
+Schedule::job(new ReleaseWatchedManagedCache)
+    ->everyMinute()
     ->withoutOverlapping();
 
 // Prune old notifications

@@ -3,12 +3,15 @@
 namespace App\Jobs;
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
+use App\Services\CachedContentDispatchService;
 use App\Services\M3uProxyService;
-use App\Settings\GeneralSettings;
+use App\Services\ManagedCacheCapacityService;
+use App\Services\ManagedCacheCapacitySnapshotSource;
 use App\Support\PrivateNetworkGuard;
 use App\Traits\ProviderRequestDelay;
 use Illuminate\Bus\Queueable;
@@ -97,6 +100,8 @@ class DownloadCachedContentFile implements ShouldQueue
 
     private ?Carbon $lastCancellationCheckAt = null;
 
+    private ?string $managedCapacityReservation = null;
+
     private bool $cancelled = false;
 
     public function __construct(public int $cachedContentFileId)
@@ -146,7 +151,7 @@ class DownloadCachedContentFile implements ShouldQueue
             return;
         }
 
-        if (! (bool) (app(GeneralSettings::class)->enable_cache ?? false)) {
+        if (! app(CachedContentDispatchService::class)->isEnabled()) {
             $this->markFailed($file, 'Caching is disabled.');
 
             return;
@@ -175,6 +180,28 @@ class DownloadCachedContentFile implements ShouldQueue
         $file = $this->claim($file);
         if ($file === null) {
             return;
+        }
+
+        if ($file->managed_by === CachedContentManagedBy::ManagedPublishing) {
+            $capacity = app(ManagedCacheCapacityService::class);
+            $this->managedCapacityReservation = $capacity->reservationForFile($file->id);
+            $snapshot = app(ManagedCacheCapacitySnapshotSource::class)->snapshotFor($item);
+            if ($snapshot === null || ! $capacity->canUseReservation($this->managedCapacityReservation, $snapshot)) {
+                $capacity->release($this->managedCapacityReservation);
+                $this->managedCapacityReservation = $snapshot === null ? null : $capacity->reserve($snapshot);
+            }
+
+            if ($this->managedCapacityReservation === null) {
+                // Queue delays may outlive a reservation. Keep the bounded
+                // existing job pending until fresh account counters allow it;
+                // never open a source or turn temporary capacity into failure.
+                $file->update(['status' => CachedContentFileStatus::Pending]);
+                $this->release(self::BUSY_RELEASE_SECONDS);
+
+                return;
+            }
+
+            $capacity->attachToFile($file->id, $this->managedCapacityReservation);
         }
 
         $this->progressFile = $file;
@@ -271,6 +298,7 @@ class DownloadCachedContentFile implements ShouldQueue
             'last_failed_at' => null,
             'last_error_message' => null,
         ])->save();
+        $this->releaseManagedCapacityReservation();
     }
 
     /**
@@ -350,10 +378,21 @@ class DownloadCachedContentFile implements ShouldQueue
 
         return PrivateNetworkGuard::get(
             $url,
-            fn (): PendingRequest => Http::withUserAgent($userAgent)
-                ->timeout($this->timeout)
-                ->withOptions(['stream' => true])
-                ->throw(),
+            function () use ($userAgent): PendingRequest {
+                if (! $this->renewManagedReservation()) {
+                    throw new RuntimeException('Managed cache capacity reservation expired before provider request.');
+                }
+
+                // Both receiving headers and an individual streamed body read
+                // must finish well before the 120-second account lease. A
+                // stalled provider is aborted, not allowed to outlive its slot.
+                $managed = $this->managedCapacityReservation !== null;
+
+                return Http::withUserAgent($userAgent)
+                    ->timeout($managed ? min($this->timeout, 30) : $this->timeout)
+                    ->withOptions($managed ? ['stream' => true, 'read_timeout' => 30] : ['stream' => true])
+                    ->throw();
+            },
             $this->maxRedirects,
         );
     }
@@ -382,6 +421,11 @@ class DownloadCachedContentFile implements ShouldQueue
 
         try {
             while (! $body->eof()) {
+                if (! $this->renewManagedReservation()) {
+                    $this->cancelled = true;
+                    break;
+                }
+
                 $chunk = $body->read($this->readChunkSize);
                 if ($chunk === '') {
                     break;
@@ -407,6 +451,12 @@ class DownloadCachedContentFile implements ShouldQueue
         }
     }
 
+    private function renewManagedReservation(): bool
+    {
+        return $this->managedCapacityReservation === null
+            || app(ManagedCacheCapacityService::class)->renew($this->managedCapacityReservation);
+    }
+
     /**
      * Persist byte progress every `progressThreshold` bytes. Failures are
      * swallowed; progress is advisory.
@@ -414,6 +464,13 @@ class DownloadCachedContentFile implements ShouldQueue
     private function reportDownloadProgress(int $downloaded, bool $force = false): void
     {
         if ($this->progressFile === null) {
+            return;
+        }
+
+        if ($this->managedCapacityReservation !== null
+            && ! app(ManagedCacheCapacityService::class)->renew($this->managedCapacityReservation)) {
+            $this->cancelled = true;
+
             return;
         }
 
@@ -490,6 +547,8 @@ class DownloadCachedContentFile implements ShouldQueue
             Log::warning("DownloadCachedContentFile failed for row {$file->id}: {$reason}");
         } catch (Throwable $e) {
             Log::error("DownloadCachedContentFile: markFailed itself failed for {$file->id}: {$e->getMessage()}");
+        } finally {
+            $this->releaseManagedCapacityReservation();
         }
     }
 
@@ -506,6 +565,17 @@ class DownloadCachedContentFile implements ShouldQueue
             'last_failed_at' => now(),
             'last_error_message' => mb_substr($reason, 0, 8000),
         ]);
+        $this->releaseManagedCapacityReservation();
+    }
+
+    private function releaseManagedCapacityReservation(): void
+    {
+        if ($this->managedCapacityReservation === null) {
+            return;
+        }
+
+        app(ManagedCacheCapacityService::class)->release($this->managedCapacityReservation);
+        $this->managedCapacityReservation = null;
     }
 
     /**

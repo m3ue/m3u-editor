@@ -40,12 +40,14 @@ use App\Notifications\Notification as AppNotification;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
+use App\Services\ManagedCacheCapacitySnapshotSource;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkChannelSyncService;
 use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
 use App\Services\TagRenamePropagationService;
+use App\Services\XtreamManagedCacheCapacitySnapshotSource;
 use App\Settings\GeneralSettings;
 use App\Support\ApiDocs\DocumentDvrAuthenticationErrors;
 use App\Support\ApiDocs\DocumentXtreamApiResponses;
@@ -111,6 +113,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(AiManager::class, fn ($app) => new PatchedAiManager($app));
 
         $this->app->singleton(GitInfoService::class);
+        $this->app->bind(ManagedCacheCapacitySnapshotSource::class, XtreamManagedCacheCapacitySnapshotSource::class);
 
         // Detect HTTPS before any provider boot() runs, so package providers
         // calling asset() during their boot() get the correct scheme. We can't

@@ -134,6 +134,7 @@ beforeEach(function () {
     $settings = new GeneralSettings;
     $settings->enable_cache = true;
     $settings->tmdb_api_key = 'fake-api-key';
+    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 
     $this->playlist = Playlist::factory()->create(['prefer_media_server_sources' => true]);
