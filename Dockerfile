@@ -225,6 +225,12 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     postgresql17 \
     postgresql17-client \
     postgresql17-contrib \
+    # Newer client tools alongside 17 so backups/restores work against an
+    # external Postgres 18 (pg_dump cannot dump a newer server). Installed to
+    # /usr/libexec/postgresql18 and picked per server version by
+    # PostgresDumpBinaryResolver; the /usr/bin default stays on 17 because
+    # only the 17 server is installed.
+    postgresql18-client \
     python3 \
     py3-pip \
     php84-cli \

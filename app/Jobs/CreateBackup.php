@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\User;
+use App\Services\PostgresDumpBinaryResolver;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -49,9 +50,13 @@ class CreateBackup implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(PostgresDumpBinaryResolver $dumpBinaryResolver): void
     {
         try {
+            foreach (config('backup.backup.source.databases', []) as $connection) {
+                $dumpBinaryResolver->configure($connection);
+            }
+
             // Create a new backup
             Artisan::call('backup:run', [
                 '--only-db' => ! $this->includeFiles,
