@@ -131,3 +131,30 @@ it('links custom and imported channels mapped in the same run', function () {
     expect($custom->refresh()->epg_channel_id)->toBe($wnbc->id)
         ->and($imported->refresh()->epg_channel_id)->toBe($cnn->id);
 });
+
+it('maps only the live channel when a movie shares its source_id', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
+    $movie = Channel::factory()->for($playlist)->for($this->user)->create([
+        'source_id' => '100',
+        'is_vod' => true,
+        'epg_channel_id' => null,
+        'stream_id' => 'movie-a',
+    ]);
+    $live = Channel::factory()->for($playlist)->for($this->user)->create([
+        'source_id' => '100',
+        'is_vod' => false,
+        'epg_map_enabled' => true,
+        'epg_channel_id' => null,
+        'stream_id' => 'cnn.us',
+        'stream_id_custom' => null,
+    ]);
+    $cnn = epgChannelFor($this, 'cnn.us');
+
+    $channelsBefore = Channel::count();
+
+    runEpgMapping($this, [$live->id]);
+
+    expect($live->refresh()->epg_channel_id)->toBe($cnn->id)
+        ->and($movie->refresh()->epg_channel_id)->toBeNull()
+        ->and(Channel::count())->toBe($channelsBefore);
+});

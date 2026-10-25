@@ -131,7 +131,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 'catchup_source',
                 'shift',
                 // 'tvg_shift', // new field for TVG shift (don't update user overridden value)
-                'is_vod', // new field for VOD
+                // 'is_vod', // part of the upsert key
                 'container_extension', // new field for container extension
                 'rating', // new field for rating
                 'rating_5based', // new field for 5-based rating
@@ -161,7 +161,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
             if ($bulkWithYear->isNotEmpty()) {
                 Channel::upsert(
                     $bulkWithYear->all(),
-                    uniqueBy: ['source_id', 'playlist_id'],
+                    uniqueBy: ['source_id', 'playlist_id', 'is_vod'],
                     update: [...$updateColumns, 'year'],
                 );
             }
@@ -169,7 +169,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
             if ($bulkWithoutYear->isNotEmpty()) {
                 Channel::upsert(
                     $bulkWithoutYear->all(),
-                    uniqueBy: ['source_id', 'playlist_id'],
+                    uniqueBy: ['source_id', 'playlist_id', 'is_vod'],
                     update: $updateColumns,
                 );
             }

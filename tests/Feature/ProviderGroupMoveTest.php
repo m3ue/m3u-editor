@@ -571,3 +571,93 @@ describe('invalidated syncs', function () {
             ->and(providerGroupMoveChannel($playlist, 100)->group_id)->toBe($sportsUk->id);
     });
 });
+
+/**
+ * Some Xtream panels number live streams and movies from one sequence, so a live stream and a
+ * movie can share a stream_id. Both keep their own row instead of overwriting each other.
+ */
+describe('live streams and movies sharing a stream_id', function () {
+    function providerGroupMoveTypedChannel(Playlist $playlist, int $streamId, bool $isVod): ?Channel
+    {
+        return Channel::where('playlist_id', $playlist->id)
+            ->where('source_id', (string) $streamId)
+            ->where('is_vod', $isVod)
+            ->first();
+    }
+
+    it('keeps the live stream and the movie as separate channels', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        $catalog = [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 100, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, $catalog, isNew: true);
+        providerGroupMoveSync($playlist, $this->feed, $catalog);
+
+        $live = providerGroupMoveTypedChannel($playlist, 100, false);
+        $movie = providerGroupMoveTypedChannel($playlist, 100, true);
+
+        expect(Channel::where('playlist_id', $playlist->id)->count())->toBe(2)
+            ->and($live->title)->toBe('Sky Sports')
+            ->and($live->group_id)->toBe(providerGroupMoveGroup($playlist, 'Sports')->id)
+            ->and($movie->title)->toBe('Movie A')
+            ->and($movie->group_id)->toBe(providerGroupMoveGroup($playlist, 'Action', 'vod')->id);
+    });
+
+    it('imports a returning live stream as its own disabled channel and leaves the movie alone', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 200, 'name' => 'BT Sport', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 100, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ], isNew: true);
+
+        $action = providerGroupMoveGroup($playlist, 'Action', 'vod');
+        $action->update(['enabled' => true]);
+        $action->channels()->update(['enabled' => true]);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'US Sports'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 200, 'name' => 'BT Sport', 'category_id' => '1'],
+                ['stream_id' => 100, 'name' => 'ESPN', 'category_id' => '2'],
+            ],
+        ]);
+
+        $live = providerGroupMoveTypedChannel($playlist, 100, false);
+        $movie = providerGroupMoveTypedChannel($playlist, 100, true);
+
+        expect($live->enabled)->toBeFalse()
+            ->and($live->title)->toBe('ESPN')
+            ->and($live->group_id)->toBe(providerGroupMoveGroup($playlist, 'US Sports')->id)
+            ->and($movie->enabled)->toBeTrue()
+            ->and($movie->title)->toBe('Movie A')
+            ->and($movie->group_id)->toBe($action->id);
+    });
+
+    it('moves a live channel an earlier sync left in a movie group back to its category', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        $catalog = [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 500, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, $catalog, isNew: true);
+
+        // Before the fix, a live stream could take over a movie's row and stay in its group
+        $action = providerGroupMoveGroup($playlist, 'Action', 'vod');
+        providerGroupMoveTypedChannel($playlist, 100, false)->update(['group_id' => $action->id, 'group' => 'Action']);
+
+        providerGroupMoveSync($playlist, $this->feed, $catalog);
+
+        expect(providerGroupMoveTypedChannel($playlist, 100, false)->group_id)->toBe(providerGroupMoveGroup($playlist, 'Sports')->id)
+            ->and(providerGroupMoveTypedChannel($playlist, 500, true)->group_id)->toBe($action->id);
+    });
+});

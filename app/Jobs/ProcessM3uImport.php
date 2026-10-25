@@ -1936,8 +1936,11 @@ class ProcessM3uImport implements ShouldQueue
      * - Streams an earlier category already imported this run are dropped from the rows, so
      *   the first category listing a stream owns its row and `group_internal` names it.
      * - Any other existing row in a different group is moved here when that group is missing,
-     *   soft-deleted, or still the provider group it was last imported into. A channel the
-     *   user moved to another group fails that check and stays put.
+     *   soft-deleted, still the provider group it was last imported into, or a provider group
+     *   of the other type (live vs VOD). A channel the user moved to another group fails that
+     *   check and stays put.
+     * - Rows are matched on the chunk's type as well as stream_id, since providers can reuse
+     *   the same stream_id for a live stream and a movie.
      * - Nothing is moved into a blank category: it can't be told apart from a failed or
      *   partial category lookup, which would pull every channel into one group.
      *
@@ -1959,10 +1962,14 @@ class ProcessM3uImport implements ShouldQueue
             return $rows;
         }
 
+        // A chunk only ever holds one type, live or VOD
+        $isVod = (bool) ($rows[0]['is_vod'] ?? false);
+
         $existing = Channel::query()
             ->leftJoin('groups', 'groups.id', '=', 'channels.group_id')
             ->where('channels.playlist_id', $playlistId)
             ->where('channels.is_custom', false)
+            ->where('channels.is_vod', $isVod)
             ->whereIn('channels.source_id', $sourceIds)
             ->get([
                 'channels.id',
@@ -1974,6 +1981,7 @@ class ProcessM3uImport implements ShouldQueue
                 'groups.deleted_at as group_deleted_at',
                 'groups.custom as group_custom',
                 'groups.name_internal as group_name_internal',
+                'groups.type as group_type',
             ]);
 
         $importedThisRun = $existing->where('import_batch_no', $batchNo)
@@ -1995,7 +2003,8 @@ class ProcessM3uImport implements ShouldQueue
                 && $channel->group_id !== $groupId
                 && ($channel->current_group_id === null
                     || $channel->group_deleted_at !== null
-                    || (! $channel->group_custom && $channel->group_name_internal === $channel->group_internal)))
+                    || (! $channel->group_custom && $channel->group_name_internal === $channel->group_internal)
+                    || (! $channel->group_custom && $channel->group_type === ($isVod ? 'live' : 'vod'))))
             ->pluck('id');
         if ($movedIds->isNotEmpty()) {
             Channel::whereIn('id', $movedIds)->update([

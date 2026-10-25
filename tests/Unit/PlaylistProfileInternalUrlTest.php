@@ -38,6 +38,40 @@ test('it resolves directly to the target playlist channel url when the profile p
         ->toBe($targetChannel->url_custom ?? $targetChannel->url);
 });
 
+test('it resolves to the target live channel when a movie shares its source_id', function () {
+    $poolPlaylist = Playlist::factory()->create();
+    $targetPlaylist = Playlist::factory()->create();
+
+    $sourceChannel = Channel::factory()->create([
+        'playlist_id' => $poolPlaylist->id,
+        'source_id' => '100',
+        'is_vod' => false,
+    ]);
+
+    Channel::factory()->create([
+        'playlist_id' => $targetPlaylist->id,
+        'source_id' => '100',
+        'is_vod' => true,
+        'enabled' => true,
+        'url' => 'http://real-upstream-provider.test/movie/realuser/realpass/100.mkv',
+    ]);
+    $targetChannel = Channel::factory()->create([
+        'playlist_id' => $targetPlaylist->id,
+        'source_id' => '100',
+        'is_vod' => false,
+        'enabled' => true,
+        'url' => 'http://real-upstream-provider.test/live/realuser/realpass/100.ts',
+    ]);
+
+    $profile = PlaylistProfile::factory()->create([
+        'playlist_id' => $poolPlaylist->id,
+        'url' => url('/'),
+        'password' => $targetPlaylist->uuid,
+    ]);
+
+    expect($profile->transformChannelUrl($sourceChannel))->toBe($targetChannel->url);
+});
+
 test('it resolves directly to the target playlist episode url when the profile points at a local playlist', function () {
     $poolPlaylist = Playlist::factory()->create();
     $targetPlaylist = Playlist::factory()->create();

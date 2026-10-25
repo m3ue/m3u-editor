@@ -318,6 +318,7 @@ class PlaylistProfile extends Model
                 ->first()
             : $targetPlaylist->channels()
                 ->where('source_id', $sourceId)
+                ->where('is_vod', (bool) $model->is_vod)
                 ->where('enabled', true)
                 ->first();
 
@@ -329,6 +330,7 @@ class PlaylistProfile extends Model
         if (! $targetModel && ! $isEpisode && $model->name) {
             $candidates = $targetPlaylist->channels()
                 ->where('enabled', true)
+                ->where('is_vod', (bool) $model->is_vod)
                 ->where('name', $model->name)
                 ->get();
 

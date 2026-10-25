@@ -296,6 +296,7 @@ class MapPlaylistChannelsToEpgChunk implements ShouldQueue
             'user_id' => $channel->user_id,
             'playlist_id' => $channel->playlist_id,
             'source_id' => $channel->source_id,
+            'is_vod' => (bool) $channel->is_vod,
             'epg_channel_id' => $epgChannel->id,
             'logo_type' => $channel->logo_type,
         ];
