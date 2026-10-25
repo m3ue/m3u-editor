@@ -37,7 +37,7 @@ return new class extends Migration
         if (DB::getDriverName() === 'pgsql') {
             $this->createUniqueIndexConcurrently(self::NEW_INDEX, 'source_id, playlist_id, is_vod');
             foreach ($oldIndexes as $index) {
-                DB::statement('DROP INDEX CONCURRENTLY IF EXISTS "'.$index.'"');
+                $this->dropUniqueIndex($index);
             }
 
             return;
@@ -86,6 +86,25 @@ return new class extends Migration
         }
 
         DB::statement('CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS '.$name.' ON channels ('.$columns.')');
+    }
+
+    /**
+     * Schema-built databases hold the old key as a UNIQUE constraint, whose index can only go
+     * with the constraint. Dropping a constraint only touches the catalog, but it takes a brief
+     * exclusive lock and waits for transactions already writing to channels to finish.
+     * Converted databases hold a plain unique index, which is dropped CONCURRENTLY.
+     */
+    private function dropUniqueIndex(string $name): void
+    {
+        $isConstraint = DB::table('pg_constraint')
+            ->join('pg_class', 'pg_class.oid', '=', 'pg_constraint.conrelid')
+            ->where('pg_class.relname', 'channels')
+            ->where('pg_constraint.conname', $name)
+            ->exists();
+
+        DB::statement($isConstraint
+            ? 'ALTER TABLE channels DROP CONSTRAINT IF EXISTS "'.$name.'"'
+            : 'DROP INDEX CONCURRENTLY IF EXISTS "'.$name.'"');
     }
 
     /**
