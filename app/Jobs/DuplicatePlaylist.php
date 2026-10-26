@@ -83,6 +83,11 @@ class DuplicatePlaylist implements ShouldQueue
                 $newSourceCategory->save();
             }
 
+            // Old => new ids, so bouquet selections that name the playlist's own groups
+            // and categories by id can be pointed at the copies.
+            $groupIdMap = [];
+            $categoryIdMap = [];
+
             // Copy the groups
             foreach ($playlist->groups()->get() as $group) {
                 $newGroup = $group->replicate(except: [
@@ -93,6 +98,7 @@ class DuplicatePlaylist implements ShouldQueue
                 $newGroup->created_at = $now;
                 $newGroup->updated_at = $now;
                 $newGroup->save();
+                $groupIdMap[$group->id] = $newGroup->id;
 
                 // Copy the group channels
                 foreach ($group->channels()->with('failovers')->get() as $channel) {
@@ -123,19 +129,6 @@ class DuplicatePlaylist implements ShouldQueue
                 }
             }
 
-            // Copy the playlist's bouquets (groups replicate with identical names,
-            // so the name-based selections stay valid). No alias attachments.
-            Bouquet::where('playlist_id', $playlist->id)
-                ->cursor()
-                ->each(function (Bouquet $bouquet) use ($newPlaylist): void {
-                    $copy = $bouquet->replicate(except: ['id']);
-                    $copy->playlist_id = $newPlaylist->id;
-                    // saveQuietly() bypasses the Bouquet::saving ownership guard by design - the
-                    // copy keeps the source bouquet's user_id, and $newPlaylist replicated the
-                    // same user_id, so the invariant already holds.
-                    $copy->saveQuietly();
-                });
-
             // Copy the categories
             foreach ($playlist->categories()->get() as $category) {
                 $newCategory = $category->replicate(except: [
@@ -146,6 +139,7 @@ class DuplicatePlaylist implements ShouldQueue
                 $newCategory->created_at = $now;
                 $newCategory->updated_at = $now;
                 $newCategory->save();
+                $categoryIdMap[$category->id] = $newCategory->id;
 
                 // Copy the category series
                 foreach ($category->series()->get() as $series) {
@@ -193,6 +187,32 @@ class DuplicatePlaylist implements ShouldQueue
                     }
                 }
             }
+
+            // Copy the playlist's bouquets (groups replicate with identical names, so the
+            // name-based selections stay valid, and id-based ones are remapped to the
+            // copied groups and categories). No alias attachments.
+            Bouquet::where('playlist_id', $playlist->id)
+                ->cursor()
+                ->each(function (Bouquet $bouquet) use ($newPlaylist, $groupIdMap, $categoryIdMap): void {
+                    $copy = $bouquet->replicate(except: ['id']);
+                    $copy->playlist_id = $newPlaylist->id;
+                    if (is_array($copy->group_selections)) {
+                        $selections = $copy->group_selections;
+                        foreach (['selected_group_ids' => $groupIdMap, 'selected_vod_group_ids' => $groupIdMap, 'selected_category_ids' => $categoryIdMap] as $key => $idMap) {
+                            if (! empty($selections[$key])) {
+                                $selections[$key] = array_values(array_filter(array_map(
+                                    fn ($id): ?int => $idMap[(int) $id] ?? null,
+                                    (array) $selections[$key],
+                                )));
+                            }
+                        }
+                        $copy->group_selections = $selections;
+                    }
+                    // saveQuietly() bypasses the Bouquet::saving ownership guard by design - the
+                    // copy keeps the source bouquet's user_id, and $newPlaylist replicated the
+                    // same user_id, so the invariant already holds.
+                    $copy->saveQuietly();
+                });
 
             // Note: Since PlaylistAuth can now only be assigned to one model at a time,
             // we skip copying auth assignments when duplicating playlists.

@@ -366,6 +366,10 @@ class XtreamApiController extends Controller
         $aliasCategoryFilter = $playlist instanceof PlaylistAlias
             ? $playlist->getAllowedCategoryNames()
             : [];
+        // Whether the alias narrows a type at all - an allow-list, an "everything except"
+        // list or a block bouquet. The name lists above are only the Only-mode allow-lists.
+        $aliasFiltersVod = $playlist instanceof PlaylistAlias && $playlist->hasVodGroupFilter();
+        $aliasFiltersSeries = $playlist instanceof PlaylistAlias && $playlist->hasCategoryFilter();
 
         $baseUrl = ProxyFacade::getBaseUrl();
         $rateLimitedResponse = $this->requestRateLimit($action, $playlist, $authMethod, $playlistAuth);
@@ -799,7 +803,7 @@ class XtreamApiController extends Controller
             // see XtreamCategoryService::dynamicCategoryIdsByItem() for why
             // the full listing needs them.
             $dynamicCategoryIdsByChannel = [];
-            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && empty($aliasVodGroupFilter)) {
+            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && ! $aliasFiltersVod) {
                 $dynamicCategoryIdsByChannel = XtreamCategoryService::dynamicCategoryIdsByItem($sourcePlaylist, isVod: true);
             }
 
@@ -986,7 +990,7 @@ class XtreamApiController extends Controller
             // Dynamic-category membership for the listing — mirrors the
             // get_vod_streams wiring; see XtreamCategoryService::dynamicCategoryIdsByItem().
             $dynamicCategoryIdsBySeries = [];
-            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && empty($aliasCategoryFilter)) {
+            if (! $isCustomPlaylist && $dynamicGroupId === null && $sourcePlaylist && ! $aliasFiltersSeries) {
                 $dynamicCategoryIdsBySeries = XtreamCategoryService::dynamicCategoryIdsByItem($sourcePlaylist, isVod: false);
             }
 

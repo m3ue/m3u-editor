@@ -5,6 +5,7 @@ use App\Jobs\DuplicatePlaylist;
 use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\CustomPlaylist;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\Series;
@@ -99,4 +100,32 @@ it('DuplicatePlaylist copies SourceCategory rows so a copied bouquet\'s category
     $alias->bouquets()->attach($copiedBouquet);
 
     expect($alias->series()->pluck('series.id'))->toContain($copiedSeries->id);
+});
+
+it('DuplicatePlaylist points id selections and the bouquet type at the copied groups and categories', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
+    $liveGroup = Group::factory()->for($playlist)->for($this->user)->create(['name' => 'My Sports', 'type' => 'live', 'custom' => true]);
+    $vodGroup = Group::factory()->for($playlist)->for($this->user)->create(['name' => 'Action', 'type' => 'vod', 'custom' => true]);
+    $category = Category::factory()->for($playlist)->for($this->user)->create(['name' => 'Comedy']);
+    Bouquet::factory()->block()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $playlist->id,
+        'group_selections' => [
+            'selected_group_ids' => [$liveGroup->id],
+            'selected_vod_group_ids' => [$vodGroup->id],
+            'selected_category_ids' => [$category->id],
+        ],
+    ]);
+
+    (new DuplicatePlaylist($playlist, name: 'P Copy'))->handle();
+
+    $copy = Playlist::where('name', 'P Copy')->firstOrFail();
+    $copiedBouquet = Bouquet::where('playlist_id', $copy->id)->firstOrFail();
+
+    expect($copiedBouquet->isBlock())->toBeTrue()
+        ->and($copiedBouquet->group_selections)->toBe([
+            'selected_group_ids' => [Group::where('playlist_id', $copy->id)->where('name', 'My Sports')->value('id')],
+            'selected_vod_group_ids' => [Group::where('playlist_id', $copy->id)->where('name', 'Action')->value('id')],
+            'selected_category_ids' => [Category::where('playlist_id', $copy->id)->where('name', 'Comedy')->value('id')],
+        ]);
 });

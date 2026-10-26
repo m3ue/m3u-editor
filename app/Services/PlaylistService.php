@@ -1869,24 +1869,6 @@ class PlaylistService
             return;
         }
 
-        // Custom groups (user-created, no matching SourceGroup row) only ever match
-        // is_custom channels via the fallback name path - provider channels moved into
-        // them never match. Adding them to a bouquet would make the staleness tooling
-        // falsely flag them, and "Clean up missing" would then delete a half-working
-        // selection. Category records have no `custom` column at all.
-        $originalCount = $records->count();
-        $records = $records->reject(fn ($record) => $record->custom ?? false)->values();
-        $skippedCustomCount = $originalCount - $records->count();
-
-        if ($records->isEmpty()) {
-            Notification::make()
-                ->danger()
-                ->title(__('Custom groups cannot be added to bouquets'))
-                ->send();
-
-            return;
-        }
-
         $playlistIds = $records->pluck('playlist_id')->unique();
         if ($playlistIds->count() !== 1 || (int) $playlistIds->first() !== $bouquet->playlist_id) {
             Notification::make()
@@ -1898,37 +1880,45 @@ class PlaylistService
             return;
         }
 
-        $key = match ($type) {
-            'vod' => 'selected_vod_groups',
-            'category' => 'selected_categories',
-            default => 'selected_groups',
-        };
+        $keys = PlaylistAlias::CONTENT_FILTER_KEYS[match ($type) {
+            'vod' => 'vod',
+            'category' => 'series',
+            default => 'live',
+        }];
 
-        $names = $records
+        // Provider groups are added by their provider name, which follows the channels
+        // wherever they are moved. Custom groups (user-created, no provider name) are
+        // added by id instead, matching the channels sitting in them. Category records
+        // have no `custom` column, so they are always added by name.
+        [$customRecords, $providerRecords] = $records->partition(fn ($record) => (bool) ($record->custom ?? false));
+        $names = $providerRecords
             ->map(fn ($record) => $record->name_internal ?? $record->name)
             ->filter()
             ->unique()
-            ->values();
+            ->values()
+            ->all();
+        $ids = $customRecords->pluck('id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
 
         $selections = $bouquet->group_selections ?? [];
-        $current = $selections[$key] ?? [];
-        $updated = array_values(array_unique(array_merge($current, $names->all())));
-        $added = count($updated) - count($current);
-        $selections[$key] = $updated;
-        $bouquet->update(['group_selections' => $selections]);
-
-        $body = __(':added added, :existing already present.', [
-            'added' => $added,
-            'existing' => $names->count() - $added,
-        ]);
-        if ($skippedCustomCount > 0) {
-            $body .= ' '.__(':skipped custom group(s) skipped.', ['skipped' => $skippedCustomCount]);
+        $added = 0;
+        foreach ([$keys['names'] => $names, $keys['ids'] => $ids] as $key => $entries) {
+            if ($entries === []) {
+                continue;
+            }
+            $current = $selections[$key] ?? [];
+            $updated = array_values(array_unique(array_merge($current, $entries)));
+            $added += count($updated) - count($current);
+            $selections[$key] = $updated;
         }
+        $bouquet->update(['group_selections' => $selections]);
 
         Notification::make()
             ->success()
             ->title(__('Added to bouquet'))
-            ->body($body)
+            ->body(__(':added added, :existing already present.', [
+                'added' => $added,
+                'existing' => count($names) + count($ids) - $added,
+            ]))
             ->send();
     }
 

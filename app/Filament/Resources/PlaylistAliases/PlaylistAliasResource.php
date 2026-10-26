@@ -2,10 +2,12 @@
 
 namespace App\Filament\Resources\PlaylistAliases;
 
+use App\Enums\AliasFilterMode;
 use App\Facades\PlaylistFacade;
 use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Forms\Components\PlaylistGroupModalSelect;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
@@ -698,6 +700,12 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                     Grid::make()
                                         ->columnSpanFull()
                                         ->schema([
+                                            Schemas\Components\Callout::make(__('What this alias delivers'))
+                                                ->columnSpanFull()
+                                                ->color('info')
+                                                ->visible(fn (Get $get): bool => (bool) ($get('playlist_id') || $get('custom_playlist_id') || $get('merged_playlist_id')))
+                                                ->description(fn (Get $get, ?PlaylistAlias $record): string => self::deliverySummary($get, $record)),
+
                                             Fieldset::make(__('Bouquets'))
                                                 ->columnSpanFull()
                                                 ->schema([
@@ -717,7 +725,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         ->searchable()
                                                         ->preload()
                                                         ->live()
-                                                        ->afterStateUpdated(fn (Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set))
+                                                        ->afterStateUpdated(function (Get $get, Set $set, $state, $old): void {
+                                                            self::restrictModesForNewAllowBouquets($get, $set, (array) $state, (array) $old);
+                                                            self::syncLiveGroupSortItems($get, $set);
+                                                        })
                                                         ->loadStateFromRelationshipsUsing(function (Forms\Components\Select $component, ?PlaylistAlias $record): void {
                                                             // Show the bouquets in the order they were assigned (pivot id
                                                             // order, see saveRelationshipsUsing) rather than whatever order
@@ -767,7 +778,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             $record->unsetRelation('bouquets');
                                                         })
                                                         ->columnSpanFull()
-                                                        ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine - assigning a bouquet never removes anything the manual pickers allow.'))
+                                                        ->helperText(__('Allow bouquets add their groups to what this alias delivers; block bouquets hide theirs, whatever else allows them. Assigning an allow bouquet switches any type set to "Everything" to "Only selected", so the bouquets decide what is delivered.'))
                                                         ->createOptionForm([
                                                             Forms\Components\TextInput::make('name')->required(),
                                                             Forms\Components\Textarea::make('description'),
@@ -793,11 +804,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                     Schemas\Components\Callout::make(__('Bouquet contributions'))
                                                         ->columnSpanFull()
                                                         ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
-                                                        ->description(fn (Get $get): string => __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
-                                                            'live' => count(self::bouquetContributedNames($get, 'live')),
-                                                            'vod' => count(self::bouquetContributedNames($get, 'vod')),
-                                                            'series' => count(self::bouquetContributedNames($get, 'categories')),
-                                                        ])),
+                                                        ->description(fn (Get $get): string => self::bouquetContributionSummary($get)),
                                                 ]),
 
                                             Schemas\Components\Callout::make(__('What you can select'))
@@ -809,13 +816,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
                                             Fieldset::make(__('Live channel groups'))
                                                 ->schema([
+                                                    self::filterModeField('live'),
+
                                                     ModalTableSelect::make('group_filter.selected_groups')
                                                         ->tableConfiguration(SourceGroupsTable::class)
-                                                        ->label(__('Allowed live groups'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'live'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get) && self::picksApply($get, 'live'))
                                                         ->multiple()
-                                                        ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'live'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'playlist_ids' => self::sourcePlaylistIds($get, 'live'),
                                                             'type' => 'live',
@@ -885,11 +894,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                     // exactly what group_filter stores, so no id/name translation is needed.
                                                     ModalTableSelect::make('group_filter.selected_groups')
                                                         ->tableConfiguration(CustomPlaylistGroupsTable::class)
-                                                        ->label(__('Allowed live groups'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'live'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && self::picksApply($get, 'live'))
                                                         ->multiple()
-                                                        ->helperText(__('Only live channels in these groups will be accessible. Leave empty to allow all live groups.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'live'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'custom_playlist_id' => (int) $get('custom_playlist_id'),
                                                             'type' => 'live',
@@ -922,7 +931,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         ->live()
                                                         ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
 
+                                                    self::ownGroupPicker('live'),
+
                                                     Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
+                                                        ->visible(fn (Get $get): bool => self::filterMode($get, 'live') === AliasFilterMode::Only)
                                                         ->label(__('Sort groups in custom order'))
                                                         ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
                                                         ->default(false)
@@ -938,7 +950,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                     Forms\Components\Repeater::make('group_filter.live_group_order')
                                                         ->hiddenLabel()
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom'))
+                                                        ->visible(fn (Get $get): bool => (bool) $get('group_filter.sort_live_groups_custom') && self::filterMode($get, 'live') === AliasFilterMode::Only)
                                                         ->dehydrated(true)
                                                         ->table([
                                                             Forms\Components\Repeater\TableColumn::make(__('Group Name')),
@@ -990,13 +1002,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
                                             Fieldset::make(__('VOD groups'))
                                                 ->schema([
+                                                    self::filterModeField('vod'),
+
                                                     ModalTableSelect::make('group_filter.selected_vod_groups')
                                                         ->tableConfiguration(SourceGroupsTable::class)
-                                                        ->label(__('Allowed VOD groups'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'vod'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get) && self::picksApply($get, 'vod'))
                                                         ->multiple()
-                                                        ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'vod'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'playlist_ids' => self::sourcePlaylistIds($get, 'vod'),
                                                             'type' => 'vod',
@@ -1053,11 +1067,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
                                                     ModalTableSelect::make('group_filter.selected_vod_groups')
                                                         ->tableConfiguration(CustomPlaylistGroupsTable::class)
-                                                        ->label(__('Allowed VOD groups'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'vod'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && self::picksApply($get, 'vod'))
                                                         ->multiple()
-                                                        ->helperText(__('Only VOD channels in these groups will be accessible. Leave empty to allow all VOD groups.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'vod'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'custom_playlist_id' => (int) $get('custom_playlist_id'),
                                                             'type' => 'vod',
@@ -1084,17 +1098,21 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         )
                                                         ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
                                                         ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+
+                                                    self::ownGroupPicker('vod'),
                                                 ]),
 
                                             Fieldset::make(__('Series categories'))
                                                 ->schema([
+                                                    self::filterModeField('series'),
+
                                                     ModalTableSelect::make('group_filter.selected_categories')
                                                         ->tableConfiguration(SourceCategoriesTable::class)
-                                                        ->label(__('Allowed series categories'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'series'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get))
+                                                        ->visible(fn (Get $get): bool => self::usesSourcePickers($get) && self::picksApply($get, 'series'))
                                                         ->multiple()
-                                                        ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'series'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'playlist_ids' => self::sourcePlaylistIds($get, 'series'),
                                                             'selected' => $get('group_filter.selected_categories') ?? [],
@@ -1149,11 +1167,11 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
                                                     ModalTableSelect::make('group_filter.selected_categories')
                                                         ->tableConfiguration(CustomPlaylistCategoriesTable::class)
-                                                        ->label(__('Allowed series categories'))
+                                                        ->label(fn (Get $get): string => self::pickerLabel($get, 'series'))
                                                         ->columnSpanFull()
-                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id'))
+                                                        ->visible(fn (Get $get): bool => (bool) $get('custom_playlist_id') && self::picksApply($get, 'series'))
                                                         ->multiple()
-                                                        ->helperText(__('Only series in these categories will be accessible. Leave empty to allow all series categories.'))
+                                                        ->helperText(fn (Get $get): string => self::pickerHelperText($get, 'series'))
                                                         ->tableArguments(fn (Get $get): array => [
                                                             'custom_playlist_id' => (int) $get('custom_playlist_id'),
                                                             'bouquet_group_names' => self::bouquetContributedNames($get, 'categories'),
@@ -1179,6 +1197,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         )
                                                         ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
                                                         ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
+
+                                                    self::ownGroupPicker('series'),
                                                 ]),
                                         ]),
                                 ]),
@@ -1520,8 +1540,265 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         $set('group_filter.selected_groups', []);
         $set('group_filter.selected_vod_groups', []);
         $set('group_filter.selected_categories', []);
+        foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $keys) {
+            $set('group_filter.'.$keys['ids'], []);
+            $set('group_filter.'.$keys['mode'], AliasFilterMode::All->value);
+        }
         $set('group_filter.sort_live_groups_custom', false);
         $set('group_filter.live_group_order', []);
+    }
+
+    /**
+     * The filter mode currently picked on the form for a content type.
+     */
+    protected static function filterMode(Get $get, string $type): AliasFilterMode
+    {
+        $mode = $get('group_filter.'.PlaylistAlias::CONTENT_FILTER_KEYS[$type]['mode']);
+
+        return $mode instanceof AliasFilterMode ? $mode : (AliasFilterMode::tryFrom((string) $mode) ?? AliasFilterMode::All);
+    }
+
+    /**
+     * Whether the alias's own picks do anything for a content type (they are the
+     * allow-list in Only mode and the hidden list in Except mode).
+     */
+    protected static function picksApply(Get $get, string $type): bool
+    {
+        return self::filterMode($get, $type) !== AliasFilterMode::All;
+    }
+
+    /**
+     * The filter mode control for one content type. Aliases saved before modes
+     * existed show the mode their stored selections already behave as.
+     */
+    protected static function filterModeField(string $type): Forms\Components\ToggleButtons
+    {
+        return Forms\Components\ToggleButtons::make('group_filter.'.PlaylistAlias::CONTENT_FILTER_KEYS[$type]['mode'])
+            ->label(match ($type) {
+                'live' => __('Live channels'),
+                'vod' => __('VOD'),
+                default => __('Series'),
+            })
+            ->options(AliasFilterMode::class)
+            ->default(AliasFilterMode::All->value)
+            ->inline()
+            ->live()
+            ->columnSpanFull()
+            ->afterStateHydrated(function (Forms\Components\ToggleButtons $component, $state, ?PlaylistAlias $record) use ($type): void {
+                if (blank($state) && $record) {
+                    $component->state($record->contentMode($type)->value);
+                }
+            })
+            ->helperText(fn (Get $get): string => match (self::filterMode($get, $type)) {
+                AliasFilterMode::All => __('Everything is delivered. Block bouquets still hide their groups.'),
+                AliasFilterMode::Only => __('Only what is picked below or in an allow bouquet is delivered - nothing picked means nothing. Block bouquets still hide their groups.'),
+                AliasFilterMode::Except => __('Everything is delivered except what is picked below or in a block bouquet.'),
+            });
+    }
+
+    protected static function pickerLabel(Get $get, string $type): string
+    {
+        $hides = self::filterMode($get, $type) === AliasFilterMode::Except;
+
+        return match ($type) {
+            'live' => $hides ? __('Hidden live groups') : __('Allowed live groups'),
+            'vod' => $hides ? __('Hidden VOD groups') : __('Allowed VOD groups'),
+            default => $hides ? __('Hidden series categories') : __('Allowed series categories'),
+        };
+    }
+
+    /**
+     * Helper text for the provider (or, on custom playlists, custom playlist) pickers.
+     */
+    protected static function pickerHelperText(Get $get, string $type): string
+    {
+        $hides = self::filterMode($get, $type) === AliasFilterMode::Except;
+
+        if ($get('custom_playlist_id')) {
+            return match ($type) {
+                'live' => $hides ? __('Live channels in these groups are hidden.') : __('Live channels in these groups are delivered.'),
+                'vod' => $hides ? __('VOD in these groups is hidden.') : __('VOD in these groups is delivered.'),
+                default => $hides ? __('Series in these categories are hidden.') : __('Series in these categories are delivered.'),
+            };
+        }
+
+        return match ($type) {
+            'live' => $hides ? __('Live channels from these provider groups are hidden, wherever you have moved them.') : __('Live channels from these provider groups are delivered, wherever you have moved them.'),
+            'vod' => $hides ? __('VOD from these provider groups is hidden, wherever you have moved it.') : __('VOD from these provider groups is delivered, wherever you have moved it.'),
+            default => $hides ? __('Series from these provider categories are hidden.') : __('Series from these provider categories are delivered.'),
+        };
+    }
+
+    /**
+     * The picker for a standard playlist's own groups / categories (custom and genre
+     * groups included), stored by id.
+     */
+    protected static function ownGroupPicker(string $type): ModalTableSelect
+    {
+        return PlaylistGroupModalSelect::make(
+            'group_filter.'.PlaylistAlias::CONTENT_FILTER_KEYS[$type]['ids'],
+            $type === 'series' ? 'categories' : $type,
+            fn (Get $get): array => self::bouquetContributedIds($get, $type),
+        )
+            ->visible(fn (Get $get): bool => PlaylistGroupModalSelect::isStandardPlaylistForm($get) && self::picksApply($get, $type))
+            ->helperText(function (Get $get) use ($type): string {
+                $hides = self::filterMode($get, $type) === AliasFilterMode::Except;
+
+                return match ($type) {
+                    'live' => $hides
+                        ? __('Live channels in these groups are hidden - the groups your clients see, custom groups included.')
+                        : __('Live channels in these groups are delivered - the groups your clients see, custom groups included.'),
+                    'vod' => $hides
+                        ? __('VOD in these groups is hidden - the groups your clients see, genre groups included.')
+                        : __('VOD in these groups is delivered - the groups your clients see, genre groups included.'),
+                    default => $hides
+                        ? __('Series in these categories are hidden - the categories your clients see.')
+                        : __('Series in these categories are delivered - the categories your clients see.'),
+                };
+            });
+    }
+
+    /**
+     * Playlist group / category ids contributed by the alias's currently selected
+     * bouquets, used by the own-group picker to tick rows a bouquet already covers.
+     *
+     * @return array<int>
+     */
+    protected static function bouquetContributedIds(Get $get, string $type): array
+    {
+        $key = PlaylistAlias::CONTENT_FILTER_KEYS[$type]['ids'];
+
+        return self::assignedBouquets($get)
+            ->flatMap(fn (Bouquet $bouquet): array => array_map('intval', (array) ($bouquet->group_selections[$key] ?? [])))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * What the assigned bouquets contribute, split into allow and block bouquets.
+     */
+    protected static function bouquetContributionSummary(Get $get): string
+    {
+        $counts = ['live' => 0, 'vod' => 0, 'series' => 0, 'block_live' => 0, 'block_vod' => 0, 'block_series' => 0];
+
+        foreach (self::assignedBouquets($get) as $bouquet) {
+            $prefix = $bouquet->isBlock() ? 'block_' : '';
+            foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $keys) {
+                $counts[$prefix.$type] += count(PlaylistAlias::selectionNames($bouquet->group_selections[$keys['names']] ?? []))
+                    + count((array) ($bouquet->group_selections[$keys['ids']] ?? []));
+            }
+        }
+
+        return __('Allow bouquets add :live live groups, :vod VOD groups and :series series categories. Block bouquets hide :block_live live groups, :block_vod VOD groups and :block_series series categories.', $counts);
+    }
+
+    /**
+     * When an allow bouquet is newly assigned, switch any content type still on
+     * Everything to Only selected, so the bouquets decide what the alias delivers
+     * instead of being outweighed by "everything".
+     *
+     * @param  array<int|string>  $state
+     * @param  array<int|string>  $old
+     */
+    protected static function restrictModesForNewAllowBouquets(Get $get, Set $set, array $state, array $old): void
+    {
+        $addedIds = array_map('intval', array_diff($state, $old));
+        if ($addedIds === []) {
+            return;
+        }
+
+        $addsAllowBouquet = self::assignedBouquets($get)
+            ->contains(fn (Bouquet $bouquet): bool => in_array($bouquet->id, $addedIds, true) && ! $bouquet->isBlock());
+        if (! $addsAllowBouquet) {
+            return;
+        }
+
+        $switched = [];
+        foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $keys) {
+            if (self::filterMode($get, $type) === AliasFilterMode::All) {
+                $set('group_filter.'.$keys['mode'], AliasFilterMode::Only->value);
+                $switched[] = match ($type) {
+                    'live' => __('Live channels'),
+                    'vod' => __('VOD'),
+                    default => __('Series'),
+                };
+            }
+        }
+
+        if ($switched !== []) {
+            Notification::make()
+                ->info()
+                ->title(__('Filter switched to "Only selected"'))
+                ->body(__('The assigned allow bouquets now decide what this alias delivers for: :types. Switch a type back to "Everything" to deliver everything again.', ['types' => implode(', ', $switched)]))
+                ->send();
+        }
+    }
+
+    /**
+     * The group_filter the form currently describes, in its persisted shape: the
+     * provider pickers hold source record ids while editing, which are translated to
+     * the names (or merged {playlist_id, name} pairs) the filter stores.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function formGroupFilter(Get $get, ?PlaylistAlias $record): array
+    {
+        $filter = (array) $get('group_filter');
+        if (! self::usesSourcePickers($get)) {
+            return $filter;
+        }
+
+        $merged = self::isMergedAliasForm($get, $record);
+        foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $keys) {
+            $state = array_values((array) ($filter[$keys['names']] ?? []));
+            if ($state === [] || ! is_numeric($state[0])) {
+                continue;
+            }
+
+            $query = $type === 'series'
+                ? SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'series', $record))
+                : SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, $type, $record))->where('type', $type);
+            $filter[$keys['names']] = self::sourceIdsToSelection($query, $state, $merged);
+        }
+
+        return $filter;
+    }
+
+    /**
+     * How much enabled content the alias delivers with the filter as it stands on the
+     * form, counted with the same filter the Xtream API, M3U and EPG outputs apply.
+     */
+    protected static function deliverySummary(Get $get, ?PlaylistAlias $record): string
+    {
+        $target = [
+            'playlist_id' => $get('playlist_id') ?: null,
+            'custom_playlist_id' => $get('custom_playlist_id') ?: null,
+            'merged_playlist_id' => $get('merged_playlist_id') ?: null,
+        ];
+
+        $count = function (array $groupFilter, EloquentCollection $bouquets) use ($target): array {
+            $alias = new PlaylistAlias([...$target, 'group_filter' => $groupFilter]);
+            $alias->setRelation('bouquets', $bouquets);
+
+            return [
+                'live' => $alias->channels()->where('channels.enabled', true)->where('channels.is_vod', false)->count(),
+                'vod' => $alias->channels()->where('channels.enabled', true)->where('channels.is_vod', true)->count(),
+                'series' => $alias->series()->where('series.enabled', true)->count(),
+            ];
+        };
+
+        $delivered = $count(self::formGroupFilter($get, $record), self::assignedBouquets($get));
+        $total = $count([], new EloquentCollection);
+
+        return __('This alias delivers :live of :live_total live channels, :vod of :vod_total VOD and :series of :series_total series. Counts follow your changes before you save, and only include enabled content.', [
+            'live' => number_format($delivered['live']),
+            'live_total' => number_format($total['live']),
+            'vod' => number_format($delivered['vod']),
+            'vod_total' => number_format($total['vod']),
+            'series' => number_format($delivered['series']),
+            'series_total' => number_format($total['series']),
+        ]);
     }
 
     /**

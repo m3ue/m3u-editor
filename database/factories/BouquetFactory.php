@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\BouquetKind;
 use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
@@ -23,6 +24,14 @@ class BouquetFactory extends Factory
             'auto_include_new_live' => false,
             'auto_include_new_vod' => false,
         ];
+    }
+
+    /**
+     * A block bouquet: aliases using it hide its groups instead of adding them.
+     */
+    public function block(): static
+    {
+        return $this->state(fn () => ['kind' => BouquetKind::Block]);
     }
 
     /**

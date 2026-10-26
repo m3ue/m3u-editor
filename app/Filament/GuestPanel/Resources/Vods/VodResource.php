@@ -116,10 +116,9 @@ class VodResource extends Resource
                     ->where('is_vod', true)
                     ->where('playlist_id', $playlist->playlist_id);
 
-                // Apply VOD group filter if configured on the alias
-                $allowedVodGroups = $playlist->getAllowedVodGroupNames();
-                if (! empty($allowedVodGroups)) {
-                    $query->whereIn('group_internal', $allowedVodGroups);
+                // Apply the alias's VOD filter, with the same rules as its Xtream output
+                if ($playlist->hasVodGroupFilter()) {
+                    $query->where(fn ($query) => $playlist->applyContentFilter($query, 'vod'));
                 }
 
                 return $query;
@@ -135,10 +134,9 @@ class VodResource extends Resource
                     ->where('enabled', true)
                     ->where('is_vod', true);
 
-                // Apply VOD group filter if configured on the alias
-                $allowedVodGroups = $playlist->getAllowedVodGroupNames();
-                if (! empty($allowedVodGroups)) {
-                    $query->where(fn ($query) => $playlist->constrainChannelsToCustomGroups($query, $allowedVodGroups));
+                // Apply the alias's VOD filter, with the same rules as its Xtream output
+                if ($playlist->hasVodGroupFilter()) {
+                    $query->where(fn ($query) => $playlist->applyContentFilter($query, 'vod'));
                 }
 
                 return $query;
@@ -152,11 +150,10 @@ class VodResource extends Resource
                     ->where('is_vod', true)
                     ->whereIn('playlist_id', $playlist->mergedPlaylist?->sourcePlaylistIds('vod') ?? []);
 
-                // Apply the source-scoped VOD group filter if configured on the alias. The
-                // stored selection gates it, not the parsed pairs, so a malformed selection
-                // fails closed instead of silently allowing every group.
+                // Apply the alias's source-scoped VOD filter, with the same rules as its
+                // Xtream output (a malformed allow-list fails closed).
                 if ($playlist->hasVodGroupFilter()) {
-                    $query->where(fn ($query) => $playlist->constrainChannelsToSourceGroups($query, $playlist->getAllowedVodGroupSelections()));
+                    $query->where(fn ($query) => $playlist->applyContentFilter($query, 'vod'));
                 }
 
                 return $query;

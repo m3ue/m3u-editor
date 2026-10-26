@@ -59,10 +59,9 @@ it('writes vod and category keys per type', function () {
         ->and($bouquet->getSelectedLiveGroupNames())->toBe([]);
 });
 
-it('writes nothing when every selected group is custom', function () {
-    // Custom groups (user-created, `custom = true`) have no matching SourceGroup row -
-    // the staleness tooling would falsely flag them, and only is_custom channels ever
-    // match them via the fallback name path, so they cannot be added to a bouquet.
+it('adds custom groups by id, leaving the provider names alone', function () {
+    // Custom groups (user-created, `custom = true`) have no provider name, so they are
+    // added by id and match the channels sitting in them, wherever they came from.
     $bouquet = Bouquet::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -75,10 +74,12 @@ it('writes nothing when every selected group is custom', function () {
 
     PlaylistService::addGroupRecordsToBouquet($groups, $bouquet->id, 'live');
 
-    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Existing']);
+    $bouquet->refresh();
+    expect($bouquet->getSelectedLiveGroupNames())->toBe(['Existing'])
+        ->and($bouquet->group_selections['selected_group_ids'])->toBe($groups->pluck('id')->all());
 });
 
-it('merges only the non-custom names from a mixed selection', function () {
+it('splits a mixed selection into provider names and custom group ids', function () {
     $bouquet = Bouquet::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -91,5 +92,7 @@ it('merges only the non-custom names from a mixed selection', function () {
 
     PlaylistService::addGroupRecordsToBouquet($groups, $bouquet->id, 'live');
 
-    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Sports']);
+    $bouquet->refresh();
+    expect($bouquet->getSelectedLiveGroupNames())->toBe(['Sports'])
+        ->and($bouquet->group_selections['selected_group_ids'])->toBe([$groups[1]->id]);
 });
