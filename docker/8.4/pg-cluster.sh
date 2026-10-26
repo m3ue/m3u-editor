@@ -400,7 +400,7 @@ pg_cluster_prepare() {
                 pg_cluster_write_status "${PREV_RESULT}" "${PREV_FROM}" "${PREV_TO}" "${PREV_MESSAGE}" "${warning}" "${PREV_AT}"
             fi
         else
-            warning="POSTGRES_VERSION=${requested} is older than the running ${ACTIVE_VERSION} cluster. Staying on ${ACTIVE_VERSION} - set POSTGRES_ROLLBACK=true to actually roll back (this discards any writes made after the upgrade to ${ACTIVE_VERSION})."
+            warning="POSTGRES_VERSION=${requested} is older than the running ${ACTIVE_VERSION} cluster. Staying on ${ACTIVE_VERSION} - set POSTGRES_VERSION=${ACTIVE_VERSION} to clear this warning, or POSTGRES_ROLLBACK=true alongside POSTGRES_VERSION=${requested} to actually roll back (this discards any writes made after the upgrade to ${ACTIVE_VERSION})."
             pg_cluster_log "WARNING: ${warning}"
             pg_cluster_read_previous_upgrade
             pg_cluster_write_status "${PREV_RESULT}" "${PREV_FROM}" "${PREV_TO}" "${PREV_MESSAGE}" "${warning}" "${PREV_AT}"
