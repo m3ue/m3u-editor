@@ -238,4 +238,19 @@ return [
 
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | PostgreSQL Backup/Restore Client Version
+    |--------------------------------------------------------------------------
+    |
+    | The image bundles PostgreSQL 17 client tools by default, plus 18 for
+    | connecting to a newer external server. Set PG_CLIENT_VERSION to the
+    | major version of client tools backup/restore should use when it
+    | differs from the bundled default - never auto-detected. See
+    | App\Services\PostgresDumpBinaryResolver.
+    |
+    */
+
+    'pg_client_version' => env('PG_CLIENT_VERSION'),
+
 ];

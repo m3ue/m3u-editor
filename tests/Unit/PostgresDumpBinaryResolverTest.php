@@ -19,6 +19,7 @@ beforeEach(function () {
     File::ensureDirectoryExists($this->clientRoot);
 
     config([
+        'database.pg_client_version' => null,
         'database.connections.pgsql_backup' => [
             'driver' => 'pgsql',
             'database' => 'm3ue',
@@ -30,7 +31,7 @@ afterEach(function () {
     File::deleteDirectory($this->clientRoot);
 });
 
-it('prefers the client matching the server major version', function () {
+it('prefers the client matching the requested version', function () {
     fakePostgresClient($this->clientRoot, 17);
     fakePostgresClient($this->clientRoot, 18);
 
@@ -57,47 +58,36 @@ it('ignores client directories missing pg_dump or psql', function () {
     expect((new PostgresDumpBinaryResolver($this->clientRoot))->resolveBinaryPath(18))->toBeNull();
 });
 
-it('sets the dump binary path for the server version', function () {
+it('sets the dump binary path for the requested PG_CLIENT_VERSION', function () {
     fakePostgresClient($this->clientRoot, 17);
     fakePostgresClient($this->clientRoot, 18);
+    config(['database.pg_client_version' => 18]);
 
-    $resolver = Mockery::mock(PostgresDumpBinaryResolver::class, [$this->clientRoot])->makePartial();
-    $resolver->shouldReceive('serverMajorVersion')->with('pgsql_backup')->andReturn(18);
-
-    $resolver->configure('pgsql_backup');
+    (new PostgresDumpBinaryResolver($this->clientRoot))->configure('pgsql_backup');
 
     expect(config('database.connections.pgsql_backup.dump.dump_binary_path'))
         ->toBe("{$this->clientRoot}/postgresql18/");
 });
 
-it('keeps an explicitly configured dump binary path', function () {
-    fakePostgresClient($this->clientRoot, 18);
-    config(['database.connections.pgsql_backup.dump.dump_binary_path' => '/opt/pg/bin/']);
+it('throws when no installed client satisfies PG_CLIENT_VERSION', function () {
+    fakePostgresClient($this->clientRoot, 17);
+    config(['database.pg_client_version' => 99]);
 
-    $resolver = Mockery::mock(PostgresDumpBinaryResolver::class, [$this->clientRoot])->makePartial();
-    $resolver->shouldNotReceive('serverMajorVersion');
+    (new PostgresDumpBinaryResolver($this->clientRoot))->configure('pgsql_backup');
+})->throws(RuntimeException::class, 'No PostgreSQL client tools installed for PG_CLIENT_VERSION=99');
 
-    $resolver->configure('pgsql_backup');
-
-    expect(config('database.connections.pgsql_backup.dump.dump_binary_path'))->toBe('/opt/pg/bin/');
-});
-
-it('leaves the default client in place when the server version cannot be read', function () {
+it('leaves the default client in place when PG_CLIENT_VERSION is unset', function () {
     fakePostgresClient($this->clientRoot, 18);
 
-    $resolver = Mockery::mock(PostgresDumpBinaryResolver::class, [$this->clientRoot])->makePartial();
-    $resolver->shouldReceive('serverMajorVersion')->andThrow(new RuntimeException('connection refused'));
-
-    $resolver->configure('pgsql_backup');
+    (new PostgresDumpBinaryResolver($this->clientRoot))->configure('pgsql_backup');
 
     expect(config('database.connections.pgsql_backup.dump.dump_binary_path'))->toBeNull();
 });
 
 it('does nothing for non-postgres connections', function () {
-    $resolver = Mockery::mock(PostgresDumpBinaryResolver::class, [$this->clientRoot])->makePartial();
-    $resolver->shouldNotReceive('serverMajorVersion');
+    config(['database.pg_client_version' => 18]);
 
-    $resolver->configure('sqlite_testing');
+    (new PostgresDumpBinaryResolver($this->clientRoot))->configure('sqlite_testing');
 
     expect(config('database.connections.sqlite_testing.dump.dump_binary_path'))->toBeNull();
 });

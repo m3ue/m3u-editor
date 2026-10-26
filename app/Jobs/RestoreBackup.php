@@ -32,12 +32,13 @@ class RestoreBackup implements ShouldQueue
     public function handle(PostgresDumpBinaryResolver $dumpBinaryResolver): void
     {
         $connectionName = config('backup.backup.source.databases')[0] ?? config('database.default');
-        $dumpBinaryResolver->configure($connectionName);
         $isSqlite = config("database.connections.{$connectionName}.driver") === 'sqlite';
         $livePath = $isSqlite ? config("database.connections.{$connectionName}.database") : null;
         $safetyCopy = null;
 
         try {
+            $dumpBinaryResolver->configure($connectionName);
+
             // Flush the jobs table
             Job::truncate();
 
