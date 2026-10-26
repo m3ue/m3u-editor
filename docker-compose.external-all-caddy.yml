@@ -160,6 +160,8 @@ services:
 
       # Postgres Configuration - DISABLE embedded Postgres
       - ENABLE_POSTGRES=false # Disable embedded Postgres, using external postgres service
+      # Only needed if your external server's major version differs from the bundled client default (17)
+      - PG_CLIENT_VERSION=${PG_CLIENT_VERSION:-}
 
       # Database Connection (m3u-editor) - Connect to external postgres service
       - DB_CONNECTION=pgsql
