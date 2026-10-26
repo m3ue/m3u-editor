@@ -8,6 +8,8 @@
 use App\Enums\AliasFilterMode;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
+use App\Filament\Tables\PlaylistCategoriesTable;
+use App\Filament\Tables\PlaylistGroupsTable;
 use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
@@ -20,6 +22,7 @@ use App\Models\Series;
 use App\Models\SourceCategory;
 use App\Models\User;
 use App\Services\XtreamCategoryService;
+use Filament\Forms\Components\TableSelect\Livewire\TableSelectLivewireComponent;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Spatie\Tags\Tag;
@@ -363,6 +366,40 @@ describe('forms', function () {
 
         expect($alias->fresh()->group_filter)
             ->toMatchArray(['live_mode' => 'except', 'selected_group_ids' => [$curated->id]]);
+    });
+
+    it('lists only groups with enabled channels in the own-group picker by default', function () {
+        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
+        modesChannel($this->user, $this->playlist, 'UK: SPORTS', $curated);
+        modesGroup($this->user, $this->playlist, 'Emptied Provider Group');
+
+        Livewire::test(TableSelectLivewireComponent::class, [
+            'tableConfiguration' => base64_encode(PlaylistGroupsTable::class),
+            'tableArguments' => ['playlist_id' => $this->playlist->id, 'type' => 'live'],
+            'state' => [],
+        ])
+            ->assertSuccessful()
+            ->assertSee('My Sports')
+            ->assertDontSee('Emptied Provider Group')
+            ->filterTable('has_enabled_channels', null)
+            ->assertSee('Emptied Provider Group');
+    });
+
+    it('lists only categories with enabled series in the own-category picker by default', function () {
+        $comedy = Category::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Comedy']);
+        Category::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Empty Category']);
+        Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'category_id' => $comedy->id]);
+
+        Livewire::test(TableSelectLivewireComponent::class, [
+            'tableConfiguration' => base64_encode(PlaylistCategoriesTable::class),
+            'tableArguments' => ['playlist_id' => $this->playlist->id],
+            'state' => [],
+        ])
+            ->assertSuccessful()
+            ->assertSee('Comedy')
+            ->assertDontSee('Empty Category')
+            ->filterTable('has_enabled_series', null)
+            ->assertSee('Empty Category');
     });
 
     it('creates a block bouquet with own-group picks', function () {

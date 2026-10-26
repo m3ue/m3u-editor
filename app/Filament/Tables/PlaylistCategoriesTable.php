@@ -12,7 +12,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Picker table for a standard playlist's own series categories - the categories
- * its clients see, genre categories included - keyed by category id.
+ * its clients see, genre categories included - keyed by category id. Lists only
+ * categories with enabled series unless the filter is cleared.
  */
 class PlaylistCategoriesTable
 {
@@ -41,6 +42,17 @@ class PlaylistCategoriesTable
                     ->boolean(),
             ])
             ->filters([
+                TernaryFilter::make('has_enabled_series')
+                    ->label(__('Enabled series'))
+                    ->placeholder(__('All categories'))
+                    ->trueLabel(__('Categories with enabled series'))
+                    ->falseLabel(__('Categories without enabled series'))
+                    ->default(true)
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereHas('series', fn (Builder $query) => $query->where('enabled', true)),
+                        false: fn (Builder $query): Builder => $query->whereDoesntHave('series', fn (Builder $query) => $query->where('enabled', true)),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
                 TernaryFilter::make('selected')
                     ->label(__('Categories'))
                     ->placeholder(__('All categories'))

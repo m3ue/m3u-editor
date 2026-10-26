@@ -13,7 +13,8 @@ use Illuminate\Database\Eloquent\Builder;
 /**
  * Picker table for a standard playlist's own groups - the groups its clients see,
  * custom and genre groups included - keyed by group id, for alias and bouquet
- * selections that match channels by the group they sit in.
+ * selections that match channels by the group they sit in. Lists only groups with
+ * enabled channels unless the filter is cleared.
  */
 class PlaylistGroupsTable
 {
@@ -62,6 +63,19 @@ class PlaylistGroupsTable
                     ->queries(
                         true: fn (Builder $query): Builder => self::whereSelected($query, $table->getArguments()['selected'] ?? [], selected: true),
                         false: fn (Builder $query): Builder => self::whereSelected($query, $table->getArguments()['selected'] ?? [], selected: false),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
+                // Clients never see a group with nothing enabled in it, e.g. a provider
+                // group whose channels were all moved into custom groups.
+                TernaryFilter::make('has_enabled_channels')
+                    ->label(__('Enabled channels'))
+                    ->placeholder(__('All groups'))
+                    ->trueLabel(__('Groups with enabled channels'))
+                    ->falseLabel(__('Groups without enabled channels'))
+                    ->default(true)
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereHas('channels', fn (Builder $query) => $query->where('enabled', true)),
+                        false: fn (Builder $query): Builder => $query->whereDoesntHave('channels', fn (Builder $query) => $query->where('enabled', true)),
                         blank: fn (Builder $query): Builder => $query,
                     ),
                 TernaryFilter::make('custom')
