@@ -99,6 +99,11 @@ EOF
 } | run_in_image smoke-upgrade -e POSTGRES_VERSION=18 2>&1)
 echo "${out}" | grep -q "RESULT version=18 post_upgrade=true" && pass "upgrade reports active=18, post_upgrade flag set" || fail "upgrade result: ${out}"
 echo "${out}" | grep -q '"result": "upgraded"' && pass "status file records upgraded" || fail "status file: ${out}"
+# The status file's own active_version/active_path fields (read by the
+# System Health page), not just the exported shell vars checked above -
+# these come from a separate code path and have gone stale independently before.
+echo "${out}" | grep -q '"active_version": "18"' && pass "status file active_version is 18, not stale" || fail "status file active_version is stale: ${out}"
+echo "${out}" | grep -q '"active_path": "/var/lib/postgresql/data/pg18"' && pass "status file active_path points at pg18" || fail "status file active_path is stale: ${out}"
 
 out=$( { prelude; cat <<'EOF'
 su-exec "${WWWUSER}" /usr/libexec/postgresql18/pg_ctl -D "${PG_MOUNT}/pg18" -w -o "-c listen_addresses='' -k /tmp -p ${PG_PORT}" start >/dev/null
@@ -112,6 +117,15 @@ out=$( { prelude; echo '[ -f "${PG_MOUNT}/PG_VERSION" ] && [ "$(cat "${PG_MOUNT}
     | run_in_image smoke-upgrade -e POSTGRES_VERSION=18 2>&1)
 echo "${out}" | grep -q RETAINED_17_OK && pass "retained 17 cluster still present at the root" || fail "retained 17 cluster missing: ${out}"
 
+echo "== 3b) an ordinary restart on the same version keeps the upgrade history, doesn't reset it to none =="
+out=$( { prelude; cat <<'EOF'
+pg_cluster_prepare
+cat "${PG_MOUNT}/.m3ue-postgres-status.json"
+EOF
+} | run_in_image smoke-upgrade -e POSTGRES_VERSION=18 2>&1)
+echo "${out}" | grep -q '"result": "upgraded"' && pass "status still records upgraded after a steady-state restart" || fail "upgrade history was reset to none: ${out}"
+echo "${out}" | grep -q '"from": "17"' && pass "status still records from=17" || fail "status lost from=17: ${out}"
+
 echo "== 4) lowering POSTGRES_VERSION without POSTGRES_ROLLBACK stays on the newer cluster, with a warning =="
 out=$( { prelude; cat <<'EOF'
 pg_cluster_prepare
@@ -123,9 +137,14 @@ echo "${out}" | grep -q "RESULT version=18" && pass "stays on 18 without POSTGRE
 echo "${out}" | grep -q 'POSTGRES_ROLLBACK' && pass "warning mentions POSTGRES_ROLLBACK" || fail "missing rollback warning: ${out}"
 
 echo "== 5) POSTGRES_ROLLBACK=true rolls back to 17, retaining the abandoned 18 cluster =="
-out=$( { prelude; echo 'pg_cluster_prepare; echo "RESULT version=$POSTGRES_ACTIVE_VERSION path=$PGDATA"'; } \
-    | run_in_image smoke-upgrade -e POSTGRES_VERSION=17 -e POSTGRES_ROLLBACK=true 2>&1)
+out=$( { prelude; cat <<'EOF'
+pg_cluster_prepare
+echo "RESULT version=$POSTGRES_ACTIVE_VERSION path=$PGDATA"
+cat "${PG_MOUNT}/.m3ue-postgres-status.json"
+EOF
+} | run_in_image smoke-upgrade -e POSTGRES_VERSION=17 -e POSTGRES_ROLLBACK=true 2>&1)
 echo "${out}" | grep -q "RESULT version=17 path=/var/lib/postgresql/data$" && pass "rolled back to 17 at the mount root" || fail "rollback result: ${out}"
+echo "${out}" | grep -q '"active_version": "17"' && pass "status file active_version is 17 after rollback, not stale" || fail "status file active_version is stale after rollback: ${out}"
 
 out=$( { prelude; echo 'ls "${PG_MOUNT}" | grep -q "pg18.rolled-back-" && echo ROLLED_BACK_OK'; } \
     | run_in_image smoke-upgrade -e POSTGRES_VERSION=17 2>&1)

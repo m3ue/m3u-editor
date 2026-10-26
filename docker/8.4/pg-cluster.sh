@@ -122,8 +122,36 @@ pg_cluster_find_active() {
     done
 }
 
+# Reads the upgrade sub-object from any existing status file into
+# PREV_RESULT/PREV_FROM/PREV_TO/PREV_AT/PREV_MESSAGE ("none"/empty when
+# there is no file yet). A boot that has nothing new to report passes these
+# straight back to pg_cluster_write_status instead of a fresh "none", so the
+# last real upgrade/rollback stays visible across every ordinary restart
+# that follows it - not just the one boot it happened on.
+pg_cluster_read_previous_upgrade() {
+    PREV_RESULT="none"
+    PREV_FROM=""
+    PREV_TO=""
+    PREV_AT=""
+    PREV_MESSAGE=""
+
+    local status_file="${PG_MOUNT}/.m3ue-postgres-status.json"
+    [ -f "${status_file}" ] || return 0
+
+    local value
+    value=$(sed -n 's/.*"result": "\([^"]*\)".*/\1/p' "${status_file}" | head -1)
+    [ -n "${value}" ] && PREV_RESULT="${value}"
+    PREV_FROM=$(sed -n 's/.*"from": "\([^"]*\)".*/\1/p' "${status_file}" | head -1)
+    PREV_TO=$(sed -n 's/.*"to": "\([^"]*\)".*/\1/p' "${status_file}" | head -1)
+    PREV_AT=$(sed -n 's/.*"at": "\([^"]*\)".*/\1/p' "${status_file}" | head -1)
+    PREV_MESSAGE=$(sed -n 's/.*"message": "\(.*\)".*/\1/p' "${status_file}" | head -1)
+}
+
+# $6 (at) is optional - a fresh event (upgraded/failed/rolled_back) omits it
+# to stamp "now"; a steady-state boot passes PREV_AT through so the
+# timestamp keeps reflecting when the recorded event actually happened.
 pg_cluster_write_status() {
-    local result="$1" from="$2" to="$3" message="$4" warning="$5"
+    local result="$1" from="$2" to="$3" message="$4" warning="$5" at="${6:-$(date -u +%FT%TZ)}"
     local status_file="${PG_MOUNT}/.m3ue-postgres-status.json"
     local tmp
     tmp="$(mktemp "${PG_MOUNT}/.m3ue-postgres-status.json.XXXXXX")"
@@ -142,7 +170,7 @@ pg_cluster_write_status() {
     "result": "${result}",
     "from": "${from}",
     "to": "${to}",
-    "at": "$(date -u +%FT%TZ)",
+    "at": "${at}",
     "message": "${escaped_message}"
   },
   "warning": "${warning}"
@@ -345,32 +373,46 @@ pg_cluster_prepare() {
         ACTIVE_PATH="${PG_MOUNT}"
         pg_cluster_write_status "none" "" "" "" "${warning}"
     elif [ -n "${requested}" ] && [ "${requested}" -gt "${ACTIVE_VERSION}" ]; then
+        local previous_version="${ACTIVE_VERSION}"
         if pg_cluster_upgrade "${ACTIVE_VERSION}" "${ACTIVE_PATH}" "${requested}"; then
-            pg_cluster_write_status "upgraded" "${ACTIVE_VERSION}" "${requested}" "" "${warning}"
             ACTIVE_VERSION="${requested}"
             ACTIVE_PATH="${NEW_ACTIVE_PATH}"
             export POSTGRES_POST_UPGRADE="true"
+            # Written after ACTIVE_VERSION/ACTIVE_PATH update above - the status
+            # file's own active_version/active_path fields come from those
+            # globals, so writing before the update would record the pre-upgrade
+            # cluster as still "active" despite having just moved off it.
+            pg_cluster_write_status "upgraded" "${previous_version}" "${requested}" "" "${warning}"
         else
-            pg_cluster_write_status "failed" "${ACTIVE_VERSION}" "${requested}" "${UPGRADE_ERROR}" "${warning}"
+            pg_cluster_write_status "failed" "${previous_version}" "${requested}" "${UPGRADE_ERROR}" "${warning}"
         fi
     elif [ -n "${requested}" ] && [ "${requested}" -lt "${ACTIVE_VERSION}" ]; then
         if [ "${rollback_flag}" = "true" ]; then
+            local previous_version="${ACTIVE_VERSION}"
             if pg_cluster_rollback "${ACTIVE_VERSION}" "${ACTIVE_PATH}" "${requested}"; then
-                pg_cluster_write_status "rolled_back" "${ACTIVE_VERSION}" "${requested}" "" "${warning}"
                 ACTIVE_VERSION="${requested}"
                 ACTIVE_PATH="${NEW_ACTIVE_PATH}"
+                pg_cluster_write_status "rolled_back" "${previous_version}" "${requested}" "" "${warning}"
             else
                 warning="${ROLLBACK_WARNING}"
                 pg_cluster_log "WARNING: ${warning}"
-                pg_cluster_write_status "none" "" "" "" "${warning}"
+                pg_cluster_read_previous_upgrade
+                pg_cluster_write_status "${PREV_RESULT}" "${PREV_FROM}" "${PREV_TO}" "${PREV_MESSAGE}" "${warning}" "${PREV_AT}"
             fi
         else
             warning="POSTGRES_VERSION=${requested} is older than the running ${ACTIVE_VERSION} cluster. Staying on ${ACTIVE_VERSION} - set POSTGRES_ROLLBACK=true to actually roll back (this discards any writes made after the upgrade to ${ACTIVE_VERSION})."
             pg_cluster_log "WARNING: ${warning}"
-            pg_cluster_write_status "none" "" "" "" "${warning}"
+            pg_cluster_read_previous_upgrade
+            pg_cluster_write_status "${PREV_RESULT}" "${PREV_FROM}" "${PREV_TO}" "${PREV_MESSAGE}" "${warning}" "${PREV_AT}"
         fi
     else
-        pg_cluster_write_status "none" "" "" "" "${warning}"
+        # Steady state: requested matches what's already active, nothing to
+        # do. Carry the last real upgrade/rollback forward instead of
+        # resetting it to "none" - this is the common case on every ordinary
+        # restart once an install is settled on a version, so overwriting
+        # history here would erase it almost as soon as it was written.
+        pg_cluster_read_previous_upgrade
+        pg_cluster_write_status "${PREV_RESULT}" "${PREV_FROM}" "${PREV_TO}" "${PREV_MESSAGE}" "${warning}" "${PREV_AT}"
     fi
 
     export PGDATA="${ACTIVE_PATH}"
