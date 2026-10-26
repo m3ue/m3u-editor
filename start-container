@@ -481,11 +481,16 @@ if [ "${ENABLE_POSTGRES}" = "true" ]; then
       chmod -R 700 "$PG_MOUNT"
     fi
 
+    # Needed before pg_cluster_prepare, not after: an upgrade starts the old
+    # cluster on this socket directory to read its settings, so it must
+    # already exist. It's baked into the image at build time, but don't rely
+    # on that surviving into every runtime (e.g. a tmpfs-mounted /run).
+    mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
+
     # shellcheck source=docker/8.4/pg-cluster.sh
     . /var/www/html/docker/8.4/pg-cluster.sh
     pg_cluster_prepare
 
-    mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
     export POSTGRES_LOCAL_ENABLED="true"
     echo "✅ Local Postgres data directory ready (embedded ${POSTGRES_ACTIVE_VERSION} at ${PGDATA}). Supervisord will start and manage it."
     echo ""

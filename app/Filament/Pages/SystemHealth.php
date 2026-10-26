@@ -186,11 +186,15 @@ class SystemHealth extends Page
                                 ->state(fn (): ?string => $this->postgresUpgradeSummary())
                                 ->placeholder(__('No upgrade has run'))
                                 ->color(fn (): string => ($this->value('database.embedded_postgres.upgrade_result') === 'failed' || $this->value('database.embedded_postgres.warning')) ? 'danger' : 'gray'),
-                            $this->entry('database.embedded_postgres.retained_bytes', __('Rollback copy size'))
-                                ->visible(fn (): bool => (bool) $this->value('database.embedded_postgres.has_retained_copies'))
-                                ->formatStateUsing(fn (int $state): string => Number::fileSize($state, precision: 1)),
                         ],
                     ),
+                    // Kept out of the array_map above: its ->visible() call would
+                    // be overwritten by the shared one applied to every entry in
+                    // that list, showing this for every embedded-Postgres install
+                    // regardless of whether a rollback copy actually exists.
+                    $this->entry('database.embedded_postgres.retained_bytes', __('Rollback copy size'))
+                        ->visible(fn (): bool => $this->value('database.embedded_postgres') !== null && (bool) $this->value('database.embedded_postgres.has_retained_copies'))
+                        ->formatStateUsing(fn (int $state): string => Number::fileSize($state, precision: 1)),
                 ]),
             Section::make(__('Cache & queue'))
                 ->icon('heroicon-o-bolt')

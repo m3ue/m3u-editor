@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use App\Services\EmbeddedPostgresStatus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 
 beforeEach(function () {
+    Cache::flush();
     $this->mount = storage_path('framework/testing/pg-mount-'.uniqid());
     File::ensureDirectoryExists($this->mount);
     config(['database.embedded_postgres_status_path' => "{$this->mount}/.m3ue-postgres-status.json"]);
@@ -126,4 +128,38 @@ it('never deletes an unrecognized file at the mount root', function () {
     (new EmbeddedPostgresStatus)->deleteRetainedCopies();
 
     expect(File::exists("{$this->mount}/.m3ue-cluster-complete-notes.txt"))->toBeTrue();
+});
+
+it('caches the retained copy size instead of re-walking the directory on every call', function () {
+    fakeRootCluster($this->mount, '17');
+    fakeNestedCluster($this->mount, '18');
+    writePostgresStatus($this->mount, ['active_version' => '18', 'active_path' => "{$this->mount}/pg18"]);
+
+    $status = new EmbeddedPostgresStatus;
+    $firstSize = $status->retainedCopies()[0]['bytes'];
+
+    // Grow the root cluster without clearing the cache - a cache hit would
+    // still report the old (smaller) size.
+    File::put("{$this->mount}/base/2", str_repeat('x', 5000));
+
+    expect($status->retainedCopies()[0]['bytes'])->toBe($firstSize);
+});
+
+it('recomputes the size after the cached copy is deleted and a new one appears at the same path', function () {
+    fakeRootCluster($this->mount, '17');
+    fakeNestedCluster($this->mount, '18');
+    writePostgresStatus($this->mount, ['active_version' => '18', 'active_path' => "{$this->mount}/pg18"]);
+
+    $status = new EmbeddedPostgresStatus;
+    $firstSize = $status->retainedCopies()[0]['bytes'];
+
+    $status->deleteRetainedCopies();
+
+    // A later upgrade retains a new, differently-sized copy at the same root path.
+    fakeRootCluster($this->mount, '18');
+    File::put("{$this->mount}/base/2", str_repeat('x', 5000));
+    fakeNestedCluster($this->mount, '19');
+    writePostgresStatus($this->mount, ['active_version' => '19', 'active_path' => "{$this->mount}/pg19"]);
+
+    expect($status->retainedCopies()[0]['bytes'])->toBeGreaterThan($firstSize);
 });

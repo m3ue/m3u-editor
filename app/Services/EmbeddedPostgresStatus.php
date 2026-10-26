@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -113,6 +114,8 @@ class EmbeddedPostgresStatus
         $mount = $this->mountPath();
 
         foreach ($this->retainedCopies() as $copy) {
+            Cache::forget(self::sizeCacheKey($copy['path']));
+
             if ($copy['kind'] === 'rolled_back') {
                 File::deleteDirectory($copy['path']);
 
@@ -136,31 +139,48 @@ class EmbeddedPostgresStatus
      * Sums the root cluster's own files, excluding any nested pg<N> (the
      * active upgraded cluster) or pg<N>.rolled-back-<timestamp> directories
      * that happen to live alongside it at the same mount root.
+     *
+     * A retained cluster can hold tens of thousands of files, and this is
+     * recomputed whenever the System Health report's 30-second cache
+     * expires. A retained copy's size only ever changes when it's deleted
+     * (nothing writes to it once set aside), so the walk itself is cached
+     * separately, much longer - deleteRetainedCopies() forgets this cache
+     * entry for whatever it removes, so a deletion is still reflected
+     * immediately rather than waiting out the TTL.
      */
     private function rootClusterSize(string $mount): int
     {
-        $size = 0;
+        return Cache::remember(self::sizeCacheKey($mount), 300, function () use ($mount): int {
+            $size = 0;
 
-        foreach (File::allFiles($mount) as $file) {
-            $topSegment = explode(DIRECTORY_SEPARATOR, $file->getRelativePath())[0] ?? '';
-            if (preg_match('/^pg\d+(\.rolled-back-.*)?$/', $topSegment)) {
-                continue;
+            foreach (File::allFiles($mount) as $file) {
+                $topSegment = explode(DIRECTORY_SEPARATOR, $file->getRelativePath())[0] ?? '';
+                if (preg_match('/^pg\d+(\.rolled-back-.*)?$/', $topSegment)) {
+                    continue;
+                }
+
+                $size += $file->getSize();
             }
 
-            $size += $file->getSize();
-        }
-
-        return $size;
+            return $size;
+        });
     }
 
     private function directorySize(string $path): int
     {
-        $size = 0;
+        return Cache::remember(self::sizeCacheKey($path), 300, function () use ($path): int {
+            $size = 0;
 
-        foreach (File::allFiles($path) as $file) {
-            $size += $file->getSize();
-        }
+            foreach (File::allFiles($path) as $file) {
+                $size += $file->getSize();
+            }
 
-        return $size;
+            return $size;
+        });
+    }
+
+    private static function sizeCacheKey(string $path): string
+    {
+        return 'embedded_postgres_retained_size:'.md5($path);
     }
 }

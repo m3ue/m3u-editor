@@ -263,8 +263,13 @@ return [
     | is enabled: which major is active, the result of the last upgrade
     | attempt, and any warning. See App\Services\EmbeddedPostgresStatus.
     |
+    | Not configurable via env(): pg-cluster.sh always writes this next to
+    | PG_MOUNT, which is itself a fixed path (not an env var) in
+    | start-container. An env override here would silently do nothing, since
+    | the shell writer would never read it.
+    |
     */
 
-    'embedded_postgres_status_path' => env('POSTGRES_STATUS_PATH', '/var/lib/postgresql/data/.m3ue-postgres-status.json'),
+    'embedded_postgres_status_path' => '/var/lib/postgresql/data/.m3ue-postgres-status.json',
 
 ];
