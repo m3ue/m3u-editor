@@ -219,18 +219,18 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     spirv-tools@edge \
     vulkan-loader@edge \
     nginx \
-    # Pinned to PostgreSQL 17: the unversioned "postgresql" package resolves to
-    # 18 on Alpine 3.23+, which cannot start on an existing 17 data directory.
-    # Bumping the major needs a pg_upgrade step in start-container first.
+    # Both full server generations ship side by side so start-container can
+    # opt an existing install into PostgreSQL 18 (POSTGRES_VERSION=18) and
+    # pg_upgrade it in place - see docker/8.4/pg-cluster.sh. Everything always
+    # runs from the explicit /usr/libexec/postgresql<N>/ binaries, never the
+    # unversioned /usr/bin ones, so the apk-chosen PATH default below only
+    # matters for anything that still shells out to a bare `psql`/`pg_dump`.
     postgresql17 \
     postgresql17-client \
     postgresql17-contrib \
-    # Newer client tools alongside 17 so backups/restores work against an
-    # external Postgres 18 (pg_dump cannot dump a newer server). Installed to
-    # /usr/libexec/postgresql18; set PG_CLIENT_VERSION=18 to point
-    # PostgresDumpBinaryResolver at it. The /usr/bin default stays on 17
-    # because only the 17 server is installed.
+    postgresql18 \
     postgresql18-client \
+    postgresql18-contrib \
     python3 \
     py3-pip \
     php84-cli \
@@ -272,6 +272,13 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
         fi; \
     fi && \
     ln -s /usr/bin/php84 /usr/bin/php && \
+    # Installing both server generations flips Alpine's unversioned /usr/bin
+    # default (postgres, initdb, pg_dump, ...) to the newest one (18). Pin it
+    # back to 17 so anything that still shells out to a bare `psql`/`pg_dump`
+    # (and a fresh install's first initdb) keeps matching the data directory
+    # an existing install already has on disk. pg-cluster.sh always uses the
+    # explicit /usr/libexec/postgresql<N>/ binaries regardless of this default.
+    pg_versions set-default 17 && \
     rm -rf /var/cache/apk/*
 
 # Create user and group early for proper file ownership

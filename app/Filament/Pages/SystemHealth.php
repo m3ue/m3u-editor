@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Jobs\DeletePostgresRollbackCopies;
 use App\Services\SystemHealthService;
 use Carbon\CarbonInterval;
 use Filament\Actions\Action;
@@ -69,6 +70,24 @@ class SystemHealth extends Page
 
                     Notification::make()
                         ->title(__('System health refreshed'))
+                        ->success()
+                        ->send();
+                }),
+            Action::make('deletePostgresRollbackCopy')
+                ->label(__('Delete PostgreSQL rollback copy'))
+                ->icon('heroicon-o-trash')
+                ->color('danger')
+                ->visible(fn (): bool => (bool) $this->value('database.embedded_postgres.has_retained_copies'))
+                ->requiresConfirmation()
+                ->modalDescription(__('This permanently deletes the retained PostgreSQL cluster(s) from the previous version (about :size). You will no longer be able to roll back to it. The currently active PostgreSQL cluster is not affected.', [
+                    'size' => Number::fileSize((int) $this->value('database.embedded_postgres.retained_bytes'), precision: 1),
+                ]))
+                ->action(function (): void {
+                    DeletePostgresRollbackCopies::dispatch();
+
+                    Notification::make()
+                        ->title(__('Deleting PostgreSQL rollback copy'))
+                        ->body(__('You will be notified when it is complete.'))
                         ->success()
                         ->send();
                 }),
@@ -159,6 +178,19 @@ class SystemHealth extends Page
                     $this->placementEntry('database.placement', __('Location')),
                     $this->entry('database.size', __('Size'))
                         ->formatStateUsing(fn (int $state): string => Number::fileSize($state, precision: 1)),
+                    ...array_map(
+                        fn (TextEntry $entry): TextEntry => $entry->visible(fn (): bool => $this->value('database.embedded_postgres') !== null),
+                        [
+                            $this->entry('database.embedded_postgres.active_version', __('PostgreSQL version')),
+                            $this->entry('database.embedded_postgres.upgrade_message', __('Last upgrade result'))
+                                ->state(fn (): ?string => $this->postgresUpgradeSummary())
+                                ->placeholder(__('No upgrade has run'))
+                                ->color(fn (): string => ($this->value('database.embedded_postgres.upgrade_result') === 'failed' || $this->value('database.embedded_postgres.warning')) ? 'danger' : 'gray'),
+                            $this->entry('database.embedded_postgres.retained_bytes', __('Rollback copy size'))
+                                ->visible(fn (): bool => (bool) $this->value('database.embedded_postgres.has_retained_copies'))
+                                ->formatStateUsing(fn (int $state): string => Number::fileSize($state, precision: 1)),
+                        ],
+                    ),
                 ]),
             Section::make(__('Cache & queue'))
                 ->icon('heroicon-o-bolt')
@@ -341,6 +373,29 @@ class SystemHealth extends Page
             'free' => Number::fileSize($available, precision: 1),
             'total' => Number::fileSize($total, precision: 1),
         ]);
+    }
+
+    protected function postgresUpgradeSummary(): ?string
+    {
+        if ($warning = $this->value('database.embedded_postgres.warning')) {
+            return $warning;
+        }
+
+        return match ($this->value('database.embedded_postgres.upgrade_result')) {
+            'upgraded' => __('Upgraded from :from to :to', [
+                'from' => $this->value('database.embedded_postgres.upgrade_from'),
+                'to' => $this->value('database.embedded_postgres.upgrade_to'),
+            ]),
+            'rolled_back' => __('Rolled back from :from to :to', [
+                'from' => $this->value('database.embedded_postgres.upgrade_from'),
+                'to' => $this->value('database.embedded_postgres.upgrade_to'),
+            ]),
+            'failed' => __('Upgrade to :to failed: :message', [
+                'to' => $this->value('database.embedded_postgres.upgrade_to'),
+                'message' => (string) $this->value('database.embedded_postgres.upgrade_message'),
+            ]),
+            default => null,
+        };
     }
 
     protected function value(string $path): mixed

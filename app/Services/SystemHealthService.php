@@ -32,6 +32,8 @@ class SystemHealthService
      */
     private const LOW_DISK_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024;
 
+    public function __construct(protected EmbeddedPostgresStatus $embeddedPostgresStatus) {}
+
     /**
      * Container processes started by docker/8.4/supervisord.conf, keyed by
      * service, matched against each /proc/<pid>/cmdline. nginx, php-fpm and
@@ -79,6 +81,23 @@ class SystemHealthService
                 ? $this->safe(fn () => DB::connection()->getDriverName(), __('Connected'))
                 : __('Unavailable'),
         ];
+
+        // Only surface this when pg-cluster.sh last boot actually hit a
+        // problem (a failed upgrade attempt, or a warning such as a refused
+        // rollback) - most installs never touch POSTGRES_VERSION and have no
+        // status file at all.
+        $postgresStatus = $this->embeddedPostgresStatus->read();
+        if ($postgresStatus && (($postgresStatus['upgrade']['result'] ?? null) === 'failed' || filled($postgresStatus['warning'] ?? null))) {
+            $failed = ($postgresStatus['upgrade']['result'] ?? null) === 'failed';
+            $checks[] = [
+                'key' => 'postgres_upgrade',
+                'label' => __('PostgreSQL upgrade'),
+                'ok' => false,
+                'detail' => $failed
+                    ? __('Upgrade to :version failed', ['version' => $postgresStatus['upgrade']['to'] ?? '?'])
+                    : __('Warning'),
+            ];
+        }
 
         // Only surface Redis when the app is actually backed by it (a SQLite-only
         // install may run file cache + sync queue and have no Redis at all).
@@ -366,6 +385,7 @@ class SystemHealthService
         $config = config("database.connections.{$connection}", []);
         $driver = $config['driver'] ?? null;
         $connected = $this->safe(fn () => DB::connection()->getPdo() !== null);
+        $placement = $driver === 'sqlite' ? 'embedded' : $this->placement($config['host'] ?? null);
 
         return [
             'driver' => $driver,
@@ -373,8 +393,34 @@ class SystemHealthService
             'server_version' => $connected ? $this->safe(fn () => DB::connection()->getPdo()->getAttribute(PDO::ATTR_SERVER_VERSION), null) : null,
             'database' => $driver === 'sqlite' ? basename((string) ($config['database'] ?? '')) : ($config['database'] ?? null),
             'host' => $driver === 'sqlite' ? null : ($config['host'] ?? null),
-            'placement' => $driver === 'sqlite' ? 'embedded' : $this->placement($config['host'] ?? null),
+            'placement' => $placement,
             'size' => $connected ? $this->databaseSize($driver, $config) : null,
+            'embedded_postgres' => $driver === 'pgsql' && $placement === 'embedded' ? $this->embeddedPostgresInfo() : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function embeddedPostgresInfo(): ?array
+    {
+        $status = $this->embeddedPostgresStatus->read();
+        if ($status === null) {
+            return null;
+        }
+
+        $retained = $this->safe(fn () => $this->embeddedPostgresStatus->retainedCopies(), []);
+
+        return [
+            'active_version' => $status['active_version'] ?? null,
+            'upgrade_result' => $status['upgrade']['result'] ?? null,
+            'upgrade_from' => $status['upgrade']['from'] ?? null,
+            'upgrade_to' => $status['upgrade']['to'] ?? null,
+            'upgrade_at' => $status['upgrade']['at'] ?? null,
+            'upgrade_message' => $status['upgrade']['message'] ?? null,
+            'warning' => $status['warning'] ?? null,
+            'retained_bytes' => array_sum(array_column($retained, 'bytes')),
+            'has_retained_copies' => $retained !== [],
         ];
     }
 

@@ -5,10 +5,13 @@ declare(strict_types=1);
 use App\Filament\Pages\SystemHealth;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use App\Filament\Widgets\SystemHealthWidget;
+use App\Jobs\DeletePostgresRollbackCopies;
 use App\Models\User;
 use App\Services\SystemHealthService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
@@ -150,6 +153,104 @@ it('matches the rewritten titles of the embedded services', function () {
         ->postgresql->toBe('running')
         ->redis->toBe('running')
         ->m3u_proxy->toBe('running');
+});
+
+it('still detects postgresql when supervisord runs the versioned binary (opt-in major upgrade)', function () {
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.host', '127.0.0.1');
+
+    $services = invade(systemHealthServiceWithProcesses([
+        'supervisord',
+        '/usr/libexec/postgresql18/postgres -D /var/lib/postgresql/data/pg18 -h 0.0.0.0 -p 5432',
+    ]))->services();
+
+    expect($services)->postgresql->toBe('running');
+});
+
+/**
+ * Writes a fake docker/8.4/pg-cluster.sh status file to a throwaway mount
+ * directory and points the embedded_postgres_status_path config at it.
+ *
+ * @param  array<string, mixed>  $status
+ */
+function fakePostgresStatus(array $status): string
+{
+    $mount = storage_path('framework/testing/pg-mount-'.uniqid());
+    File::ensureDirectoryExists($mount);
+    config(['database.embedded_postgres_status_path' => "{$mount}/.m3ue-postgres-status.json"]);
+    File::put("{$mount}/.m3ue-postgres-status.json", json_encode($status));
+
+    return $mount;
+}
+
+afterEach(function () {
+    // Only clean up the throwaway fixture directories fakePostgresStatus()
+    // creates - never the real default path, which would delete a live
+    // embedded Postgres data directory out from under CI.
+    $mount = dirname((string) config('database.embedded_postgres_status_path'));
+    if (str_contains($mount, 'framework/testing/pg-mount-')) {
+        File::deleteDirectory($mount);
+    }
+});
+
+it('surfaces a failed PostgreSQL upgrade as a health check', function () {
+    fakePostgresStatus([
+        'active_version' => '17',
+        'upgrade' => ['result' => 'failed', 'from' => '17', 'to' => '18', 'message' => 'disk full'],
+        'warning' => '',
+    ]);
+
+    $check = collect(app(SystemHealthService::class)->checks())->firstWhere('key', 'postgres_upgrade');
+
+    expect($check)->not->toBeNull()
+        ->and($check['ok'])->toBeFalse();
+});
+
+it('does not show the PostgreSQL upgrade check when nothing has gone wrong', function () {
+    fakePostgresStatus([
+        'active_version' => '17',
+        'upgrade' => ['result' => 'none'],
+        'warning' => '',
+    ]);
+
+    expect(collect(app(SystemHealthService::class)->checks())->firstWhere('key', 'postgres_upgrade'))->toBeNull();
+});
+
+it('hides the delete-rollback-copy action when there is nothing retained', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.host', '127.0.0.1');
+    $mount = fakePostgresStatus(['active_version' => '17', 'upgrade' => ['result' => 'none'], 'warning' => '']);
+    config(['database.embedded_postgres_status_path' => "{$mount}/.m3ue-postgres-status.json"]);
+    File::put("{$mount}/.m3ue-postgres-status.json", json_encode(['active_version' => '17', 'active_path' => $mount, 'upgrade' => ['result' => 'none'], 'warning' => '']));
+
+    Livewire::test(SystemHealth::class)->assertActionHidden('deletePostgresRollbackCopy');
+});
+
+it('offers to delete the retained rollback copy after a successful upgrade, and dispatches the job', function () {
+    Bus::fake();
+    $this->actingAs(User::factory()->admin()->create());
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.host', '127.0.0.1');
+
+    $mount = fakePostgresStatus([]);
+    File::ensureDirectoryExists("{$mount}/pg18/base");
+    File::put("{$mount}/pg18/PG_VERSION", '18');
+    File::put("{$mount}/PG_VERSION", '17');
+    File::put("{$mount}/.m3ue-postgres-status.json", json_encode([
+        'active_version' => '18',
+        'active_path' => "{$mount}/pg18",
+        'upgrade' => ['result' => 'upgraded', 'from' => '17', 'to' => '18'],
+        'warning' => '',
+    ]));
+
+    Livewire::test(SystemHealth::class)
+        ->assertSee('Upgraded from 17 to 18')
+        ->assertActionVisible('deletePostgresRollbackCopy')
+        ->callAction('deletePostgresRollbackCopy')
+        ->assertNotified();
+
+    Bus::assertDispatched(DeletePostgresRollbackCopies::class);
 });
 
 it('skips the services section outside the container', function () {
