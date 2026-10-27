@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\PostgresDumpBinaryResolver;
 use Exception;
 use Filament\Notifications\Notification;
+use Illuminate\Console\Command;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -57,10 +58,18 @@ class CreateBackup implements ShouldQueue
                 $dumpBinaryResolver->configure($connection);
             }
 
-            // Create a new backup
-            Artisan::call('backup:run', [
+            // Create a new backup. backup:run reports a failure (e.g. a pg_dump older than
+            // the server) through its exit code and Spatie's BackupHasFailed event rather
+            // than by throwing. The event's listener (App\Listeners\BackupFailed) already
+            // tells the admin why, so a failed run just must not be announced as created.
+            $exitCode = Artisan::call('backup:run', [
                 '--only-db' => ! $this->includeFiles,
             ]);
+            if ($exitCode !== Command::SUCCESS) {
+                logger()->error('Failed to create backup', ['exit_code' => $exitCode, 'output' => trim(Artisan::output())]);
+
+                return;
+            }
 
             // Notify the admin that the backup was restored
             $user = User::where('is_admin', true)->first();
