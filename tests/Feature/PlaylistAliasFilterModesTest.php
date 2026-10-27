@@ -1,11 +1,9 @@
 <?php
 
 /**
- * Alias filter modes (Everything / Only selected / Everything except selected), allow
- * and block bouquets, and selections of a standard playlist's own groups/categories.
+ * Allow and block bouquets, and selections of a standard playlist's own groups/categories.
  */
 
-use App\Enums\AliasFilterMode;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Tables\PlaylistCategoriesTable;
@@ -79,58 +77,8 @@ beforeEach(function () {
     $this->film = modesChannel($this->user, $this->playlist, 'ACTION', isVod: true);
 });
 
-describe('content modes', function () {
-    it('keeps aliases saved before modes working as they did', function () {
-        $restricted = modesAlias($this->user, ['playlist_id' => $this->playlist->id, 'group_filter' => ['selected_groups' => ['UK: SPORTS']]]);
-        $unrestricted = modesAlias($this->user, ['playlist_id' => $this->playlist->id, 'group_filter' => null]);
-
-        expect($restricted->contentMode('live'))->toBe(AliasFilterMode::Only)
-            ->and($restricted->contentMode('vod'))->toBe(AliasFilterMode::All)
-            ->and(deliveredIds($restricted))->toBe([$this->sports->id])
-            ->and(deliveredIds($restricted, isVod: true))->toBe([$this->film->id])
-            ->and($unrestricted->hasGroupFilter())->toBeFalse()
-            ->and(deliveredIds($unrestricted))->toBe([$this->sports->id, $this->news->id]);
-    });
-
-    it('delivers nothing for a type in Only mode with nothing picked', function () {
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id, 'group_filter' => ['vod_mode' => 'only']]);
-
-        expect(deliveredIds($alias, isVod: true))->toBe([])
-            ->and(deliveredIds($alias))->toBe([$this->sports->id, $this->news->id]);
-    });
-
-    it('stops a live-only allow bouquet from handing out every VOD and series', function () {
-        $series = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true]);
-        $bouquet = Bouquet::factory()->create([
-            'user_id' => $this->user->id,
-            'playlist_id' => $this->playlist->id,
-            'group_selections' => ['selected_groups' => ['UK: SPORTS']],
-        ]);
-        $alias = modesAlias($this->user, [
-            'playlist_id' => $this->playlist->id,
-            'group_filter' => ['live_mode' => 'only', 'vod_mode' => 'only', 'series_mode' => 'only'],
-        ]);
-        $alias->bouquets()->attach($bouquet);
-
-        expect(deliveredIds($alias))->toBe([$this->sports->id])
-            ->and(deliveredIds($alias, isVod: true))->toBe([])
-            ->and($alias->fresh()->series()->pluck('series.id')->all())->not->toContain($series->id);
-    });
-
-    it('hides the picked groups in Except mode and keeps channels with no group', function () {
-        $noGroup = modesChannel($this->user, $this->playlist, 'unused', attributes: ['group_internal' => null, 'group' => null]);
-        $customUngrouped = modesChannel($this->user, $this->playlist, 'unused', attributes: ['group_internal' => null, 'group' => null, 'is_custom' => true]);
-        $alias = modesAlias($this->user, [
-            'playlist_id' => $this->playlist->id,
-            'group_filter' => ['live_mode' => 'except', 'selected_groups' => ['UK: SPORTS']],
-        ]);
-
-        expect(deliveredIds($alias))->toBe([$this->news->id, $noGroup->id, $customUngrouped->id]);
-    });
-});
-
 describe('allow and block bouquets', function () {
-    it('hides a block bouquet\'s groups in Everything mode', function () {
+    it('hides a block bouquet\'s groups when nothing else is selected', function () {
         $block = Bouquet::factory()->block()->create([
             'user_id' => $this->user->id,
             'playlist_id' => $this->playlist->id,
@@ -139,8 +87,7 @@ describe('allow and block bouquets', function () {
         $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
         $alias->bouquets()->attach($block);
 
-        expect($alias->fresh()->contentMode('live'))->toBe(AliasFilterMode::All)
-            ->and($alias->fresh()->hasLiveGroupFilter())->toBeTrue()
+        expect($alias->fresh()->hasLiveGroupFilter())->toBeTrue()
             ->and(deliveredIds($alias))->toBe([$this->sports->id])
             ->and(deliveredIds($alias, isVod: true))->toBe([]);
     });
@@ -159,11 +106,10 @@ describe('allow and block bouquets', function () {
         $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
         $alias->bouquets()->attach([$allow->id, $block->id]);
 
-        expect($alias->fresh()->contentMode('live'))->toBe(AliasFilterMode::Only)
-            ->and(deliveredIds($alias))->toBe([$this->sports->id]);
+        expect(deliveredIds($alias))->toBe([$this->sports->id]);
     });
 
-    it('does not count a block bouquet as a selection on aliases saved before modes', function () {
+    it('does not count a block bouquet as an allow-list', function () {
         $block = Bouquet::factory()->block()->create([
             'user_id' => $this->user->id,
             'playlist_id' => $this->playlist->id,
@@ -172,8 +118,7 @@ describe('allow and block bouquets', function () {
         $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
         $alias->bouquets()->attach($block);
 
-        expect($alias->fresh()->contentMode('live'))->toBe(AliasFilterMode::All)
-            ->and($alias->fresh()->getAllowedLiveGroupNames())->toBe([]);
+        expect($alias->fresh()->getAllowedLiveGroupNames())->toBe([]);
     });
 });
 
@@ -182,20 +127,29 @@ describe('the playlist\'s own groups and categories', function () {
         $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
         $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
 
-        $only = modesAlias($this->user, [
+        $alias = modesAlias($this->user, [
             'playlist_id' => $this->playlist->id,
-            'group_filter' => ['live_mode' => 'only', 'selected_group_ids' => [$curated->id]],
-        ]);
-        $except = modesAlias($this->user, [
-            'playlist_id' => $this->playlist->id,
-            'group_filter' => ['live_mode' => 'except', 'selected_group_ids' => [$curated->id]],
+            'group_filter' => ['selected_group_ids' => [$curated->id]],
         ]);
 
-        expect(deliveredIds($only))->toBe([$moved->id])
-            ->and(deliveredIds($except))->toBe([$this->sports->id, $this->news->id]);
+        expect(deliveredIds($alias))->toBe([$moved->id]);
     });
 
-    it('treats an id selection on an alias saved before modes as a restriction', function () {
+    it('lets a block bouquet hide a group by id', function () {
+        $curated = modesGroup($this->user, $this->playlist, 'Adults', custom: true);
+        $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
+        $block = Bouquet::factory()->block()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_group_ids' => [$curated->id]],
+        ]);
+        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
+        $alias->bouquets()->attach($block);
+
+        expect(deliveredIds($alias))->toBe([$this->sports->id, $this->news->id]);
+    });
+
+    it('treats an allow bouquet id selection as a restriction', function () {
         $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
         $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
         $bouquet = Bouquet::factory()->create([
@@ -216,17 +170,20 @@ describe('the playlist\'s own groups and categories', function () {
         $comedy = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 20, 'category_id' => $genre->id]);
         $uncategorised = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => null, 'category_id' => null]);
 
-        $only = modesAlias($this->user, [
+        $allowed = modesAlias($this->user, [
             'playlist_id' => $this->playlist->id,
-            'group_filter' => ['series_mode' => 'only', 'selected_categories' => ['Drama'], 'selected_category_ids' => [$genre->id]],
+            'group_filter' => ['selected_categories' => ['Drama'], 'selected_category_ids' => [$genre->id]],
         ]);
-        $except = modesAlias($this->user, [
+        $block = Bouquet::factory()->block()->create([
+            'user_id' => $this->user->id,
             'playlist_id' => $this->playlist->id,
-            'group_filter' => ['series_mode' => 'except', 'selected_categories' => ['Drama']],
+            'group_selections' => ['selected_categories' => ['Drama']],
         ]);
+        $blocked = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
+        $blocked->bouquets()->attach($block);
 
-        expect($only->series()->pluck('series.id')->sort()->values()->all())->toBe([$drama->id, $comedy->id])
-            ->and($except->series()->pluck('series.id')->sort()->values()->all())->toBe([$comedy->id, $uncategorised->id]);
+        expect($allowed->series()->pluck('series.id')->sort()->values()->all())->toBe([$drama->id, $comedy->id])
+            ->and($blocked->fresh()->series()->pluck('series.id')->sort()->values()->all())->toBe([$comedy->id, $uncategorised->id]);
     });
 
     it('reports and cleans up deleted groups in id selections', function () {
@@ -251,7 +208,7 @@ describe('the playlist\'s own groups and categories', function () {
             'group_filter' => ['selected_group_ids' => [123]],
         ]);
 
-        expect($alias->contentMode('live'))->toBe(AliasFilterMode::All);
+        expect($alias->hasLiveGroupFilter())->toBeFalse();
     });
 });
 
@@ -274,19 +231,21 @@ describe('other targets', function () {
             ->and($delivered)->not->toContain($this->sports->id);
     });
 
-    it('hides a custom playlist\'s tagged group in Except mode', function () {
+    it('hides a custom playlist\'s tagged group with a block bouquet', function () {
         $custom = CustomPlaylist::factory()->for($this->user)->create();
         $custom->channels()->attach([$this->sports->id, $this->news->id]);
         $tag = Tag::findOrCreate('Favourites', $custom->uuid);
         $custom->attachTag($tag);
         $this->sports->attachTag($tag);
-
-        $alias = modesAlias($this->user, [
-            'custom_playlist_id' => $custom->id,
-            'group_filter' => ['live_mode' => 'except', 'selected_groups' => ['Favourites']],
+        $block = Bouquet::factory()->forCustomPlaylist($custom)->block()->create([
+            'user_id' => $this->user->id,
+            'group_selections' => ['selected_groups' => ['Favourites']],
         ]);
 
-        expect($alias->channels()->pluck('channels.id')->all())->toBe([$this->news->id]);
+        $alias = modesAlias($this->user, ['custom_playlist_id' => $custom->id]);
+        $alias->bouquets()->attach($block);
+
+        expect($alias->fresh()->channels()->pluck('channels.id')->all())->toBe([$this->news->id]);
     });
 });
 
@@ -296,76 +255,34 @@ it('leaves hidden groups out of the Xtream category list', function () {
     $this->sports->update(['group_id' => $sportsGroup->id]);
     $this->news->update(['group_id' => $newsGroup->id]);
 
-    $alias = modesAlias($this->user, [
+    $block = Bouquet::factory()->block()->create([
+        'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
-        'group_filter' => ['live_mode' => 'except', 'selected_groups' => ['UK: SPORTS']],
+        'group_selections' => ['selected_groups' => ['UK: SPORTS']],
     ]);
+    $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
+    $alias->bouquets()->attach($block);
 
-    expect(array_column(XtreamCategoryService::groupCategories($alias, false), 'category_name'))->toBe(['UK: NEWS']);
+    expect(array_column(XtreamCategoryService::groupCategories($alias->fresh(), false), 'category_name'))->toBe(['UK: NEWS']);
 });
 
 describe('forms', function () {
     beforeEach(fn () => $this->actingAs($this->user));
 
-    it('shows the mode a pre-modes alias already behaves as', function () {
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id, 'group_filter' => ['selected_groups' => ['UK: SPORTS']]]);
-
-        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
-            ->assertSuccessful()
-            ->assertSchemaStateSet([
-                'group_filter.live_mode' => AliasFilterMode::Only,
-                'group_filter.vod_mode' => AliasFilterMode::All,
-                'group_filter.series_mode' => AliasFilterMode::All,
-            ]);
-    });
-
-    it('switches Everything to Only selected when an allow bouquet is assigned', function () {
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id, 'group_filter' => ['vod_mode' => 'except']]);
-        $allow = Bouquet::factory()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
-
-        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
-            ->fillForm(['bouquets' => [(string) $allow->id]])
-            ->assertSchemaStateSet([
-                'group_filter.live_mode' => AliasFilterMode::Only,
-                'group_filter.vod_mode' => AliasFilterMode::Except,
-                'group_filter.series_mode' => AliasFilterMode::Only,
-            ])
-            ->assertNotified();
-    });
-
-    it('previews what the alias delivers as the filter changes', function () {
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-
-        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
-            ->assertSee('This alias delivers 2 of 2 live channels, 1 of 1 VOD and 0 of 0 series.')
-            ->fillForm(['group_filter.vod_mode' => 'only'])
-            ->assertSee('This alias delivers 2 of 2 live channels, 0 of 1 VOD and 0 of 0 series.');
-    });
-
-    it('leaves the modes alone when only a block bouquet is assigned', function () {
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-        $block = Bouquet::factory()->block()->create(['user_id' => $this->user->id, 'playlist_id' => $this->playlist->id]);
-
-        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
-            ->fillForm(['bouquets' => [(string) $block->id]])
-            ->assertSchemaStateSet(['group_filter.live_mode' => AliasFilterMode::All]);
-    });
-
-    it('saves the modes and own-group picks', function () {
+    it('saves own-group picks', function () {
         $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
         $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
 
         Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
             ->fillForm([
                 'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
-                'group_filter.live_mode' => 'except',
                 'group_filter.selected_group_ids' => [(string) $curated->id],
             ])
             ->call('save')
             ->assertHasNoFormErrors();
 
         expect($alias->fresh()->group_filter)
-            ->toMatchArray(['live_mode' => 'except', 'selected_group_ids' => [$curated->id]]);
+            ->toMatchArray(['selected_group_ids' => [$curated->id]]);
     });
 
     it('lists only groups with enabled channels in the own-group picker by default', function () {

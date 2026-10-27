@@ -17,7 +17,6 @@ use App\Models\Bouquet;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
-use App\Models\PlaylistAlias;
 use App\Rules\ValidRegexPattern;
 use App\Traits\HasUserFiltering;
 use BackedEnum;
@@ -38,7 +37,6 @@ use Filament\Tables;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Validation\Rule;
 
 class BouquetResource extends Resource
@@ -271,12 +269,6 @@ class BouquetResource extends Resource
                             ? __('Aliases using this bouquet will hide series in these categories.')
                             : __('Aliases using this bouquet will include series in these categories.')),
                 ]),
-
-            Schemas\Components\Callout::make(__('Coverage'))
-                ->columnSpanFull()
-                ->color('info')
-                ->visible(fn (?Bouquet $record): bool => $record !== null)
-                ->description(fn (Bouquet $record): string => self::coverageSummary($record)),
         ];
     }
 
@@ -326,34 +318,6 @@ class BouquetResource extends Resource
     protected static function isBlockForm(Get $get): bool
     {
         return self::kindOf($get) === BouquetKind::Block;
-    }
-
-    /**
-     * How much enabled content the saved bouquet covers on its playlist, counted by
-     * the same filter its aliases apply.
-     */
-    protected static function coverageSummary(Bouquet $record): string
-    {
-        $allowKind = $record->replicate();
-        $allowKind->kind = BouquetKind::Allow;
-
-        $alias = new PlaylistAlias([
-            'playlist_id' => $record->playlist_id,
-            'custom_playlist_id' => $record->custom_playlist_id,
-            'merged_playlist_id' => $record->merged_playlist_id,
-            'group_filter' => ['live_mode' => 'only', 'vod_mode' => 'only', 'series_mode' => 'only'],
-        ]);
-        $alias->setRelation('bouquets', new EloquentCollection([$allowKind]));
-
-        $counts = [
-            'live' => $alias->channels()->where('channels.enabled', true)->where('channels.is_vod', false)->count(),
-            'vod' => $alias->channels()->where('channels.enabled', true)->where('channels.is_vod', true)->count(),
-            'series' => $alias->series()->where('series.enabled', true)->count(),
-        ];
-
-        return $record->isBlock()
-            ? __('As saved, this bouquet hides :live live channels, :vod VOD and :series series (enabled content only).', $counts)
-            : __('As saved, this bouquet includes :live live channels, :vod VOD and :series series (enabled content only).', $counts);
     }
 
     public static function table(Table $table): Table

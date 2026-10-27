@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\AliasFilterMode;
 use App\Enums\BouquetKind;
 use App\Enums\PlaylistChannelId;
 use App\Jobs\UpdateXtreamStats;
@@ -46,15 +45,14 @@ class PlaylistAlias extends Model
     /**
      * The group_filter / bouquet group_selections keys for each content type: the
      * provider selection (names, or {playlist_id, name} pairs on merged aliases), the
-     * playlist's own groups or categories by id (standard playlists only), and the
-     * alias's filter mode.
+     * playlist's own groups or categories by id (standard playlists only).
      *
-     * @var array<string, array{names: string, ids: string, mode: string}>
+     * @var array<string, array{names: string, ids: string}>
      */
     public const CONTENT_FILTER_KEYS = [
-        'live' => ['names' => 'selected_groups', 'ids' => 'selected_group_ids', 'mode' => 'live_mode'],
-        'vod' => ['names' => 'selected_vod_groups', 'ids' => 'selected_vod_group_ids', 'mode' => 'vod_mode'],
-        'series' => ['names' => 'selected_categories', 'ids' => 'selected_category_ids', 'mode' => 'series_mode'],
+        'live' => ['names' => 'selected_groups', 'ids' => 'selected_group_ids'],
+        'vod' => ['names' => 'selected_vod_groups', 'ids' => 'selected_vod_group_ids'],
+        'series' => ['names' => 'selected_categories', 'ids' => 'selected_category_ids'],
     ];
 
     protected $casts = [
@@ -215,26 +213,7 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * How this alias filters a content type ('live', 'vod' or 'series').
-     */
-    public function contentMode(string $type): AliasFilterMode
-    {
-        $stored = $this->group_filter[self::CONTENT_FILTER_KEYS[$type]['mode']] ?? null;
-        $mode = $stored instanceof AliasFilterMode ? $stored : AliasFilterMode::tryFrom(is_string($stored) ? $stored : '');
-        if ($mode !== null) {
-            return $mode;
-        }
-
-        // Aliases saved before filter modes existed: a selection, from the alias itself
-        // or an allow bouquet, restricts the type to it, and no selection allows everything.
-        return $this->hasStoredSelection($type, $this->group_filter ?? [])
-            || $this->hasStoredSelection($type, $this->bouquetEntries()['allow'])
-            ? AliasFilterMode::Only
-            : AliasFilterMode::All;
-    }
-
-    /**
-     * The allow-list for a type in Only mode: the alias's own picks plus its allow bouquets'.
+     * The allow-list for a type: the alias's own picks plus its allow bouquets'.
      *
      * @return array{entries: array<int, mixed>, ids: array<int>}
      */
@@ -244,19 +223,23 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * What is hidden for a type whatever else allows it: the block bouquets' selections,
-     * plus the alias's own picks in Except mode.
+     * What is hidden for a type whatever else allows it: the block bouquets' selections.
      *
      * @return array{entries: array<int, mixed>, ids: array<int>}
      */
     private function blockSet(string $type): array
     {
-        $sources = [$this->bouquetEntries()['block']];
-        if ($this->contentMode($type) === AliasFilterMode::Except) {
-            $sources[] = $this->group_filter ?? [];
-        }
+        return $this->selectionSet($type, [$this->bouquetEntries()['block']]);
+    }
 
-        return $this->selectionSet($type, $sources);
+    /**
+     * Whether a type is limited to an allow-list: the alias or an allow bouquet picks
+     * something for it. Nothing picked means everything is allowed.
+     */
+    private function hasAllowList(string $type): bool
+    {
+        return $this->hasStoredSelection($type, $this->group_filter ?? [])
+            || $this->hasStoredSelection($type, $this->bouquetEntries()['allow']);
     }
 
     /**
@@ -264,20 +247,19 @@ class PlaylistAlias extends Model
      */
     public function isContentFiltered(string $type): bool
     {
-        return $this->contentMode($type) === AliasFilterMode::Only
-            || ! self::isEmptySelectionSet($this->blockSet($type));
+        return $this->hasAllowList($type) || ! self::isEmptySelectionSet($this->blockSet($type));
     }
 
     /**
      * Restrict a channels ('live' / 'vod') or series query to what this alias delivers
-     * for that content type: the Only allow-list, minus everything a block list hides.
+     * for that content type: the allow-list, minus everything a block bouquet hides.
      *
      * The one place alias filtering is decided. The channels() and series() relations,
      * the Xtream category lists and the guest panel all apply it, so they can't drift.
      */
     public function applyContentFilter($query, string $type): void
     {
-        if ($this->contentMode($type) === AliasFilterMode::Only) {
+        if ($this->hasAllowList($type)) {
             $allow = $this->allowSet($type);
             $query->where(fn ($query) => $this->matchContent($query, $type, $allow, isAllowList: true));
         }
@@ -323,8 +305,8 @@ class PlaylistAlias extends Model
 
     /**
      * Get the allowed live group names for this alias: its own picks unioned with
-     * every attached allow bouquet's, when the type is in Only mode. Empty otherwise,
-     * which no longer means "no restriction" - check isContentFiltered() for that.
+     * every attached allow bouquet's. Empty means no allow-list, not that nothing is
+     * hidden: block bouquets are checked through isContentFiltered().
      *
      * @return array<string>
      */
@@ -355,7 +337,7 @@ class PlaylistAlias extends Model
 
     /**
      * Source-scoped live group allow-list for merged-playlist aliases: one
-     * {playlist_id, name} per allowed provider group, in Only mode.
+     * {playlist_id, name} per allowed provider group.
      *
      * @return array<int, array{playlist_id: int, name: string}>
      */
@@ -389,10 +371,6 @@ class PlaylistAlias extends Model
      */
     private function allowedNamesFor(string $type): array
     {
-        if ($this->contentMode($type) !== AliasFilterMode::Only) {
-            return [];
-        }
-
         return self::selectionNames($this->allowSet($type)['entries']);
     }
 
@@ -401,10 +379,6 @@ class PlaylistAlias extends Model
      */
     private function allowedPairsFor(string $type): array
     {
-        if ($this->contentMode($type) !== AliasFilterMode::Only) {
-            return [];
-        }
-
         return self::selectionPairs($this->allowSet($type)['entries']);
     }
 
@@ -964,7 +938,7 @@ class PlaylistAlias extends Model
      */
     private function applyMergedGroupFilter($query, string $type): void
     {
-        if ($this->contentMode($type) === AliasFilterMode::Only) {
+        if ($this->hasAllowList($type)) {
             $allow = $this->allowSet($type)['entries'];
             $query->where(fn ($query) => $this->constrainGroupsToSourceGroups($query, $allow));
         }

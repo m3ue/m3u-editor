@@ -573,7 +573,7 @@ it('saves a channel filter from the alias edit form for a custom playlist', func
 
     Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
         ->assertSuccessful()
-        ->fillForm(['group_filter' => ['live_mode' => 'only', 'selected_groups' => ['Sports']]])
+        ->fillForm(['group_filter' => ['selected_groups' => ['Sports']]])
         ->call('save')
         ->assertHasNoFormErrors();
 
