@@ -122,8 +122,9 @@ it('DuplicatePlaylist points id selections and the bouquet type at the copied gr
     $copy = Playlist::where('name', 'P Copy')->firstOrFail();
     $copiedBouquet = Bouquet::where('playlist_id', $copy->id)->firstOrFail();
 
+    // toEqual, not toBe: jsonb (Postgres) stores object keys in its own order.
     expect($copiedBouquet->isBlock())->toBeTrue()
-        ->and($copiedBouquet->group_selections)->toBe([
+        ->and($copiedBouquet->group_selections)->toEqual([
             'selected_group_ids' => [Group::where('playlist_id', $copy->id)->where('name', 'My Sports')->value('id')],
             'selected_vod_group_ids' => [Group::where('playlist_id', $copy->id)->where('name', 'Action')->value('id')],
             'selected_category_ids' => [Category::where('playlist_id', $copy->id)->where('name', 'Comedy')->value('id')],
