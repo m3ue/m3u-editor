@@ -7,7 +7,6 @@ use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Forms\Components\CustomPlaylistGroupModalSelect;
 use App\Filament\Forms\Components\MergedSourceGroupModalSelect;
-use App\Filament\Forms\Components\PlaylistGroupModalSelect;
 use App\Filament\Forms\Components\SourceGroupModalSelect;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
@@ -194,10 +193,6 @@ class BouquetResource extends Resource
                             ? __('Aliases using this bouquet will hide live channels from these groups. Each selection is scoped to the source playlist it was picked from.')
                             : __('Aliases using this bouquet will include live channels from these groups. Each selection is scoped to the source playlist it was picked from.'),
                     ),
-                    PlaylistGroupModalSelect::make('group_selections.selected_group_ids', 'live')
-                        ->helperText(fn (Get $get): string => self::isBlockForm($get)
-                            ? __('Aliases using this bouquet will hide live channels in these groups, wherever they came from.')
-                            : __('Aliases using this bouquet will include live channels in these groups, wherever they came from.')),
                     Forms\Components\Toggle::make('auto_include_new_live')
                         ->label(__('Automatically include new live groups'))
                         ->default(false)
@@ -229,10 +224,6 @@ class BouquetResource extends Resource
                             ? __('Aliases using this bouquet will hide VOD channels from these groups. Each selection is scoped to the source playlist it was picked from.')
                             : __('Aliases using this bouquet will include VOD channels from these groups. Each selection is scoped to the source playlist it was picked from.'),
                     ),
-                    PlaylistGroupModalSelect::make('group_selections.selected_vod_group_ids', 'vod')
-                        ->helperText(fn (Get $get): string => self::isBlockForm($get)
-                            ? __('Aliases using this bouquet will hide VOD channels in these groups, wherever they came from.')
-                            : __('Aliases using this bouquet will include VOD channels in these groups, wherever they came from.')),
                     Forms\Components\Toggle::make('auto_include_new_vod')
                         ->label(__('Automatically include new VOD groups'))
                         ->default(false)
@@ -264,10 +255,6 @@ class BouquetResource extends Resource
                             ? __('Aliases using this bouquet will hide series from these categories. Each selection is scoped to the source playlist it was picked from.')
                             : __('Aliases using this bouquet will include series from these categories. Each selection is scoped to the source playlist it was picked from.'),
                     ),
-                    PlaylistGroupModalSelect::make('group_selections.selected_category_ids', 'categories')
-                        ->helperText(fn (Get $get): string => self::isBlockForm($get)
-                            ? __('Aliases using this bouquet will hide series in these categories.')
-                            : __('Aliases using this bouquet will include series in these categories.')),
                 ]),
         ];
     }
@@ -299,9 +286,6 @@ class BouquetResource extends Resource
         $set('group_selections.selected_groups', []);
         $set('group_selections.selected_vod_groups', []);
         $set('group_selections.selected_categories', []);
-        $set('group_selections.selected_group_ids', []);
-        $set('group_selections.selected_vod_group_ids', []);
-        $set('group_selections.selected_category_ids', []);
         $set('auto_include_new_live', false);
         $set('auto_include_new_vod', false);
         $set('auto_include_live_patterns', []);
@@ -344,9 +328,9 @@ class BouquetResource extends Resource
                     }),
                 Tables\Columns\TextColumn::make('selection_counts')
                     ->label(__('Live / VOD / Series'))
-                    ->getStateUsing(fn (Bouquet $record): string => (count($record->getSelectedLiveGroupNames()) + count($record->group_selections['selected_group_ids'] ?? []))
-                        .' / '.(count($record->getSelectedVodGroupNames()) + count($record->group_selections['selected_vod_group_ids'] ?? []))
-                        .' / '.(count($record->getSelectedCategoryNames()) + count($record->group_selections['selected_category_ids'] ?? [])))->badge(),
+                    ->getStateUsing(fn (Bouquet $record): string => count($record->getSelectedLiveGroupNames())
+                        .' / '.count($record->getSelectedVodGroupNames())
+                        .' / '.count($record->getSelectedCategoryNames()))->badge(),
                 Tables\Columns\TextColumn::make('playlist_aliases_count')
                     ->label(__('Aliases'))
                     ->badge()

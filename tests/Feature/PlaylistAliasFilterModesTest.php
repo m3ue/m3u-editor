@@ -1,15 +1,12 @@
 <?php
 
 /**
- * Allow and block bouquets, and selections of a standard playlist's own groups/categories.
+ * Allow and block bouquets.
  */
 
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
-use App\Filament\Tables\PlaylistCategoriesTable;
-use App\Filament\Tables\PlaylistGroupsTable;
 use App\Models\Bouquet;
-use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -20,7 +17,6 @@ use App\Models\Series;
 use App\Models\SourceCategory;
 use App\Models\User;
 use App\Services\XtreamCategoryService;
-use Filament\Forms\Components\TableSelect\Livewire\TableSelectLivewireComponent;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Spatie\Tags\Tag;
@@ -122,94 +118,26 @@ describe('allow and block bouquets', function () {
     });
 });
 
-describe('the playlist\'s own groups and categories', function () {
-    it('matches channels by the group they sit in, wherever they came from', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
-        $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
+it('filters series by provider category, allowed or blocked', function () {
+    SourceCategory::create(['playlist_id' => $this->playlist->id, 'source_category_id' => 10, 'name' => 'Drama']);
+    $drama = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 10]);
+    $comedy = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 20]);
+    $uncategorised = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => null]);
 
-        $alias = modesAlias($this->user, [
-            'playlist_id' => $this->playlist->id,
-            'group_filter' => ['selected_group_ids' => [$curated->id]],
-        ]);
+    $allowed = modesAlias($this->user, [
+        'playlist_id' => $this->playlist->id,
+        'group_filter' => ['selected_categories' => ['Drama']],
+    ]);
+    $block = Bouquet::factory()->block()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_selections' => ['selected_categories' => ['Drama']],
+    ]);
+    $blocked = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
+    $blocked->bouquets()->attach($block);
 
-        expect(deliveredIds($alias))->toBe([$moved->id]);
-    });
-
-    it('lets a block bouquet hide a group by id', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'Adults', custom: true);
-        $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
-        $block = Bouquet::factory()->block()->create([
-            'user_id' => $this->user->id,
-            'playlist_id' => $this->playlist->id,
-            'group_selections' => ['selected_group_ids' => [$curated->id]],
-        ]);
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-        $alias->bouquets()->attach($block);
-
-        expect(deliveredIds($alias))->toBe([$this->sports->id, $this->news->id]);
-    });
-
-    it('treats an allow bouquet id selection as a restriction', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
-        $moved = modesChannel($this->user, $this->playlist, 'UK: ENTERTAINMENT', $curated);
-        $bouquet = Bouquet::factory()->create([
-            'user_id' => $this->user->id,
-            'playlist_id' => $this->playlist->id,
-            'group_selections' => ['selected_group_ids' => [$curated->id]],
-        ]);
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-        $alias->bouquets()->attach($bouquet);
-
-        expect(deliveredIds($alias))->toBe([$moved->id]);
-    });
-
-    it('filters series by provider category and by playlist category', function () {
-        SourceCategory::create(['playlist_id' => $this->playlist->id, 'source_category_id' => 10, 'name' => 'Drama']);
-        $genre = Category::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Comedy']);
-        $drama = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 10]);
-        $comedy = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 20, 'category_id' => $genre->id]);
-        $uncategorised = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => null, 'category_id' => null]);
-
-        $allowed = modesAlias($this->user, [
-            'playlist_id' => $this->playlist->id,
-            'group_filter' => ['selected_categories' => ['Drama'], 'selected_category_ids' => [$genre->id]],
-        ]);
-        $block = Bouquet::factory()->block()->create([
-            'user_id' => $this->user->id,
-            'playlist_id' => $this->playlist->id,
-            'group_selections' => ['selected_categories' => ['Drama']],
-        ]);
-        $blocked = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-        $blocked->bouquets()->attach($block);
-
-        expect($allowed->series()->pluck('series.id')->sort()->values()->all())->toBe([$drama->id, $comedy->id])
-            ->and($blocked->fresh()->series()->pluck('series.id')->sort()->values()->all())->toBe([$comedy->id, $uncategorised->id]);
-    });
-
-    it('reports and cleans up deleted groups in id selections', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
-        $bouquet = Bouquet::factory()->create([
-            'user_id' => $this->user->id,
-            'playlist_id' => $this->playlist->id,
-            'group_selections' => ['selected_group_ids' => [$curated->id, 999999]],
-        ]);
-
-        expect($bouquet->staleSelectionNames())->toBe(['Deleted group #999999']);
-
-        $bouquet->removeStaleSelectionNames();
-
-        expect($bouquet->fresh()->group_selections['selected_group_ids'])->toBe([$curated->id]);
-    });
-
-    it('ignores id selections on merged and custom playlist aliases', function () {
-        $merged = MergedPlaylist::factory()->for($this->user)->create();
-        $alias = modesAlias($this->user, [
-            'merged_playlist_id' => $merged->id,
-            'group_filter' => ['selected_group_ids' => [123]],
-        ]);
-
-        expect($alias->hasLiveGroupFilter())->toBeFalse();
-    });
+    expect($allowed->series()->pluck('series.id')->all())->toBe([$drama->id])
+        ->and($blocked->fresh()->series()->pluck('series.id')->sort()->values()->all())->toBe([$comedy->id, $uncategorised->id]);
 });
 
 describe('other targets', function () {
@@ -269,59 +197,7 @@ it('leaves hidden groups out of the Xtream category list', function () {
 describe('forms', function () {
     beforeEach(fn () => $this->actingAs($this->user));
 
-    it('saves own-group picks', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
-        $alias = modesAlias($this->user, ['playlist_id' => $this->playlist->id]);
-
-        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
-            ->fillForm([
-                'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
-                'group_filter.selected_group_ids' => [(string) $curated->id],
-            ])
-            ->call('save')
-            ->assertHasNoFormErrors();
-
-        expect($alias->fresh()->group_filter)
-            ->toMatchArray(['selected_group_ids' => [$curated->id]]);
-    });
-
-    it('lists only groups with enabled channels in the own-group picker by default', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
-        modesChannel($this->user, $this->playlist, 'UK: SPORTS', $curated);
-        modesGroup($this->user, $this->playlist, 'Emptied Provider Group');
-
-        Livewire::test(TableSelectLivewireComponent::class, [
-            'tableConfiguration' => base64_encode(PlaylistGroupsTable::class),
-            'tableArguments' => ['playlist_id' => $this->playlist->id, 'type' => 'live'],
-            'state' => [],
-        ])
-            ->assertSuccessful()
-            ->assertSee('My Sports')
-            ->assertDontSee('Emptied Provider Group')
-            ->filterTable('has_enabled_channels', null)
-            ->assertSee('Emptied Provider Group');
-    });
-
-    it('lists only categories with enabled series in the own-category picker by default', function () {
-        $comedy = Category::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Comedy']);
-        Category::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Empty Category']);
-        Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'category_id' => $comedy->id]);
-
-        Livewire::test(TableSelectLivewireComponent::class, [
-            'tableConfiguration' => base64_encode(PlaylistCategoriesTable::class),
-            'tableArguments' => ['playlist_id' => $this->playlist->id],
-            'state' => [],
-        ])
-            ->assertSuccessful()
-            ->assertSee('Comedy')
-            ->assertDontSee('Empty Category')
-            ->filterTable('has_enabled_series', null)
-            ->assertSee('Empty Category');
-    });
-
-    it('creates a block bouquet with own-group picks', function () {
-        $curated = modesGroup($this->user, $this->playlist, 'Adults', custom: true);
-
+    it('creates a block bouquet', function () {
         Livewire::test(ListBouquets::class)
             ->callAction('create', [
                 'name' => 'No adult',
@@ -329,12 +205,10 @@ describe('forms', function () {
                 'target_type' => 'playlist',
                 'target_id' => $this->playlist->id,
                 'playlist_id' => $this->playlist->id,
-                'group_selections' => ['selected_group_ids' => [(string) $curated->id]],
             ])
             ->assertHasNoActionErrors();
 
         $bouquet = Bouquet::where('name', 'No adult')->firstOrFail();
-        expect($bouquet->isBlock())->toBeTrue()
-            ->and($bouquet->group_selections['selected_group_ids'])->toBe([$curated->id]);
+        expect($bouquet->isBlock())->toBeTrue();
     });
 });

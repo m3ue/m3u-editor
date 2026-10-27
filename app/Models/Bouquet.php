@@ -357,26 +357,6 @@ class Bouquet extends Model
         };
 
         if ($this->playlist_id) {
-            // The playlist's own groups and categories, picked by id (custom and genre
-            // groups included). A deleted one is stale until it is cleaned up.
-            $resolveIds = function (string $key, callable $existingFor) use ($selections, &$stale): void {
-                $ids = array_values(array_filter((array) ($selections[$key] ?? []), 'is_numeric'));
-                if (empty($ids)) {
-                    return;
-                }
-                $existing = array_map('intval', $existingFor($ids));
-                $missing = array_values(array_filter($ids, fn ($id): bool => ! in_array((int) $id, $existing, true)));
-                if (! empty($missing)) {
-                    $stale[$key] = $missing;
-                }
-            };
-            $resolveIds('selected_group_ids', fn (array $ids) => Group::where('playlist_id', $this->playlist_id)
-                ->where('type', 'live')->whereIn('id', $ids)->pluck('id')->all());
-            $resolveIds('selected_vod_group_ids', fn (array $ids) => Group::where('playlist_id', $this->playlist_id)
-                ->where('type', 'vod')->whereIn('id', $ids)->pluck('id')->all());
-            $resolveIds('selected_category_ids', fn (array $ids) => Category::where('playlist_id', $this->playlist_id)
-                ->whereIn('id', $ids)->pluck('id')->all());
-
             $resolve('selected_groups', fn (array $names) => SourceGroup::where('playlist_id', $this->playlist_id)
                 ->where('type', 'live')->whereIn('name', $names)->pluck('name')->all());
             $resolve('selected_vod_groups', fn (array $names) => SourceGroup::where('playlist_id', $this->playlist_id)
@@ -443,21 +423,9 @@ class Bouquet extends Model
      */
     public function staleSelectionNames(): array
     {
-        $staleByKey = $this->staleSelectionsByKey();
-        $idKeys = array_column(PlaylistAlias::CONTENT_FILTER_KEYS, 'ids');
-
-        $names = PlaylistAlias::selectionNames(
-            array_merge([], ...array_values(array_diff_key($staleByKey, array_flip($idKeys))))
+        return PlaylistAlias::selectionNames(
+            array_merge([], ...array_values($this->staleSelectionsByKey()))
         );
-
-        // Deleted playlist groups/categories have no name left to show.
-        foreach (array_intersect_key($staleByKey, array_flip($idKeys)) as $ids) {
-            foreach ($ids as $id) {
-                $names[] = __('Deleted group #:id', ['id' => $id]);
-            }
-        }
-
-        return $names;
     }
 
     /**

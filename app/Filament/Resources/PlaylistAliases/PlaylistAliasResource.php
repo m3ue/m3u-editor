@@ -6,7 +6,6 @@ use App\Facades\PlaylistFacade;
 use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Concerns\HasCopilotSupport;
-use App\Filament\Forms\Components\PlaylistGroupModalSelect;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
@@ -919,8 +918,6 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         ->live()
                                                         ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
 
-                                                    self::ownGroupPicker('live'),
-
                                                     Forms\Components\Toggle::make('group_filter.sort_live_groups_custom')
                                                         ->label(__('Sort groups in custom order'))
                                                         ->helperText(__('When enabled, the selected live groups are delivered to the client in the custom order set below, instead of inheriting the source playlist order.'))
@@ -1083,8 +1080,6 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         )
                                                         ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
                                                         ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
-
-                                                    self::ownGroupPicker('vod'),
                                                 ]),
 
                                             Fieldset::make(__('Series categories'))
@@ -1180,8 +1175,6 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                         )
                                                         ->getOptionLabelFromRecordUsing(fn ($record): string => $record->name)
                                                         ->getOptionLabelsUsing(fn (array $values): array => array_combine($values, $values)),
-
-                                                    self::ownGroupPicker('series'),
                                                 ]),
                                         ]),
                                 ]),
@@ -1523,48 +1516,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         $set('group_filter.selected_groups', []);
         $set('group_filter.selected_vod_groups', []);
         $set('group_filter.selected_categories', []);
-        foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $keys) {
-            $set('group_filter.'.$keys['ids'], []);
-        }
         $set('group_filter.sort_live_groups_custom', false);
         $set('group_filter.live_group_order', []);
-    }
-
-    /**
-     * The picker for a standard playlist's own groups / categories (custom and genre
-     * groups included), stored by id.
-     */
-    protected static function ownGroupPicker(string $type): ModalTableSelect
-    {
-        return PlaylistGroupModalSelect::make(
-            'group_filter.'.PlaylistAlias::CONTENT_FILTER_KEYS[$type]['ids'],
-            $type === 'series' ? 'categories' : $type,
-            fn (Get $get): array => self::bouquetContributedIds($get, $type),
-        )
-            ->visible(fn (Get $get): bool => PlaylistGroupModalSelect::isStandardPlaylistForm($get))
-            ->helperText(match ($type) {
-                'live' => __('Live channels in these groups are delivered - the groups your clients see, custom groups included.'),
-                'vod' => __('VOD in these groups is delivered - the groups your clients see, genre groups included.'),
-                default => __('Series in these categories are delivered - the categories your clients see.'),
-            });
-    }
-
-    /**
-     * Playlist group / category ids contributed by the alias's currently selected
-     * bouquets, used by the own-group picker to tick rows a bouquet already covers.
-     *
-     * @return array<int>
-     */
-    protected static function bouquetContributedIds(Get $get, string $type): array
-    {
-        $key = PlaylistAlias::CONTENT_FILTER_KEYS[$type]['ids'];
-
-        return self::assignedBouquets($get)
-            ->reject(fn (Bouquet $bouquet): bool => $bouquet->isBlock())
-            ->flatMap(fn (Bouquet $bouquet): array => array_map('intval', (array) ($bouquet->group_selections[$key] ?? [])))
-            ->unique()
-            ->values()
-            ->all();
     }
 
     /**
@@ -1576,9 +1529,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
 
         foreach (self::assignedBouquets($get) as $bouquet) {
             $prefix = $bouquet->isBlock() ? 'block_' : '';
-            foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $keys) {
-                $counts[$prefix.$type] += count(PlaylistAlias::selectionNames($bouquet->group_selections[$keys['names']] ?? []))
-                    + count((array) ($bouquet->group_selections[$keys['ids']] ?? []));
+            foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $key) {
+                $counts[$prefix.$type] += count(PlaylistAlias::selectionNames($bouquet->group_selections[$key] ?? []));
             }
         }
 

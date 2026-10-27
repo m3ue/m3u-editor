@@ -43,16 +43,15 @@ class PlaylistAlias extends Model
     private array $resolvedSourceCategoryIds = [];
 
     /**
-     * The group_filter / bouquet group_selections keys for each content type: the
-     * provider selection (names, or {playlist_id, name} pairs on merged aliases), the
-     * playlist's own groups or categories by id (standard playlists only).
+     * The group_filter / bouquet group_selections key holding the selection for each
+     * content type: provider names, or {playlist_id, name} pairs on merged aliases.
      *
-     * @var array<string, array{names: string, ids: string}>
+     * @var array<string, string>
      */
     public const CONTENT_FILTER_KEYS = [
-        'live' => ['names' => 'selected_groups', 'ids' => 'selected_group_ids'],
-        'vod' => ['names' => 'selected_vod_groups', 'ids' => 'selected_vod_group_ids'],
-        'series' => ['names' => 'selected_categories', 'ids' => 'selected_category_ids'],
+        'live' => 'selected_groups',
+        'vod' => 'selected_vod_groups',
+        'series' => 'selected_categories',
     ];
 
     protected $casts = [
@@ -156,46 +155,22 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * Whether the alias targets a standard playlist, the only target whose selections
-     * can also name the playlist's own groups and categories by id.
-     */
-    private function isStandardTarget(): bool
-    {
-        return $this->playlist_id && ! $this->custom_playlist_id && ! $this->merged_playlist_id;
-    }
-
-    /**
      * Merge the selections for one content type from group_filter / group_selections
-     * arrays into the shape its matcher expects: names (or {playlist_id, name} pairs on
-     * merged aliases) and, on standard playlists, playlist group / category ids.
+     * arrays into the shape its matcher expects: names, or {playlist_id, name} pairs
+     * on merged aliases.
      *
      * @param  array<int, array<string, mixed>>  $sources
-     * @return array{entries: array<int, mixed>, ids: array<int>}
+     * @return array<int, mixed>
      */
     private function selectionSet(string $type, array $sources): array
     {
-        $keys = self::CONTENT_FILTER_KEYS[$type];
+        $key = self::CONTENT_FILTER_KEYS[$type];
         $entries = [];
-        $ids = [];
         foreach ($sources as $source) {
-            $entries = array_merge($entries, (array) ($source[$keys['names']] ?? []));
-            $ids = array_merge($ids, (array) ($source[$keys['ids']] ?? []));
+            $entries = array_merge($entries, (array) ($source[$key] ?? []));
         }
 
-        return [
-            'entries' => $this->merged_playlist_id ? self::selectionPairs($entries) : self::selectionNames($entries),
-            'ids' => $this->isStandardTarget()
-                ? array_values(array_unique(array_map('intval', array_filter($ids, 'is_numeric'))))
-                : [],
-        ];
-    }
-
-    /**
-     * @param  array{entries: array<int, mixed>, ids: array<int>}  $set
-     */
-    private static function isEmptySelectionSet(array $set): bool
-    {
-        return $set['entries'] === [] && $set['ids'] === [];
+        return $this->merged_playlist_id ? self::selectionPairs($entries) : self::selectionNames($entries);
     }
 
     /**
@@ -207,15 +182,13 @@ class PlaylistAlias extends Model
      */
     private function hasStoredSelection(string $type, array $source): bool
     {
-        $keys = self::CONTENT_FILTER_KEYS[$type];
-
-        return ! empty($source[$keys['names']]) || ($this->isStandardTarget() && ! empty($source[$keys['ids']]));
+        return ! empty($source[self::CONTENT_FILTER_KEYS[$type]]);
     }
 
     /**
      * The allow-list for a type: the alias's own picks plus its allow bouquets'.
      *
-     * @return array{entries: array<int, mixed>, ids: array<int>}
+     * @return array<int, mixed>
      */
     private function allowSet(string $type): array
     {
@@ -225,7 +198,7 @@ class PlaylistAlias extends Model
     /**
      * What is hidden for a type whatever else allows it: the block bouquets' selections.
      *
-     * @return array{entries: array<int, mixed>, ids: array<int>}
+     * @return array<int, mixed>
      */
     private function blockSet(string $type): array
     {
@@ -247,7 +220,7 @@ class PlaylistAlias extends Model
      */
     public function isContentFiltered(string $type): bool
     {
-        return $this->hasAllowList($type) || ! self::isEmptySelectionSet($this->blockSet($type));
+        return $this->hasAllowList($type) || $this->blockSet($type) !== [];
     }
 
     /**
@@ -265,7 +238,7 @@ class PlaylistAlias extends Model
         }
 
         $block = $this->blockSet($type);
-        if (! self::isEmptySelectionSet($block)) {
+        if ($block !== []) {
             $query->whereNot(fn ($query) => $this->matchContent($query, $type, $block, isAllowList: false));
         }
     }
@@ -276,7 +249,7 @@ class PlaylistAlias extends Model
      * strictly true or false and a block list can negate it without dropping rows whose
      * group or category is unset.
      *
-     * @param  array{entries: array<int, mixed>, ids: array<int>}  $set
+     * @param  array<int, mixed>  $set
      */
     private function matchContent($query, string $type, array $set, bool $isAllowList): void
     {
@@ -284,16 +257,16 @@ class PlaylistAlias extends Model
 
         if ($this->merged_playlist_id) {
             $isSeries
-                ? $this->constrainSeriesToSourceCategories($query, $set['entries'])
-                : $this->constrainChannelsToSourceGroups($query, $set['entries'], includeUngroupedCustom: $isAllowList);
+                ? $this->constrainSeriesToSourceCategories($query, $set)
+                : $this->constrainChannelsToSourceGroups($query, $set, includeUngroupedCustom: $isAllowList);
 
             return;
         }
 
         if ($this->custom_playlist_id) {
             $isSeries
-                ? $this->constrainSeriesToCustomCategories($query, $set['entries'])
-                : $this->constrainChannelsToCustomGroups($query, $set['entries']);
+                ? $this->constrainSeriesToCustomCategories($query, $set)
+                : $this->constrainChannelsToCustomGroups($query, $set);
 
             return;
         }
@@ -371,7 +344,7 @@ class PlaylistAlias extends Model
      */
     private function allowedNamesFor(string $type): array
     {
-        return self::selectionNames($this->allowSet($type)['entries']);
+        return self::selectionNames($this->allowSet($type));
     }
 
     /**
@@ -379,7 +352,7 @@ class PlaylistAlias extends Model
      */
     private function allowedPairsFor(string $type): array
     {
-        return self::selectionPairs($this->allowSet($type)['entries']);
+        return self::selectionPairs($this->allowSet($type));
     }
 
     /**
@@ -939,11 +912,11 @@ class PlaylistAlias extends Model
     private function applyMergedGroupFilter($query, string $type): void
     {
         if ($this->hasAllowList($type)) {
-            $allow = $this->allowSet($type)['entries'];
+            $allow = $this->allowSet($type);
             $query->where(fn ($query) => $this->constrainGroupsToSourceGroups($query, $allow));
         }
 
-        $block = $this->blockSet($type)['entries'];
+        $block = $this->blockSet($type);
         if ($block !== []) {
             $query->whereNot(fn ($query) => $this->constrainGroupsToSourceGroups($query, $block));
         }
@@ -951,8 +924,7 @@ class PlaylistAlias extends Model
 
     /**
      * Restrict a channels query to a standard alias selection: channels whose provider
-     * group (group_internal) is a selected provider group, or that sit in a selected
-     * playlist group (group_id - custom and genre groups included).
+     * group (group_internal) is a selected provider group.
      *
      * group_internal is the provider-supplied name updated on every sync and is never
      * overridden by the user, unlike the user-facing group name. Custom channels
@@ -961,27 +933,19 @@ class PlaylistAlias extends Model
      * group pass an allow-list, because they cannot be meaningfully filtered by a group
      * name, but a block list never catches them.
      *
-     * @param  array{entries: array<int, mixed>, ids: array<int>}  $set
+     * @param  array<int, string>  $names
      */
-    private function constrainChannelsToPlaylistGroups($query, array $set, bool $includeUngroupedCustom): void
+    private function constrainChannelsToPlaylistGroups($query, array $names, bool $includeUngroupedCustom): void
     {
-        $names = $set['entries'];
-        $ids = $set['ids'];
-
-        if ($names === [] && $ids === []) {
+        if ($names === []) {
             $query->whereRaw('1 = 0');
 
             return;
         }
 
-        $query->where(function ($query) use ($names, $ids, $includeUngroupedCustom): void {
-            if ($names !== []) {
-                $query->orWhere(fn ($query) => $query->whereNotNull('channels.group_internal')->whereIn('channels.group_internal', $names))
-                    ->orWhere(fn ($query) => $query->where('channels.is_custom', true)->whereNotNull('channels.group')->whereIn('channels.group', $names));
-            }
-            if ($ids !== []) {
-                $query->orWhere(fn ($query) => $query->whereNotNull('channels.group_id')->whereIn('channels.group_id', $ids));
-            }
+        $query->where(function ($query) use ($names, $includeUngroupedCustom): void {
+            $query->orWhere(fn ($query) => $query->whereNotNull('channels.group_internal')->whereIn('channels.group_internal', $names))
+                ->orWhere(fn ($query) => $query->where('channels.is_custom', true)->whereNotNull('channels.group')->whereIn('channels.group', $names));
             if ($includeUngroupedCustom) {
                 $query->orWhere(fn ($query) => $query->where('channels.is_custom', true)->whereNull('channels.group'));
             }
@@ -991,38 +955,29 @@ class PlaylistAlias extends Model
     /**
      * Restrict a series query to a standard alias selection: series in a selected
      * provider category, matched on source_category_id (the provider-stable id that
-     * survives user renames of the Category record), or in a selected playlist category.
+     * survives user renames of the Category record).
      *
-     * @param  array{entries: array<int, mixed>, ids: array<int>}  $set
+     * @param  array<int, string>  $names
      */
-    private function constrainSeriesToPlaylistCategories($query, array $set, bool $isAllowList): void
+    private function constrainSeriesToPlaylistCategories($query, array $names, bool $isAllowList): void
     {
-        $sourceCategoryIds = [];
-        if ($set['entries'] !== []) {
-            $resolve = fn (): array => SourceCategory::where('playlist_id', $this->playlist_id)
-                ->whereIn('name', $set['entries'])
-                ->pluck('source_category_id')
-                ->all();
-            $sourceCategoryIds = $isAllowList
+        $resolve = fn (): array => SourceCategory::where('playlist_id', $this->playlist_id)
+            ->whereIn('name', $names)
+            ->pluck('source_category_id')
+            ->all();
+        $sourceCategoryIds = $names === []
+            ? []
+            : ($isAllowList
                 ? ($this->resolvedCategoryIds ??= $resolve())
-                : ($this->resolvedBlockedCategoryIds ??= $resolve());
-        }
-        $ids = $set['ids'];
+                : ($this->resolvedBlockedCategoryIds ??= $resolve()));
 
-        if ($sourceCategoryIds === [] && $ids === []) {
+        if ($sourceCategoryIds === []) {
             $query->whereRaw('1 = 0');
 
             return;
         }
 
-        $query->where(function ($query) use ($sourceCategoryIds, $ids): void {
-            if ($sourceCategoryIds !== []) {
-                $query->orWhere(fn ($query) => $query->whereNotNull('series.source_category_id')->whereIn('series.source_category_id', $sourceCategoryIds));
-            }
-            if ($ids !== []) {
-                $query->orWhere(fn ($query) => $query->whereNotNull('series.category_id')->whereIn('series.category_id', $ids));
-            }
-        });
+        $query->whereNotNull('series.source_category_id')->whereIn('series.source_category_id', $sourceCategoryIds);
     }
 
     /**
