@@ -5,7 +5,6 @@
  */
 
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
-use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Models\Bouquet;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
