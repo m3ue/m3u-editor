@@ -187,32 +187,56 @@ class PlaylistAlias extends Model
     }
 
     /**
-     * The allow-list for a type: the alias's own picks plus its allow bouquets'.
+     * The group_filter flag that turns the alias's own picks for a content type into
+     * a hidden list ("everything except") instead of its allow-list.
+     */
+    public static function hideSelectionKey(string $type): string
+    {
+        return 'hide_'.self::CONTENT_FILTER_KEYS[$type];
+    }
+
+    /**
+     * Whether the alias's own picks for a type are hidden rather than allowed.
+     */
+    public function hidesSelection(string $type): bool
+    {
+        return (bool) ($this->group_filter[self::hideSelectionKey($type)] ?? false);
+    }
+
+    /**
+     * The allow-list for a type: the alias's own picks (unless it hides them) plus its
+     * allow bouquets'.
      *
      * @return array<int, mixed>
      */
     private function allowSet(string $type): array
     {
-        return $this->selectionSet($type, [$this->group_filter ?? [], $this->bouquetEntries()['allow']]);
+        return $this->selectionSet($type, $this->hidesSelection($type)
+            ? [$this->bouquetEntries()['allow']]
+            : [$this->group_filter ?? [], $this->bouquetEntries()['allow']]);
     }
 
     /**
-     * What is hidden for a type whatever else allows it: the block bouquets' selections.
+     * What is hidden for a type whatever else allows it: the block bouquets' selections,
+     * plus the alias's own picks when it hides them.
      *
      * @return array<int, mixed>
      */
     private function blockSet(string $type): array
     {
-        return $this->selectionSet($type, [$this->bouquetEntries()['block']]);
+        return $this->selectionSet($type, $this->hidesSelection($type)
+            ? [$this->bouquetEntries()['block'], $this->group_filter ?? []]
+            : [$this->bouquetEntries()['block']]);
     }
 
     /**
-     * Whether a type is limited to an allow-list: the alias or an allow bouquet picks
-     * something for it. Nothing picked means everything is allowed.
+     * Whether a type is limited to an allow-list: an allow bouquet, or the alias itself
+     * when it doesn't hide its picks, picks something for it. Nothing picked means
+     * everything is allowed.
      */
     private function hasAllowList(string $type): bool
     {
-        return $this->hasStoredSelection($type, $this->group_filter ?? [])
+        return (! $this->hidesSelection($type) && $this->hasStoredSelection($type, $this->group_filter ?? []))
             || $this->hasStoredSelection($type, $this->bouquetEntries()['allow']);
     }
 
