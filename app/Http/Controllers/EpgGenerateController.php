@@ -866,6 +866,9 @@ class EpgGenerateController extends Controller
         $roleImages = '';
         $images = is_array($programme['images'] ?? null) ? $programme['images'] : [];
         if ($programme['icon']) {
+            if (EpgProgrammeArtwork::preservedPrimary($programme) !== null) {
+                $icons .= '    <?m3ue-preserved-primary?>'.PHP_EOL;
+            }
             $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($programme['icon'], $epg, $logoProxyEnabled)).'"/>'.PHP_EOL;
         }
         foreach ($images as $image) {
@@ -878,7 +881,7 @@ class EpgGenerateController extends Controller
             $dimensions = $width > 0 && $height > 0 ? ' width="'.$width.'" height="'.$height.'"' : '';
             $icons .= '    <icon src="'.$this->escapeXml($this->programmeImageUrl($rawUrl, $epg, $logoProxyEnabled)).'"'.$dimensions.'/>'.PHP_EOL;
         }
-        foreach ($this->programmeRoleImages($images) as $image) {
+        foreach ($this->programmeRoleImages($images, $programme['icon'] ?? null) as $image) {
             $attributes = ' type="'.$image['type'].'"';
             if ($image['size'] !== null) {
                 $attributes .= ' size="'.$image['size'].'"';
@@ -912,7 +915,7 @@ class EpgGenerateController extends Controller
      * @param  array<int, mixed>  $images
      * @return list<array{url: string, type: string, size: int|null, orient: string|null}>
      */
-    private function programmeRoleImages(array $images): array
+    private function programmeRoleImages(array $images, ?string $selectedUrl = null): array
     {
         $roleImages = [];
         $add = function (?array $image, string $type) use (&$roleImages): void {
@@ -928,7 +931,7 @@ class EpgGenerateController extends Controller
             ];
         };
 
-        $add(EpgProgrammeArtwork::poster($images), 'poster');
+        $add(EpgProgrammeArtwork::poster($images, $selectedUrl), 'poster');
         $add(EpgProgrammeArtwork::backdrop($images), 'backdrop');
         foreach ($images as $image) {
             if (is_array($image) && in_array(EpgProgrammeArtwork::type($image), ['still', 'person', 'character'], true)) {

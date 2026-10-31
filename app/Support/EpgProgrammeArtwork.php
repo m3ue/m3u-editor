@@ -15,24 +15,66 @@ class EpgProgrammeArtwork
     /** Image roles allowed by the XMLTV DTD's <image type> attribute. */
     public const ROLES = ['poster', 'backdrop', 'still', 'person', 'character'];
 
+    /** The preservation decision applies only to the unchanged canonical scalar. */
+    public static function preservedPrimary(array $programme): ?string
+    {
+        $url = $programme['preserved_primary_url'] ?? null;
+
+        return is_string($url) && $url !== '' && $url === ($programme['icon'] ?? null)
+            && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
+            && filter_var($url, FILTER_VALIDATE_URL) !== false ? $url : null;
+    }
+
+    /** @return array{0: int, 1: int} */
+    public static function preservedPrimaryDimensions(array $programme): array
+    {
+        $url = self::preservedPrimary($programme);
+        $dimensions = [0, 0];
+        foreach (self::validImages($programme['images'] ?? null) as $image) {
+            if ($url === null || $image['url'] !== $url) {
+                continue;
+            }
+            $width = (int) ($image['width'] ?? 0);
+            $height = (int) ($image['height'] ?? 0);
+            if ($width <= 0 || $height <= 0) {
+                continue;
+            }
+            if ($dimensions !== [0, 0] && $dimensions !== [$width, $height]) {
+                return [0, 0];
+            }
+            $dimensions = [$width, $height];
+        }
+
+        return $dimensions;
+    }
+
     /**
      * The portrait poster: an image typed `poster` (or untyped) whose
      * orientation is portrait, else a typed `poster` with no orientation
-     * at all (XMLTV makes <image orient> optional). Known-portrait images
-     * rank first, then the largest.
+     * at all (XMLTV makes <image orient> optional). Preserve the selected URL
+     * when it is an eligible HTTP(S) poster; otherwise rank known-portrait
+     * images first, then the largest.
      *
      * @return array<string, mixed>|null
      */
-    public static function poster(mixed $images): ?array
+    public static function poster(mixed $images, ?string $selectedUrl = null): ?array
     {
         $posters = array_values(array_filter(
             self::validImages($images),
-            fn (array $image): bool => match (self::orientation($image)) {
-                'P' => in_array(self::type($image), ['poster', ''], true),
-                null => self::type($image) === 'poster',
-                default => false,
-            },
+            fn (array $image): bool => in_array(strtolower((string) parse_url(trim((string) $image['url']), PHP_URL_SCHEME)), ['http', 'https'], true)
+                && match (self::orientation($image)) {
+                    'P' => in_array(self::type($image), ['poster', ''], true),
+                    null => self::type($image) === 'poster'
+                        && ((int) ($image['width'] ?? 0) <= 0 || (int) ($image['height'] ?? 0) <= 0),
+                    default => false,
+                },
         ));
+
+        foreach ($posters as $poster) {
+            if (trim((string) $poster['url']) === trim((string) $selectedUrl)) {
+                return $poster;
+            }
+        }
 
         usort($posters, fn (array $a, array $b): int => [self::orientation($b) === 'P', self::area($b)]
             <=> [self::orientation($a) === 'P', self::area($a)]);
@@ -73,9 +115,9 @@ class EpgProgrammeArtwork
     }
 
     /**
-     * The landscape backdrop: the programme (not cast) image closest to
-     * 16:9, else a declared `backdrop` without dimensions that isn't marked
-     * portrait.
+     * The landscape backdrop: prefer explicitly typed backdrops, then legacy
+     * programme (not still or cast) artwork, closest to 16:9. A declared
+     * backdrop without dimensions is eligible unless marked portrait.
      *
      * @return array<string, mixed>|null
      */
@@ -83,12 +125,39 @@ class EpgProgrammeArtwork
     {
         $programmeImages = array_values(array_filter(
             self::validImages($images),
-            fn (array $image): bool => ! in_array(self::type($image), ['person', 'character'], true),
+            fn (array $image): bool => ! in_array(self::type($image), ['still', 'screenshot', 'person', 'character'], true),
         ));
 
-        return self::wide($programmeImages) ?? collect($programmeImages)->first(
-            fn (array $image): bool => self::type($image) === 'backdrop' && self::orientation($image) !== 'P',
-        );
+        $backdrops = array_values(array_filter(
+            $programmeImages,
+            fn (array $image): bool => self::type($image) === 'backdrop' && match (self::orientation($image)) {
+                'L' => true,
+                null => (int) ($image['width'] ?? 0) <= 0 || (int) ($image['height'] ?? 0) <= 0,
+                default => false,
+            },
+        ));
+
+        return self::wide($backdrops) ?? $backdrops[0] ?? self::wide($programmeImages);
+    }
+
+    /**
+     * The declared programme still, closest to 16:9, else a dimensionless
+     * still that is not marked portrait.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function still(mixed $images): ?array
+    {
+        $stills = array_values(array_filter(
+            self::validImages($images),
+            fn (array $image): bool => self::type($image) === 'still' && match (self::orientation($image)) {
+                'L' => true,
+                null => (int) ($image['width'] ?? 0) <= 0 || (int) ($image['height'] ?? 0) <= 0,
+                default => false,
+            },
+        ));
+
+        return self::wide($stills) ?? $stills[0] ?? null;
     }
 
     /**
