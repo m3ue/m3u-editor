@@ -28,8 +28,17 @@ it('provisions every optional supervisor by default', function () {
         ->toContain('m3u-editor-plugin-queue', 'm3u-editor-sd-queue', 'aiostreams-queue', 'cache-queue');
 });
 
-it('drops an optional supervisor when its switch is off', function (string $envKey, string $supervisor) {
-    $config = horizonConfigWith([$envKey => 'false']);
+it('keeps optional supervisors enabled unless the switch is explicitly false', function (string $value) {
+    expect(array_keys(horizonConfigWith([
+        'HORIZON_PLUGIN_QUEUE_ENABLED' => $value,
+        'HORIZON_SD_QUEUE_ENABLED' => $value,
+        'HORIZON_AIOSTREAMS_QUEUE_ENABLED' => $value,
+        'HORIZON_CACHE_QUEUE_ENABLED' => $value,
+    ])['defaults']))->toContain('m3u-editor-plugin-queue', 'm3u-editor-sd-queue', 'aiostreams-queue', 'cache-queue');
+})->with(['true', 'TRUE', '1', '', '0', 'null', 'empty', 'no']);
+
+it('drops an optional supervisor when its switch is off', function (string $envKey, string $supervisor, string $value) {
+    $config = horizonConfigWith([$envKey => $value]);
     $plan = new ProvisioningPlan('test-master', $config['environments'], $config['defaults']);
 
     expect(array_keys($config['defaults']))
@@ -41,7 +50,7 @@ it('drops an optional supervisor when its switch is off', function (string $envK
     'schedules direct' => ['HORIZON_SD_QUEUE_ENABLED', 'm3u-editor-sd-queue'],
     'aiostreams' => ['HORIZON_AIOSTREAMS_QUEUE_ENABLED', 'aiostreams-queue'],
     'cache' => ['HORIZON_CACHE_QUEUE_ENABLED', 'cache-queue'],
-]);
+])->with(['false', 'FALSE', 'False', '(false)']);
 
 it('documents every optional supervisor switch in .env.example', function () {
     expect(file_get_contents(base_path('.env.example')))->toContain(

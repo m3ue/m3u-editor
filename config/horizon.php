@@ -311,7 +311,8 @@ if (! (env('DVR_ENABLED', true) && env('M3U_PROXY_INTEGRATION_ENABLED', true))) 
 
 // Each supervisor costs a supervisor plus at least one idle worker (~90 MB each), so
 // installs that never use these features can drop them. Jobs dispatched to a disabled
-// queue wait in Redis until the supervisor is enabled again.
+// queue wait in Redis until the supervisor is enabled again. Only an explicit false
+// (any case) disables one; unset, blank or other values keep it enabled.
 $optionalSupervisors = [
     'HORIZON_PLUGIN_QUEUE_ENABLED' => 'm3u-editor-plugin-queue',
     'HORIZON_SD_QUEUE_ENABLED' => 'm3u-editor-sd-queue',
@@ -320,7 +321,7 @@ $optionalSupervisors = [
 ];
 
 foreach ($optionalSupervisors as $envKey => $supervisor) {
-    if (! env($envKey, true)) {
+    if (env($envKey, true) === false) {
         unset($config['defaults'][$supervisor]);
     }
 }
