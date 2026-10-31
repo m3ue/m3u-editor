@@ -206,10 +206,17 @@ $config = [
             'nice' => 0,
         ],
 
+        // Plugin, SchedulesDirect and AIOStreams work is occasional (or unused), so
+        // these pools scale to zero workers while their queue is empty and Horizon
+        // starts one within a balance cycle when a job arrives. Only 'auto' balancing
+        // can go below one worker, hence 'auto' even where maxProcesses is 1. Set the
+        // *_MIN_PROCESSES env vars to 1 to keep a warm worker instead.
         'm3u-editor-plugin-queue' => [
             'connection' => 'plugin',
             'queue' => ['plugin-invocations'],
-            'balance' => 'simple',
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => $horizonIntEnv('HORIZON_PLUGIN_MIN_PROCESSES', 0),
             'maxProcesses' => $horizonIntEnv('HORIZON_PLUGIN_MAX_PROCESSES', 1),
             'maxTime' => $horizonIntEnv('HORIZON_PLUGIN_MAX_TIME', 3600),
             'maxJobs' => $horizonIntEnv('HORIZON_PLUGIN_MAX_JOBS', 50),
@@ -227,7 +234,9 @@ $config = [
         'm3u-editor-sd-queue' => [
             'connection' => 'redis',
             'queue' => ['schedules-direct'],
-            'balance' => 'simple',
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'minProcesses' => $horizonIntEnv('HORIZON_SD_MIN_PROCESSES', 0),
             'maxProcesses' => $horizonIntEnv('HORIZON_SD_MAX_PROCESSES', 1),
             'maxTime' => $horizonIntEnv('HORIZON_SD_MAX_TIME', 3600), // recycle worker hourly
             'maxJobs' => $horizonIntEnv('HORIZON_SD_MAX_JOBS', 250),
@@ -258,14 +267,14 @@ $config = [
         // low-concurrency and isolated from the general queue on purpose: bursts of
         // resolution jobs (e.g. bulk-add, or many exhausted failover chains around the
         // same time) hit AIOStreams and, transitively, debrid backends that penalize
-        // aggressive/concurrent request patterns. Auto balancing idles at one worker
-        // and adds the second only while jobs are waiting ('simple' kept both running).
+        // aggressive/concurrent request patterns. Auto balancing idles at zero workers
+        // and adds workers only while jobs are waiting ('simple' kept both running).
         'aiostreams-queue' => [
             'connection' => 'redis',
             'queue' => ['aiostreams-resolve'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
-            'minProcesses' => 1,
+            'minProcesses' => $horizonIntEnv('HORIZON_AIOSTREAMS_MIN_PROCESSES', 0),
             'maxProcesses' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_PROCESSES', 2),
             'maxTime' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_TIME', 1800), // recycle every 30 min, jobs are short
             'maxJobs' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_JOBS', 300),
