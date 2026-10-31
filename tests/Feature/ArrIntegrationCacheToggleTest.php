@@ -16,6 +16,7 @@ function arrWidgetCacheSetting(bool $enabled): void
 {
     $settings = new GeneralSettings;
     $settings->enable_cache = $enabled;
+    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 }
 

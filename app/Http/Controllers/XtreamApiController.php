@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Casts\UtcDateTime;
+use App\Enums\CacheDispatchResult;
 use App\Enums\ChannelLogoType;
 use App\Enums\DvrMatchMode;
 use App\Enums\DvrRecordingStatus;
@@ -16,6 +17,8 @@ use App\Filament\Support\DvrPaddingFields;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\RefreshMediaServerLibraryJob;
 use App\Models\ArrIntegration;
+use App\Models\CachedContentActivityLease;
+use App\Models\CachedContentFile;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
@@ -28,6 +31,7 @@ use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Models\Episode;
 use App\Models\Group;
+use App\Models\ManagedCacheEvent;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Network;
@@ -42,6 +46,8 @@ use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
 use App\Providers\VersionServiceProvider;
 use App\Services\AIOStreamsAuthorizationService;
+use App\Services\CachedContentActivityService;
+use App\Services\CachedContentDispatchService;
 use App\Services\ChannelNumberSequence;
 use App\Services\ContentRequestService;
 use App\Services\DvrAccessScope;
@@ -50,6 +56,9 @@ use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\ManagedCacheCapacityService;
+use App\Services\ManagedCacheCapacitySnapshotSource;
+use App\Services\ManagedCacheControlService;
 use App\Services\TmdbService;
 use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
@@ -64,6 +73,7 @@ use Carbon\Carbon;
 use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Collection;
@@ -549,6 +559,19 @@ class XtreamApiController extends Controller
                             'revision_metadata',
                         ],
                     ];
+                    if (app(CachedContentDispatchService::class)->isEnabled()) {
+                        $m3uEditorPayload['library_publishing']['cache_control'] = [
+                            'api_version' => 1,
+                            'actions' => [
+                                'prefetch' => 'm3u_editor_cache_prefetch',
+                                'playback' => 'm3u_editor_cache_playback',
+                                'release' => 'm3u_editor_cache_release',
+                            ],
+                            'max_targets' => 100,
+                            'heartbeat_seconds' => 30,
+                            'lease_seconds' => 120,
+                        ];
+                    }
                 }
 
                 $payload['m3u_editor'] = $m3uEditorPayload;
@@ -2345,6 +2368,12 @@ class XtreamApiController extends Controller
             return $this->managedLibraryCatalog($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'm3u_editor_sync_result') {
             return $this->managedLibrarySyncResult($request, $playlist, $authMethod, $playlistAuth);
+        } elseif (in_array($action, [
+            'm3u_editor_cache_prefetch',
+            'm3u_editor_cache_playback',
+            'm3u_editor_cache_release',
+        ], true)) {
+            return $this->managedCacheControl($request, $playlist, $authMethod, $playlistAuth);
         } elseif (in_array($action, self::DVR_ACTIONS, true)) {
             $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
 
@@ -3852,6 +3881,360 @@ class XtreamApiController extends Controller
             'mapping_uuid' => $result['mapping']->uuid,
             'revision' => $result['mapping']->last_applied_revision,
         ]);
+    }
+
+    private function managedCacheControl(
+        Request $request,
+        mixed $playlist,
+        string $authMethod,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        if (! $request->isMethod('POST')) {
+            return $this->requestError('method_not_allowed', 'Cache control actions require POST.', 405);
+        }
+
+        $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
+        if (! $effectivePlaylist || ! $this->libraryPublishingAuthorized($effectivePlaylist, $authMethod, $playlistAuth)) {
+            return $this->libraryPublishingUnavailableError();
+        }
+
+        if (! app(CachedContentDispatchService::class)->isEnabled()) {
+            return $this->requestError('cache_disabled', 'Caching is disabled.', 403);
+        }
+
+        $mappingValidator = Validator::make($request->all(), [
+            'api_version' => ['required', 'integer', 'in:1'],
+            'integration_id' => ['required', 'integer', 'min:1'],
+            'mapping_uuid' => ['required', 'uuid'],
+            'revision' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/'],
+        ]);
+        if ($mappingValidator->fails()) {
+            return $this->apiVersionValidationError($request);
+        }
+
+        $mappingIdentity = $mappingValidator->validated();
+        $action = (string) $request->input('action');
+        $control = app(ManagedCacheControlService::class);
+        $mapping = $control->resolveActiveMapping(
+            $effectivePlaylist->user,
+            $mappingIdentity['integration_id'],
+            $mappingIdentity['mapping_uuid'],
+            $mappingIdentity['revision'],
+        );
+
+        // A stop is allowed to close the exact lease issued by an older
+        // generation. It cannot target a newly resolved source or any other
+        // session after the generation moved on.
+        if ($mapping === null && $action === 'm3u_editor_cache_playback' && $request->input('state') === 'stop') {
+            $candidate = EmbyLibraryMapping::query()
+                ->where('user_id', $effectivePlaylist->user_id)
+                ->where('media_server_integration_id', $mappingIdentity['integration_id'])
+                ->where('uuid', $mappingIdentity['mapping_uuid'])
+                ->where('enabled', true)
+                ->where('is_managed', true)
+                ->first();
+            $hasExactLease = $candidate !== null && CachedContentActivityLease::query()
+                ->where('integration_id', $candidate->media_server_integration_id)
+                ->where('kind', 'playback')
+                ->where('lease_id', (string) $request->input('session_id'))
+                ->where('revision', $mappingIdentity['revision'])
+                ->exists();
+            $mapping = $hasExactLease ? $candidate : null;
+        }
+        if (! $mapping) {
+            $mappingExists = EmbyLibraryMapping::query()
+                ->where('user_id', $effectivePlaylist->user_id)
+                ->where('media_server_integration_id', $mappingIdentity['integration_id'])
+                ->where('uuid', $mappingIdentity['mapping_uuid'])
+                ->where('enabled', true)
+                ->where('is_managed', true)
+                ->exists();
+
+            return $mappingExists
+                ? $this->requestError('stale_revision', 'The managed mapping revision is not current.', 409)
+                : $this->requestError('mapping_not_found', 'The managed mapping was not found.', 404);
+        }
+
+        if ($action === 'm3u_editor_cache_prefetch'
+            && ! hash_equals((string) $mapping->last_planned_revision, $mappingIdentity['revision'])) {
+            return $this->requestError('stale_revision', 'The managed mapping revision is not current.', 409);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'api_version' => ['required', 'integer', 'in:1'],
+            'integration_id' => ['required', 'integer', 'min:1'],
+            'mapping_uuid' => ['required', 'uuid'],
+            'revision' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'request_id' => ['required', 'uuid'],
+            'consumer_id' => ['required', 'string', 'max:255'],
+            'targets' => ['required', 'array', 'list', 'min:1', 'max:100'],
+            'targets.*.canonical_id' => ['required', 'string', 'max:255'],
+            'targets.*.variant_key' => ['required', 'string', 'max:255'],
+        ]);
+        if ($validator->fails()) {
+            return $this->apiVersionValidationError($request);
+        }
+
+        $validated = $validator->validated();
+        $action = (string) $request->input('action');
+        if ($action === 'm3u_editor_cache_playback') {
+            $playbackValidator = Validator::make($request->all(), [
+                'session_id' => ['required', 'uuid'],
+                'sequence' => ['required', 'integer', 'min:1'],
+                'state' => ['required', 'string', 'in:start,heartbeat,stop'],
+                'targets' => ['required', 'array', 'list', 'size:1'],
+            ]);
+            if ($playbackValidator->fails()) {
+                return $this->apiVersionValidationError($request);
+            }
+
+            $validated = [...$validated, ...$playbackValidator->validated()];
+        }
+        if ($action === 'm3u_editor_cache_release') {
+            $releaseValidator = Validator::make($request->all(), [
+                'watched' => ['required', 'boolean'],
+                'cohort_complete' => ['required', 'boolean'],
+                'delete_after_hours' => ['required', 'integer', 'min:0', 'max:168'],
+            ]);
+            if ($releaseValidator->fails()) {
+                return $this->apiVersionValidationError($request);
+            }
+
+            $validated = [...$validated, ...$releaseValidator->validated()];
+        }
+
+        // Heartbeats only renew their lease. They are intentionally not audit
+        // events: a player may emit them frequently and they do not alter the
+        // managed cache cohort or dispatch work.
+        if ($action === 'm3u_editor_cache_playback' && $validated['state'] === 'heartbeat') {
+            $target = $validated['targets'][0];
+            app(CachedContentActivityService::class)->acquirePlayback(
+                $effectivePlaylist->user,
+                $mapping->integration,
+                $validated['session_id'],
+                $validated['sequence'],
+                [
+                    'mapping_uuid' => $mapping->uuid,
+                    'revision' => $validated['revision'],
+                    'canonical_id' => $target['canonical_id'],
+                    'variant_key' => $target['variant_key'],
+                ],
+            );
+
+            return $this->requestSuccess(['request_id' => $validated['request_id'], 'results' => []]);
+        }
+        $control = app(ManagedCacheControlService::class);
+        $catalogTargets = $control->resolveCatalogTargets($mapping, $validated['targets']);
+        $resolvedTargets = [];
+        foreach ($validated['targets'] as $index => $target) {
+            $catalogTarget = $catalogTargets[$index];
+            if ($catalogTarget === null) {
+                return $this->requestError('target_not_found', 'The managed catalog target was not found.', 404);
+            }
+
+            $cacheable = $control->resolveCacheableTarget($mapping, $catalogTarget);
+            if ($cacheable === null) {
+                return $this->requestError('target_not_found', 'The managed catalog target was not found.', 404);
+            }
+
+            $resolvedTargets[] = [
+                'target' => $target,
+                'cacheable' => $cacheable,
+            ];
+        }
+
+        $payloadHash = hash('sha256', json_encode([
+            'mapping_uuid' => $validated['mapping_uuid'],
+            'revision' => $validated['revision'],
+            'consumer_id' => $validated['consumer_id'],
+            'targets' => $validated['targets'],
+            'session_id' => $validated['session_id'] ?? null,
+            'sequence' => $validated['sequence'] ?? null,
+            'state' => $validated['state'] ?? null,
+            'watched' => $validated['watched'] ?? null,
+            'cohort_complete' => $validated['cohort_complete'] ?? null,
+            'delete_after_hours' => $validated['delete_after_hours'] ?? null,
+        ], JSON_THROW_ON_ERROR));
+
+        $findEvent = fn (): ?ManagedCacheEvent => ManagedCacheEvent::query()
+            ->where('user_id', $effectivePlaylist->user_id)
+            ->where('integration_id', $validated['integration_id'])
+            ->where('action', $action)
+            ->where('request_id', $validated['request_id'])
+            ->first();
+
+        $existing = $findEvent();
+        if ($existing) {
+            if (! hash_equals($existing->payload_hash, $payloadHash)) {
+                return $this->requestError('idempotency_conflict', 'The request ID was already used with a different payload.', 409);
+            }
+
+            if ($action === 'm3u_editor_cache_playback' && $validated['state'] === 'heartbeat') {
+                $target = $resolvedTargets[0]['target'];
+                app(CachedContentActivityService::class)->acquirePlayback(
+                    $effectivePlaylist->user,
+                    $mapping->integration,
+                    $validated['session_id'],
+                    $validated['sequence'],
+                    [
+                        'mapping_uuid' => $mapping->uuid,
+                        'revision' => $validated['revision'],
+                        'canonical_id' => $target['canonical_id'],
+                        'variant_key' => $target['variant_key'],
+                    ],
+                );
+            }
+
+            return $this->requestSuccess($existing->redacted_response);
+        }
+
+        try {
+            $event = DB::transaction(function () use ($findEvent, $effectivePlaylist, $validated, $action, $payloadHash, $mapping, $control, $resolvedTargets): ManagedCacheEvent {
+                $existing = $findEvent();
+                if ($existing) {
+                    return $existing;
+                }
+
+                if ($action === 'm3u_editor_cache_playback') {
+                    $target = $resolvedTargets[0]['target'];
+                    $activityTarget = [
+                        'mapping_uuid' => $mapping->uuid,
+                        'revision' => $validated['revision'],
+                        'canonical_id' => $target['canonical_id'],
+                        'variant_key' => $target['variant_key'],
+                    ];
+                    $activity = app(CachedContentActivityService::class);
+                    if ($validated['state'] === 'stop') {
+                        $activity->stopPlayback($mapping->integration, $validated['session_id'], $validated['sequence']);
+                    } else {
+                        $activity->acquirePlayback(
+                            $effectivePlaylist->user,
+                            $mapping->integration,
+                            $validated['session_id'],
+                            $validated['sequence'],
+                            $activityTarget,
+                        );
+                    }
+                }
+
+                $response = [
+                    'request_id' => $validated['request_id'],
+                    'results' => array_map(function (array $resolved) use ($action, $control, $effectivePlaylist, $mapping, $validated): array {
+                        $target = $resolved['target'];
+                        if ($action === 'm3u_editor_cache_release') {
+                            $control->releaseWatched(
+                                $effectivePlaylist->user,
+                                $mapping->integration,
+                                $mapping->uuid,
+                                $target['canonical_id'],
+                                $target['variant_key'],
+                                $validated['consumer_id'],
+                                $validated['watched'],
+                                $validated['delete_after_hours'],
+                                $validated['cohort_complete'],
+                            );
+                        }
+                        $file = CachedContentFile::findServableFor($resolved['cacheable']);
+                        if ($file?->isPlayable()) {
+                            $control->recordInterest(
+                                $file,
+                                $mapping->integration,
+                                $mapping->uuid,
+                                $target['canonical_id'],
+                                $target['variant_key'],
+                                $validated['consumer_id'],
+                            );
+
+                            return [
+                                'canonical_id' => $target['canonical_id'],
+                                'variant_key' => $target['variant_key'],
+                                'status' => 'already_cached',
+                            ];
+                        }
+
+                        if ($action !== 'm3u_editor_cache_prefetch') {
+                            return [
+                                'canonical_id' => $target['canonical_id'],
+                                'variant_key' => $target['variant_key'],
+                                'status' => 'deferred',
+                            ];
+                        }
+
+                        $snapshot = app(ManagedCacheCapacitySnapshotSource::class)->snapshotFor($resolved['cacheable']);
+                        if ($snapshot === null) {
+                            return [
+                                'canonical_id' => $target['canonical_id'],
+                                'variant_key' => $target['variant_key'],
+                                'status' => 'deferred',
+                            ];
+                        }
+
+                        $capacity = app(ManagedCacheCapacityService::class);
+                        if ($capacity->availability($snapshot->limit, $snapshot->live, $snapshot->background) !== CacheDispatchResult::Queued) {
+                            return [
+                                'canonical_id' => $target['canonical_id'],
+                                'variant_key' => $target['variant_key'],
+                                'status' => 'deferred',
+                            ];
+                        }
+
+                        // A batch may queue several next episodes, but only one
+                        // may own the account's download slot. Waiting jobs acquire
+                        // their own reservation from fresh counters when they run.
+                        $reservation = $capacity->reserve($snapshot);
+                        $dispatch = app(CachedContentDispatchService::class)->dispatchManaged($resolved['cacheable']);
+                        $file = $resolved['cacheable']->cachedContentFile()->first();
+                        if ($file && in_array($dispatch, [CacheDispatchResult::Queued, CacheDispatchResult::AlreadyQueued], true)) {
+                            if ($reservation !== null) {
+                                $capacity->attachToFile($file->id, $reservation);
+                            }
+                            $control->recordInterest(
+                                $file,
+                                $mapping->integration,
+                                $mapping->uuid,
+                                $target['canonical_id'],
+                                $target['variant_key'],
+                                $validated['consumer_id'],
+                            );
+
+                            return [
+                                'canonical_id' => $target['canonical_id'],
+                                'variant_key' => $target['variant_key'],
+                                'status' => $dispatch->value,
+                            ];
+                        }
+
+                        $capacity->release($reservation);
+
+                        return [
+                            'canonical_id' => $target['canonical_id'],
+                            'variant_key' => $target['variant_key'],
+                            'status' => $dispatch->value === CacheDispatchResult::AlreadyCached->value ? 'already_cached' : 'deferred',
+                        ];
+                    }, $resolvedTargets),
+                ];
+
+                return ManagedCacheEvent::create([
+                    'user_id' => $effectivePlaylist->user_id,
+                    'integration_id' => $validated['integration_id'],
+                    'action' => $action,
+                    'request_id' => $validated['request_id'],
+                    'payload_hash' => $payloadHash,
+                    'redacted_response' => $response,
+                ]);
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            $event = $findEvent();
+            if (! $event) {
+                throw $e;
+            }
+        }
+
+        if (! hash_equals($event->payload_hash, $payloadHash)) {
+            return $this->requestError('idempotency_conflict', 'The request ID was already used with a different payload.', 409);
+        }
+
+        return $this->requestSuccess($event->redacted_response);
     }
 
     /**

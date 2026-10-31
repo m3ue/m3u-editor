@@ -3,14 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use App\Http\Controllers\Concerns\StreamLocalFile;
+use App\Models\CachedContentActivityLease;
 use App\Models\CachedContentFile;
 use App\Models\Playlist;
+use App\Services\CachedContentActivityService;
 use App\Services\PlaylistCredentialResolver;
 use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -26,7 +30,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class CachedContentStreamController extends Controller
 {
-    public function __construct(protected PlaylistCredentialResolver $resolver) {}
+    private ?CachedContentActivityLease $readerLease = null;
+
+    public function __construct(
+        protected PlaylistCredentialResolver $resolver,
+        protected CachedContentActivityService $activity,
+    ) {}
 
     public function stream(Request $request, string $username, string $password, string $uuid): StreamedResponse
     {
@@ -52,6 +61,18 @@ class CachedContentStreamController extends Controller
             abort(404, 'Cached file not found');
         }
 
+        // Managed-publishing files need a reader lease BEFORE the file is
+        // stat'd or opened so deletion races see the active reader under the
+        // same lock. The lease is acquired here and released in onFinish.
+        if ($file->managed_by === CachedContentManagedBy::ManagedPublishing) {
+            $this->readerLease = $this->activity->acquireReaderForFile(
+                $playlist->user,
+                null,
+                (string) Str::uuid(),
+                $file,
+            );
+        }
+
         $disk = Storage::disk($file->resolveStorageDisk());
 
         // size() throws on a missing file (some drivers return false); either
@@ -59,9 +80,11 @@ class CachedContentStreamController extends Controller
         try {
             $fileSize = (int) $disk->size($file->file_path);
         } catch (\Throwable) {
+            $this->releaseReaderLease();
             abort(404, 'Cached file not found on disk');
         }
         if ($fileSize < 1) {
+            $this->releaseReaderLease();
             abort(404, 'Cached file not found on disk');
         }
 
@@ -71,6 +94,20 @@ class CachedContentStreamController extends Controller
             mimeType: $file->resolveMimeType(),
             filename: basename($file->file_path),
             range: $request->header('Range'),
+            onProgress: fn () => $this->readerLease && $this->activity->renewReader($this->readerLease),
+            onFinish: fn () => $this->releaseReaderLease(),
         );
+    }
+
+    private function releaseReaderLease(): void
+    {
+        if ($this->readerLease !== null) {
+            try {
+                $this->activity->releaseReader($this->readerLease);
+            } catch (\Throwable) {
+                // Best-effort release; do not break the HTTP response.
+            }
+            $this->readerLease = null;
+        }
     }
 }

@@ -8,6 +8,7 @@ use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\DynamicGroup;
 use App\Models\Episode;
+use App\Models\ManagedCacheInterest;
 use App\Models\Playlist;
 use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,6 +16,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Automatic cleanup of cached content files.
@@ -105,6 +107,10 @@ class CachedContentRetentionService
         foreach ($ids->chunk(500) as $chunk) {
             CachedContentFile::query()
                 ->whereIn('id', $chunk->all())
+                ->where(function (Builder $query): void {
+                    $query->whereNull('managed_by')
+                        ->orWhere('managed_by', '!=', CachedContentManagedBy::ManagedPublishing->value);
+                })
                 ->whereNotIn('status', [
                     CachedContentFileStatus::Pending->value,
                     CachedContentFileStatus::Downloading->value,
@@ -122,6 +128,157 @@ class CachedContentRetentionService
         }
 
         return $deleted;
+    }
+
+    /**
+     * Release watched managed-publishing cache files whose grace period has
+     * expired, all interests are released, and no active reader/download/
+     * playback lease protects them.
+     */
+    public function releaseManagedCacheFiles(): int
+    {
+        $ids = CachedContentFile::query()
+            ->where('managed_by', CachedContentManagedBy::ManagedPublishing->value)
+            ->where('source', 'provider')
+            ->whereIn('status', [
+                CachedContentFileStatus::Completed->value,
+                CachedContentFileStatus::Failed->value,
+            ])
+            ->whereHas('managedCacheInterests', fn (Builder $q) => $q
+                ->whereNotNull('watched_at')
+                ->whereNotNull('release_after')
+                ->where('release_after', '<=', now()))
+            ->pluck('id');
+
+        $deleted = 0;
+
+        foreach ($ids as $id) {
+            $file = CachedContentFile::query()->find($id);
+
+            if ($file === null) {
+                continue;
+            }
+
+            if ($this->deleteManagedFileIfReleasable($file)) {
+                $deleted++;
+            }
+        }
+
+        if ($deleted > 0) {
+            Log::info("ReleaseWatchedManagedCache: deleted {$deleted} managed files.");
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * Atomically check and delete a managed-publishing cache file. Returns
+     * true only when the row and storage were both removed. Storage failure
+     * leaves the row and interests intact for retry.
+     */
+    public function deleteManagedFileIfReleasable(CachedContentFile $file): bool
+    {
+        return app(CachedContentActivityService::class)->withFileActivityLock($file, function () use ($file): bool {
+            $file = $file->fresh();
+            if ($file === null || $file->managed_by !== CachedContentManagedBy::ManagedPublishing || $file->source !== 'provider') {
+                return false;
+            }
+
+            if ($file->playlist?->share_cache_across_playlists) {
+                return false;
+            }
+
+            if (in_array($file->status, [
+                CachedContentFileStatus::Pending,
+                CachedContentFileStatus::Downloading,
+            ], true)) {
+                return false;
+            }
+
+            $hasUnreleasedInterest = ManagedCacheInterest::query()
+                ->where('cached_content_file_id', $file->id)
+                ->where(function (Builder $q): void {
+                    $q->whereNull('watched_at')
+                        ->orWhereNull('release_after')
+                        ->orWhere('release_after', '>', now());
+                })
+                ->exists();
+
+            if ($hasUnreleasedInterest || ! app(CachedContentActivityService::class)->isSafeToDelete($file)) {
+                return false;
+            }
+
+            return $this->deleteManagedFileWithDatabaseClaim($file);
+        });
+    }
+
+    /**
+     * Hold the file, playlist and interest rows through physical deletion.
+     * Ordinary keep/sharing/undo updates must serialize with this claim, even
+     * when their caller does not use the cache activity lock.
+     */
+    private function deleteManagedFileWithDatabaseClaim(CachedContentFile $file): bool
+    {
+        return DB::transaction(function () use ($file): bool {
+            if (DB::connection()->getDriverName() === 'sqlite') {
+                // SQLite has no FOR UPDATE. Reserve its writer before taking
+                // the protection snapshot; this does not change metadata.
+                DB::table('cached_content_files')->where('id', $file->id)
+                    ->update(['updated_at' => DB::raw('updated_at')]);
+            }
+
+            $file = CachedContentFile::query()->lockForUpdate()->find($file->id);
+            if ($file === null || $file->managed_by !== CachedContentManagedBy::ManagedPublishing || $file->source !== 'provider') {
+                return false;
+            }
+            $playlist = Playlist::query()->lockForUpdate()->find($file->playlist_id);
+            if ($playlist?->share_cache_across_playlists || in_array($file->status, [
+                CachedContentFileStatus::Pending,
+                CachedContentFileStatus::Downloading,
+            ], true)) {
+                return false;
+            }
+
+            $interests = ManagedCacheInterest::query()
+                ->where('cached_content_file_id', $file->id)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+            if ($interests->contains(fn (ManagedCacheInterest $interest): bool => $interest->watched_at === null
+                || $interest->release_after === null || $interest->release_after->isFuture())
+                || ! app(CachedContentActivityService::class)->isSafeToDelete($file)) {
+                return false;
+            }
+
+            return $this->deleteStoredFileAndRow($file);
+        });
+    }
+
+    /**
+     * Delete storage and row. Returns false when storage deletion fails so
+     * the caller can retry later.
+     */
+    private function deleteStoredFileAndRow(CachedContentFile $file): bool
+    {
+        if (! empty($file->file_path)) {
+            try {
+                $deleted = Storage::disk($file->resolveStorageDisk())->delete($file->file_path);
+                if ($deleted === false) {
+                    return false;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Managed cache file storage deletion failed', [
+                    'file_id' => $file->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return false;
+            }
+        }
+
+        $file->delete();
+
+        return true;
     }
 
     /**

@@ -166,6 +166,7 @@ it('the Items column counts series', function () {
 it('the Caching Enabled column shows the rule\'s cache toggle', function () {
     // Every row reads off while caching is off in Settings.
     app(GeneralSettings::class)->enable_cache = true;
+    app(GeneralSettings::class)->save();
     $this->playlist->updateQuietly(['dynamic_groups_config' => [
         ['enabled' => true, 'type' => 'series', 'source' => 'trending', 'name' => 'Cached', 'tmdb_params' => [], 'cache_enabled' => true],
         ['enabled' => true, 'type' => 'series', 'source' => 'popular', 'name' => 'Not Cached', 'tmdb_params' => [], 'cache_enabled' => false],

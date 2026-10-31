@@ -497,6 +497,7 @@ it('dispatches QueueDynamicGroupCacheDownloads when the rule has caching enabled
     // The hook checks CachedContentDispatchService::isEnabled() before
     // dispatching, so the global toggle must be on.
     app(GeneralSettings::class)->enable_cache = true;
+    app(GeneralSettings::class)->save();
 
     Http::fake([
         'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([
@@ -535,6 +536,7 @@ it('dispatches QueueDynamicGroupCacheDownloads when the rule has caching enabled
 
 it('does not dispatch QueueDynamicGroupCacheDownloads when the rule has caching off', function () {
     app(GeneralSettings::class)->enable_cache = true;
+    app(GeneralSettings::class)->save();
 
     Http::fake([
         'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([

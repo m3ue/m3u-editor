@@ -358,6 +358,7 @@ it('loads only the playlist columns the listing needs, so serializing a row neve
 
 it('locks the caching toggle off while caching is off in Settings and keeps the rule\'s stored cache options on save', function () {
     app(GeneralSettings::class)->enable_cache = false;
+    app(GeneralSettings::class)->save();
     $cacheOptions = ['cache_enabled' => true, 'cache_never_expire' => true, 'cache_keep_days' => 3, 'cache_max_items' => 10];
     $this->playlist->updateQuietly(['dynamic_groups_config' => [dynamicGroupRuleActionsRule($cacheOptions)]]);
     $group = dynamicGroupRuleActionsGroup($this);
@@ -383,6 +384,7 @@ it('locks the caching toggle off while caching is off in Settings and keeps the 
 
 it('does not add cache options to a rule that has none while caching is off in Settings', function () {
     app(GeneralSettings::class)->enable_cache = false;
+    app(GeneralSettings::class)->save();
     $this->playlist->updateQuietly(['dynamic_groups_config' => [dynamicGroupRuleActionsRule()]]);
     $group = dynamicGroupRuleActionsGroup($this);
 
@@ -397,6 +399,7 @@ it('does not add cache options to a rule that has none while caching is off in S
 
 it('offers the caching toggle while caching is on in Settings', function () {
     app(GeneralSettings::class)->enable_cache = true;
+    app(GeneralSettings::class)->save();
     $this->playlist->updateQuietly(['dynamic_groups_config' => [dynamicGroupRuleActionsRule(['cache_enabled' => true])]]);
     $group = dynamicGroupRuleActionsGroup($this);
 
@@ -409,6 +412,7 @@ it('offers the caching toggle while caching is on in Settings', function () {
 
 it('shows Caching Enabled off for every row while caching is off in Settings', function (bool $cachingEnabled) {
     app(GeneralSettings::class)->enable_cache = $cachingEnabled;
+    app(GeneralSettings::class)->save();
     $this->playlist->updateQuietly(['dynamic_groups_config' => [
         dynamicGroupRuleActionsRule(['cache_enabled' => true]),
         dynamicGroupRuleActionsRule(['name' => 'Not Cached']),

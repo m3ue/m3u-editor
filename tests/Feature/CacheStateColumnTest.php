@@ -31,6 +31,7 @@ beforeEach(function () {
 
     $settings = new GeneralSettings;
     $settings->enable_cache = true;
+    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 
     $this->user = User::factory()->create();

@@ -141,6 +141,7 @@ beforeEach(function () {
     $settings = new GeneralSettings;
     $settings->enable_cache = true;
     $settings->tmdb_api_key = 'fake-api-key';
+    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 });
 
