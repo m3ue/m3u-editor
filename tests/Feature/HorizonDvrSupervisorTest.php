@@ -6,19 +6,7 @@
  */
 function horizonSupervisorsWith(array $env): array
 {
-    $previous = [];
-    foreach ($env as $key => $value) {
-        $previous[$key] = getenv($key);
-        putenv("{$key}={$value}");
-    }
-
-    try {
-        return array_keys((require config_path('horizon.php'))['defaults']);
-    } finally {
-        foreach ($previous as $key => $value) {
-            putenv($value === false ? $key : "{$key}={$value}");
-        }
-    }
+    return array_keys(configFileWith('horizon', $env)['defaults']);
 }
 
 it('provisions the DVR supervisor by default', function () {

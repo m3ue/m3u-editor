@@ -69,6 +69,26 @@ return [
     | Blank any entry in your .env to disable that particular fallback.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Optional Integrations
+    |--------------------------------------------------------------------------
+    |
+    | Master switches for optional integrations. When false, the integration is
+    | hidden in the UI and its background work (syncs, resolves, schedules and
+    | its Horizon supervisor) stops; content it already produced keeps being
+    | served. Only an explicit false disables one, so a blank templated .env
+    | line keeps it on. config/horizon.php reads the same variables.
+    |
+    */
+    'schedules_direct' => [
+        'enabled' => env('SCHEDULES_DIRECT_ENABLED', true) !== false,
+    ],
+
+    'aiostreams' => [
+        'enabled' => env('AIOSTREAMS_ENABLED', true) !== false,
+    ],
+
     'stremio' => [
         'meta_addons' => [
             'cinemeta' => env('STREMIO_CINEMETA_URL', 'https://v3-cinemeta.strem.io'),

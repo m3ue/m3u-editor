@@ -286,7 +286,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
         $aiostreamsSection = Section::make(__('AIOStreams Access'))
             ->description(__('Control whether this user can access AIOStreams content from the assigned playlist.'))
             ->compact()
-            ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
+            ->hidden(fn () => ! config('services.aiostreams.enabled', true) || MediaServerIntegration::where('user_id', auth()->id())
                 ->where('type', 'aiostreams')
                 ->where('enabled', true)
                 ->doesntExist()

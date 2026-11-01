@@ -309,4 +309,21 @@ if (! (env('DVR_ENABLED', true) && env('M3U_PROXY_INTEGRATION_ENABLED', true))) 
     unset($config['defaults']['dvr-queue']);
 }
 
+// Same for the optional features: switching one off (which also hides it in the app
+// and stops its background work) drops its supervisor, saving the supervisor plus its
+// idle worker. Each mirrors the feature's own config flag, where only an explicit
+// false disables it; unset, blank or other values keep it on.
+$optionalFeatureSupervisors = [
+    'PLUGINS_ENABLED' => 'm3u-editor-plugin-queue', // config('plugins.enabled')
+    'SCHEDULES_DIRECT_ENABLED' => 'm3u-editor-sd-queue', // config('services.schedules_direct.enabled')
+    'AIOSTREAMS_ENABLED' => 'aiostreams-queue', // config('services.aiostreams.enabled')
+    'CACHED_CONTENT_ENABLED' => 'cache-queue', // config('cached_content.enabled')
+];
+
+foreach ($optionalFeatureSupervisors as $envKey => $supervisor) {
+    if (env($envKey, true) === false) {
+        unset($config['defaults'][$supervisor]);
+    }
+}
+
 return $config;

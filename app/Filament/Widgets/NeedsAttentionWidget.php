@@ -95,7 +95,9 @@ class NeedsAttentionWidget extends Widget
                 ];
             }
 
-            $pendingPlugins = Plugin::query()->where('trust_state', 'pending_review')->count();
+            $pendingPlugins = config('plugins.enabled', true)
+                ? Plugin::query()->where('trust_state', 'pending_review')->count()
+                : 0;
             if ($pendingPlugins > 0) {
                 $rows[] = [
                     'label' => trans_choice(':count plugin pending trust review|:count plugins pending trust review', $pendingPlugins, ['count' => $pendingPlugins]),

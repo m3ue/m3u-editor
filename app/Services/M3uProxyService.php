@@ -3663,7 +3663,7 @@ class M3uProxyService
             // If the failover chain is exhausted for an AIOStreams-backed channel,
             // asynchronously re-resolve fresh candidates for the *next* playback
             // attempt rather than trying to serve a URL synchronously mid-request.
-            if ($nextUrl === null && $channel->aio_integration_id) {
+            if ($nextUrl === null && $channel->aio_integration_id && config('services.aiostreams.enabled', true)) {
                 ResolveAioStreamsChannel::dispatch($channel->id);
             }
 
@@ -3798,7 +3798,7 @@ class M3uProxyService
             // If the failover chain is exhausted for an AIOStreams-backed episode,
             // asynchronously re-resolve fresh candidates for the *next* playback
             // attempt rather than trying to serve a URL synchronously mid-request.
-            if ($nextUrl === null && $episode->is_custom && $episode->aio_item_id) {
+            if ($nextUrl === null && $episode->is_custom && $episode->aio_item_id && config('services.aiostreams.enabled', true)) {
                 ResolveAioStreamsEpisode::dispatch($episode->id);
             }
 

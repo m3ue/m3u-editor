@@ -12,11 +12,11 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\CachedContentDispatchService;
 use App\Services\MediaSourcePreferenceService;
 use App\Services\PlaylistCredentialResolver;
 use App\Services\PlaylistService;
 use App\Services\PlaylistUrlService;
-use App\Settings\GeneralSettings;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
@@ -563,7 +563,7 @@ class XtreamStreamController extends Controller
      */
     private function resolveCacheHit(Channel|Episode $item, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist, string $username, string $password, string $routeFormat): ?RedirectResponse
     {
-        if (! (app(GeneralSettings::class)->enable_cache ?? false)) {
+        if (! app(CachedContentDispatchService::class)->isEnabled()) {
             return null;
         }
 

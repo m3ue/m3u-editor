@@ -126,6 +126,27 @@ function seedEpgProgrammeCache(Epg $epg, iterable $entries): void
     }
 }
 
+/**
+ * Evaluate a config file (e.g. 'horizon') with the given env vars set, restoring
+ * the previous values afterwards, so env-driven gating can be asserted per case.
+ */
+function configFileWith(string $name, array $env): array
+{
+    $previous = [];
+    foreach ($env as $key => $value) {
+        $previous[$key] = getenv($key);
+        putenv("{$key}={$value}");
+    }
+
+    try {
+        return require config_path("{$name}.php");
+    } finally {
+        foreach ($previous as $key => $value) {
+            putenv($value === false ? $key : "{$key}={$value}");
+        }
+    }
+}
+
 function createEligiblePlexDvrIntegration(int $userId): MediaServerIntegration
 {
     return MediaServerIntegration::withoutEvents(function () use ($userId) {

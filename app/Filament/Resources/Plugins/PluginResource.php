@@ -66,7 +66,7 @@ class PluginResource extends Resource implements CopilotResource
 
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->canUseTools();
+        return config('plugins.enabled', true) && auth()->check() && auth()->user()->canUseTools();
     }
 
     public static function getNavigationLabel(): string

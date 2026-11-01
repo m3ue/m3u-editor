@@ -15,7 +15,7 @@ class PluginsOverviewWidget extends Widget
 
     public static function canView(): bool
     {
-        return auth()->check() && auth()->user()->isAdmin();
+        return auth()->check() && auth()->user()->canManagePlugins();
     }
 
     protected function getViewData(): array

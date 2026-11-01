@@ -436,6 +436,19 @@ it('routes plugin hooks through the dedicated worker', function () {
     });
 });
 
+it('dispatches no plugin hooks while plugins are disabled', function () {
+    Queue::fake();
+    config()->set('plugins.enabled', false);
+
+    createPluginForInvocationQueueTests([
+        'hooks' => ['playlist.synced'],
+    ]);
+
+    expect(app(PluginHookDispatcher::class)->dispatch('playlist.synced', ['playlist_id' => 123]))->toBeEmpty();
+
+    Queue::assertNothingPushed();
+});
+
 it('routes scheduled plugin invocations through the dedicated worker', function () {
     Queue::fake();
 

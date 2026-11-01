@@ -47,7 +47,6 @@ use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
-use App\Settings\GeneralSettings;
 use Filament\Navigation\NavigationItem;
 
 /**
@@ -119,7 +118,7 @@ final class AdminNavigationSchema
                     'channel_scrubbers' => self::entry(ChannelScrubberResource::class),
                     'cached_downloads' => [
                         // Hidden while caching is off, matching the resource's canAccess().
-                        'available' => fn () => (bool) (app(GeneralSettings::class)->enable_cache ?? false),
+                        'available' => fn () => CachedContentFileResource::canAccess(),
                         'resolve' => fn () => CachedContentFileResource::getNavigationItems(),
                     ],
                 ],

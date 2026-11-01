@@ -239,7 +239,7 @@ class DvrRequestsAiostreamsTabs
 
         return Tab::make(__('AIOStreams'))
             ->icon('heroicon-m-film')
-            ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
+            ->hidden(fn () => ! config('services.aiostreams.enabled', true) || MediaServerIntegration::where('user_id', auth()->id())
                 ->where('type', 'aiostreams')
                 ->where('enabled', true)
                 ->doesntExist()

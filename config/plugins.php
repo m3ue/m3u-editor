@@ -16,6 +16,13 @@ $pluginIntEnv = static function (string $key, int $default): int {
 };
 
 return [
+    /**
+     * Master switch for the plugin system (UI, hooks, scheduled runs and the plugin
+     * Horizon supervisor). Only an explicit false disables it, so a blank templated
+     * .env line keeps plugins on. config/horizon.php reads the same variable.
+     */
+    'enabled' => env('PLUGINS_ENABLED', true) !== false,
+
     'api_version' => '1.0.0',
 
     'install_mode' => env('PLUGIN_INSTALL_MODE', 'normal'),
