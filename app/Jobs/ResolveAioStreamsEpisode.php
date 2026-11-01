@@ -43,7 +43,11 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
         public int $episodeId,
         public int $attempt = 1,
     ) {
-        $this->onQueue('aiostreams-resolve');
+        // With AIOStreams disabled its supervisor isn't running, so the job stays on
+        // the default queue where handle() drops it instead of waiting forever.
+        if (config('services.aiostreams.enabled', true)) {
+            $this->onQueue('aiostreams-resolve');
+        }
     }
 
     public function uniqueId(): string
@@ -53,6 +57,10 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
 
     public function handle(AioStreamsQualityParser $parser): void
     {
+        if (! config('services.aiostreams.enabled', true)) {
+            return;
+        }
+
         $episode = Episode::find($this->episodeId);
 
         if (! $episode || ! $episode->is_custom || ! $episode->aio_item_id) {

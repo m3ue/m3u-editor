@@ -41,11 +41,13 @@ class CachedContentDispatchService
     ) {}
 
     /**
-     * Whether the global `enable_cache` toggle is on.
+     * Whether caching is on: the CACHED_CONTENT_ENABLED master switch and the
+     * global `enable_cache` toggle must both allow it.
      */
     public function isEnabled(): bool
     {
-        return (bool) (app(GeneralSettings::class)->enable_cache ?? false);
+        return config('cached_content.enabled', true)
+            && (bool) (app(GeneralSettings::class)->enable_cache ?? false);
     }
 
     /**

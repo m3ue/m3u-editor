@@ -40,7 +40,7 @@ class GuestAioStreams extends Page
      */
     public static function canAccess(): bool
     {
-        if (! static::isSessionAuthenticated()) {
+        if (! config('services.aiostreams.enabled', true) || ! static::isSessionAuthenticated()) {
             return false;
         }
 

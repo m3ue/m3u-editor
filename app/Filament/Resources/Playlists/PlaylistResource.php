@@ -3482,7 +3482,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 ->collapsible()
                 ->collapsed($creating)
                 ->columns(2)
-                ->hidden(fn (): bool => ! (app(GeneralSettings::class)->enable_cache ?? false))
+                ->hidden(fn (): bool => ! app(CachedContentDispatchService::class)->isEnabled())
                 ->schema([
                     Toggle::make('share_cache_across_playlists')
                         ->label(__('Share cache across playlists'))

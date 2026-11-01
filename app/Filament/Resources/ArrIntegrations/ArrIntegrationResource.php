@@ -229,7 +229,7 @@ class ArrIntegrationResource extends Resource
                                     ->formatStateUsing(fn (): bool => false)
                                     ->disabled()
                                     ->dehydrated(false)
-                                    ->hidden(fn (): bool => app(CachedContentDispatchService::class)->isEnabled()),
+                                    ->hidden(fn (): bool => ! config('cached_content.enabled', true) || app(CachedContentDispatchService::class)->isEnabled()),
 
                                 Toggle::make('cache_cleanup')
                                     ->label(__('Remove after leaving dynamic groups'))

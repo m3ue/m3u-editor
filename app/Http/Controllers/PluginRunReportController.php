@@ -11,6 +11,7 @@ class PluginRunReportController extends Controller
 {
     public function __invoke(Request $request, Plugin $plugin, PluginRun $run)
     {
+        abort_unless(config('plugins.enabled', true), 404);
         abort_unless($request->user()?->canUseTools(), 403);
         abort_unless($run->extension_plugin_id === $plugin->id, 404);
         abort_unless($run->canBeViewedBy($request->user()), 403);

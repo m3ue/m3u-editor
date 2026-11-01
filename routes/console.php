@@ -49,9 +49,11 @@ $inProcess('app:refresh-media-server-integrations')
 // (TorBox) ban accounts for. Ordinary link rot on resolved content is
 // handled on-demand instead, via M3uProxyService::resolveFailoverUrl's
 // exhaustion hook at actual playback-failure time.
-Schedule::command('app:resolve-pending-aiostreams-candidates')
-    ->hourly()
-    ->withoutOverlapping();
+if (config('services.aiostreams.enabled', true)) {
+    Schedule::command('app:resolve-pending-aiostreams-candidates')
+        ->hourly()
+        ->withoutOverlapping();
+}
 
 // Refresh EPG
 $inProcess('app:refresh-epg')
@@ -74,21 +76,23 @@ Schedule::command('app:logo-cleanup --force')
 Schedule::command('queue:prune-failed --hours=48')
     ->daily();
 
-// Cached content cleanup: remove files whose channel/episode left its playlist
-// (playlists in "automatic" retention mode), then rows that never got a file.
-Schedule::command('cache:cleanup')
-    ->dailyAt('03:00')
-    ->withoutOverlapping();
+if (config('cached_content.enabled', true)) {
+    // Cached content cleanup: remove files whose channel/episode left its playlist
+    // (playlists in "automatic" retention mode), then rows that never got a file.
+    Schedule::command('cache:cleanup')
+        ->dailyAt('03:00')
+        ->withoutOverlapping();
 
-Schedule::command('cache:cleanup-orphans')
-    ->dailyAt('03:30')
-    ->withoutOverlapping();
+    Schedule::command('cache:cleanup-orphans')
+        ->dailyAt('03:30')
+        ->withoutOverlapping();
 
-// Arr cache failback: hand arr-sourced cache requests the arr can't deliver
-// (failed download, or not downloaded or downloading within 24h) to the provider.
-Schedule::job(new SweepArrCacheFailback)
-    ->everyTenMinutes()
-    ->withoutOverlapping();
+    // Arr cache failback: hand arr-sourced cache requests the arr can't deliver
+    // (failed download, or not downloaded or downloading within 24h) to the provider.
+    Schedule::job(new SweepArrCacheFailback)
+        ->everyTenMinutes()
+        ->withoutOverlapping();
+}
 
 // Prune old notifications
 Schedule::command('app:prune-old-notifications --days=7')
@@ -105,23 +109,25 @@ $inProcess('m3u-proxy:register-webhook')
 $inProcess('app:refresh-playlist-profiles')
     ->everyFifteenMinutes();
 
-// Run scheduled plugin invocations. Kept as its own process: it loads plugin code to
-// ask each plugin what's due, and a plugin that exits or runs out of memory must not
-// take down schedule:run and skip the checks after it (e.g. the DVR scheduler tick).
-Schedule::command('plugins:run-scheduled')
-    ->everyMinute()
-    ->withoutOverlapping();
-
-// Mark abandoned plugin runs stale so operators can resume them.
-$inProcess('plugins:recover-stale-runs')
-    ->everyMinute();
-
-// Check for plugin updates from GitHub repositories
-if (config('plugins.update_check.enabled', true)) {
-    $updateFrequencyHours = max(1, (int) config('plugins.update_check.frequency_hours', 4));
-    Schedule::command('plugins:check-updates')
-        ->cron("0 */{$updateFrequencyHours} * * *")
+if (config('plugins.enabled', true)) {
+    // Run scheduled plugin invocations. Kept as its own process: it loads plugin code to
+    // ask each plugin what's due, and a plugin that exits or runs out of memory must not
+    // take down schedule:run and skip the checks after it (e.g. the DVR scheduler tick).
+    Schedule::command('plugins:run-scheduled')
+        ->everyMinute()
         ->withoutOverlapping();
+
+    // Mark abandoned plugin runs stale so operators can resume them.
+    $inProcess('plugins:recover-stale-runs')
+        ->everyMinute();
+
+    // Check for plugin updates from GitHub repositories
+    if (config('plugins.update_check.enabled', true)) {
+        $updateFrequencyHours = max(1, (int) config('plugins.update_check.frequency_hours', 4));
+        Schedule::command('plugins:check-updates')
+            ->cron("0 */{$updateFrequencyHours} * * *")
+            ->withoutOverlapping();
+    }
 }
 
 // Note: HLS broadcast files are managed by m3u-proxy service

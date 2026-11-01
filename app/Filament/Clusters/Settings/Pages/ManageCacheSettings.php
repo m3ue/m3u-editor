@@ -22,6 +22,11 @@ class ManageCacheSettings extends BaseSettingsPage
 
     protected static ?int $navigationSort = 10;
 
+    public static function canAccess(): bool
+    {
+        return parent::canAccess() && config('cached_content.enabled', true);
+    }
+
     public static function getNavigationLabel(): string
     {
         return __('Cache');

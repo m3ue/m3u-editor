@@ -93,6 +93,11 @@ class RefreshEpg extends Command
                 $interval = $epg->sync_interval === '24hr' ? '0 0 * * *' : $epg->sync_interval;
                 $cronExpression = new CronExpression($interval);
 
+                // Skip Schedules Direct EPGs while SchedulesDirect is disabled.
+                if ($epg->isSchedulesDirectDisabled()) {
+                    return;
+                }
+
                 // Skip Schedules Direct EPGs that are in a provider login-limit
                 // (4009/4010) cooldown or server-error backoff: dispatching would
                 // just re-trigger a /token request and keep the account

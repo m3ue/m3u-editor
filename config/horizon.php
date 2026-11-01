@@ -309,18 +309,18 @@ if (! (env('DVR_ENABLED', true) && env('M3U_PROXY_INTEGRATION_ENABLED', true))) 
     unset($config['defaults']['dvr-queue']);
 }
 
-// Each supervisor costs a supervisor plus at least one idle worker (~90 MB each), so
-// installs that never use these features can drop them. Jobs dispatched to a disabled
-// queue wait in Redis until the supervisor is enabled again. Only an explicit false
-// (any case) disables one; unset, blank or other values keep it enabled.
-$optionalSupervisors = [
-    'HORIZON_PLUGIN_QUEUE_ENABLED' => 'm3u-editor-plugin-queue',
-    'HORIZON_SD_QUEUE_ENABLED' => 'm3u-editor-sd-queue',
-    'HORIZON_AIOSTREAMS_QUEUE_ENABLED' => 'aiostreams-queue',
-    'HORIZON_CACHE_QUEUE_ENABLED' => 'cache-queue',
+// Same for the optional features: switching one off (which also hides it in the app
+// and stops its background work) drops its supervisor, saving the supervisor plus its
+// idle worker. Each mirrors the feature's own config flag, where only an explicit
+// false disables it; unset, blank or other values keep it on.
+$optionalFeatureSupervisors = [
+    'PLUGINS_ENABLED' => 'm3u-editor-plugin-queue', // config('plugins.enabled')
+    'SCHEDULES_DIRECT_ENABLED' => 'm3u-editor-sd-queue', // config('services.schedules_direct.enabled')
+    'AIOSTREAMS_ENABLED' => 'aiostreams-queue', // config('services.aiostreams.enabled')
+    'CACHED_CONTENT_ENABLED' => 'cache-queue', // config('cached_content.enabled')
 ];
 
-foreach ($optionalSupervisors as $envKey => $supervisor) {
+foreach ($optionalFeatureSupervisors as $envKey => $supervisor) {
     if (env($envKey, true) === false) {
         unset($config['defaults'][$supervisor]);
     }

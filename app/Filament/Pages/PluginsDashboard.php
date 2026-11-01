@@ -42,7 +42,7 @@ class PluginsDashboard extends Page
      */
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->canUseTools();
+        return config('plugins.enabled', true) && auth()->check() && auth()->user()->canUseTools();
     }
 
     /**

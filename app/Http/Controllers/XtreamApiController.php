@@ -3918,7 +3918,7 @@ class XtreamApiController extends Controller
      */
     private function resolveAIOStreamsData($playlist, array $features): array
     {
-        if (! in_array('aiostreams', $features)) {
+        if (! config('services.aiostreams.enabled', true) || ! in_array('aiostreams', $features)) {
             return [];
         }
 

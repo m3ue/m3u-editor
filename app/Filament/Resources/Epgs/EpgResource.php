@@ -238,6 +238,7 @@ class EpgResource extends Resource implements CopilotResource
                                 ->send();
                         })
                         ->disabled(fn ($record): bool => $record->status === Status::Processing)
+                        ->hidden(fn (Epg $record): bool => $record->isSchedulesDirectDisabled())
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
@@ -324,6 +325,10 @@ class EpgResource extends Resource implements CopilotResource
                         ->label(__('Process selected'))
                         ->action(function (Collection $records): void {
                             foreach ($records as $record) {
+                                if ($record->isSchedulesDirectDisabled()) {
+                                    continue;
+                                }
+
                                 $record->update([
                                     'status' => Status::Processing,
                                     'progress' => 0,
@@ -409,9 +414,11 @@ class EpgResource extends Resource implements CopilotResource
                 ->label(__('EPG type'))
                 ->columnSpan(1)
                 ->grouped()
-                ->options([
+                ->options(fn (): array => config('services.schedules_direct.enabled', true) ? [
                     'url' => 'File, URL or Path',
                     'schedules_direct' => 'SchedulesDirect',
+                ] : [
+                    'url' => 'File, URL or Path',
                 ])
                 ->icons([
                     'url' => 'heroicon-s-link',
@@ -607,6 +614,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->schema([
                             Actions::make([
                                 Action::make('test_connection')
+                                    ->hidden(fn (): bool => ! config('services.schedules_direct.enabled', true))
                                     ->label(__('Test Connection'))
                                     ->icon('heroicon-o-wifi')
                                     ->color('gray')
@@ -641,6 +649,7 @@ class EpgResource extends Resource implements CopilotResource
                                         }
                                     }),
                                 Action::make('browse_lineups')
+                                    ->hidden(fn (): bool => ! config('services.schedules_direct.enabled', true))
                                     ->label(__('View Lineups'))
                                     ->icon('heroicon-o-tv')
                                     ->color('gray')
@@ -922,7 +931,7 @@ class EpgResource extends Resource implements CopilotResource
             ->label(__('Retry SchedulesDirect Login'))
             ->icon('heroicon-o-key')
             ->color('warning')
-            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && $record->isSchedulesDirectAuthBlocked())
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && ! $record->isSchedulesDirectDisabled() && $record->isSchedulesDirectAuthBlocked())
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-key')
             ->modalDescription(fn (Epg $record): string => (string) $record->sd_auth_blocked_message)
@@ -959,7 +968,7 @@ class EpgResource extends Resource implements CopilotResource
             ->label(__('Manage SD Lineups'))
             ->icon('heroicon-o-list-bullet')
             ->color('warning')
-            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && ! $record->isSchedulesDirectDisabled())
             ->modalHeading(__('Manage SchedulesDirect Lineups'))
             ->modalDescription(__('View and remove lineups from your SchedulesDirect account.'))
             ->modalSubmitActionLabel(__('Remove Selected Lineup'))

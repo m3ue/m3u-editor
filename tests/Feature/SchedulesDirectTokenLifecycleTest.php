@@ -1011,8 +1011,9 @@ it('measures the token lifetime on the Schedules Direct clock', function () {
 
     (new SchedulesDirectService)->authenticateFromEpg($epg);
 
-    // Absolute tokenExpires would give now + 24h05m; the real lifetime is 24h.
-    expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addDay()->subSeconds(60)->timestamp);
+    // Absolute tokenExpires would give now + 24h05m; the real lifetime is 24h. Seconds,
+    // not addDay(): a calendar day is 23h or 25h across a DST change.
+    expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addSeconds(86400 - 60)->timestamp);
 });
 
 it('replaces a leftover from an interrupted sync and leaves only the guide file and SD cache', function () {

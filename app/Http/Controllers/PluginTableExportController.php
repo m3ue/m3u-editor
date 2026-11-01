@@ -18,6 +18,8 @@ class PluginTableExportController extends Controller
 {
     public function __invoke(Request $request, Plugin $plugin, string $table, string $format): StreamedResponse
     {
+        abort_unless(config('plugins.enabled', true), 404);
+
         $format = strtolower($format);
         abort_unless(in_array($format, ['csv', 'json'], true), 404);
 

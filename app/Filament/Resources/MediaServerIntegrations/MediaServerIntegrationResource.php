@@ -1268,14 +1268,14 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
      */
     public static function typeOptions(): array
     {
-        return [
+        return array_filter([
             'emby' => 'Emby',
             'jellyfin' => 'Jellyfin',
             'plex' => 'Plex',
             'local' => 'Local Media',
             'webdav' => 'WebDAV',
-            'aiostreams' => 'AIOStreams',
-        ];
+            'aiostreams' => config('services.aiostreams.enabled', true) ? 'AIOStreams' : null,
+        ]);
     }
 
     public static function table(Table $table): Table
@@ -1724,7 +1724,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->where('user_id', Auth::id());
+            ->where('user_id', Auth::id())
+            ->when(! config('services.aiostreams.enabled', true), fn (Builder $query) => $query->where('type', '!=', 'aiostreams'));
     }
 
     public static function flushLibraryContent(MediaServerIntegration $record): void

@@ -84,7 +84,9 @@ class ProcessEpgImport implements ShouldQueue
         // maxProcesses = 1 (see config/horizon.php) so concurrency is enforced by the
         // queue itself rather than app-level locking. M3U/XML imports are unaffected
         // and continue to run on the default/import queues with full concurrency.
-        if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT) {
+        // With SchedulesDirect disabled its supervisor isn't running, so the job stays
+        // on the default queue where handle() drops it instead of waiting forever.
+        if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT && ! $epg->isSchedulesDirectDisabled()) {
             $this->onQueue('schedules-direct');
         }
     }
@@ -94,6 +96,15 @@ class ProcessEpgImport implements ShouldQueue
      */
     public function handle(SchedulesDirectService $service): void
     {
+        if ($this->epg->isSchedulesDirectDisabled()) {
+            Log::info('ProcessEpgImport: SchedulesDirect is disabled, skipping sync', [
+                'epg_id' => $this->epg->id,
+                'name' => $this->epg->name,
+            ]);
+
+            return;
+        }
+
         if (! $this->force) {
             // Don't update if currently processing
             if ($this->epg->processing) {

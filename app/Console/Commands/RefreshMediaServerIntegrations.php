@@ -52,6 +52,7 @@ class RefreshMediaServerIntegrations extends Command
             ->where('enabled', true)
             ->where('auto_sync', true)
             ->whereNotNull('playlist_id')
+            ->when(! config('services.aiostreams.enabled', true), fn ($query) => $query->where('type', '!=', 'aiostreams'))
             ->get();
 
         if ($integrations->isEmpty()) {
