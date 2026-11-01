@@ -5,6 +5,10 @@ use Illuminate\Support\Facades\Queue;
 
 it('clears the schedules-direct and plugin-invocations queues along with the existing ones', function () {
     foreach (['default', 'import', 'file_sync', 'schedules-direct', 'plugin-invocations'] as $queue) {
+        // config/queue.php hardcodes 'redis' as the default, so earlier tests in
+        // the same parallel worker (same key prefix) that dispatch real jobs, e.g.
+        // ProcessEpgImport onto schedules-direct, can leave jobs behind here.
+        Queue::connection('redis')->clear($queue);
         Queue::connection('redis')->push(CallQueuedClosure::create(fn () => null), '', $queue);
     }
 
