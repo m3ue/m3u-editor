@@ -833,9 +833,12 @@ class EpgGenerateController extends Controller
 
         $parts = parse_url($url);
 
+        // The only query allowed is the image version (`?v=lastUpdate`) that
+        // SchedulesDirectService::buildImageUrl() appends.
         if ($parts === false
             || isset($parts['user']) || isset($parts['pass'])
-            || isset($parts['query']) || isset($parts['fragment'])
+            || (isset($parts['query']) && preg_match('/^v=\d+$/D', $parts['query']) !== 1)
+            || isset($parts['fragment'])
             || ! isset($parts['path'])) {
             return false;
         }

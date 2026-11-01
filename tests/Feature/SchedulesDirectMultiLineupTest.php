@@ -15,6 +15,7 @@ use Illuminate\Support\Sleep;
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    fakeSchedulesDirectChangeDetection();
     Sleep::fake();
     Storage::fake('local');
     Http::preventStrayRequests();
@@ -104,7 +105,15 @@ it('sends the documented method, path, headers and JSON body on every request of
             && $request->header('token') === ['fresh-token']
             && $request->data() === [$programId]);
     }
-    Http::assertSentCount(5);
+    // Change detection: one /status for the lineup stamps and one /schedules/md5 per station chunk
+    Http::assertSent(fn (Request $request) => $request->method() === 'GET'
+        && $request->url() === 'https://json.schedulesdirect.org/20141201/status');
+    Http::assertSent(fn (Request $request) => $isJsonPost($request, '/schedules/md5')
+        && $request->data() === [
+            ['stationID' => '1', 'date' => [now()->format('Y-m-d')]],
+            ['stationID' => '2', 'date' => [now()->format('Y-m-d')]],
+        ]);
+    Http::assertSentCount(7);
 
     expect(Storage::disk('local')->get($epg->file_path))
         ->toContain('<programme channel="1"')

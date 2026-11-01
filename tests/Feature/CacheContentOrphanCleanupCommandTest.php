@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Storage;
 |  - Completed rows that DO have a file_path stay untouched regardless of age
 |  - Completed row whose file vanished from disk (no on-disk cleanup contract)
 |  - Downloading rows are NEVER deleted (a worker is presumed to be on it)
+|  - arr-tracked rows are NEVER deleted (the arr failback sweep owns them)
 |  - Pending / Failed rows are KEPT if updated_at is inside the window,
 |    DELETED if updated_at crossed it (the documented contract)
 |  - A Pending row created long ago but updated recently is KEPT (the
@@ -454,4 +455,64 @@ it('--dry-run counts a Downloading row in the IDENTIFIED count, but never delete
     }
 
     expect(CachedContentFile::find($stalled->id))->not->toBeNull();
+});
+
+it('NEVER deletes an arr-tracked Pending row, even if its updated_at is well past --days', function () {
+    // An arr request can download for weeks, and the failback sweep never
+    // touches the row while it waits, so its updated_at goes stale. The
+    // sweep owns these rows (#1785): deleting one here lost the automatic
+    // provider failback when the arr download later failed.
+    $user = User::factory()->create();
+    $waitingOnArr = CachedContentFile::factory()->create([
+        'user_id' => $user->id,
+        'status' => CachedContentFileStatus::Pending,
+        'source' => 'arr',
+        'file_path' => null,
+        'updated_at' => Carbon::now()->subDays(12),
+        'created_at' => Carbon::now()->subDays(12),
+    ]);
+
+    Carbon::setTestNow(Carbon::now());
+    try {
+        $this->artisan('cache:cleanup-orphans --dry-run')
+            ->expectsOutputToContain('[DRY RUN] Identified 0 orphan cached_content_files rows older than 7 day(s).')
+            ->assertExitCode(0);
+        $this->artisan('cache:cleanup-orphans')->assertExitCode(0);
+    } finally {
+        Carbon::setTestNow();
+    }
+
+    expect(CachedContentFile::find($waitingOnArr->id))->not->toBeNull();
+});
+
+it('still deletes an abandoned provider row next to a kept arr-tracked row', function () {
+    $user = User::factory()->create();
+    $waitingOnArr = CachedContentFile::factory()->create([
+        'user_id' => $user->id,
+        'status' => CachedContentFileStatus::Pending,
+        'source' => 'arr',
+        'file_path' => null,
+        'updated_at' => Carbon::now()->subDays(12),
+        'created_at' => Carbon::now()->subDays(12),
+    ]);
+    $abandoned = CachedContentFile::factory()->create([
+        'user_id' => $user->id,
+        'status' => CachedContentFileStatus::Pending,
+        'source' => 'provider',
+        'file_path' => null,
+        'updated_at' => Carbon::now()->subDays(12),
+        'created_at' => Carbon::now()->subDays(12),
+    ]);
+
+    Carbon::setTestNow(Carbon::now());
+    try {
+        $this->artisan('cache:cleanup-orphans')
+            ->expectsOutputToContain('Deleted 1 orphan cached_content_files rows.')
+            ->assertExitCode(0);
+    } finally {
+        Carbon::setTestNow();
+    }
+
+    expect(CachedContentFile::find($waitingOnArr->id))->not->toBeNull()
+        ->and(CachedContentFile::find($abandoned->id))->toBeNull();
 });

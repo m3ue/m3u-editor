@@ -102,6 +102,12 @@ class CachedContentDispatchService
                 // Cache Now on a title still waiting on the arr uses the
                 // provider now, like Cache Now on an arr title without a file.
                 if ($existing->source === 'arr') {
+                    // The arr's own cleanup tracking is separate from the
+                    // row, so keep it too, like Cache Now without a row.
+                    if ($existing->content_type === 'movie' && (int) $existing->tmdb_id > 0) {
+                        ArrCacheMovie::keep((int) $existing->user_id, (int) $existing->tmdb_id);
+                    }
+
                     return $this->failback->fallBack($existing) ? CacheDispatchResult::Queued : CacheDispatchResult::AlreadyQueued;
                 }
             }

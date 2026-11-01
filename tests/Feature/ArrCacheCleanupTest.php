@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\CachedContentFileStatus;
+use App\Enums\CacheDispatchResult;
 use App\Models\ArrCacheMovie;
 use App\Models\ArrIntegration;
 use App\Models\CachedContentFile;
@@ -209,6 +211,28 @@ it('stops tracking a movie on Cache Now so cleanup keeps it', function () {
     app(CachedContentDispatchService::class)->dispatch(accChannel($this->playlist, 550));
 
     expect(ArrCacheMovie::query()->count())->toBe(0);
+});
+
+it('stops tracking a movie on Cache Now while it waits on Radarr with failback on', function () {
+    $this->radarr->update(['cache_failback' => true]);
+    accTracked($this->radarr);
+    $channel = accChannel($this->playlist, 550);
+    $row = CachedContentFile::factory()->forItem($channel)->create([
+        ...CachedContentFile::buildAttributes($channel, automatic: true),
+        'status' => CachedContentFileStatus::Pending,
+        'source' => 'arr',
+        'arr_integration_id' => $this->radarr->id,
+        'arr_requested_at' => now()->subMinutes(5),
+    ]);
+    Http::fake([
+        'radarr.test/api/v3/movie?tmdbId=550' => Http::response([['id' => 7, 'tmdbId' => 550, 'hasFile' => false]]),
+        'radarr.test/api/v3/movie/7' => Http::response(['id' => 7, 'monitored' => true]),
+    ]);
+
+    expect(app(CachedContentDispatchService::class)->dispatch($channel))->toBe(CacheDispatchResult::Queued)
+        ->and($row->refresh()->source)->toBe('provider')
+        ->and($row->managed_by)->toBeNull()
+        ->and(ArrCacheMovie::query()->count())->toBe(0);
 });
 
 // --- Cleanup ---

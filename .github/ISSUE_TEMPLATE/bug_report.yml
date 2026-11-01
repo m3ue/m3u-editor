@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a reproducible problem with m3u-editor.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please report one problem per issue and provide enough detail to reproduce it.
+        This is a public issue. Redact passwords, API keys, tokens, private playlist/stream URLs, and personal information from all text and attachments.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed sensitive information from my report and attachments.
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: Explain which feature is affected, what fails, and how often it happens. Include the exact error message if one is shown.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: m3u-editor version
+      description: Give the exact release version or commit and image tag. A moving tag such as latest or dev alone is not enough.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Deployment and environment
+      description: Include installation method, host OS/architecture, database type/version, and browser/version. For playback or integration issues, include player/client and m3u-proxy versions, if used.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide numbered steps, relevant settings, and a minimal example using synthetic or redacted data. Say whether it affects all items or only some.
+      placeholder: |
+        1. Open...
+        2. Configure...
+        3. Run...
+        4. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the result you expected from those steps.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Describe what happened instead, including any error message or status code.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste a redacted log excerpt in a fenced code block or attach a .log/.txt file from the time of the failure. Check container output and storage/logs; include proxy logs for proxy-related failures. If logs are unavailable or empty, explain where you checked and why.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recording
+      description: Drag and drop screenshots or a short recording showing the problem and relevant settings. For a non-visual problem, explain why screenshots are not applicable. Redact sensitive details first.
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Paste only the relevant redacted Compose/service configuration or settings in a fenced code block. Do not upload your full .env, database, or private playlist. If no configuration is relevant, explain why.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional workarounds, when this last worked, or related issues.

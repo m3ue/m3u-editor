@@ -4710,6 +4710,7 @@
     "Scheduled scans: disabled": "Analyses planifiées : désactivées",
     "Scheduled start time must be in the future.": "L’heure de début prévue doit être ultérieure.",
     "Scheduler (cron)": "Planificateur (cron)",
+    "Schedules Direct will sync, at most, once per hour, regardless of configured schedule.": "Schedules Direct sera synchronisé au maximum une fois par heure, quelle que soit la planification configurée.",
     "Schedules Generated": "Horaires générés",
     "SchedulesDirect": "Horaires directs",
     "SchedulesDirect Configuration": "Configuration des horaires directs",

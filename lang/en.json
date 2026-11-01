@@ -5722,6 +5722,7 @@
     "Scheduled scans: disabled": "Scheduled scans: disabled",
     "Scheduled start time must be in the future.": "Scheduled start time must be in the future.",
     "Scheduler (cron)": "Scheduler (cron)",
+    "Schedules Direct will sync, at most, once per hour, regardless of configured schedule.": "Schedules Direct will sync, at most, once per hour, regardless of configured schedule.",
     "Schedules Generated": "Schedules Generated",
     "SchedulesDirect": "SchedulesDirect",
     "SchedulesDirect Configuration": "SchedulesDirect Configuration",

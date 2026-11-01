@@ -5,6 +5,8 @@ use App\Models\MediaServerIntegration;
 use App\Services\EpgProgrammeStore;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -52,6 +54,27 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Fake the SchedulesDirect change-detection endpoints a sync calls first:
+ * /status lists no lineups, so every lineup downloads, and /schedules/md5
+ * reports a new MD5 for every requested station-day, so every station-day
+ * downloads. Register it before a test's own fakes so those still apply to
+ * every other endpoint.
+ */
+function fakeSchedulesDirectChangeDetection(): void
+{
+    Http::fake([
+        'json.schedulesdirect.org/20141201/status' => Http::response(['code' => 0, 'lineups' => []]),
+        'json.schedulesdirect.org/20141201/schedules/md5' => fn (Request $request) => Http::response(
+            collect($request->data())->mapWithKeys(fn (array $station) => [
+                $station['stationID'] => collect($station['date'])
+                    ->mapWithKeys(fn (string $date) => [$date => ['code' => 0, 'md5' => bin2hex(random_bytes(11))]])
+                    ->all(),
+            ])->all()
+        ),
+    ]);
 }
 
 /**

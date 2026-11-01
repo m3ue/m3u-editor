@@ -267,7 +267,7 @@ class CachedContentFileResource extends Resource
             ->poll(
                 fn (): string => static::getEloquentQuery()
                     ->whereIn('status', [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading])
-                    ->where('source', '!=', 'arr')
+                    ->notArrTracked()
                     ->exists() ? '5s' : '60s',
             )
             ->columns([

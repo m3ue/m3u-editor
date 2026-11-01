@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
+beforeEach(fn () => fakeSchedulesDirectChangeDetection());
+
 function sdEpg(array $overrides = []): Epg
 {
     return Epg::factory()->create(array_merge([
@@ -536,6 +538,44 @@ it('skips blocked EPGs in the scheduled refresh', function () {
     Queue::assertNotPushed(ProcessEpgImport::class);
 });
 
+it('waits at least an hour between scheduled Schedules Direct syncs whatever the cron says', function (int $minutesSinceSync, bool $dispatched) {
+    sdEpg(['auto_sync' => true, 'sync_interval' => '* * * * *', 'status' => 'completed', 'synced' => now()->subMinutes($minutesSinceSync)]);
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    $dispatched ? Queue::assertPushed(ProcessEpgImport::class) : Queue::assertNotPushed(ProcessEpgImport::class);
+})->with([
+    'synced 10 minutes ago' => [10, false],
+    'synced 61 minutes ago' => [61, true],
+]);
+
+it('does not make a failed Schedules Direct sync wait an hour to retry', function () {
+    $epg = sdEpg(['auto_sync' => true, 'sync_interval' => '0 */6 * * *', 'status' => 'failed', 'synced' => now()->subMinutes(10)]);
+    // Past the failed-retry cooldown, which is measured from updated_at
+    $epg->forceFill(['updated_at' => now()->subDay()])->saveQuietly();
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    Queue::assertPushed(ProcessEpgImport::class);
+});
+
+it('keeps the configured schedule for EPGs that are not Schedules Direct', function () {
+    Epg::factory()->create([
+        'user_id' => User::factory()->create()->id,
+        'auto_sync' => true,
+        'sync_interval' => '* * * * *',
+        'status' => 'completed',
+        'synced' => now()->subMinutes(10),
+    ]);
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    Queue::assertPushed(ProcessEpgImport::class);
+});
+
 it('lifts the block when the credentials change', function () {
     $epg = sdEpg(['sd_auth_blocked_code' => 4003, 'sd_auth_blocked_message' => 'bad password', 'sd_backoff_attempts' => 2]);
 
@@ -975,7 +1015,7 @@ it('measures the token lifetime on the Schedules Direct clock', function () {
     expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addDay()->subSeconds(60)->timestamp);
 });
 
-it('replaces a leftover from an interrupted sync and leaves only the guide file', function () {
+it('replaces a leftover from an interrupted sync and leaves only the guide file and SD cache', function () {
     Storage::fake('local');
     Bus::fake();
 
@@ -990,7 +1030,7 @@ it('replaces a leftover from an interrupted sync and leaves only the guide file'
 
     (new SchedulesDirectService)->syncEpgData($epg);
 
-    expect(Storage::disk('local')->files($epg->folder_path))->toBe([$epg->file_path]);
+    expect(Storage::disk('local')->files($epg->folder_path))->toBe([$epg->file_path, "{$epg->folder_path}/".SchedulesDirectService::CACHE_FILE]);
     expect(Storage::disk('local')->get($epg->file_path))
         ->toContain('Synthetic EP0000000001')
         ->not->toContain('half-written');

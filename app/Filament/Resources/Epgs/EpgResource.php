@@ -826,9 +826,18 @@ class EpgResource extends Resource implements CopilotResource
                                 ->live()
                                 ->placeholder(__('0 */6 * * *'))
                                 ->hintAction(CronHelperAction::make(name: 'epg-sync-cron', cronField: 'sync_interval'))
-                                ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                                    ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
-                                    : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
+                                ->helperText(function (Get $get): string {
+                                    $syncInterval = $get('sync_interval');
+                                    $helperText = $syncInterval && CronExpression::isValidExpression($syncInterval)
+                                        ? 'Next scheduled sync: '.(new CronExpression($syncInterval))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
+                                        : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".';
+
+                                    if ($get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value) {
+                                        $helperText .= ' '.__('Schedules Direct will sync, at most, once per hour, regardless of configured schedule.');
+                                    }
+
+                                    return $helperText;
+                                })
                                 ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
                         ]),
                     Grid::make()

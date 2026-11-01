@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Logging\AlertsHandler;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Notification as BaseNotification;
@@ -53,6 +54,8 @@ class TelegramAlert extends BaseNotification implements ShouldQueue
      */
     public function failed(Throwable $exception): void
     {
-        Log::error("Telegram alert job failed: {$exception->getMessage()}");
+        Log::error("Telegram alert job failed: {$exception->getMessage()}", [
+            AlertsHandler::SKIP_CONTEXT_KEY => true,
+        ]);
     }
 }

@@ -883,7 +883,10 @@ class ChannelResource extends Resource implements CopilotResource
                     ])
                     ->action(function (Collection $records, array $data): void {
                         foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => $data['aed_profile_id']]);
+                            $ids = $chunk->pluck('id')->all();
+                            Channel::whereIn('id', $ids)->update(['aed_profile_id' => $data['aed_profile_id']]);
+                            // A query update skips the Channel::updated cache clear.
+                            EpgCacheService::clearForChannelIds($ids);
                         }
                     })->after(function () {
                         Notification::make()
@@ -903,7 +906,10 @@ class ChannelResource extends Resource implements CopilotResource
                     ->color('warning')
                     ->action(function (Collection $records): void {
                         foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => null]);
+                            $ids = $chunk->pluck('id')->all();
+                            Channel::whereIn('id', $ids)->update(['aed_profile_id' => null]);
+                            // A query update skips the Channel::updated cache clear.
+                            EpgCacheService::clearForChannelIds($ids);
                         }
                     })->after(function () {
                         Notification::make()

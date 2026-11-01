@@ -4710,6 +4710,7 @@
     "Scheduled scans: disabled": "Escaneos programados: deshabilitados",
     "Scheduled start time must be in the future.": "La hora de inicio programada debe ser en el futuro.",
     "Scheduler (cron)": "Programador (cron)",
+    "Schedules Direct will sync, at most, once per hour, regardless of configured schedule.": "Schedules Direct se sincronizará, como máximo, una vez por hora, independientemente de la programación configurada.",
     "Schedules Generated": "Horarios generados",
     "SchedulesDirect": "Horarios directos",
     "SchedulesDirect Configuration": "HorariosConfiguración directa",

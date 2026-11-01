@@ -4710,6 +4710,7 @@
     "Scheduled scans: disabled": "定时扫描：已禁用",
     "Scheduled start time must be in the future.": "计划开始时间必须晚于当前时间。",
     "Scheduler (cron)": "计划任务 (cron)",
+    "Schedules Direct will sync, at most, once per hour, regardless of configured schedule.": "Schedules Direct 最多每小时同步一次，与所配置的计划无关。",
     "Schedules Generated": "节目单已生成",
     "SchedulesDirect": "SchedulesDirect",
     "SchedulesDirect Configuration": "SchedulesDirect 配置",

@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an improvement to m3u-editor with a concrete use case.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe one feature per request. Explain the problem before the proposed implementation.
+        This is public: redact passwords, API keys, tokens, private playlist/stream URLs, and personal information from text and attachments.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this feature.
+          required: true
+        - label: I removed sensitive information from my request and attachments.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: Describe your current workflow, its limitation, and who would benefit. Give a concrete example rather than only a feature name.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior and what a successful result would look like.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing options or workarounds and why they do not meet your needs. If you found none, explain what you checked.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Supporting context, screenshots, or examples
+      description: Optional mockups, redacted screenshots/logs, related issues, or examples from other tools. Drag and drop attachments here. Include your version and environment if the request depends on them.

@@ -16,6 +16,7 @@ use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -170,9 +171,29 @@ class SchedulesDirectService
     private const MAX_RETRIES = 2;                   // Fewer retries for speed
 
     // SchedulesDirect allows up to 5000 programIDs per /programs request. This response
-    // is streamed straight to disk (see processProgramBatchDirectly's sink()), so there's
+    // is streamed straight to disk (see cacheProgramBatch's sink()), so there's
     // no memory cost to requesting the maximum and cutting the number of requests by 5x.
     private const PROGRAMS_BATCH_SIZE = 5000;
+
+    // SchedulesDirect source-data cache in the EPG's folder (see SchedulesDirectCacheStore).
+    // Kept out of epg-cache/ so clearing the guide cache doesn't force a full download.
+    public const CACHE_FILE = 'schedules-direct.sqlite';
+
+    // Programs read from the program cache, and held in memory, at a time.
+    private const PROGRAM_CACHE_QUERY_SIZE = 1000;
+
+    // Top-level /programs fields kept in the program cache: the ones
+    // writeProgramToXMLTV() reads. Cast, crew and keywords are most of a
+    // program's size and the guide never uses them.
+    private const CACHED_PROGRAM_FIELDS = ['programID', 'md5', 'titles', 'episodeTitle150', 'descriptions', 'genres', 'metadata', 'contentRating'];
+
+    // Artwork is not covered by a program's MD5, so cached artwork is fetched
+    // again after this many days to pick up images added since.
+    private const ARTWORK_REFRESH_DAYS = 7;
+
+    // Programs SchedulesDirect had no artwork for are checked again sooner, since
+    // art for new shows and episodes often arrives after they are first listed.
+    private const MISSING_ARTWORK_RETRY_HOURS = 24;
 
     public function __construct()
     {
@@ -243,7 +264,7 @@ class SchedulesDirectService
     /**
      * Generator to process schedules in memory-efficient chunks
      */
-    private function processScheduleChunks(string $token, array $stationIds, array $dates): Generator
+    private function processScheduleChunks(Epg $epg, SchedulesDirectCacheStore $cache, array $stationIds, array $dates): Generator
     {
         foreach ($this->getStationChunks($stationIds, self::STATIONS_PER_CHUNK) as $chunkIndex => $stationChunk) {
             $chunkNumber = $chunkIndex + 1;
@@ -256,22 +277,15 @@ class SchedulesDirectService
                     sleep($sleepTime);
                 }
 
-                $stationRequests = array_map(function ($stationId) use ($dates) {
-                    return [
-                        'stationID' => $stationId,
-                        'date' => $dates,
-                    ];
-                }, $stationChunk);
-
                 try {
-                    $chunkSchedules = $this->getSchedules($token, $stationRequests);
+                    $chunkSchedules = $this->getStationSchedules($epg, $cache, $stationChunk, $dates);
 
-                    if (is_array($chunkSchedules) && ! empty($chunkSchedules)) {
+                    if (! empty($chunkSchedules)) {
                         $success = true;
                         yield $chunkSchedules;
 
                         // Clear the chunk data immediately
-                        unset($chunkSchedules, $stationRequests);
+                        unset($chunkSchedules);
                     } else {
                         throw new Exception('Empty or invalid response received');
                     }
@@ -292,6 +306,123 @@ class SchedulesDirectService
             // Delay between chunks
             usleep(self::CHUNK_DELAY_MICROSECONDS);
         }
+    }
+
+    /**
+     * The schedules for a chunk of stations, one entry per station-day. Only the
+     * station-days whose MD5 from /schedules/md5 differs from the cached copy are
+     * downloaded; the rest come from the schedule cache.
+     *
+     * @param  array<int, string>  $stationIds
+     * @param  array<int, string>  $dates
+     * @return array<int, array<string, mixed>>
+     */
+    private function getStationSchedules(Epg $epg, SchedulesDirectCacheStore $cache, array $stationIds, array $dates): array
+    {
+        $cachedMd5s = $cache->scheduleMd5s($stationIds, $dates);
+        $currentMd5s = $this->getScheduleMd5s($epg->sd_token, $stationIds, $dates);
+
+        $changedRequests = $unchangedDates = [];
+        foreach ($stationIds as $stationId) {
+            $changedDates = [];
+            foreach ($dates as $date) {
+                if ($currentMd5s !== null && ! isset($currentMd5s[$stationId][$date])) {
+                    // No data for this station-day yet; requesting it would return nothing
+                    continue;
+                }
+                // A null MD5 means the md5 request failed: download the station-day
+                $currentMd5 = $currentMd5s[$stationId][$date] ?? null;
+                if ($currentMd5 !== null && ($cachedMd5s[$stationId][$date] ?? null) === $currentMd5) {
+                    $unchangedDates[$stationId][] = $date;
+                } else {
+                    $changedDates[] = $date;
+                }
+            }
+            if ($changedDates !== []) {
+                $changedRequests[] = ['stationID' => $stationId, 'date' => $changedDates];
+            }
+        }
+
+        Log::debug('SchedulesDirect schedule MD5 comparison', [
+            'epg_id' => $epg->id,
+            'stations' => count($stationIds),
+            'stations_with_changes' => count($changedRequests),
+            'unchanged_station_days' => array_sum(array_map('count', $unchangedDates)),
+        ]);
+
+        $schedules = [];
+        if ($changedRequests !== []) {
+            $schedules = $this->getSchedules($epg->sd_token, $changedRequests);
+            $this->cacheSchedules($cache, $schedules);
+        }
+
+        if ($unchangedDates !== []) {
+            array_push($schedules, ...$cache->schedules($unchangedDates));
+        }
+
+        return $schedules;
+    }
+
+    /**
+     * The current MD5 of every station-day that has data, keyed by station ID
+     * then date, from POST /schedules/md5. Null when the request fails for a
+     * reason other than an expired token or a server error, so the caller can
+     * fall back to downloading every station-day.
+     *
+     * @param  array<int, string>  $stationIds
+     * @param  array<int, string>  $dates
+     * @return array<string, array<string, string>>|null
+     */
+    private function getScheduleMd5s(string $token, array $stationIds, array $dates): ?array
+    {
+        $stationRequests = array_map(fn (string $stationId) => ['stationID' => $stationId, 'date' => $dates], $stationIds);
+
+        try {
+            $response = $this->makeRequest('POST', '/schedules/md5', $stationRequests, $token)->json();
+        } catch (SchedulesDirectTokenExpiredException|SchedulesDirectServerException $e) {
+            throw $e;
+        } catch (Exception $e) {
+            Log::warning('SchedulesDirect /schedules/md5 request failed; downloading every station-day in this chunk', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $md5s = [];
+        foreach ($stationIds as $stationId) {
+            foreach ($dates as $date) {
+                $entry = $response[$stationId][$date] ?? null;
+                // A non-zero code (e.g. 7100 schedule queued) means there is no data to fetch
+                if (is_array($entry) && (int) ($entry['code'] ?? 0) === 0 && ! empty($entry['md5'])) {
+                    $md5s[$stationId][$date] = (string) $entry['md5'];
+                }
+            }
+        }
+
+        return $md5s;
+    }
+
+    /**
+     * Store the station-days of a /schedules response in the schedule cache.
+     * Error entries carry no metadata and are skipped.
+     *
+     * @param  array<int, array<string, mixed>>  $schedules
+     */
+    private function cacheSchedules(SchedulesDirectCacheStore $cache, array $schedules): void
+    {
+        $rows = [];
+        foreach ($schedules as $schedule) {
+            $stationId = $schedule['stationID'] ?? null;
+            $date = $schedule['metadata']['startDate'] ?? null;
+            $md5 = $schedule['metadata']['md5'] ?? null;
+            if (! $stationId || ! $date || ! $md5 || ! is_array($schedule['programs'] ?? null)) {
+                continue;
+            }
+            $rows[] = ['station_id' => (string) $stationId, 'date' => $date, 'md5' => $md5, 'schedule' => $schedule];
+        }
+
+        $cache->putSchedules($rows);
     }
 
     /**
@@ -1119,6 +1250,58 @@ class SchedulesDirectService
     }
 
     /**
+     * The modified stamp of every lineup on the account, keyed by lineup ID, from
+     * GET /status. Empty when /status can't be read, so every lineup downloads.
+     *
+     * @return array<string, string>
+     */
+    private function getAccountLineupModifiedStamps(Epg $epg): array
+    {
+        try {
+            $status = $this->getStatus($epg->sd_token);
+        } catch (SchedulesDirectTokenExpiredException $e) {
+            throw $e;
+        } catch (Exception $e) {
+            Log::warning('SchedulesDirect /status request failed; downloading every lineup', [
+                'epg_id' => $epg->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        $stamps = [];
+        foreach ($status['lineups'] ?? [] as $lineup) {
+            if (is_array($lineup) && isset($lineup['lineup'], $lineup['modified'])) {
+                $stamps[(string) $lineup['lineup']] = (string) $lineup['modified'];
+            }
+        }
+
+        return $stamps;
+    }
+
+    /**
+     * A lineup from the lineup cache when its modified stamp still matches
+     * /status, otherwise downloaded (and added to the account if needed) and
+     * cached. A lineup /status doesn't list yet is downloaded without caching.
+     */
+    private function getCachedLineup(Epg $epg, SchedulesDirectCacheStore $cache, string $lineupId, ?string $modified): array
+    {
+        $cachedLineup = $modified !== null ? $cache->lineup($lineupId, $modified) : null;
+        if ($cachedLineup !== null) {
+            return $cachedLineup;
+        }
+
+        $lineup = $this->getOrAddLineup($epg, $lineupId);
+
+        if ($modified !== null && is_array($lineup['map'] ?? null) && is_array($lineup['stations'] ?? null)) {
+            $cache->putLineup($lineupId, $modified, $lineup);
+        }
+
+        return $lineup;
+    }
+
+    /**
      * Get lineup details including stations
      */
     public function getLineup(string $token, string $lineupId): array
@@ -1167,11 +1350,16 @@ class SchedulesDirectService
      * the 10 character root programID, so anything still missing after the
      * first pass is retried against its root.
      *
+     * $failedProgramIds receives the programs whose artwork request failed, as
+     * opposed to programs SchedulesDirect has no artwork for.
+     *
      * @param  array<int, string>  $programIds
+     * @param  array<int, string>  $failedProgramIds
      * @return array<string, array<int, array<string, mixed>>>
      */
-    public function getProgramArtwork(string $token, array $programIds, ?string $epgUuid = null): array
+    public function getProgramArtwork(string $token, array $programIds, ?string $epgUuid = null, array &$failedProgramIds = []): array
     {
+        $failedProgramIds = [];
         if (empty($programIds)) {
             return [];
         }
@@ -1181,7 +1369,7 @@ class SchedulesDirectService
                 'program_count' => count($programIds),
             ]);
 
-            $allArtwork = $this->fetchArtworkBatches($token, $programIds, $epgUuid);
+            $allArtwork = $this->fetchArtworkBatches($token, $programIds, $epgUuid, $failedProgramIds);
 
             $missingByRootId = [];
             foreach ($programIds as $programId) {
@@ -1191,12 +1379,17 @@ class SchedulesDirectService
             }
 
             if (! empty($missingByRootId)) {
-                $rootArtwork = $this->fetchArtworkBatches($token, array_keys($missingByRootId), $epgUuid);
+                $failedRootIds = [];
+                $rootArtwork = $this->fetchArtworkBatches($token, array_map('strval', array_keys($missingByRootId)), $epgUuid, $failedRootIds);
                 foreach ($rootArtwork as $rootId => $artwork) {
                     foreach ($missingByRootId[$rootId] ?? [] as $programId) {
                         $allArtwork[$programId] = $artwork;
                     }
                 }
+                foreach ($failedRootIds as $rootId) {
+                    array_push($failedProgramIds, ...$missingByRootId[$rootId] ?? []);
+                }
+                $failedProgramIds = array_values(array_unique($failedProgramIds));
             }
 
             Log::debug('Successfully fetched program artwork', [
@@ -1213,6 +1406,7 @@ class SchedulesDirectService
                 'error' => $e->getMessage(),
                 'program_count' => count($programIds),
             ]);
+            $failedProgramIds = $programIds;
 
             return [];
         }
@@ -1222,12 +1416,14 @@ class SchedulesDirectService
      * POST programIDs to /metadata/programs/ in batches of 500 (the API limit)
      * and return the selected artwork keyed by the programID SchedulesDirect
      * echoes back. IDs without artwork come back as an error object instead of
-     * an image list and are left out.
+     * an image list and are left out. The IDs of batches whose request failed
+     * are added to $failedProgramIds.
      *
      * @param  array<int, string>  $programIds
+     * @param  array<int, string>  $failedProgramIds
      * @return array<string, array<int, array<string, mixed>>>
      */
-    private function fetchArtworkBatches(string $token, array $programIds, ?string $epgUuid): array
+    private function fetchArtworkBatches(string $token, array $programIds, ?string $epgUuid, array &$failedProgramIds): array
     {
         $artwork = [];
         $batches = array_chunk($programIds, 500);
@@ -1272,6 +1468,7 @@ class SchedulesDirectService
                     }
                 }
             } else {
+                array_push($failedProgramIds, ...$batch);
                 Log::error('Failed to fetch program artwork batch', [
                     'batch' => $batchIndex + 1,
                     'status' => $response->status(),
@@ -1365,12 +1562,19 @@ class SchedulesDirectService
      * The XMLTV icon attributes for one SchedulesDirect image.
      *
      * @param  array<string, mixed>  $artwork
-     * @return array{url: string, type: string, width: int, height: int, orient: string, size: string, category: string, tier: string}
+     *                                         `last_update` is the image's `lastUpdate` as a UNIX timestamp; the image
+     *                                         proxy uses it to tell when its cached copy of the image is out of date.
+     * @param  array<string, mixed>  $artwork
+     * @return array{uri: string, last_update: ?int, url: string, type: string, width: int, height: int, orient: string, size: string, category: string, tier: string}
      */
     private function buildArtworkInfo(array $artwork, string $type, ?string $epgUuid): array
     {
+        $lastUpdate = isset($artwork['lastUpdate']) ? (strtotime((string) $artwork['lastUpdate']) ?: null) : null;
+
         return [
-            'url' => $this->buildImageUrl($artwork['uri'], $epgUuid),
+            'uri' => $artwork['uri'],
+            'last_update' => $lastUpdate,
+            'url' => $this->buildImageUrl($artwork['uri'], $epgUuid, $lastUpdate),
             'type' => $type,
             'width' => $artwork['width'] ?? 0,
             'height' => $artwork['height'] ?? 0,
@@ -1460,9 +1664,11 @@ class SchedulesDirectService
     }
 
     /**
-     * Build the complete image URL from the URI
+     * Build the complete image URL from the URI. Proxy URLs carry the image's
+     * lastUpdate as `?v=`, so the proxy refreshes its cached copy when the image
+     * changes (SchedulesDirect URIs are ephemeral, not content hashes).
      */
-    private function buildImageUrl(string $uri, ?string $epgUuid = null): string
+    private function buildImageUrl(string $uri, ?string $epgUuid = null, ?int $lastUpdate = null): string
     {
         // If URI is already a complete URL (starts with https://), return as-is
         if (str_starts_with($uri, 'https://')) {
@@ -1471,7 +1677,8 @@ class SchedulesDirectService
 
         // If we have an EPG UUID, use the proxy URL
         if ($epgUuid) {
-            return ProxyFacade::getBaseUrl().'/schedules-direct/'.$epgUuid.'/image/'.$uri;
+            return ProxyFacade::getBaseUrl().'/schedules-direct/'.$epgUuid.'/image/'.$uri
+                .($lastUpdate ? '?v='.$lastUpdate : '');
         }
 
         // Fallback to direct URL (will require authentication)
@@ -1567,27 +1774,6 @@ class SchedulesDirectService
     }
 
     /**
-     * Extract artwork URL directly from program data
-     * This looks for artwork URLs embedded in the program response itself
-     */
-    private function extractArtworkFromProgram($program): ?string
-    {
-        // Check if program has artwork flags
-        $hasArtwork = $program->hasImageArtwork ?? false;
-        $hasEpisodeArtwork = $program->hasEpisodeArtwork ?? false;
-        $hasSeriesArtwork = $program->hasSeriesArtwork ?? false;
-        $hasSeasonArtwork = $program->hasSeasonArtwork ?? false;
-
-        if (! $hasArtwork && ! $hasEpisodeArtwork && ! $hasSeriesArtwork && ! $hasSeasonArtwork) {
-            return null;
-        }
-
-        // For now, we'll return null since we need to implement the metadata API correctly
-        // The artwork URLs are not included in the regular program data
-        return null;
-    }
-
-    /**
      * Fetch SchedulesDirect EPG data and update the EPG record.
      *
      * If the provider reports TOKEN_EXPIRED (4006) mid-sync, the stored token has
@@ -1635,6 +1821,7 @@ class SchedulesDirectService
 
     private function performEpgSync(Epg $epg): void
     {
+        $cache = null;
         try {
             // Validate token or re-authenticate
             if (! $epg->hasValidSchedulesDirectToken()) {
@@ -1661,10 +1848,14 @@ class SchedulesDirectService
             // and skipped so the others still import. It was never imported, so skipping it loses
             // no channel mappings. Any other failure fails the sync, because an import missing a
             // previously imported lineup would delete its EPG channels and their mappings.
+            $cache = SchedulesDirectCacheStore::open(Storage::disk('local')->path("{$epg->folder_path}/".self::CACHE_FILE));
+            $cache->beginSync();
+
             $map = $stations = $lineupErrors = [];
+            $lineupModifiedStamps = $this->getAccountLineupModifiedStamps($epg);
             foreach ($epg->sd_lineup_ids as $lineupId) {
                 try {
-                    $lineup = $this->getOrAddLineup($epg, $lineupId);
+                    $lineup = $this->getCachedLineup($epg, $cache, $lineupId, $lineupModifiedStamps[$lineupId] ?? null);
                 } catch (Exception $e) {
                     if (! in_array($e->getCode(), [self::MAX_LINEUPS_CODE, self::TOO_MANY_LINEUP_CHANGES_CODE], true)) {
                         throw $e;
@@ -1724,7 +1915,7 @@ class SchedulesDirectService
             }
 
             // Stream process schedules and build XMLTV on the fly
-            $xmlFilePath = $this->streamProcessToXMLTV($epg, $lineupData, $stationIds, $dates);
+            $xmlFilePath = $this->streamProcessToXMLTV($epg, $cache, $lineupData, $stationIds, $dates);
 
             // Update EPG record
             $epg->update([
@@ -1758,6 +1949,8 @@ class SchedulesDirectService
                 'error' => $e->getMessage(),
             ]);
             throw $e;
+        } finally {
+            $cache?->close();
         }
     }
 
@@ -1767,6 +1960,7 @@ class SchedulesDirectService
      */
     private function streamProcessToXMLTV(
         Epg $epg,
+        SchedulesDirectCacheStore $cache,
         array $lineupData,
         array $stationIds,
         array $dates
@@ -1799,8 +1993,8 @@ class SchedulesDirectService
             // Write XML header and channels with artwork
             $this->writeXMLTVHeader($file, $lineupData, ['stations' => $stationArtworkCache]);
 
-            // Use optimized single-pass processing - program artwork will be fetched during processing
-            $this->runStreamSchedulesToXMLTV($file, $epg, $stationIds, $dates, ['stations' => $stationArtworkCache]);
+            // Single-pass processing; program artwork is fetched alongside programs
+            $this->runStreamSchedulesToXMLTV($file, $epg, $cache, $stationIds, $dates);
 
             // Write XML footer
             fwrite($file, "</tv>\n");
@@ -1882,9 +2076,9 @@ class SchedulesDirectService
     private function runStreamSchedulesToXMLTV(
         $file,
         Epg $epg,
+        SchedulesDirectCacheStore $cache,
         array $stationIds,
-        array $dates,
-        array $artworkCache = []
+        array $dates
     ): void {
         @ini_set('max_execution_time', 0);
 
@@ -1908,7 +2102,10 @@ class SchedulesDirectService
         $progressStep = 0;
         $totalProgramsWritten = 0;
         $totalProgramIds = 0;
-        foreach ($this->processScheduleChunks($epg->sd_token, $stationIds, $dates) as $scheduleChunk) {
+        // Programs requested from /programs during this sync, so a program carried
+        // on stations in different sub-chunks is never requested twice.
+        $requestedProgramIds = [];
+        foreach ($this->processScheduleChunks($epg, $cache, $stationIds, $dates) as $scheduleChunk) {
             $subChunkSize = max(1, (int) ceil(count($scheduleChunk) / self::PROGRESS_STEPS_PER_BATCH));
             foreach (array_chunk($scheduleChunk, $subChunkSize) as $scheduleSubChunk) {
                 $progressStep++;
@@ -1917,48 +2114,36 @@ class SchedulesDirectService
                     'total_steps' => $totalProgressSteps,
                 ]);
 
-                // Stream through the sub-chunk and collect unique program IDs using file-based deduplication
-                $tempProgramIdFile = tempnam(sys_get_temp_dir(), 'epg_programs_chunk_'.$progressStep.'_');
-                $programIdHandle = fopen($tempProgramIdFile, 'w');
-                $seenProgramIds = []; // Small lookup table for deduplication
-                $scheduleCount = 0;
-                $programCount = 0;
+                // The MD5 each schedule lists for its programs, and every airing of each program
+                $programMd5s = [];
+                $airings = [];
                 foreach ($scheduleSubChunk as $schedule) {
-                    $scheduleCount++;
-                    foreach ($schedule['programs'] ?? [] as $program) {
-                        $programId = $program['programID'];
-                        // Use array key existence check for O(1) deduplication
-                        if (! isset($seenProgramIds[$programId])) {
-                            $seenProgramIds[$programId] = true;
-                            fwrite($programIdHandle, $programId."\n");
-                            $programCount++;
+                    $stationId = $schedule['stationID'] ?? null;
+                    if (! $stationId) {
+                        continue;
+                    }
+                    foreach ($schedule['programs'] ?? [] as $scheduleProgram) {
+                        $programId = $scheduleProgram['programID'] ?? null;
+                        if (! $programId) {
+                            continue;
                         }
+                        $programMd5s[$programId] = (string) ($scheduleProgram['md5'] ?? '');
+                        $airings[$programId][] = [(string) $stationId, $scheduleProgram];
                     }
                 }
+                $totalProgramIds += count($programMd5s);
 
-                // Close the program ID file handle
-                fclose($programIdHandle);
-                Log::debug('Collected program IDs from schedule sub-chunk', [
-                    'step' => $progressStep,
-                    'schedules_in_sub_chunk' => $scheduleCount,
-                    'unique_program_ids' => $programCount,
-                ]);
-
-                $totalProgramIds += $programCount;
-
-                // Fetch programs for this sub-chunk only using streaming batches
-                if ($programCount > 0) {
-                    Log::debug('Fetching programs for sub-chunk', [
-                        'step' => $progressStep,
-                        'program_count' => $programCount,
-                    ]);
+                if ($programMd5s !== []) {
                     try {
-                        // Stream process programs directly without creating lookup arrays
-                        $chunkProgramsWritten = 0;
-                        $this->streamProcessProgramsDirectly($tempProgramIdFile, $epg->sd_token, $progressStep, $scheduleSubChunk, $file, $chunkProgramsWritten, $artworkCache, $epg);
+                        $this->refreshProgramCache($epg, $cache, $programMd5s, $requestedProgramIds);
+                        if (self::$FETCH_PROGRAM_ARTWORK) {
+                            $this->refreshProgramArtwork($epg, $cache, array_keys($programMd5s));
+                        }
+                        $chunkProgramsWritten = $this->writeCachedPrograms($epg, $cache, $airings, $file);
                         $totalProgramsWritten += $chunkProgramsWritten;
                         Log::debug('Sub-chunk completed', [
                             'step' => $progressStep,
+                            'unique_program_ids' => count($programMd5s),
                             'programs_written' => $chunkProgramsWritten,
                             'total_programs_written' => $totalProgramsWritten,
                         ]);
@@ -1969,13 +2154,6 @@ class SchedulesDirectService
                             'step' => $progressStep,
                             'error' => $e->getMessage(),
                         ]);
-
-                        continue;
-                    } finally {
-                        // Clean up temporary file
-                        if (isset($tempProgramIdFile) && file_exists($tempProgramIdFile)) {
-                            unlink($tempProgramIdFile);
-                        }
                     }
                 }
 
@@ -1984,7 +2162,7 @@ class SchedulesDirectService
                 $epg->update(['sd_progress' => $progress]);
 
                 // Clear sub-chunk from memory
-                unset($scheduleSubChunk, $seenProgramIds);
+                unset($scheduleSubChunk, $programMd5s, $airings);
 
                 // Force garbage collection every few sub-chunks
                 if ($progressStep % 2 === 0) {
@@ -1996,6 +2174,7 @@ class SchedulesDirectService
         }
         Log::debug('EPG processing completed', [
             'total_programs_written' => $totalProgramsWritten,
+            'programs_requested' => count($requestedProgramIds),
             'steps_processed' => $progressStep,
         ]);
 
@@ -2004,78 +2183,66 @@ class SchedulesDirectService
         if ($totalProgramIds > 0 && $totalProgramsWritten === 0) {
             throw new Exception('SchedulesDirect returned no programmes; keeping the existing EPG data');
         }
-    }
 
-    /**
-     * Stream process programs directly without creating lookup arrays - pure streaming approach
-     */
-    private function streamProcessProgramsDirectly(string $programIdFile, string $token, int $chunkIndex, array $scheduleChunk, $file, int &$programsWritten, array $artworkCache = [], ?Epg $epg = null): void
-    {
-        $handle = fopen($programIdFile, 'r');
-        if (! $handle) {
-            throw new Exception("Cannot open program ID file: {$programIdFile}");
-        }
-
-        $batch = [];
-        $batchIndex = 0;
-        try {
-            // Stream through program IDs and batch them
-            while (($line = fgets($handle)) !== false) {
-                $programId = trim($line);
-                if (! empty($programId)) {
-                    $batch[] = $programId;
-
-                    // When we reach batch size, process the programs immediately
-                    if (count($batch) >= self::PROGRAMS_BATCH_SIZE) {
-                        $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
-                        $batch = []; // Clear the batch
-                        $batchIndex++;
-
-                        // Small delay between batches
-                        usleep(100000); // 100ms
-                    }
-                }
-            }
-
-            // Process remaining programs in the last batch
-            if (! empty($batch)) {
-                $this->processProgramBatchDirectly($batch, $batchIndex, $token, $chunkIndex, $scheduleChunk, $file, $programsWritten, $artworkCache, $epg);
-            }
-            Log::debug('Completed streaming direct program processing', [
-                'chunk' => $chunkIndex,
-                'total_batches' => $batchIndex + 1,
-                'programs_written' => $programsWritten,
-            ]);
-        } finally {
-            fclose($handle);
+        if ($dates !== []) {
+            $cache->prune($dates[0], $stationIds, $epg->sd_lineup_ids ?? []);
         }
     }
 
     /**
-     * Process a batch of programs and immediately write matching schedule entries - no arrays
+     * Download the programs whose cached copy is missing or whose MD5 differs
+     * from the one the schedule lists, and store them in the program cache.
+     *
+     * @param  array<string, string>  $programMd5s  MD5 keyed by programID
+     * @param  array<string, true>  $requestedProgramIds  programs already requested this sync
      */
-    private function processProgramBatchDirectly(array $programBatch, int $batchIndex, string $token, int $chunkIndex, array $scheduleChunk, $file, int &$programsWritten, array $artworkCache = [], ?Epg $epg = null): void
+    private function refreshProgramCache(Epg $epg, SchedulesDirectCacheStore $cache, array $programMd5s, array &$requestedProgramIds): void
     {
+        $staleProgramIds = [];
+        $cachedMd5s = $cache->programMd5s(array_map('strval', array_keys($programMd5s)));
+        foreach ($programMd5s as $programId => $md5) {
+            if (($cachedMd5s[$programId] ?? null) !== $md5 && ! isset($requestedProgramIds[$programId])) {
+                $staleProgramIds[] = (string) $programId;
+                $requestedProgramIds[$programId] = true;
+            }
+        }
+
+        Log::debug('SchedulesDirect program MD5 comparison', [
+            'epg_id' => $epg->id,
+            'programs' => count($programMd5s),
+            'programs_to_download' => count($staleProgramIds),
+        ]);
+
+        foreach (array_chunk($staleProgramIds, self::PROGRAMS_BATCH_SIZE) as $batchIndex => $programBatch) {
+            if ($batchIndex > 0) {
+                usleep(100000); // 100ms between batches
+            }
+            $this->cacheProgramBatch($epg, $cache, $programBatch, $batchIndex);
+        }
+    }
+
+    /**
+     * POST a batch of programIDs to /programs, streaming the response to disk,
+     * and store each returned program in the program cache.
+     *
+     * Programs are cached under the MD5 in the /programs response, which
+     * SchedulesDirect says is authoritative. Programs and schedules are not
+     * updated in lock-step: when a program changes its schedules are rebuilt
+     * afterwards, so until then a schedule can list an older MD5 and the program
+     * downloads again; that usually settles by the next sync.
+     *
+     * @param  array<int, string>  $programBatch
+     */
+    private function cacheProgramBatch(Epg $epg, SchedulesDirectCacheStore $cache, array $programBatch, int $batchIndex): void
+    {
+        $token = $epg->sd_token;
         // Create a temporary file for the API response
         $tempResponseFile = tempnam(sys_get_temp_dir(), 'epg_programs_response_');
         try {
-            Log::debug('Fetching program batch for direct processing', [
-                'chunk' => $chunkIndex,
+            Log::debug('Fetching program batch', [
                 'batch' => $batchIndex + 1,
                 'batch_size' => count($programBatch),
             ]);
-
-            // Fetch program artwork using the corrected metadata endpoint (if enabled)
-            $programArtworkCache = [];
-            if (self::$FETCH_PROGRAM_ARTWORK) {
-                $programArtworkCache = $this->getProgramArtwork($token, $programBatch, $epg?->uuid);
-                Log::debug("Fetched artwork for {$batchIndex} programs", ['artwork_count' => count($programArtworkCache)]);
-            } else {
-                Log::debug('Program artwork disabled for faster sync');
-            }
-
-            // Merge with existing artwork cache
-            $fullArtworkCache = array_merge($artworkCache, ['programs' => $programArtworkCache]);
 
             // Stream the API response directly to a file
             $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
@@ -2099,59 +2266,48 @@ class SchedulesDirectService
                 throw new SchedulesDirectServerException("SchedulesDirect /programs request failed with HTTP {$response->status()}", $response->status());
             }
 
-            if ($response->successful()) {
-                // Stream through the program response and match with schedules immediately
-                $programs = Items::fromFile($tempResponseFile);
-                foreach ($programs as $program) {
-                    $programId = $program->programID ?? null;
-                    if (! $programId) {
-                        continue;
-                    }
-
-                    // Extract artwork URLs directly from program data if available
-                    $programArtworkUrl = $this->extractArtworkFromProgram($program);
-                    if ($programArtworkUrl) {
-                        $fullArtworkCache['programs'][$programId] = $programArtworkUrl;
-                    }
-
-                    // Find matching schedule entries and write them immediately
-                    foreach ($scheduleChunk as $schedule) {
-                        $stationId = $schedule['stationID'] ?? null;
-                        if (! $stationId) {
-                            continue;
-                        }
-
-                        foreach ($schedule['programs'] ?? [] as $scheduleProgram) {
-                            if ($scheduleProgram['programID'] === $programId) {
-                                $this->writeProgramToXMLTV($file, $stationId, $scheduleProgram, $program, $fullArtworkCache);
-                                $programsWritten++;
-                            }
-                        }
-                    }
-                }
-
-                // Clear the JsonMachine iterator immediately
-                unset($programs);
-                Log::debug('Program batch processed directly', [
-                    'chunk' => $chunkIndex,
-                    'batch' => $batchIndex + 1,
-                    'programs_in_batch' => count($programBatch),
-                    'programs_written_in_batch' => $programsWritten,
-                ]);
-            } else {
+            if (! $response->successful()) {
                 Log::error('Failed to fetch program batch', [
-                    'chunk' => $chunkIndex,
                     'batch' => $batchIndex + 1,
                     'status' => $response->status(),
                 ]);
+
+                return;
             }
+
+            $rows = [];
+            $cachedCount = 0;
+            foreach (Items::fromFile($tempResponseFile) as $program) {
+                $programId = $program->programID ?? null;
+                // Entries with a non-zero code (e.g. 6001 program queued) carry no program data
+                if (! $programId || (int) ($program->code ?? 0) !== 0) {
+                    continue;
+                }
+                $rows[] = [
+                    'program_id' => (string) $programId,
+                    'md5' => (string) ($program->md5 ?? ''),
+                    'data' => array_intersect_key((array) $program, array_flip(self::CACHED_PROGRAM_FIELDS)),
+                ];
+                if (count($rows) >= 500) {
+                    $cache->putPrograms($rows);
+                    $cachedCount += count($rows);
+                    $rows = [];
+                }
+            }
+            $cache->putPrograms($rows);
+            $cachedCount += count($rows);
+
+            Log::debug('Program batch cached', [
+                'batch' => $batchIndex + 1,
+                'programs_requested' => count($programBatch),
+                'programs_cached' => $cachedCount,
+            ]);
         } catch (SchedulesDirectTokenExpiredException|SchedulesDirectServerException $e) {
             throw $e;
         } catch (ConnectionException $e) {
             throw new SchedulesDirectServerException("SchedulesDirect /programs request failed: {$e->getMessage()}", 0, $e);
         } catch (Exception $e) {
-            Log::error('Error processing program batch directly', [
-                'chunk' => $chunkIndex,
+            Log::error('Error processing program batch', [
                 'batch' => $batchIndex + 1,
                 'error' => $e->getMessage(),
             ]);
@@ -2161,6 +2317,83 @@ class SchedulesDirectService
                 unlink($tempResponseFile);
             }
         }
+    }
+
+    /**
+     * Fetch artwork for the cached programs that have none yet, or whose
+     * artwork is older than ARTWORK_REFRESH_DAYS, and store it with them.
+     *
+     * @param  array<int, string>  $programIds
+     */
+    private function refreshProgramArtwork(Epg $epg, SchedulesDirectCacheStore $cache, array $programIds): void
+    {
+        $needsArtwork = $cache->programsNeedingArtwork(
+            array_map('strval', $programIds),
+            now()->subDays(self::ARTWORK_REFRESH_DAYS)->getTimestamp(),
+            now()->subHours(self::MISSING_ARTWORK_RETRY_HOURS)->getTimestamp(),
+        );
+
+        foreach (array_chunk($needsArtwork, self::PROGRAMS_BATCH_SIZE) as $batch) {
+            $failedProgramIds = [];
+            $artwork = $this->getProgramArtwork($epg->sd_token, $batch, $epg->uuid, $failedProgramIds);
+            // Failed requests stay unstamped so the next sync tries them again
+            $fetchedProgramIds = array_values(array_diff($batch, $failedProgramIds));
+            if ($fetchedProgramIds !== []) {
+                // Store the image URI only: writeCachedPrograms() rebuilds the URL from it
+                $artwork = array_map(
+                    fn (array $images) => array_map(fn (array $image) => Arr::except($image, 'url'), $images),
+                    $artwork,
+                );
+                $cache->putArtwork($fetchedProgramIds, $artwork, now()->getTimestamp());
+            }
+        }
+    }
+
+    /**
+     * Write every airing of the given programs from the program cache to the
+     * XMLTV file, and mark the cached programs as used by this sync.
+     *
+     * @param  array<string, array<int, array{0: string, 1: array<string, mixed>}>>  $airings  airings keyed by programID
+     * @return int the number of programmes written
+     */
+    private function writeCachedPrograms(Epg $epg, SchedulesDirectCacheStore $cache, array $airings, $file): int
+    {
+        $written = 0;
+        foreach (array_chunk(array_map('strval', array_keys($airings)), self::PROGRAM_CACHE_QUERY_SIZE) as $programIds) {
+            foreach ($cache->usePrograms($programIds) as $row) {
+                // Decoded as objects, the shape writeProgramToXMLTV() reads
+                $program = json_decode($row['data']);
+                if (! is_object($program)) {
+                    continue;
+                }
+
+                $artworkCache = [];
+                if (self::$FETCH_PROGRAM_ARTWORK && $row['artwork']) {
+                    $artworkCache['programs'][$row['program_id']] = $this->withCurrentImageUrls(json_decode($row['artwork'], true) ?: [], $epg->uuid);
+                }
+
+                foreach ($airings[$row['program_id']] ?? [] as [$stationId, $scheduleProgram]) {
+                    $this->writeProgramToXMLTV($file, $stationId, $scheduleProgram, $program, $artworkCache);
+                    $written++;
+                }
+            }
+        }
+
+        return $written;
+    }
+
+    /**
+     * Rebuild the URLs of cached artwork from each image's URI, so a change to
+     * the proxy base URL applies without fetching the artwork again.
+     *
+     * @param  array<int, array<string, mixed>>  $artwork
+     * @return array<int, array<string, mixed>>
+     */
+    private function withCurrentImageUrls(array $artwork, ?string $epgUuid): array
+    {
+        return array_map(fn (array $image) => isset($image['uri'])
+            ? [...$image, 'url' => $this->buildImageUrl($image['uri'], $epgUuid, $image['last_update'] ?? null)]
+            : $image, $artwork);
     }
 
     /**
@@ -2292,7 +2525,9 @@ class SchedulesDirectService
 
         // Configure timeout based on endpoint and data size
         $timeout = self::DEFAULT_TIMEOUT;
-        if (str_contains($endpoint, '/schedules')) {
+        if (str_contains($endpoint, '/schedules/md5')) {
+            $timeout = 45; // Hash requests are faster but still need time
+        } elseif (str_contains($endpoint, '/schedules')) {
             $timeout = self::SCHEDULES_TIMEOUT;
         } elseif (str_contains($endpoint, '/programs')) {
             $dataSize = is_array($data) ? count($data) : 0;
@@ -2304,8 +2539,6 @@ class SchedulesDirectService
             } else {
                 $timeout = 90; // 1.5 minutes for medium batches
             }
-        } elseif (str_contains($endpoint, '/schedules/md5')) {
-            $timeout = 45; // Hash requests are faster but still need time
         }
 
         $request = Http::withHeaders($headers)
