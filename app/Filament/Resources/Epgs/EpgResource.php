@@ -11,6 +11,7 @@ use App\Filament\Resources\EpgResource\Pages;
 use App\Filament\Resources\Epgs\Pages\ListEpgs;
 use App\Filament\Resources\Epgs\Pages\ViewEpg;
 use App\Jobs\GenerateEpgCache;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Models\Playlist;
@@ -287,6 +288,8 @@ class EpgResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-uturn-left')
                         ->color('warning')
                         ->action(function ($record) {
+                            // Stop the sync still in flight, so a new one doesn't run beside it
+                            SkipIfSyncReset::recordReset($record);
                             $record->update([
                                 'status' => Status::Pending,
                                 'processing' => false,

@@ -10,6 +10,7 @@ use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MatchMediaServerSources;
 use App\Jobs\MergeChannels;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessChannelScrubber;
@@ -620,6 +621,24 @@ class SyncPipelineService
         ]);
 
         Log::error("SyncPipeline: Run {$run->id} failed — {$reason}");
+    }
+
+    /**
+     * Stop a playlist's in-flight sync when the user resets its status. Its
+     * running SyncRun is cancelled, so no further phase is dispatched and the
+     * next sync starts a fresh run, and its queued import jobs are skipped
+     * (see SkipIfSyncReset).
+     */
+    public function cancelActiveRuns(Playlist $playlist): void
+    {
+        SkipIfSyncReset::recordReset($playlist);
+
+        $playlist->syncRuns()
+            ->where('status', SyncRunStatus::Running->value)
+            ->update([
+                'status' => SyncRunStatus::Cancelled->value,
+                'finished_at' => now(),
+            ]);
     }
 
     // ── Pipeline builder ─────────────────────────────────────────────────────

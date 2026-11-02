@@ -10,6 +10,7 @@ use App\Filament\Resources\EpgMaps\Pages\ViewEpgMap;
 use App\Filament\Resources\EpgMaps\RelationManagers\CandidatesRelationManager;
 use App\Filament\Resources\EpgMaps\RelationManagers\MappedChannelsRelationManager;
 use App\Jobs\MapPlaylistChannelsToEpg;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Models\Epg;
 use App\Models\EpgMap;
 use App\Models\Group;
@@ -204,6 +205,10 @@ class EpgMapResource extends Resource implements CopilotResource
                         // `true` forever and the atomic claim in
                         // MapPlaylistChannelsToEpg::handle() would silently
                         // refuse to start a new run.
+                        //
+                        // The old run's queued jobs are skipped too, so they
+                        // don't keep mapping beside the restarted one.
+                        SkipIfSyncReset::recordReset($record);
                         $record->update([
                             'status' => Status::Processing,
                             'progress' => 0,

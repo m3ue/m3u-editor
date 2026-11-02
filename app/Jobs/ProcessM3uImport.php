@@ -6,6 +6,7 @@ use App\Enums\PlaylistSourceType;
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
@@ -130,6 +131,9 @@ class ProcessM3uImport implements ShouldQueue
     // M3U Parser instance
     public $m3uParser = null;
 
+    // When the import was queued (microtime); null for jobs queued before this was tracked
+    public ?float $queuedAt = null;
+
     /**
      * Create a new job instance.
      */
@@ -139,6 +143,8 @@ class ProcessM3uImport implements ShouldQueue
         public ?bool $isNew = false,
         public ?int $syncRunId = null,
     ) {
+        $this->queuedAt = microtime(true);
+
         // General processing settings
         $this->maxItems = config('dev.max_channels') + 1; // Maximum number of channels allowed for m3u import
         $this->preprocess = $playlist->import_prefs['preprocess'] ?? false;
@@ -187,6 +193,26 @@ class ProcessM3uImport implements ShouldQueue
         // URL find & replace rules, applied to provider stream URLs before they're saved
         $this->urlFindReplaceRules = collect($playlist->url_find_replace_rules ?? [])
             ->filter(fn (array $rule): bool => ($rule['enabled'] ?? false) && filled($rule['find'] ?? null));
+    }
+
+    /**
+     * Skip the import, and the chain it starts, once the user resets the
+     * playlist after it was queued.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return $this->queuedAt !== null ? [$this->syncResetGuard()] : [];
+    }
+
+    /**
+     * Guard for this import's jobs. Imports queued before queuedAt was tracked
+     * only guard the chain they start, from now on.
+     */
+    private function syncResetGuard(): SkipIfSyncReset
+    {
+        return new SkipIfSyncReset(Playlist::class, $this->playlist->id, $this->queuedAt ?? microtime(true));
     }
 
     /**
@@ -1621,7 +1647,7 @@ class ProcessM3uImport implements ShouldQueue
         // job (including parsed channel collections) into the chain's catch handler
         // and OOM the worker during closure serialization.
         $syncRunId = $this->syncRunId;
-        Bus::chain($jobs)
+        Bus::chain($this->syncResetGuard()->guard($jobs))
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->catch(function (Throwable $e) use ($playlist, $syncRunId) {
@@ -2515,7 +2541,7 @@ class ProcessM3uImport implements ShouldQueue
         // NOTE: see comment on the other Bus::chain catch — capture scalars only,
         // never $this, or closure serialization will OOM the worker.
         $syncRunId = $this->syncRunId;
-        Bus::chain($jobs)
+        Bus::chain($this->syncResetGuard()->guard($jobs))
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->catch(function (Throwable $e) use ($playlist, $syncRunId) {

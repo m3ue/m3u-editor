@@ -474,6 +474,8 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->color('warning')
                         ->action(function ($records) {
                             foreach ($records as $record) {
+                                // Stop the sync still in flight, so a new one doesn't run beside it
+                                app(SyncPipelineService::class)->cancelActiveRuns($record);
                                 $record->update([
                                     'status' => Status::Pending,
                                     'processing' => [
@@ -658,6 +660,9 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('This will clear any stuck processing locks and allow new syncs to run. Use this if syncs appear stuck.'))
                     ->modalSubmitActionLabel(__('Reset'))
                     ->action(function ($record) {
+                        // Stop the sync still in flight, so a new one doesn't run beside it
+                        app(SyncPipelineService::class)->cancelActiveRuns($record);
+
                         // Clear processing flag
                         $record->update([
                             'processing' => [
@@ -715,6 +720,8 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->color('warning')
                     ->action(function ($record) {
+                        // Stop the sync still in flight, so a new one doesn't run beside it
+                        app(SyncPipelineService::class)->cancelActiveRuns($record);
                         $record->update([
                             'status' => Status::Pending,
                             'processing' => [
@@ -4255,6 +4262,9 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->modalDescription(__('This will clear any stuck processing locks and allow new syncs to run. Use this if syncs appear stuck.'))
                     ->modalSubmitActionLabel(__('Reset'))
                     ->action(function (Playlist $record) {
+                        // Stop the sync still in flight, so a new one doesn't run beside it
+                        app(SyncPipelineService::class)->cancelActiveRuns($record);
+
                         // Clear processing flag
                         $record->update([
                             'processing' => [
@@ -4541,6 +4551,8 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->icon('heroicon-o-arrow-uturn-left')
                     ->color('warning')
                     ->action(function ($record) {
+                        // Stop the sync still in flight, so a new one doesn't run beside it
+                        app(SyncPipelineService::class)->cancelActiveRuns($record);
                         $record->update([
                             'status' => Status::Pending,
                             'processing' => [

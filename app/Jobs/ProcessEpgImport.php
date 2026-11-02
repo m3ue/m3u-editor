@@ -7,6 +7,7 @@ use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Exceptions\SchedulesDirectAuthBlockedException;
 use App\Exceptions\SchedulesDirectRateLimitException;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Job;
@@ -53,6 +54,9 @@ class ProcessEpgImport implements ShouldQueue
     // Giving a timeout of 60 minutes to the Job to process the file
     public $timeout = 60 * 60;
 
+    // When the import was queued (microtime); null for jobs queued before this was tracked
+    public ?float $queuedAt = null;
+
     /**
      * Sanitize UTF-8 string to remove invalid sequences
      */
@@ -78,6 +82,8 @@ class ProcessEpgImport implements ShouldQueue
         public Epg $epg,
         public ?bool $force = false,
     ) {
+        $this->queuedAt = microtime(true);
+
         // SchedulesDirect syncs share a single external account/API per user, and
         // running more than one at a time for the same account gets it rate-limited
         // or blocked by SD. Route them onto a dedicated queue that Horizon runs with
@@ -89,6 +95,26 @@ class ProcessEpgImport implements ShouldQueue
         if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT && ! $epg->isSchedulesDirectDisabled()) {
             $this->onQueue('schedules-direct');
         }
+    }
+
+    /**
+     * Skip the import, and the chain it starts, once the user resets the EPG
+     * after it was queued.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return $this->queuedAt !== null ? [$this->syncResetGuard()] : [];
+    }
+
+    /**
+     * Guard for this import's jobs. Imports queued before queuedAt was tracked
+     * only guard the chain they start, from now on.
+     */
+    private function syncResetGuard(): SkipIfSyncReset
+    {
+        return new SkipIfSyncReset(Epg::class, $this->epg->id, $this->queuedAt ?? microtime(true));
     }
 
     /**
@@ -432,7 +458,7 @@ class ProcessEpgImport implements ShouldQueue
 
                 // Run completion after channels imported
                 $jobs[] = new ProcessEpgImportComplete($userId, $epgId, $batchNo, $start);
-                Bus::chain($jobs)
+                Bus::chain($this->syncResetGuard()->guard($jobs))
                     ->onConnection('redis') // force to use redis connection
                     ->onQueue('import')
                     ->catch(function (Throwable $e) use ($epg) {
