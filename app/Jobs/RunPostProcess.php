@@ -113,20 +113,7 @@ class RunPostProcess implements ShouldQueue
                 $emailVars = [];
                 $vars = $metadata['email_vars'] ?? [];
                 foreach ($vars as $var) {
-                    if ($var['value'] === 'url') {
-                        if ($modelType === Epg::class) {
-                            $value = route('epg.file', ['uuid' => $this->model->uuid]);
-                        } else {
-                            $value = PlaylistFacade::getUrls($this->model)['m3u'];
-                        }
-                    } else {
-                        if ($var['value'] === 'status') {
-                            $value = $this->model->status->value ?? '';
-                        } else {
-                            $value = $this->model->{$var['value']} ?? '';
-                        }
-                    }
-                    $emailVars[$var['value']] = $value;
+                    $emailVars[$var['value']] = $this->outputVariableValue($var['value']);
                 }
 
                 // Send email using the configured email service
@@ -184,16 +171,7 @@ class RunPostProcess implements ShouldQueue
                 $queryVars = [];
                 $vars = $metadata['post_vars'] ?? [];
                 foreach ($vars as $var) {
-                    if ($var['value'] === 'url') {
-                        if ($modelType === Epg::class) {
-                            $value = route('epg.file', ['uuid' => $this->model->uuid]);
-                        } else {
-                            $value = PlaylistFacade::getUrls($this->model)['m3u'];
-                        }
-                    } else {
-                        $value = $this->model->{$var['value']} ?? '';
-                    }
-                    $queryVars[$var['variable_name']] = $value;
+                    $queryVars[$var['variable_name']] = $this->outputVariableValue($var['value']);
                 }
 
                 // Build custom headers
@@ -296,41 +274,27 @@ class RunPostProcess implements ShouldQueue
                 $exportVars = [];
                 $vars = $metadata['script_vars'] ?? [];
                 foreach ($vars as $var) {
-                    if ($var['value'] === 'url') {
-                        if ($modelType === Epg::class) {
-                            $value = route('epg.file', ['uuid' => $this->model->uuid]);
-                        } else {
-                            $value = PlaylistFacade::getUrls($this->model)['m3u'];
-                        }
-                    } else {
-                        if ($var['value'] === 'status') {
-                            $value = $this->model->status->value ?? '';
-                        } else {
-                            $value = $this->model->{$var['value']} ?? '';
-                        }
-                    }
-                    $exportVars[$var['export_name']] = $value;
+                    $exportVars[$var['export_name']] = $this->outputVariableValue($var['value']);
                 }
                 $output = '';
                 $errors = '';
                 if (count($exportVars) > 0) {
                     $process->setEnv($exportVars);
                 }
-                $hasErrors = false;
                 $process->run(
-                    function ($type, $buffer) use (&$output, &$hasErrors, &$errors) {
+                    function ($type, $buffer) use (&$output, &$errors) {
                         if ($type === SymfonyProcess::OUT) {
                             $output .= $buffer;
                         }
                         if ($type === SymfonyProcess::ERR) {
-                            $hasErrors = true;
                             $errors .= $buffer;
                         }
                     }
                 );
 
-                // Check if the process was successful
-                if (! $hasErrors) {
+                // The exit status decides the outcome; scripts may write
+                // diagnostics to stderr and still succeed.
+                if ($process->isSuccessful()) {
                     // Success!
                     $title = "Post processing for \"$name\" completed successfully";
                     $body = $output;
@@ -350,7 +314,9 @@ class RunPostProcess implements ShouldQueue
                 } else {
                     // Error running the script
                     $title = "Error running post processing for \"$name\"";
-                    $body = $errors;
+                    $body = trim($errors) !== ''
+                        ? $errors
+                        : "Script exited with status {$process->getExitCode()}.";
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
@@ -472,6 +438,23 @@ class RunPostProcess implements ShouldQueue
             'is_empty' => empty($actualValue),
             'is_not_empty' => ! empty($actualValue),
             default => false,
+        };
+    }
+
+    /**
+     * Resolve an output variable (email, webhook or script) from the model.
+     * "time" falls back to the persisted sync duration when no sync log was
+     * passed to the job.
+     */
+    protected function outputVariableValue(string $key): mixed
+    {
+        return match ($key) {
+            'url' => $this->model instanceof Epg
+                ? route('epg.file', ['uuid' => $this->model->uuid])
+                : PlaylistFacade::getUrls($this->model)['m3u'],
+            'status' => $this->model->status->value ?? '',
+            'time' => $this->model->time ?? $this->model->sync_time ?? '',
+            default => $this->model->{$key} ?? '',
         };
     }
 
