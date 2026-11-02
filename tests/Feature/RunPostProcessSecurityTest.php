@@ -139,7 +139,7 @@ it('logs an error when a local script exits nonzero without writing to stderr', 
         ->and($log->message)->toContain('exited with status 7');
 });
 
-it('logs success when a local script exits zero but writes diagnostics to stderr', function () {
+it('logs success and keeps the diagnostics when a local script exits zero but writes to stderr', function () {
     $script = writePostProcessScript($this->scriptDir, 'hook.sh', "printf 'diagnostic only' >&2\necho 'done'");
 
     $log = runPostProcessFor(User::factory()->admin()->create(), [
@@ -148,7 +148,8 @@ it('logs success when a local script exits zero but writes diagnostics to stderr
     ]);
 
     expect($log->status)->toBe('success')
-        ->and(trim($log->message))->toBe('done');
+        ->and($log->message)->toStartWith('done')
+        ->and($log->message)->toContain('diagnostic only');
 });
 
 it('does not let a non-admin save a Local file post process from the form', function () {

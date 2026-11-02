@@ -297,7 +297,9 @@ class RunPostProcess implements ShouldQueue
                 if ($process->isSuccessful()) {
                     // Success!
                     $title = "Post processing for \"$name\" completed successfully";
-                    $body = $output;
+                    $body = trim($errors) !== ''
+                        ? rtrim($output)."\n\n[stderr]\n".$errors
+                        : $output;
                     PostProcessLog::create([
                         'name' => $name,
                         'type' => $postProcess->event,
@@ -469,7 +471,7 @@ class RunPostProcess implements ShouldQueue
             'name' => $this->model->name,
             'url' => $this->model->url ?? null,
             'status' => $this->model->status?->value ?? $this->model->status,
-            'time' => $this->model->sync_time,
+            'time' => $this->model->time ?? $this->model->sync_time,
             'added_groups' => $this->model->added_groups ?? null,
             'removed_groups' => $this->model->removed_groups ?? null,
             'added_categories' => $this->model->added_categories ?? null,
@@ -484,43 +486,5 @@ class RunPostProcess implements ShouldQueue
             'removed_channel_names' => $this->model->removed_channel_names ?? null,
             default => null,
         };
-    }
-
-    /**
-     * Replace placeholders in a string with actual model values
-     * Placeholders are in the format {{field_name}}
-     */
-    protected function replacePlaceholders(string $content, string $modelType): string
-    {
-        // Define available placeholders and their values
-        $placeholders = [
-            'id' => $this->model->id,
-            'uuid' => $this->model->uuid,
-            'name' => $this->model->name,
-            'url' => $modelType === Epg::class
-                ? route('epg.file', ['uuid' => $this->model->uuid])
-                : PlaylistFacade::getUrls($this->model)['m3u'],
-            'status' => $this->model->status?->value ?? $this->model->status ?? '',
-            'time' => $this->model->sync_time ?? '',
-            'added_groups' => $this->model->added_groups ?? 0,
-            'removed_groups' => $this->model->removed_groups ?? 0,
-            'added_categories' => $this->model->added_categories ?? 0,
-            'removed_categories' => $this->model->removed_categories ?? 0,
-            'added_channels' => $this->model->added_channels ?? 0,
-            'removed_channels' => $this->model->removed_channels ?? 0,
-            'added_group_names' => $this->model->added_group_names ?? '',
-            'removed_group_names' => $this->model->removed_group_names ?? '',
-            'added_category_names' => $this->model->added_category_names ?? '',
-            'removed_category_names' => $this->model->removed_category_names ?? '',
-            'added_channel_names' => $this->model->added_channel_names ?? '',
-            'removed_channel_names' => $this->model->removed_channel_names ?? '',
-        ];
-
-        // Replace all placeholders
-        foreach ($placeholders as $key => $value) {
-            $content = str_replace('{{'.$key.'}}', $value, $content);
-        }
-
-        return $content;
     }
 }

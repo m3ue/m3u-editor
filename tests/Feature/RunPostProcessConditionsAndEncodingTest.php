@@ -163,3 +163,32 @@ it('prefers the sync log duration for the Sync time output variable when one is 
 
     Http::assertSent(fn (Request $request): bool => (float) $request['duration'] === 12.5);
 });
+
+it('evaluates the Sync time condition against the sync log duration when one is supplied', function () {
+    Http::preventStrayRequests();
+    Http::fake(['http://198.51.100.1/*' => Http::response('ok', 200)]);
+
+    $playlist = Playlist::factory()->for(User::factory()->create())->createQuietly([
+        'status' => Status::Completed,
+        'sync_time' => 1.0,
+    ]);
+    $postProcess = PostProcess::factory()->create([
+        'user_id' => $playlist->user_id,
+        'event' => 'synced',
+        'enabled' => true,
+        'conditions' => [
+            ['field' => 'time', 'operator' => 'greater_than', 'value' => '10'],
+        ],
+        'metadata' => [
+            'local' => 'url',
+            'path' => 'http://198.51.100.1/hook',
+            'post' => false,
+        ],
+    ]);
+    $syncLog = new PlaylistSyncStatus(['sync_stats' => ['time' => 12.5]]);
+
+    (new RunPostProcess($postProcess, $playlist, $syncLog))->handle(app(GeneralSettings::class));
+
+    expect(PostProcessLog::where('post_process_id', $postProcess->id)->sole()->status)->toBe('success');
+    Http::assertSentCount(1);
+});
