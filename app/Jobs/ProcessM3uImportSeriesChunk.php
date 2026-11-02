@@ -147,6 +147,10 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ->where('source_category_id', $sourceCategoryId)
             ->pluck('last_modified', 'source_series_id');
 
+        $existingCovers = $playlist->series()
+            ->where('source_category_id', $sourceCategoryId)
+            ->pluck('cover', 'source_series_id');
+
         $insertBuffer = [];
         $listedExistingIds = [];
         $listedAnySeries = false;
@@ -181,13 +185,23 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             if ($existingSeriesIds->has($item->series_id)) {
                 $listedExistingIds[] = $item->series_id;
 
-                // Already in DB — only update last_modified if it changed
+                // Already in DB — only update last_modified and the provider cover if they changed
+                $changes = [];
                 $storedModified = $existingSeriesIds->get($item->series_id);
                 if ($lastModified && $lastModified !== $storedModified) {
+                    $changes['last_modified'] = $lastModified;
+                }
+
+                $refreshedCover = $this->refreshedProviderCover($existingCovers->get($item->series_id), $item->cover ?? null);
+                if ($refreshedCover !== null) {
+                    $changes['cover'] = $refreshedCover;
+                }
+
+                if ($changes !== []) {
                     $playlist->series()
                         ->where('source_series_id', $item->series_id)
                         ->where('source_category_id', $sourceCategoryId)
-                        ->update(['last_modified' => $lastModified]);
+                        ->update($changes);
                 }
 
                 continue;
@@ -244,6 +258,33 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         }
 
         $playlist->update($update);
+    }
+
+    /**
+     * The provider's new cover for a series already in the DB, or null to keep the stored one.
+     *
+     * Some providers sign cover URLs with a short expiry, so the cover saved when the series was
+     * first imported stops loading a few days later. The listing carries a fresh URL, so take it
+     * when the stored cover is blank or comes from the same image host. A cover from another host
+     * (TMDB, or one set by hand) is left alone.
+     */
+    private function refreshedProviderCover(?string $storedCover, mixed $providerCover): ?string
+    {
+        $providerCover = is_string($providerCover) ? trim($providerCover) : '';
+        if ($providerCover === '' || $providerCover === $storedCover || ! filter_var($providerCover, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+
+        if (blank($storedCover)) {
+            return $providerCover;
+        }
+
+        $storedHost = parse_url($storedCover, PHP_URL_HOST);
+        $providerHost = parse_url($providerCover, PHP_URL_HOST);
+
+        return is_string($storedHost) && is_string($providerHost) && strcasecmp($storedHost, $providerHost) === 0
+            ? $providerCover
+            : null;
     }
 
     /**
