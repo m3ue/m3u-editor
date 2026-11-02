@@ -3960,7 +3960,7 @@ class XtreamApiController extends Controller
         $selectedSet = array_flip($integration->aiostreams_selected_catalog_ids ?? []);
 
         return collect($all)
-            ->filter(fn (array $catalog) => isset($selectedSet[$catalog['id'].'_'.$catalog['type']]))
+            ->filter(fn (array $catalog) => isset($selectedSet[MediaServerIntegration::aiostreamsCatalogKey($catalog)]))
             ->values()
             ->all();
     }

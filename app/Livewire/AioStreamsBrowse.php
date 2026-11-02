@@ -161,7 +161,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
 
         if (! $integration->aiostreams_enable_all_catalogs) {
             $selected = collect($integration->aiostreams_selected_catalog_ids ?? [])->flip();
-            $catalogs = $catalogs->filter(fn (array $c) => $selected->has($c['id'].'_'.$c['type']));
+            $catalogs = $catalogs->filter(fn (array $c) => $selected->has(MediaServerIntegration::aiostreamsCatalogKey($c)));
         }
 
         if ($this->typeFilter !== 'all') {

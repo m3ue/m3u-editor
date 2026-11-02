@@ -68,6 +68,31 @@ it('reports all valid catalogs when the manifest is well-formed', function () {
         ->and($integration->aiostreams_catalogs)->toHaveCount(2);
 });
 
+it('keeps manual catalog selections that are still in the manifest and prunes removed ones', function () {
+    $integration = makeAioIntegration();
+    $integration->forceFill([
+        'aiostreams_enable_all_catalogs' => false,
+        'aiostreams_selected_catalog_ids' => ['popular_movie', 'popular_series', 'gone_movie'],
+    ])->save();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'catalogs' => [
+                ['id' => 'popular', 'type' => 'movie', 'name' => 'Popular'],
+                ['id' => 'popular', 'type' => 'series', 'name' => 'Popular'],
+                ['id' => 'recent', 'type' => 'movie', 'name' => 'Recent'],
+            ],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_selected_catalog_ids)->toBe(['popular_movie', 'popular_series']);
+});
+
 // ── aiostreams_meta_id_prefixes: computed from the manifest's `meta` resource
 // declaration so fetchMeta() can skip a guaranteed-404 call instead of always
 // trying AIOStreams first and falling back after the fact.

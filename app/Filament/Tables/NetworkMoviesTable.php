@@ -4,6 +4,7 @@ namespace App\Filament\Tables;
 
 use App\Models\Channel;
 use App\Models\Group;
+use App\Services\LogoCacheService;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -42,7 +43,7 @@ class NetworkMoviesTable
                     ->label(__('Cover'))
                     ->height(60)
                     ->width(40)
-                    ->defaultImageUrl('/images/placeholder-movie.png'),
+                    ->defaultImageUrl(fn (): string => LogoCacheService::getPlaceholderUrl('poster')),
 
                 TextColumn::make('title')
                     ->label(__('Movie Title'))

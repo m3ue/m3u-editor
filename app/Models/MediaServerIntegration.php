@@ -437,6 +437,17 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Selection key for an AIOStreams catalog. Catalog ids are only unique per
+     * type, so selections are stored as "{id}_{type}".
+     *
+     * @param  array{id: string, type: string}  $catalog
+     */
+    public static function aiostreamsCatalogKey(array $catalog): string
+    {
+        return $catalog['id'].'_'.$catalog['type'];
+    }
+
+    /**
      * Get the base URL derived from the manifest URL (strips /manifest.json).
      */
     public function getManifestBaseUrlAttribute(): ?string

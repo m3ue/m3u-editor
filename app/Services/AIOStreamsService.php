@@ -114,9 +114,12 @@ class AIOStreamsService implements MediaServer
 
         // Prune any selected catalog IDs that no longer exist in the manifest.
         if (! $this->integration->aiostreams_enable_all_catalogs) {
-            $validIds = collect($catalogs)->pluck('id')->flip()->all();
+            $validKeys = collect($catalogs)
+                ->map(MediaServerIntegration::aiostreamsCatalogKey(...))
+                ->flip()
+                ->all();
             $pruned = collect($this->integration->aiostreams_selected_catalog_ids ?? [])
-                ->filter(fn (string $id) => isset($validIds[$id]))
+                ->filter(fn (string $key) => isset($validKeys[$key]))
                 ->values()
                 ->all();
             $this->integration->aiostreams_selected_catalog_ids = $pruned;
