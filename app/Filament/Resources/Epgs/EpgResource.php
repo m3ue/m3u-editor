@@ -470,7 +470,19 @@ class EpgResource extends Resource implements CopilotResource
                                 ->required(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value)
                                 ->searchable()
                                 ->preload()
-                                ->options(function (SchedulesDirectService $service) {
+                                ->options(function (SchedulesDirectService $service, ?string $state) {
+                                    // No discovery requests while the integration is switched off;
+                                    // keep the saved country selectable so the record stays editable.
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        $options = ['USA' => 'United States', 'CAN' => 'Canada'];
+
+                                        if (filled($state)) {
+                                            $options[$state] ??= $state;
+                                        }
+
+                                        return $options;
+                                    }
+
                                     try {
                                         $countries = $service->getCountries();
                                         $options = [];
@@ -507,6 +519,10 @@ class EpgResource extends Resource implements CopilotResource
                                 ->multiple()
                                 ->searchable()
                                 ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        return [];
+                                    }
+
                                     $country = $get('sd_country');
                                     $postalCode = $get('sd_postal_code');
                                     $username = $get('sd_username');
@@ -558,6 +574,10 @@ class EpgResource extends Resource implements CopilotResource
                                 })
                                 ->getOptionLabelsUsing(function (array $values, Get $get, SchedulesDirectService $service): array {
                                     $labels = array_combine($values, $values);
+
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        return $labels;
+                                    }
 
                                     try {
                                         $country = $get('sd_country');

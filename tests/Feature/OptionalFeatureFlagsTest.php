@@ -13,18 +13,21 @@ use App\Filament\Clusters\Settings\Pages\ManageCacheSettings;
 use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
+use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Filament\Resources\Plugins\PluginResource;
 use App\Jobs\ProcessEpgImport;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Epg;
 use App\Models\MediaServerIntegration;
+use App\Models\Playlist;
 use App\Models\User;
 use App\Services\CachedContentDispatchService;
 use App\Services\SchedulesDirectService;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
+use Livewire\Livewire;
 
 beforeEach(function () {
     $this->user = User::factory()->create(['is_admin' => true, 'permissions' => ['use_tools', 'use_integrations']]);
@@ -123,6 +126,43 @@ it('hides AIOStreams integrations and the AIOStreams type while AIOStreams is di
 
     expect(MediaServerIntegrationResource::typeOptions())->not->toHaveKey('aiostreams')
         ->and(MediaServerIntegrationResource::getEloquentQuery()->pluck('id')->all())->not->toContain($integration->id);
+});
+
+it('hides the playlist AIOStreams tab while AIOStreams is disabled or no integration is enabled', function () {
+    Bus::fake();
+    $playlist = Playlist::factory()->for($this->user)->createQuietly();
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldHidden('aiostreams_integration_id');
+
+    MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test AIOStreams',
+        'type' => 'aiostreams',
+        'enabled' => true,
+        'manifest_url' => 'https://aiostreams.test/manifest.json',
+    ]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldVisible('aiostreams_integration_id');
+
+    config()->set('services.aiostreams.enabled', false);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldHidden('aiostreams_integration_id');
+});
+
+it('hides the playlist Requests tab from users without the integrations permission', function () {
+    Bus::fake();
+    $playlist = Playlist::factory()->for($this->user)->createQuietly();
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldVisible('request_enabled');
+
+    $this->user->update(['is_admin' => false, 'permissions' => ['use_tools']]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->assertFormFieldHidden('request_enabled');
 });
 
 it('turns caching off regardless of the Enable cache setting while cached content is disabled', function () {

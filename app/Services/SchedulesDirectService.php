@@ -449,7 +449,8 @@ class SchedulesDirectService
             // Carbon 3 returns a UTC instance from a bare timestamp; pin it to the
             // app timezone so it round-trips through the tz-naive datetime column.
             is_numeric($tokenExpires) => Carbon::createFromTimestamp((int) $tokenExpires, config('app.timezone')),
-            default => now()->addDay(),
+            // Elapsed seconds, not a calendar day, which is 23 or 25 hours across DST.
+            default => now()->addSeconds(86400),
         };
 
         return $expiresAt->subSeconds(self::TOKEN_EXPIRY_SKEW_SECONDS);

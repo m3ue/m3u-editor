@@ -13,6 +13,7 @@ use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
@@ -93,6 +94,35 @@ it('falls back to a 24 hour lifetime when tokenExpires is absent', function () {
         ->toBeGreaterThan(now()->addHours(23)->timestamp)
         ->toBeLessThanOrEqual(now()->addDay()->timestamp);
 });
+
+it('keeps the 24 hour fallback lifetime in elapsed time across a DST change', function (string $issuedAt) {
+    $originalTimezone = date_default_timezone_get();
+    config(['app.timezone' => 'Europe/Berlin']);
+    date_default_timezone_set('Europe/Berlin');
+
+    try {
+        $this->travelTo(Carbon::parse($issuedAt));
+        Http::fake([
+            'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'fresh-token']),
+        ]);
+
+        $epg = sdEpg();
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+
+        expect($epg->fresh()->sd_token_expires_at->timestamp - now()->timestamp)->toBe(86340);
+
+        // Past 24 elapsed hours the stored token must not be reused.
+        $this->travel(87000)->seconds();
+        (new SchedulesDirectService)->authenticateFromEpg($epg->fresh());
+
+        Http::assertSentCount(2);
+    } finally {
+        date_default_timezone_set($originalTimezone);
+    }
+})->with([
+    'spring forward' => '2026-03-28 12:00:00',
+    'fall back' => '2026-10-24 12:00:00',
+]);
 
 it('reuses a valid stored token and issues zero /token requests during a sync', function () {
     Storage::fake('local');
