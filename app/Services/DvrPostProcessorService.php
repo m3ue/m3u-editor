@@ -109,15 +109,14 @@ class DvrPostProcessorService
         }
 
         // ── Step 1: Concatenate HLS → single .mp4 ───────────────────────────
-        $outputRelPath = $this->buildOutputPath($recording);
-        $outputFullPath = Storage::disk($disk)->path($outputRelPath);
-        $outputDir = dirname($outputFullPath);
-
-        if (! is_dir($outputDir) && ! mkdir($outputDir, 0755, true)) {
-            $this->markFailed($recording, "Could not create output directory: {$outputDir}");
+        try {
+            $outputRelPath = $this->reserveOutputPath($recording, $disk);
+        } catch (Exception $e) {
+            $this->markFailed($recording, $e->getMessage());
 
             return;
         }
+        $outputFullPath = Storage::disk($disk)->path($outputRelPath);
 
         $ffmpegPath = (string) config('dvr.ffmpeg_path', '/usr/bin/ffmpeg');
 
@@ -134,6 +133,7 @@ class DvrPostProcessorService
 
             $this->concatHls($ffmpegPath, $m3u8FullPath, $outputFullPath, $outputFormat);
         } catch (Exception $e) {
+            $this->releaseEmptyReservation($recording, $disk);
             $this->markFailed($recording, "HLS concat failed: {$e->getMessage()}");
 
             return;
@@ -286,6 +286,94 @@ class DvrPostProcessorService
         }
 
         return "library/{$year}/{$title}/{$episode}.{$ext}";
+    }
+
+    /**
+     * Pick and claim a library path for this recording that no other recording uses.
+     *
+     * buildOutputPath() is only unique per title + date (or season/episode), so two
+     * recordings of the same programme on the same day — or two jobs post-processing
+     * at once — used to write the same file, the later one silently replacing the
+     * earlier while both rows kept pointing at it. The first recording keeps the plain
+     * name; later ones get " (2)", " (3)", ... before the extension.
+     *
+     * A name is claimed by creating the file exclusively (fopen 'x'), which is atomic
+     * even when several post-processing workers race, and the claim is saved to
+     * file_path straight away so a retried job reuses its own reservation instead of
+     * taking another name.
+     *
+     * @throws Exception when no free name can be claimed
+     */
+    public function reserveOutputPath(DvrRecording $recording, string $disk): string
+    {
+        $storage = Storage::disk($disk);
+
+        // A previous attempt of this same recording already claimed a name. Reuse it only
+        // if no other recording uses it: a legacy file shared by two rows (from before
+        // names were unique) belongs to the other row too, so a reprocessed row gets its own.
+        if ($recording->file_path && str_starts_with($recording->file_path, 'library/')
+            && ! DvrRecording::where('file_path', $recording->file_path)->whereKeyNot($recording->getKey())->exists()) {
+            $dir = dirname($storage->path($recording->file_path));
+            if (! is_dir($dir) && ! @mkdir($dir, 0755, true) && ! is_dir($dir)) {
+                throw new Exception("Could not create output directory: {$dir}");
+            }
+
+            return $recording->file_path;
+        }
+
+        $base = $this->buildOutputPath($recording);
+        $dir = dirname($storage->path($base));
+        if (! is_dir($dir) && ! @mkdir($dir, 0755, true) && ! is_dir($dir)) {
+            throw new Exception("Could not create output directory: {$dir}");
+        }
+
+        for ($n = 1; $n <= 999; $n++) {
+            $candidate = $n === 1 ? $base : preg_replace('/(\.[^.\/]+)$/', " ({$n})$1", $base);
+
+            // Taken by another recording row (its file may even be missing right now).
+            if (DvrRecording::where('file_path', $candidate)->whereKeyNot($recording->getKey())->exists()) {
+                continue;
+            }
+
+            // Taken on disk (another recording, a worker racing us, or a stray file).
+            $handle = @fopen($storage->path($candidate), 'x');
+            if ($handle === false) {
+                continue;
+            }
+            fclose($handle);
+
+            $recording->update(['file_path' => $candidate]);
+
+            if ($n > 1) {
+                Log::info('DVR post-processing: output name already in use, using a numbered name', [
+                    'recording_id' => $recording->id,
+                    'wanted' => $base,
+                    'file_path' => $candidate,
+                ]);
+            }
+
+            return $candidate;
+        }
+
+        throw new Exception("Could not reserve a free output file name for {$base}");
+    }
+
+    /**
+     * Undo reserveOutputPath() after a failed concat when nothing was written, so a
+     * failed recording doesn't leave an empty placeholder file or claim a name.
+     */
+    private function releaseEmptyReservation(DvrRecording $recording, string $disk): void
+    {
+        if (! $recording->file_path) {
+            return;
+        }
+
+        $fullPath = Storage::disk($disk)->path($recording->file_path);
+        clearstatcache(true, $fullPath);
+        if (file_exists($fullPath) && filesize($fullPath) === 0) {
+            @unlink($fullPath);
+            $recording->update(['file_path' => null]);
+        }
     }
 
     /**
