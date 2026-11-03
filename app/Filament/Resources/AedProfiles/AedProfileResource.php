@@ -8,6 +8,7 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\EditAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\ListAedProfiles;
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Group;
@@ -15,7 +16,6 @@ use App\Services\AedAiRegexSuggestionService;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
 use App\Services\EspnSportsService;
-use App\Services\Sports\SportsAedRefresher;
 use App\Services\Sports\SportsAedResolver;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
@@ -667,11 +667,13 @@ class AedProfileResource extends Resource implements CopilotResource
                             }
                             RateLimiter::hit($limiterKey, 120);
 
-                            $games = app(SportsAedRefresher::class)->refresh($record, force: true);
+                            // In the background: a wide league set is hundreds of
+                            // ESPN requests, too long to hold the page for
+                            RefreshSportsAedProfile::dispatch($record->id, force: true);
                             Notification::make()
                                 ->success()
-                                ->title(__('Games refreshed'))
-                                ->body(__(':count games found. The guide rebuilds the next time it is requested.', ['count' => $games]))
+                                ->title(__('Refreshing games'))
+                                ->body(__('Games are being fetched from ESPN in the background. The guide rebuilds the next time it is requested after that.'))
                                 ->send();
                         })
                         ->requiresConfirmation()

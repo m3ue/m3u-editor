@@ -57,8 +57,11 @@ class EspnSportsService
     /** How long one process may hold the ESPN fetch lock. */
     private const int FETCH_LOCK_SECONDS = 120;
 
-    /** How long another process waits for that lock before serving the cache. */
-    private const int FETCH_LOCK_WAIT_SECONDS = 60;
+    /**
+     * How long a background fetch waits for another's lock before serving
+     * the cache. Well under a web request's time limit, should one ever wait.
+     */
+    private const int FETCH_LOCK_WAIT_SECONDS = 10;
 
     /** How long ESPN requests pause after ESPN refuses or fails a batch. */
     private const int PAUSE_MINUTES = 10;
@@ -202,18 +205,43 @@ class EspnSportsService
      */
     public function rawFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to, bool $liveScores = true): array
     {
+        return $this->collectFixtures($leagueIds, $from, $to, $liveScores, fetchMissing: true)[0];
+    }
+
+    /**
+     * [rawFixtures] for game matching, from the cache alone: EPG requests
+     * (a TV's guide, xmltv.php) must never wait on ESPN. `complete` is false
+     * when some league-day isn't cached yet; [SportsAedRefresher], run in the
+     * background, fills it.
+     *
+     * @param  list<string>  $leagueIds
+     * @return array{fixtures: list<array<string, mixed>>, complete: bool}
+     */
+    public function cachedFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): array
+    {
+        [$fixtures, $missing] = $this->collectFixtures($leagueIds, $from, $to, liveScores: false, fetchMissing: false);
+
+        return ['fixtures' => $fixtures, 'complete' => $missing === 0];
+    }
+
+    /**
+     * @param  list<string>  $leagueIds
+     * @return array{0: list<array<string, mixed>>, 1: int} fixtures, and how many league-days weren't cached and weren't fetched
+     */
+    private function collectFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to, bool $liveScores, bool $fetchMissing): array
+    {
         $from = CarbonImmutable::instance($from)->utc();
         $to = CarbonImmutable::instance($to)->utc();
         if ($to->greaterThan($from->addDays(self::MAX_RANGE_DAYS))) {
             $to = $from->addDays(self::MAX_RANGE_DAYS);
         }
         if (! $to->greaterThan($from)) {
-            return [];
+            return [[], 0];
         }
 
         $leagues = array_values(array_filter(array_map(self::findLeague(...), array_unique($leagueIds))));
 
-        $scoreboards = $this->scoreboards($leagues, $this->days($from, $to), $liveScores);
+        [$scoreboards, $missing] = $this->scoreboards($leagues, $this->days($from, $to), $liveScores, $fetchMissing);
 
         $fixtures = [];
         foreach ($scoreboards as $dayFixtures) {
@@ -229,7 +257,7 @@ class EspnSportsService
         $fixtures = array_values($fixtures);
         usort($fixtures, fn (array $a, array $b): int => strcmp($a['start'], $b['start']));
 
-        return $fixtures;
+        return [$fixtures, $missing];
     }
 
     /**
@@ -291,12 +319,13 @@ class EspnSportsService
     /**
      * The teams of each of [$leagueIds], by league, with crests as ESPN
      * serves them: for server-side matching, which never shows them. Lists
-     * not cached yet are fetched in parallel batches.
+     * not cached yet are fetched in parallel batches, or, without
+     * [$fetchMissing] (an EPG request), left out.
      *
      * @param  list<string>  $leagueIds
      * @return array<string, list<array<string, mixed>>>
      */
-    public function teamsByLeague(array $leagueIds, bool $holdsLock = false): array
+    public function teamsByLeague(array $leagueIds, bool $fetchMissing = true, bool $holdsLock = false): array
     {
         $keys = [];
         foreach (array_unique($leagueIds) as $leagueId) {
@@ -316,6 +345,9 @@ class EspnSportsService
             }
         }
 
+        if (! $fetchMissing) {
+            return $teams;
+        }
         if ($misses !== [] && ! $holdsLock) {
             try {
                 return Cache::lock($this->fetchLockKey(), self::FETCH_LOCK_SECONDS)
@@ -462,11 +494,14 @@ class EspnSportsService
      * ESPN's all-leagues scoreboard, split by league, instead of one request
      * per league.
      *
+     * Without [$fetchMissing], nothing is fetched and the second value
+     * counts the league-days that would have been.
+     *
      * @param  list<array<string, mixed>>  $leagues
      * @param  list<CarbonImmutable>  $days
-     * @return list<list<array<string, mixed>>>
+     * @return array{0: list<list<array<string, mixed>>>, 1: int}
      */
-    private function scoreboards(array $leagues, array $days, bool $liveScores, bool $holdsLock = false): array
+    private function scoreboards(array $leagues, array $days, bool $liveScores, bool $fetchMissing, bool $holdsLock = false): array
     {
         $soccerIds = [];
         foreach ($leagues as $league) {
@@ -523,15 +558,20 @@ class EspnSportsService
             }
         }
 
-        // One process fetches at a time; the others wait, then read what it
-        // cached (a TV opening its guide sends several EPG requests at once).
-        if ($misses !== [] && ! $holdsLock) {
+        if (! $fetchMissing) {
+            return [$this->withSoccerDays($results, $soccerDays, $soccerIds), count($misses)];
+        }
+
+        // A wide matching fetch (hundreds of requests, run in the background)
+        // goes one at a time: a second one waits briefly, then reads what the
+        // first cached. A client's own few leagues never wait on it.
+        if ($misses !== [] && ! $liveScores && ! $holdsLock) {
             try {
                 return Cache::lock($this->fetchLockKey(), self::FETCH_LOCK_SECONDS)
-                    ->block(self::FETCH_LOCK_WAIT_SECONDS, fn (): array => $this->scoreboards($leagues, $days, $liveScores, holdsLock: true));
+                    ->block(self::FETCH_LOCK_WAIT_SECONDS, fn (): array => $this->scoreboards($leagues, $days, $liveScores, $fetchMissing, holdsLock: true));
             } catch (LockTimeoutException) {
                 // Still fetching elsewhere: serve what's cached
-                $misses = [];
+                return [$this->withSoccerDays($results, $soccerDays, $soccerIds), count($misses)];
             }
         }
 
@@ -560,6 +600,20 @@ class EspnSportsService
             array_push($soccerDays, ...$fetchedSoccerDays);
         }
 
+        return [$this->withSoccerDays($results, $soccerDays, $soccerIds), 0];
+    }
+
+    /**
+     * [$results] plus the requested soccer leagues' fixtures from all-leagues
+     * soccer days.
+     *
+     * @param  list<list<array<string, mixed>>>  $results
+     * @param  list<array<string, list<array<string, mixed>>>>  $soccerDays
+     * @param  list<string>  $soccerIds
+     * @return list<list<array<string, mixed>>>
+     */
+    private function withSoccerDays(array $results, array $soccerDays, array $soccerIds): array
+    {
         foreach ($soccerDays as $byLeague) {
             foreach ($soccerIds as $leagueId) {
                 $results[] = $byLeague[$leagueId] ?? [];

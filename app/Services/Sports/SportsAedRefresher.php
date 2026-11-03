@@ -39,6 +39,8 @@ class SportsAedRefresher
             $this->espn->forgetFixtures($leagueIds, $from, $to);
         }
         $fixtures = $this->espn->rawFixtures($leagueIds, $from, $to, liveScores: false);
+        // Matching also reads the playing leagues' full team lists
+        $this->espn->teamsByLeague(array_values(array_unique(array_column($fixtures, 'league_id'))));
 
         $fingerprint = md5(json_encode(array_map(fn (array $fixture): array => [
             $fixture['league_id'],

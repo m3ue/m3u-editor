@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\ListAedProfiles;
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Epg;
@@ -11,12 +12,14 @@ use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\AedExtractorService;
 use App\Services\EpgCacheService;
+use App\Services\Sports\SportsAedRefresher;
 use App\Services\Sports\SportsTeamMatcher;
 use App\Settings\GeneralSettings;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -106,9 +109,21 @@ function sportsAedProfile(User $user, array $attributes = []): AedProfile
     ]);
 }
 
+/**
+ * What the background refresh does before EPG requests can match: fetch the
+ * profile's games and team lists into the cache.
+ */
+function warmSportsAed(AedProfile $profile): void
+{
+    app(SportsAedRefresher::class)->refresh($profile);
+}
+
 beforeEach(function () {
     Cache::flush();
     Http::preventStrayRequests();
+    // config/queue.php hard-codes Redis: an unfaked dispatch would land on
+    // the dev queue
+    Queue::fake();
     $this->travelTo(now()->parse('2026-11-03 18:00:00', 'UTC'));
 });
 
@@ -133,6 +148,15 @@ it('matches games in any provider title format and falls back for the rest', fun
         'no_event_format' => '{channel}',
         'output_timezone' => 'America/New_York',
     ]);
+
+    // An EPG request never waits on ESPN: cold, it matches nothing (falling
+    // back to the no-event title) and queues the fetch for later requests
+    expect(app(AedExtractorService::class)->resolve($profile, 'ESPN+ 53: Winnipeg Jets vs. Montreal Canadiens')->title)
+        ->toBe('ESPN+ 53: Winnipeg Jets vs. Montreal Canadiens');
+    Http::assertNothingSent();
+    Queue::assertPushed(RefreshSportsAedProfile::class, fn (RefreshSportsAedProfile $job): bool => $job->profileId === $profile->id && ! $job->force);
+
+    warmSportsAed($profile);
     $extractor = app(AedExtractorService::class);
 
     $espnPlus = $extractor->resolve($profile, 'ESPN+ 53: Winnipeg Jets vs. Montreal Canadiens @ Nov 03 7:00PM ET');
@@ -159,6 +183,7 @@ it('does not read a team inside a longer name of another team', function () {
     enableSportsAed();
     fakeSportsAedEspn();
     $profile = sportsAedProfile(User::factory()->create(), ['sports_league_ids' => ['basketball/womens-college-basketball']]);
+    warmSportsAed($profile);
     $extractor = app(AedExtractorService::class);
 
     // "Southern" (Jaguars) sits inside "Southern Illinois" (Salukis); the real
@@ -176,6 +201,7 @@ it('ignores a stale title whose own date is far from the game', function () {
         'time_format' => 'Y-m-d H:i:s',
         'source_timezone' => 'America/New_York',
     ]);
+    warmSportsAed($profile);
     $extractor = app(AedExtractorService::class);
 
     $stale = $extractor->resolve($profile, 'NHL 07: Utah Mammoth vs. Toronto Maple Leafs (2026-10-27 19:00:00)');
@@ -203,6 +229,7 @@ it('prefers the men\'s game for an unmarked title and the women\'s for a marked 
         default => [$derby('m1', '2026-11-03T20:00Z')],
     }]));
     $profile = sportsAedProfile(User::factory()->create(), ['sports_league_ids' => ['soccer/eng.1', 'soccer/eng.w.1']]);
+    warmSportsAed($profile);
     $extractor = app(AedExtractorService::class);
 
     expect($extractor->resolve($profile, 'EPL 01: Arsenal vs Chelsea')->start->toIso8601ZuluString())->toBe('2026-11-03T20:00:00Z')
@@ -227,6 +254,7 @@ it('writes the matched game into the XMLTV and JSON EPG', function () {
     $user = User::factory()->create();
     $playlist = Playlist::factory()->for($user)->create(['dummy_epg' => false]);
     $profile = sportsAedProfile($user);
+    warmSportsAed($profile);
     $channel = Channel::factory()->for($user)->for($playlist)->create([
         'enabled' => true,
         'is_vod' => false,
@@ -263,6 +291,7 @@ it('serves the matched game over the mapped guide in the Xtream batch EPG the TV
     $auth = PlaylistAuth::create(['name' => 'TV', 'username' => 'sports-tv', 'password' => 'secret', 'enabled' => true, 'user_id' => $user->id]);
     $playlist->playlistAuths()->attach($auth->id);
     $profile = sportsAedProfile($user, ['override' => true]);
+    warmSportsAed($profile);
     $epg = Epg::factory()->for($user)->create(['is_cached' => true]);
     $channel = Channel::factory()->for($user)->for($playlist)->create([
         'enabled' => true,
@@ -328,18 +357,24 @@ it('refreshes a profile\'s games from ESPN on demand, at most every couple of mi
     Storage::disk('local')->put($cachePath, '<tv/>');
     $sent = count(Http::recorded());
 
+    // Queued, not run while the page waits
     Livewire::test(ListAedProfiles::class)
         ->assertActionHidden(TestAction::make('refresh_games')->table($plain))
         ->callAction(TestAction::make('refresh_games')->table($profile))
-        ->assertNotified('Games refreshed');
+        ->assertNotified('Refreshing games');
+    expect(count(Http::recorded()))->toBe($sent);
+    $job = Queue::pushed(RefreshSportsAedProfile::class)->sole();
+    expect($job->profileId)->toBe($profile->id)->and($job->force)->toBeTrue();
+
+    // The job refetches from ESPN and clears the guide whatever changed
+    app()->call([$job, 'handle']);
     expect(Storage::disk('local')->exists($cachePath))->toBeFalse()
         ->and(count(Http::recorded()))->toBeGreaterThan($sent);
 
-    $sent = count(Http::recorded());
     Livewire::test(ListAedProfiles::class)
         ->callAction(TestAction::make('refresh_games')->table($profile))
         ->assertNotified('Games were just refreshed');
-    expect(count(Http::recorded()))->toBe($sent);
+    expect(Queue::pushed(RefreshSportsAedProfile::class))->toHaveCount(1);
 
     RateLimiter::clear($limiterKey);
 });

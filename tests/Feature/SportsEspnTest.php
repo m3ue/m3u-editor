@@ -306,3 +306,21 @@ it('pauses ESPN requests for a while after it rate limits a batch', function () 
     $espn->rawFixtures(...$window);
     expect(count(Http::recorded()))->toBeGreaterThan($sent);
 });
+
+it('serves a client\'s leagues while a background matching fetch holds the lock', function () {
+    enableSports();
+    Http::fake(fn () => Http::response(['events' => [espnEvent('401', '2026-11-03T23:00Z')]]));
+    $lock = Cache::lock('sports:espn:v4:'.md5(EspnSportsService::DEFAULT_API_URL).':fetching', 120);
+    expect($lock->get())->toBeTrue();
+
+    $started = microtime(true);
+    $fixtures = app(EspnSportsService::class)->fixtures(
+        ['hockey/nhl'],
+        CarbonImmutable::parse('2026-11-03 12:00:00'),
+        CarbonImmutable::parse('2026-11-04 12:00:00'),
+    );
+
+    expect($fixtures)->toHaveCount(1)
+        ->and(microtime(true) - $started)->toBeLessThan(5.0);
+    $lock->release();
+});

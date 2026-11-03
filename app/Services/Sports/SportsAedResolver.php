@@ -2,6 +2,7 @@
 
 namespace App\Services\Sports;
 
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Services\AedEvent;
 use App\Services\EspnSportsService;
@@ -325,10 +326,17 @@ class SportsAedResolver
                 }
             }
         };
-        $rawFixtures = $this->espn->rawFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days), liveScores: false);
+        // EPG requests never wait on ESPN: match what's cached, and have a
+        // background refresh fetch whatever isn't yet
+        $cached = $this->espn->cachedFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days));
+        $rawFixtures = $cached['fixtures'];
         // Only leagues playing in the window need their full team lists
         $playingLeagueIds = array_values(array_unique(array_column($rawFixtures, 'league_id')));
-        foreach ($this->espn->teamsByLeague($playingLeagueIds) as $leagueId => $teams) {
+        $teamsByLeague = $this->espn->teamsByLeague($playingLeagueIds, fetchMissing: false);
+        if (! $cached['complete'] || count($teamsByLeague) < count($playingLeagueIds)) {
+            RefreshSportsAedProfile::dispatch($profile->id);
+        }
+        foreach ($teamsByLeague as $leagueId => $teams) {
             foreach ($teams as $team) {
                 $addNames($team, $leagueId.':'.$team['id']);
             }
