@@ -251,7 +251,7 @@ it('matches a wide soccer league set from one all-leagues scoreboard per day', f
     );
 
     expect(collect($fixtures)->pluck('league_id', 'id')->all())->toBe(['1' => 'soccer/eng.1', '2' => 'soccer/usa.ncaa.m.1'])
-        ->and($fixtures[0]['league_logo'])->toBe('https://a.espncdn.com/i/leaguelogos/soccer/500/23.png');
+        ->and($fixtures[0]['league_logo'])->toBe('https://a.espncdn.com/i/leaguelogos/soccer/500-dark/23.png');
     Http::assertSent(fn (HttpRequest $request): bool => $request['limit'] === '1000');
     Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/eng.1/'));
 });
@@ -323,4 +323,16 @@ it('serves a client\'s leagues while a background matching fetch holds the lock'
     expect($fixtures)->toHaveCount(1)
         ->and(microtime(true) - $started)->toBeLessThan(5.0);
     $lock->release();
+});
+
+it('prefers the dark-background league logo a scoreboard lists', function () {
+    $fixtures = EspnSportsService::parseScoreboard([
+        'leagues' => [['logos' => [
+            ['href' => 'https://a.espncdn.com/i/teamlogos/leagues/500/nhl.png', 'rel' => ['full', 'default']],
+            ['href' => 'https://a.espncdn.com/i/teamlogos/leagues/500-dark/nhl.png', 'rel' => ['full', 'dark']],
+        ]]],
+        'events' => [espnEvent('9', '2026-11-04T00:00Z')],
+    ], 'hockey/nhl');
+
+    expect($fixtures[0]['league_logo'])->toBe('https://a.espncdn.com/i/teamlogos/leagues/500-dark/nhl.png');
 });

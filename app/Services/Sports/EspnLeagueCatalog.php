@@ -9,9 +9,10 @@ namespace App\Services\Sports;
  * Generated from ESPN's league index
  * (`sports.core.api.espn.com/v2/sports/{sport}/leagues`), with each league's
  * id (soccer's all-leagues scoreboard names a game's league only by it), its
- * logo (ESPN's dark-background variant where it has one), and whether it's a women's or youth competition (from its gender, else
- * its name). The first leagues keep the short names, defaults and scoreboard
- * queries they were added with.
+ * logo (ESPN's dark-background variant where it has one, as clients show it
+ * on dark screens), and whether it's a women's or youth competition (from
+ * its gender, else its name). The first leagues keep the short names,
+ * defaults and scoreboard queries they were added with.
  */
 final class EspnLeagueCatalog
 {

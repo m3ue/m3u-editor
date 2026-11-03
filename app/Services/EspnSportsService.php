@@ -859,7 +859,7 @@ class EspnSportsService
         if (! is_array($events)) {
             return [];
         }
-        $leagueLogo = self::string($json['leagues'][0]['logos'][0]['href'] ?? null)
+        $leagueLogo = self::leagueLogo($json['leagues'][0]['logos'] ?? null)
             ?? (self::findLeague($leagueId)['logo'] ?? null);
 
         $fixtures = [];
@@ -870,6 +870,25 @@ class EspnSportsService
         }
 
         return $fixtures;
+    }
+
+    /**
+     * A scoreboard league's logo: ESPN's dark-background variant (`rel`
+     * "dark") when it lists one, as clients show it on dark screens, else
+     * the first.
+     */
+    private static function leagueLogo(mixed $logos): ?string
+    {
+        if (! is_array($logos)) {
+            return null;
+        }
+        foreach ($logos as $logo) {
+            if (is_array($logo) && in_array('dark', (array) ($logo['rel'] ?? []), true)) {
+                return self::string($logo['href'] ?? null);
+            }
+        }
+
+        return self::string($logos[0]['href'] ?? null);
     }
 
     /**
