@@ -44,6 +44,9 @@ class AedProfile extends Model
         'override' => 'boolean',
         'event_duration_minutes' => 'integer',
         'dummy_epg_days' => 'integer',
+        'sports_matching' => 'boolean',
+        'sports_league_ids' => 'array',
+        'sports_event_duration_minutes' => 'integer',
     ];
 
     public function user(): BelongsTo

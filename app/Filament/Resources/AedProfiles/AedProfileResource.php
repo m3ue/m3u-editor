@@ -14,6 +14,8 @@ use App\Models\Group;
 use App\Services\AedAiRegexSuggestionService;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
+use App\Services\EspnSportsService;
+use App\Services\Sports\SportsAedResolver;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -33,6 +35,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -103,6 +106,51 @@ class AedProfileResource extends Resource implements CopilotResource
                     : __('Only use this profile if no EPG channel is assigned.'))
                 ->default(true)
                 ->inline(false),
+
+            Section::make(__('Sports (ESPN)'))
+                ->compact()
+                ->collapsible()
+                ->columnSpanFull()
+                ->description(__('Match channel titles to real games by team names, in any title format. Unmatched channels fall back to the regex extraction below.'))
+                ->schema([
+                    Callout::make(__('Sports is turned off'))
+                        ->warning()
+                        ->columnSpanFull()
+                        ->description(__('Enable it under Settings > Integrations > Sports to use game matching.'))
+                        ->visible(fn (): bool => ! app(EspnSportsService::class)->isEnabled()),
+                    Toggle::make('sports_matching')
+                        ->label(__('Match games from ESPN'))
+                        ->live()
+                        ->default(false)
+                        ->inline(false)
+                        ->columnSpanFull(),
+                    Grid::make(2)
+                        ->visible(fn (Get $get): bool => (bool) $get('sports_matching'))
+                        ->schema([
+                            Select::make('sports_league_ids')
+                                ->label(__('Leagues'))
+                                ->multiple()
+                                ->searchable()
+                                ->options(fn (): array => collect(EspnSportsService::leagues())
+                                    ->groupBy('sport_name')
+                                    ->map(fn ($leagues): array => $leagues->pluck('name', 'id')->all())
+                                    ->all())
+                                ->placeholder(__('All leagues'))
+                                ->helperText(__('Pick the leagues this group carries for faster EPG builds. Leave empty to match every league.'))
+                                ->columnSpanFull(),
+                            TextInput::make('sports_title_format')
+                                ->label(__('Game Title Format'))
+                                ->placeholder('{away} at {home}')
+                                ->helperText(__('Variables: {home}, {away}, {league}, {venue}, {event}, {channel}, {date}, {time}. Leave empty for "{away} at {home}" ("{home} vs {away}" for soccer).')),
+                            TextInput::make('sports_event_duration_minutes')
+                                ->label(__('Game Duration (minutes)'))
+                                ->numeric()
+                                ->minValue(15)
+                                ->maxValue(720)
+                                ->placeholder(__('By sport'))
+                                ->helperText(__('Leave empty to use a typical length per sport (e.g. 165 for hockey, 210 for football).')),
+                        ]),
+                ]),
 
             Section::make(__('Source Extraction'))
                 ->compact()
@@ -267,7 +315,11 @@ class AedProfileResource extends Resource implements CopilotResource
                             $set('category', $data['ai_category'] ?? '');
                         })
                 )
-                ->description(__('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
+                ->description(fn (Get $get): string => $get('sports_matching')
+                    ? __('Used for channels that don\'t match a game. The time and date patterns also narrow which game a channel matches.')
+                    : __('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
+                ->collapsible()
+                ->collapsed(fn (Get $get): bool => (bool) $get('sports_matching'))
                 ->schema([
                     Grid::make(2)->schema([
                         TextInput::make('title_regex')
@@ -332,7 +384,9 @@ class AedProfileResource extends Resource implements CopilotResource
 
             Section::make(__('Output Format'))
                 ->compact()
-                ->description(__('Define how the extracted data is formatted in the generated EPG programme.'))
+                ->description(fn (Get $get): string => $get('sports_matching')
+                    ? __('Timezone, pre/post-event padding, category and EPG days apply to every channel. Title, description, duration and no-event format apply only to channels that don\'t match a game.')
+                    : __('Define how the extracted data is formatted in the generated EPG programme.'))
                 ->schema([
                     Grid::make(2)->schema([
                         Select::make('output_timezone')
@@ -430,6 +484,10 @@ class AedProfileResource extends Resource implements CopilotResource
                             Hidden::make('_no_event_format')->default($get('no_event_format') ?? '{channel}'),
                             Hidden::make('_pre_event_format')->default($get('pre_event_format')),
                             Hidden::make('_post_event_format')->default($get('post_event_format')),
+                            Hidden::make('_sports_matching')->default((bool) $get('sports_matching')),
+                            Hidden::make('_sports_league_ids')->default($get('sports_league_ids') ?? []),
+                            Hidden::make('_sports_title_format')->default($get('sports_title_format')),
+                            Hidden::make('_sports_event_duration_minutes')->default($get('sports_event_duration_minutes')),
                             Hidden::make('tested')->default(false),
                             Hidden::make('match_count')->default(''),
 
@@ -474,14 +532,25 @@ class AedProfileResource extends Resource implements CopilotResource
                                         $profile->no_event_format = $get('_no_event_format') ?? '{channel}';
                                         $profile->pre_event_format = $get('_pre_event_format') ?: null;
                                         $profile->post_event_format = $get('_post_event_format') ?: null;
+                                        $profile->sports_matching = (bool) $get('_sports_matching');
+                                        $profile->sports_league_ids = $get('_sports_league_ids') ?: null;
+                                        $profile->sports_title_format = $get('_sports_title_format') ?: null;
+                                        $profile->sports_event_duration_minutes = filled($get('_sports_event_duration_minutes'))
+                                            ? (int) $get('_sports_event_duration_minutes')
+                                            : null;
 
                                         $service = app(AedExtractorService::class);
+                                        $sports = app(SportsAedResolver::class);
                                         $rows = [];
                                         foreach ($titles as $title) {
-                                            $result = $service->extract($profile, $title);
+                                            $result = $sports->appliesTo($profile)
+                                                ? $sports->match($profile, $title, $service->startTimeFor($profile, $title))
+                                                : null;
+                                            $isGame = $result !== null;
+                                            $result ??= $service->extract($profile, $title);
                                             $rows[] = [
                                                 'input' => $title,
-                                                'status' => $result ? __('Match') : __('No match'),
+                                                'status' => $isGame ? __('Game match') : ($result ? __('Match') : __('No match')),
                                                 'extracted_title' => $result?->title ?? '',
                                                 'time' => $result?->hasTime()
                                                     ? $result->start->format('M j g:i A T').' - '.$result->end->format('g:i A')
@@ -489,7 +558,7 @@ class AedProfileResource extends Resource implements CopilotResource
                                             ];
                                         }
 
-                                        $matched = count(array_filter($rows, fn ($r) => $r['status'] === __('Match')));
+                                        $matched = count(array_filter($rows, fn ($r) => $r['status'] !== __('No match')));
                                         $total = count($rows);
                                         $set('match_count', __("{$matched} of {$total} titles matched"));
                                         $set('results', $rows);
@@ -516,7 +585,11 @@ class AedProfileResource extends Resource implements CopilotResource
                                     TextEntry::make('status')
                                         ->hiddenLabel()
                                         ->badge()
-                                        ->color(fn (string $state): string => $state === __('Match') ? 'success' : 'gray'),
+                                        ->color(fn (string $state): string => match ($state) {
+                                            __('Game match') => 'info',
+                                            __('Match') => 'success',
+                                            default => 'gray',
+                                        }),
                                     TextInput::make('extracted_title')->hiddenLabel()->disabled(),
                                     TextInput::make('time')->hiddenLabel()->disabled(),
                                 ])

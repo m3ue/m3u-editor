@@ -15,6 +15,7 @@ use App\Facades\ProxyFacade;
 use App\Filament\Support\DvrPaddingFields;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\RefreshMediaServerLibraryJob;
+use App\Models\AedProfile;
 use App\Models\ArrIntegration;
 use App\Models\Category;
 use App\Models\Channel;
@@ -41,6 +42,7 @@ use App\Models\StreamProfile;
 use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
 use App\Providers\VersionServiceProvider;
+use App\Services\AedExtractorService;
 use App\Services\AIOStreamsAuthorizationService;
 use App\Services\ChannelNumberSequence;
 use App\Services\ContentRequestService;
@@ -88,6 +90,17 @@ class XtreamApiController extends Controller
         'request_status',
         'request_dismiss',
     ];
+
+    private const SPORTS_ACTIONS = [
+        'get_sports_fixtures',
+        'get_sports_teams',
+        'get_sports_follows',
+        'toggle_sports_follow',
+        'sync_sports_follows',
+    ];
+
+    /** A team's follow key: "{sport}/{league}:{team id}". */
+    private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9.-]+):([A-Za-z0-9-]+)$/';
 
     private const DVR_ACTIONS = [
         'get_dvr_recordings',
@@ -533,9 +546,14 @@ class XtreamApiController extends Controller
                         'api_version' => 1,
                         'actions' => [
                             'fixtures' => 'get_sports_fixtures',
+                            'teams' => 'get_sports_teams',
+                            'follows' => 'get_sports_follows',
+                            'toggle_follow' => 'toggle_sports_follow',
+                            'sync_follows' => 'sync_sports_follows',
                         ],
                         'max_range_days' => EspnSportsService::MAX_RANGE_DAYS,
-                        'leagues' => EspnSportsService::leagues(),
+                        'leagues' => EspnSportsService::clientLeagues(),
+                        'sport_names' => EspnSportsService::sportNames(),
                     ];
                 }
 
@@ -1937,6 +1955,20 @@ class XtreamApiController extends Controller
                 return response()->json(['error' => 'Channel not found'], 404);
             }
 
+            // Get programmes for today and tomorrow to ensure we have enough data
+            $today = Carbon::now()->format('Y-m-d');
+            $tomorrow = Carbon::now()->addDay()->format('Y-m-d');
+
+            // A channel whose AED profile replaces its guide
+            $aed = $this->aedProgrammesFor(collect([$channel]), $playlist, Carbon::parse($today)->startOfDay(), Carbon::parse($tomorrow)->endOfDay())[$channel->id] ?? null;
+            if ($aed !== null) {
+                return response()->json(['epg_listings' => $this->shortEpgListings(
+                    $aed['programmes'], $channel, 'aed-'.$aed['profile_id'],
+                    (string) ($channel->epgChannel?->channel_id ?? $channel->id),
+                    $playlist, $limit, (bool) $proxyEnabled, $disableCatchup,
+                )]);
+            }
+
             if (! $channel->epgChannel) {
                 return response()->json(['epg_listings' => []]);
             }
@@ -1948,10 +1980,6 @@ class XtreamApiController extends Controller
             if (! $epg || ! $epg->is_cached) {
                 return response()->json(['epg_listings' => []]);
             }
-
-            // Get programmes for today and tomorrow to ensure we have enough data
-            $today = Carbon::now()->format('Y-m-d');
-            $tomorrow = Carbon::now()->addDay()->format('Y-m-d');
 
             $todayProgrammes = $cacheService->getCachedProgrammes($epg, $today, [$channel->epgChannel->channel_id]);
             $tomorrowProgrammes = $cacheService->getCachedProgrammes($epg, $tomorrow, [$channel->epgChannel->channel_id]);
@@ -1978,46 +2006,10 @@ class XtreamApiController extends Controller
 
             $allProgrammes = EpgCacheService::shiftProgrammes($allProgrammes, $tvgShift);
 
-            // Check if channel is currently playing
-            $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
-
-            // Filter programmes to current time and future, then limit
-            $now = Carbon::now();
-            $epgListings = [];
-            $count = 0;
-
-            foreach ($allProgrammes as $programme) {
-                if ($count >= $limit) {
-                    break;
-                }
-
-                $startTime = Carbon::parse($programme['start']);
-                $endTime = Carbon::parse($programme['stop']);
-
-                // Include current programme and future programmes
-                if ($endTime->gt($now)) {
-                    $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
-
-                    $epgListings[] = [
-                        'id' => (string) ($programme['id'] ?? $count),
-                        'epg_id' => (string) $epg->id,
-                        'title' => $programme['title'] ?? '',
-                        'subtitle' => $programme['subtitle'] ?? '',
-                        'lang' => $programme['lang'] ?? 'en',
-                        'start' => $startTime->format('Y-m-d H:i:s'),
-                        'end' => $endTime->format('Y-m-d H:i:s'),
-                        'description' => $programme['desc'] ?? '',
-                        'channel_id' => $channel->epgChannel->channel_id,
-                        'start_timestamp' => (string) $startTime->timestamp,
-                        'stop_timestamp' => (string) $endTime->timestamp,
-                        'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                    ] + $this->epgProgrammeArtwork($programme, $playlist);
-                    $count++;
-                }
-            }
-
-            return response()->json(['epg_listings' => $epgListings]);
+            return response()->json(['epg_listings' => $this->shortEpgListings(
+                $allProgrammes, $channel, (string) $epg->id, (string) $channel->epgChannel->channel_id,
+                $playlist, $limit, (bool) $proxyEnabled, $disableCatchup,
+            )]);
         } elseif ($action === 'get_simple_data_table') {
             // Handle network playlists - return EPG from network schedule
             if ($isNetworkPlaylist) {
@@ -2124,10 +2116,13 @@ class XtreamApiController extends Controller
                 ->get()
                 ->keyBy('id');
 
+            $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
+            $aedProgrammes = $this->aedProgrammesFor($channels, $playlist, Carbon::parse($date)->startOfDay(), Carbon::parse($nextDate)->endOfDay());
+
             // Group channels by EPG source so each JSONL file is read once
             $epgGroups = [];
             foreach ($channels as $channel) {
-                if (! $channel->epgChannel) {
+                if (! $channel->epgChannel || isset($aedProgrammes[$channel->id])) {
                     continue;
                 }
                 $epgId = $channel->epgChannel->epg_id;
@@ -2143,8 +2138,17 @@ class XtreamApiController extends Controller
 
             $cacheService = new EpgCacheService;
             $now = Carbon::now();
-            $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
             $result = [];
+
+            // Channels whose AED profile replaces their guide
+            foreach ($aedProgrammes as $streamId => $aed) {
+                $channel = $channels[$streamId];
+                $result[(string) $streamId] = ['epg_listings' => $this->epgBatchListings(
+                    $aed['programmes'], $channel, $streamId, $date, $nextDate, 'aed-'.$aed['profile_id'],
+                    (string) ($channel->epgChannel?->channel_id ?? $streamId),
+                    $playlist, (bool) $proxyEnabled, $disableCatchup, $includeDetails, $now,
+                )];
+            }
 
             foreach ($epgGroups as $group) {
                 $epg = $group['epg'];
@@ -2196,119 +2200,10 @@ class XtreamApiController extends Controller
                         $channelProgrammes = array_merge(array_values($shiftedIn), $channelProgrammes);
                     }
 
-                    // Fill gaps in EPG
-                    if (empty($channelProgrammes)) {
-                        $start = Carbon::parse($date)->startOfDay();
-                        $end = Carbon::parse($nextDate)->endOfDay();
-
-                        $current = $start->copy();
-                        while ($current->lt($end)) {
-                            $chunkEnd = $current->copy()->addHour();
-                            if ($chunkEnd->gt($end)) {
-                                $chunkEnd = $end->copy();
-                            }
-
-                            $channelProgrammes[] = [
-                                'id' => 'dummy-'.md5($streamId.$current->timestamp),
-                                'title' => $channel->name ?? 'Unknown Channel',
-                                'desc' => 'No information available',
-                                'start' => $current->format('Y-m-d H:i:s'),
-                                'stop' => $chunkEnd->format('Y-m-d H:i:s'),
-                                'lang' => 'en',
-                            ];
-                            $current = $chunkEnd;
-                        }
-                    } else {
-                        usort($channelProgrammes, function ($a, $b) {
-                            return strcmp($a['start'], $b['start']);
-                        });
-
-                        $filled = [];
-                        $lastEnd = Carbon::parse($date)->startOfDay();
-                        $finalEnd = Carbon::parse($nextDate)->endOfDay();
-
-                        foreach ($channelProgrammes as $prog) {
-                            $start = Carbon::parse($prog['start']);
-                            $stop = Carbon::parse($prog['stop']);
-
-                            if ($start->gt($lastEnd) && $start->diffInMinutes($lastEnd) > 1) {
-                                $gapStart = $lastEnd->copy();
-                                while ($gapStart->lt($start)) {
-                                    $gapEnd = $gapStart->copy()->addHour();
-                                    if ($gapEnd->gt($start)) {
-                                        $gapEnd = $start->copy();
-                                    }
-
-                                    $filled[] = [
-                                        'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
-                                        'title' => $channel->name ?? 'Unknown Channel',
-                                        'desc' => 'No information available',
-                                        'start' => $gapStart->format('Y-m-d H:i:s'),
-                                        'stop' => $gapEnd->format('Y-m-d H:i:s'),
-                                        'lang' => 'en',
-                                    ];
-                                    $gapStart = $gapEnd;
-                                }
-                            }
-
-                            $filled[] = $prog;
-
-                            if ($stop->gt($lastEnd)) {
-                                $lastEnd = $stop;
-                            }
-                        }
-
-                        if ($finalEnd->gt($lastEnd) && $finalEnd->diffInMinutes($lastEnd) > 1) {
-                            $gapStart = $lastEnd->copy();
-                            while ($gapStart->lt($finalEnd)) {
-                                $gapEnd = $gapStart->copy()->addHour();
-                                if ($gapEnd->gt($finalEnd)) {
-                                    $gapEnd = $finalEnd->copy();
-                                }
-
-                                $filled[] = [
-                                    'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
-                                    'title' => $channel->name ?? 'Unknown Channel',
-                                    'desc' => 'No information available',
-                                    'start' => $gapStart->format('Y-m-d H:i:s'),
-                                    'stop' => $gapEnd->format('Y-m-d H:i:s'),
-                                    'lang' => 'en',
-                                ];
-                                $gapStart = $gapEnd;
-                            }
-                        }
-                        $channelProgrammes = $filled;
-                    }
-
-                    $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
-
-                    $epgListings = [];
-                    foreach ($channelProgrammes as $index => $programme) {
-                        $startTime = Carbon::parse($programme['start']);
-                        $endTime = Carbon::parse($programme['stop']);
-                        $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
-
-                        $listing = [
-                            'id' => (string) ($programme['id'] ?? $index),
-                            'epg_id' => (string) $epg->id,
-                            'title' => base64_encode($programme['title'] ?? ''),
-                            'subtitle' => base64_encode($programme['subtitle'] ?? ''),
-                            'description' => base64_encode($programme['desc'] ?? ''),
-                            'lang' => $programme['lang'] ?? 'en',
-                            'start' => $startTime->format('Y-m-d H:i:s'),
-                            'end' => $endTime->format('Y-m-d H:i:s'),
-                            'channel_id' => $epgChannelId,
-                            'start_timestamp' => (string) $startTime->timestamp,
-                            'stop_timestamp' => (string) $endTime->timestamp,
-                            'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                            'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
-                        ];
-                        if ($includeDetails) {
-                            $listing += $this->epgProgrammeDetails($programme, $playlist);
-                        }
-                        $epgListings[] = $listing;
-                    }
-                    $result[(string) $streamId] = ['epg_listings' => $epgListings];
+                    $result[(string) $streamId] = ['epg_listings' => $this->epgBatchListings(
+                        $channelProgrammes, $channel, $streamId, $date, $nextDate, (string) $epg->id, $epgChannelId,
+                        $playlist, (bool) $proxyEnabled, $disableCatchup, $includeDetails, $now,
+                    )];
                 }
             }
 
@@ -2357,8 +2252,20 @@ class XtreamApiController extends Controller
             return $this->managedLibraryCatalog($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'm3u_editor_sync_result') {
             return $this->managedLibrarySyncResult($request, $playlist, $authMethod, $playlistAuth);
-        } elseif ($action === 'get_sports_fixtures') {
-            return $this->sportsFixtures($request);
+        } elseif (in_array($action, self::SPORTS_ACTIONS, true)) {
+            // Every Sports action is gated on the same setting that advertises
+            // the `sports` feature, so a client never shown Sports can't use it.
+            if (! app(EspnSportsService::class)->isEnabled()) {
+                return response()->json(['error' => 'Sports is not enabled'], 403);
+            }
+
+            return match ($action) {
+                'get_sports_fixtures' => $this->sportsFixtures($request),
+                'get_sports_teams' => $this->sportsTeams($request),
+                'get_sports_follows' => $this->sportsFollows($request, $playlist, $authMethod, $username, $password),
+                'toggle_sports_follow' => $this->toggleSportsFollow($request, $playlist, $authMethod, $username, $password),
+                'sync_sports_follows' => $this->syncSportsFollows($request, $playlist, $authMethod, $username, $password),
+            };
         } elseif (in_array($action, self::DVR_ACTIONS, true)) {
             $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
 
@@ -2403,9 +2310,6 @@ class XtreamApiController extends Controller
     private function sportsFixtures(Request $request): JsonResponse
     {
         $sports = app(EspnSportsService::class);
-        if (! $sports->isEnabled()) {
-            return response()->json(['error' => 'Sports is not enabled'], 403);
-        }
 
         $validator = Validator::make($request->all(), [
             'leagues' => ['required', 'string', 'max:2000'],
@@ -2425,6 +2329,148 @@ class XtreamApiController extends Controller
                 Carbon::createFromTimestampUTC((int) $request->input('to')),
             ),
         ]);
+    }
+
+    /**
+     * Every team of one competition (`get_sports_teams`), for the TV's team
+     * browser: `league` is a league id from `m3u_editor.sports.leagues`.
+     */
+    private function sportsTeams(Request $request): JsonResponse
+    {
+        $leagueId = (string) $request->input('league', '');
+        if (EspnSportsService::findLeague($leagueId) === null) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => ['league']], 422);
+        }
+
+        return response()->json(['teams' => app(EspnSportsService::class)->teams($leagueId)]);
+    }
+
+    /**
+     * The viewer's followed teams (`get_sports_follows`), oldest first.
+     */
+    private function sportsFollows(Request $request, $playlist, string $authMethod, string $username, string $password): JsonResponse
+    {
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
+        if (! $viewer) {
+            return response()->json(['error' => 'Viewer not found'], 404);
+        }
+
+        return response()->json(['follows' => $this->presentSportsFollows($viewer)]);
+    }
+
+    /**
+     * Follow or stop following one team (`toggle_sports_follow`). Idempotent;
+     * answers with the viewer's whole list.
+     */
+    private function toggleSportsFollow(Request $request, $playlist, string $authMethod, string $username, string $password): JsonResponse
+    {
+        $followed = $request->boolean('followed', true);
+        $validator = Validator::make($request->all(), [
+            'team_key' => ['required', 'string', 'max:120', 'regex:'.self::SPORTS_TEAM_KEY_PATTERN],
+            'name' => [$followed ? 'required' : 'nullable', 'string', 'max:255'],
+        ]);
+        $key = $this->parseSportsTeamKey((string) $request->input('team_key'));
+        if ($validator->fails() || $key === null) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => $validator->errors()->keys() ?: ['team_key']], 422);
+        }
+
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
+        if (! $viewer) {
+            return response()->json(['error' => 'Viewer not found'], 404);
+        }
+
+        if ($followed) {
+            $this->storeSportsFollow($viewer, (string) $request->input('team_key'), $key, (string) $request->input('name'));
+        } else {
+            $viewer->sportsFollows()->where('team_key', $request->input('team_key'))->delete();
+        }
+
+        return response()->json(['follows' => $this->presentSportsFollows($viewer)]);
+    }
+
+    /**
+     * Union the posted follows into the viewer's (`sync_sports_follows`):
+     * how a device's follows from before syncing join the account. Never
+     * removes one; answers with the merged list.
+     */
+    private function syncSportsFollows(Request $request, $playlist, string $authMethod, string $username, string $password): JsonResponse
+    {
+        $items = $request->input('follows', []);
+        if (! is_array($items)) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => ['follows']], 422);
+        }
+
+        $viewer = $this->resolveContextViewer($request, $playlist, $authMethod, $username, $password);
+        if (! $viewer) {
+            return response()->json(['error' => 'Viewer not found'], 404);
+        }
+
+        foreach (array_slice($items, 0, 500) as $item) {
+            $teamKey = is_array($item) ? ($item['team_key'] ?? null) : null;
+            $name = is_array($item) ? ($item['name'] ?? null) : null;
+            if (! is_string($teamKey) || ! is_string($name) || $name === '' || mb_strlen($name) > 255) {
+                continue;
+            }
+            $key = $this->parseSportsTeamKey($teamKey);
+            if ($key !== null) {
+                $this->storeSportsFollow($viewer, $teamKey, $key, $name);
+            }
+        }
+
+        return response()->json(['follows' => $this->presentSportsFollows($viewer)]);
+    }
+
+    /**
+     * The league and team ids of a follow key, or null when it isn't one or
+     * names a league this server doesn't offer.
+     *
+     * @return array{league_id: string, team_id: string}|null
+     */
+    private function parseSportsTeamKey(string $teamKey): ?array
+    {
+        if (! preg_match(self::SPORTS_TEAM_KEY_PATTERN, $teamKey, $matches)
+            || EspnSportsService::findLeague($matches[1]) === null) {
+            return null;
+        }
+
+        return ['league_id' => $matches[1], 'team_id' => $matches[2]];
+    }
+
+    /**
+     * @param  array{league_id: string, team_id: string}  $key
+     */
+    private function storeSportsFollow(PlaylistViewer $viewer, string $teamKey, array $key, string $name): void
+    {
+        $viewer->sportsFollows()->updateOrCreate(
+            ['team_key' => $teamKey],
+            [...$key, 'name' => $name],
+        );
+    }
+
+    /**
+     * A viewer's follows as clients read them. Crests come from the cached
+     * team list through the logo proxy rather than being stored, so a follow
+     * never holds a stale proxy URL.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function presentSportsFollows(PlaylistViewer $viewer): array
+    {
+        $follows = $viewer->sportsFollows()->orderBy('followed_at')->orderBy('id')->get();
+        $sports = app(EspnSportsService::class);
+        $logos = [];
+        foreach ($follows->pluck('league_id')->unique() as $leagueId) {
+            $logos[$leagueId] = array_column($sports->teams($leagueId), 'logo', 'id');
+        }
+
+        return $follows->map(fn ($follow): array => [
+            'team_key' => $follow->team_key,
+            'league_id' => $follow->league_id,
+            'team_id' => $follow->team_id,
+            'name' => $follow->name,
+            'logo' => $logos[$follow->league_id][$follow->team_id] ?? null,
+            'followed_at' => $follow->followed_at?->toIso8601ZuluString(),
+        ])->values()->all();
     }
 
     /**
@@ -2693,6 +2739,265 @@ class XtreamApiController extends Controller
             'now_playing' => $isCurrentProgramme ? 1 : 0,
             'has_archive' => 0,
         ];
+    }
+
+    /**
+     * AED programmes for the [$channels] whose AED profile (their own, else
+     * their group's) replaces the guide: any profile with Override on, or any
+     * profile on a channel with no EPG mapped. These are the same channels
+     * xmltv.php and the JSON EPG API build from AED. Keyed by channel id, as
+     * cached programmes (UTC ISO times) plus the profile id; channels whose
+     * profile resolves no event map to an empty list.
+     *
+     * @param  Collection<int, Channel>  $channels
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return array<int, array{profile_id: int, programmes: list<array<string, mixed>>}>
+     */
+    private function aedProgrammesFor(Collection $channels, $playlist, Carbon $windowStart, Carbon $windowEnd): array
+    {
+        $groupProfileIds = Group::query()
+            ->whereIn('id', $channels->pluck('group_id')->filter()->unique()->values())
+            ->whereNotNull('aed_profile_id')
+            ->pluck('aed_profile_id', 'id');
+
+        $profileIdFor = fn (Channel $channel): ?int => $channel->aed_profile_id ?? $groupProfileIds[$channel->group_id] ?? null;
+        $profileIds = $channels->map($profileIdFor)->filter()->unique()->values();
+        if ($profileIds->isEmpty()) {
+            return [];
+        }
+
+        $profiles = AedProfile::query()
+            ->whereIn('id', $profileIds)
+            ->where('user_id', $playlist->user_id)
+            ->get()
+            ->keyBy('id');
+
+        $extractor = app(AedExtractorService::class);
+        $result = [];
+        foreach ($channels as $channel) {
+            $profile = $profiles->get($profileIdFor($channel));
+            if (! $profile || (! $profile->override && $channel->epgChannel)) {
+                continue;
+            }
+
+            $days = (int) ($profile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5);
+            $programmes = [];
+            foreach ($extractor->programmes($profile, (string) $channel->title, $windowStart, $windowEnd, $days) ?? [] as $programme) {
+                $programmes[] = [
+                    'id' => 'aed-'.md5($channel->id.'-'.$programme['start']->timestamp),
+                    'start' => $programme['start']->toISOString(),
+                    'stop' => $programme['stop']->toISOString(),
+                    'title' => $programme['title'],
+                    'desc' => $programme['desc'] ?? $programme['title'],
+                    'icon' => $programme['icon'],
+                    'category' => $programme['category'],
+                    'lang' => 'en',
+                ];
+            }
+            $result[$channel->id] = ['profile_id' => $profile->id, 'programmes' => $programmes];
+        }
+
+        return $result;
+    }
+
+    /**
+     * One channel's `get_short_epg` listings: the programme on now and the
+     * ones after it, at most [$limit].
+     *
+     * @param  list<array<string, mixed>>  $programmes
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return list<array<string, mixed>>
+     */
+    private function shortEpgListings(
+        array $programmes,
+        Channel $channel,
+        string $epgId,
+        string $epgChannelId,
+        $playlist,
+        int $limit,
+        bool $proxyEnabled,
+        bool $disableCatchup,
+    ): array {
+        // Check if channel is currently playing
+        $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
+
+        // Filter programmes to current time and future, then limit
+        $now = Carbon::now();
+        $epgListings = [];
+        $count = 0;
+
+        foreach ($programmes as $programme) {
+            if ($count >= $limit) {
+                break;
+            }
+
+            $startTime = Carbon::parse($programme['start']);
+            $endTime = Carbon::parse($programme['stop']);
+
+            // Include current programme and future programmes
+            if ($endTime->gt($now)) {
+                $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
+
+                $epgListings[] = [
+                    'id' => (string) ($programme['id'] ?? $count),
+                    'epg_id' => $epgId,
+                    'title' => $programme['title'] ?? '',
+                    'subtitle' => $programme['subtitle'] ?? '',
+                    'lang' => $programme['lang'] ?? 'en',
+                    'start' => $startTime->format('Y-m-d H:i:s'),
+                    'end' => $endTime->format('Y-m-d H:i:s'),
+                    'description' => $programme['desc'] ?? '',
+                    'channel_id' => $epgChannelId,
+                    'start_timestamp' => (string) $startTime->timestamp,
+                    'stop_timestamp' => (string) $endTime->timestamp,
+                    'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
+                    'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                ] + $this->epgProgrammeArtwork($programme, $playlist);
+                $count++;
+            }
+        }
+
+        return $epgListings;
+    }
+
+    /**
+     * One channel's `get_epg_batch` listings: [$channelProgrammes] sorted, every
+     * gap from the start of [$date] to the end of [$nextDate] filled with
+     * hour-long "No information available" slots (the whole range when there
+     * are none), then shaped for the wire.
+     *
+     * @param  list<array<string, mixed>>  $channelProgrammes
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     * @return list<array<string, mixed>>
+     */
+    private function epgBatchListings(
+        array $channelProgrammes,
+        Channel $channel,
+        int $streamId,
+        string $date,
+        string $nextDate,
+        string $epgId,
+        string $epgChannelId,
+        $playlist,
+        bool $proxyEnabled,
+        bool $disableCatchup,
+        bool $includeDetails,
+        Carbon $now,
+    ): array {
+        // Fill gaps in EPG
+        if (empty($channelProgrammes)) {
+            $start = Carbon::parse($date)->startOfDay();
+            $end = Carbon::parse($nextDate)->endOfDay();
+
+            $current = $start->copy();
+            while ($current->lt($end)) {
+                $chunkEnd = $current->copy()->addHour();
+                if ($chunkEnd->gt($end)) {
+                    $chunkEnd = $end->copy();
+                }
+
+                $channelProgrammes[] = [
+                    'id' => 'dummy-'.md5($streamId.$current->timestamp),
+                    'title' => $channel->name ?? 'Unknown Channel',
+                    'desc' => 'No information available',
+                    'start' => $current->format('Y-m-d H:i:s'),
+                    'stop' => $chunkEnd->format('Y-m-d H:i:s'),
+                    'lang' => 'en',
+                ];
+                $current = $chunkEnd;
+            }
+        } else {
+            usort($channelProgrammes, function ($a, $b) {
+                return strcmp($a['start'], $b['start']);
+            });
+
+            $filled = [];
+            $lastEnd = Carbon::parse($date)->startOfDay();
+            $finalEnd = Carbon::parse($nextDate)->endOfDay();
+
+            foreach ($channelProgrammes as $prog) {
+                $start = Carbon::parse($prog['start']);
+                $stop = Carbon::parse($prog['stop']);
+
+                if ($start->gt($lastEnd) && $start->diffInMinutes($lastEnd) > 1) {
+                    $gapStart = $lastEnd->copy();
+                    while ($gapStart->lt($start)) {
+                        $gapEnd = $gapStart->copy()->addHour();
+                        if ($gapEnd->gt($start)) {
+                            $gapEnd = $start->copy();
+                        }
+
+                        $filled[] = [
+                            'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
+                            'title' => $channel->name ?? 'Unknown Channel',
+                            'desc' => 'No information available',
+                            'start' => $gapStart->format('Y-m-d H:i:s'),
+                            'stop' => $gapEnd->format('Y-m-d H:i:s'),
+                            'lang' => 'en',
+                        ];
+                        $gapStart = $gapEnd;
+                    }
+                }
+
+                $filled[] = $prog;
+
+                if ($stop->gt($lastEnd)) {
+                    $lastEnd = $stop;
+                }
+            }
+
+            if ($finalEnd->gt($lastEnd) && $finalEnd->diffInMinutes($lastEnd) > 1) {
+                $gapStart = $lastEnd->copy();
+                while ($gapStart->lt($finalEnd)) {
+                    $gapEnd = $gapStart->copy()->addHour();
+                    if ($gapEnd->gt($finalEnd)) {
+                        $gapEnd = $finalEnd->copy();
+                    }
+
+                    $filled[] = [
+                        'id' => 'dummy-'.md5($streamId.$gapStart->timestamp),
+                        'title' => $channel->name ?? 'Unknown Channel',
+                        'desc' => 'No information available',
+                        'start' => $gapStart->format('Y-m-d H:i:s'),
+                        'stop' => $gapEnd->format('Y-m-d H:i:s'),
+                        'lang' => 'en',
+                    ];
+                    $gapStart = $gapEnd;
+                }
+            }
+            $channelProgrammes = $filled;
+        }
+
+        $isNowPlaying = $proxyEnabled ? M3uProxyService::isChannelActive($channel) : false;
+
+        $epgListings = [];
+        foreach ($channelProgrammes as $index => $programme) {
+            $startTime = Carbon::parse($programme['start']);
+            $endTime = Carbon::parse($programme['stop']);
+            $isCurrentProgramme = $startTime->lte($now) && $endTime->gt($now);
+
+            $listing = [
+                'id' => (string) ($programme['id'] ?? $index),
+                'epg_id' => $epgId,
+                'title' => base64_encode($programme['title'] ?? ''),
+                'subtitle' => base64_encode($programme['subtitle'] ?? ''),
+                'description' => base64_encode($programme['desc'] ?? ''),
+                'lang' => $programme['lang'] ?? 'en',
+                'start' => $startTime->format('Y-m-d H:i:s'),
+                'end' => $endTime->format('Y-m-d H:i:s'),
+                'channel_id' => $epgChannelId,
+                'start_timestamp' => (string) $startTime->timestamp,
+                'stop_timestamp' => (string) $endTime->timestamp,
+                'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
+                'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
+            ];
+            if ($includeDetails) {
+                $listing += $this->epgProgrammeDetails($programme, $playlist);
+            }
+            $epgListings[] = $listing;
+        }
+
+        return $epgListings;
     }
 
     /**

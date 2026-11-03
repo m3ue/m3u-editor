@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Enums\ImageProfile;
 use App\Http\Controllers\LogoProxyController;
+use App\Services\Sports\EspnLeagueCatalog;
 use App\Settings\GeneralSettings;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -41,33 +43,53 @@ class EspnSportsService
     private const int REQUEST_TIMEOUT_SECONDS = 15;
 
     /**
-     * Competitions offered to clients, in display order. Team sports only:
-     * the TV finds a game's channel by both teams' names in the guide.
-     *
-     * @var list<array{sport: string, slug: string, name: string, abbreviation: string, soccer_style?: bool, default?: bool, query?: array<string, string>}>
+     * Above this many soccer leagues, a day's soccer comes from ESPN's
+     * all-leagues scoreboard: one larger request instead of one per league.
      */
-    private const array LEAGUES = [
-        ['sport' => 'football', 'slug' => 'nfl', 'name' => 'NFL', 'abbreviation' => 'NFL', 'default' => true],
-        ['sport' => 'basketball', 'slug' => 'nba', 'name' => 'NBA', 'abbreviation' => 'NBA', 'default' => true],
-        ['sport' => 'baseball', 'slug' => 'mlb', 'name' => 'MLB', 'abbreviation' => 'MLB', 'default' => true],
-        ['sport' => 'hockey', 'slug' => 'nhl', 'name' => 'NHL', 'abbreviation' => 'NHL', 'default' => true],
-        ['sport' => 'basketball', 'slug' => 'wnba', 'name' => 'WNBA', 'abbreviation' => 'WNBA'],
-        ['sport' => 'football', 'slug' => 'college-football', 'name' => 'College Football', 'abbreviation' => 'NCAAF', 'default' => true, 'query' => ['groups' => '80']],
-        ['sport' => 'basketball', 'slug' => 'mens-college-basketball', 'name' => "Men's College Basketball", 'abbreviation' => 'NCAAM', 'query' => ['groups' => '50']],
-        ['sport' => 'basketball', 'slug' => 'womens-college-basketball', 'name' => "Women's College Basketball", 'abbreviation' => 'NCAAW', 'query' => ['groups' => '50']],
-        ['sport' => 'football', 'slug' => 'cfl', 'name' => 'CFL', 'abbreviation' => 'CFL'],
-        ['sport' => 'soccer', 'slug' => 'usa.1', 'name' => 'MLS', 'abbreviation' => 'MLS', 'soccer_style' => true, 'default' => true],
-        ['sport' => 'soccer', 'slug' => 'usa.nwsl', 'name' => 'NWSL', 'abbreviation' => 'NWSL', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'mex.1', 'name' => 'Liga MX', 'abbreviation' => 'LMX', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'eng.1', 'name' => 'Premier League', 'abbreviation' => 'EPL', 'soccer_style' => true, 'default' => true],
-        ['sport' => 'soccer', 'slug' => 'eng.2', 'name' => 'EFL Championship', 'abbreviation' => 'EFL', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'esp.1', 'name' => 'LaLiga', 'abbreviation' => 'LIGA', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'ger.1', 'name' => 'Bundesliga', 'abbreviation' => 'BUN', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'ita.1', 'name' => 'Serie A', 'abbreviation' => 'SA', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'fra.1', 'name' => 'Ligue 1', 'abbreviation' => 'L1', 'soccer_style' => true],
-        ['sport' => 'soccer', 'slug' => 'uefa.champions', 'name' => 'UEFA Champions League', 'abbreviation' => 'UCL', 'soccer_style' => true, 'default' => true],
-        ['sport' => 'soccer', 'slug' => 'uefa.europa', 'name' => 'UEFA Europa League', 'abbreviation' => 'UEL', 'soccer_style' => true],
+    private const int BULK_SOCCER_MIN_LEAGUES = 3;
+
+    /**
+     * How stale a scoreboard game matching (kickoffs and teams, no scores)
+     * still accepts, so live games don't refetch it every minute.
+     */
+    private const int MATCHING_STALE_MINUTES = 30;
+
+    /** How long one process may hold the ESPN fetch lock. */
+    private const int FETCH_LOCK_SECONDS = 120;
+
+    /** How long another process waits for that lock before serving the cache. */
+    private const int FETCH_LOCK_WAIT_SECONDS = 60;
+
+    /** How long ESPN requests pause after ESPN refuses or fails a batch. */
+    private const int PAUSE_MINUTES = 10;
+
+    /** Failed requests in one batch that, as half of it or more, pause ESPN requests. */
+    private const int PAUSE_MIN_FAILURES = 3;
+
+    /** How long a league's season window is trusted before it's re-read. */
+    private const int SEASON_CACHE_HOURS = 24;
+
+    /** Sports whose fixtures read home side first ("Arsenal v Chelsea"). */
+    private const array HOME_FIRST_SPORTS = ['soccer', 'rugby', 'rugby-league', 'australian-football'];
+
+    /** Display names of the sports in [EspnLeagueCatalog], in its order. */
+    private const array SPORT_NAMES = [
+        'football' => 'Football',
+        'basketball' => 'Basketball',
+        'baseball' => 'Baseball',
+        'hockey' => 'Hockey',
+        'soccer' => 'Soccer',
+        'rugby' => 'Rugby',
+        'rugby-league' => 'Rugby League',
+        'australian-football' => 'Australian Football',
+        'lacrosse' => 'Lacrosse',
+        'volleyball' => 'Volleyball',
+        'field-hockey' => 'Field Hockey',
+        'water-polo' => 'Water Polo',
     ];
+
+    /** @var array<string, array<string, mixed>>|null catalogue entries by league id */
+    private static ?array $leaguesById = null;
 
     public function __construct(private readonly GeneralSettings $settings) {}
 
@@ -87,9 +109,10 @@ class EspnSportsService
     }
 
     /**
-     * The competitions clients may list, as sent to them.
+     * The competitions clients may list, as sent to them: every league in
+     * [EspnLeagueCatalog], with its sport's display name for grouping.
      *
-     * @return list<array{id: string, name: string, abbreviation: string, soccer_style: bool, default: bool}>
+     * @return list<array{id: string, name: string, abbreviation: string, sport: string, sport_name: string, soccer_style: bool, default: bool}>
      */
     public static function leagues(): array
     {
@@ -97,9 +120,57 @@ class EspnSportsService
             'id' => self::leagueId($league),
             'name' => $league['name'],
             'abbreviation' => $league['abbreviation'],
-            'soccer_style' => $league['soccer_style'] ?? false,
+            'sport' => $league['sport'],
+            'sport_name' => self::sportName($league['sport']),
+            'soccer_style' => self::isHomeFirst($league),
             'default' => $league['default'] ?? false,
-        ], self::LEAGUES);
+        ], EspnLeagueCatalog::LEAGUES);
+    }
+
+    /**
+     * [leagues] as sent to clients on every login, kept small (the Xtream API
+     * isn't compressed): flags only when set, an abbreviation only when it
+     * differs from the name, and no sport, which starts the id.
+     *
+     * @return list<array{id: string, name: string, abbreviation?: string, soccer_style?: true, default?: true}>
+     */
+    public static function clientLeagues(): array
+    {
+        return array_map(fn (array $league): array => array_filter([
+            'id' => $league['id'],
+            'name' => $league['name'],
+            'abbreviation' => $league['abbreviation'] !== $league['name'] ? $league['abbreviation'] : null,
+            'soccer_style' => $league['soccer_style'] ?: null,
+            'default' => $league['default'] ?: null,
+        ], fn (mixed $value): bool => $value !== null), self::leagues());
+    }
+
+    /**
+     * Each sport's display name, by the sport that starts a league id.
+     *
+     * @return array<string, string>
+     */
+    public static function sportNames(): array
+    {
+        return array_column(self::leagues(), 'sport_name', 'sport');
+    }
+
+    /**
+     * A sport's display name ("Rugby League" for "rugby-league").
+     */
+    public static function sportName(string $sport): string
+    {
+        return __(self::SPORT_NAMES[$sport] ?? ucwords(str_replace('-', ' ', $sport)));
+    }
+
+    /**
+     * Whether a league's fixtures read home side first, as soccer's do.
+     *
+     * @param  array<string, mixed>  $league
+     */
+    public static function isHomeFirst(array $league): bool
+    {
+        return in_array($league['sport'], self::HOME_FIRST_SPORTS, true);
     }
 
     /**
@@ -115,6 +186,22 @@ class EspnSportsService
      */
     public function fixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): array
     {
+        return array_map($this->present(...), $this->rawFixtures($leagueIds, $from, $to));
+    }
+
+    /**
+     * [fixtures], with crests as ESPN serves them: for server-side use (the
+     * sports AED profiles), which proxies only what it emits.
+     *
+     * Without [$liveScores] (game matching only reads kickoffs and teams), a
+     * wide soccer league set comes from ESPN's all-leagues scoreboard, which
+     * isn't refreshed for scores.
+     *
+     * @param  list<string>  $leagueIds
+     * @return list<array<string, mixed>>
+     */
+    public function rawFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to, bool $liveScores = true): array
+    {
         $from = CarbonImmutable::instance($from)->utc();
         $to = CarbonImmutable::instance($to)->utc();
         if ($to->greaterThan($from->addDays(self::MAX_RANGE_DAYS))) {
@@ -124,17 +211,14 @@ class EspnSportsService
             return [];
         }
 
-        $leagues = array_values(array_filter(
-            self::LEAGUES,
-            fn (array $league): bool => in_array(self::leagueId($league), $leagueIds, true),
-        ));
+        $leagues = array_values(array_filter(array_map(self::findLeague(...), array_unique($leagueIds))));
 
         $days = [];
         for ($day = $from->subDay()->startOfDay(); $day->lessThanOrEqualTo($to->addDay()); $day = $day->addDay()) {
             $days[] = $day;
         }
 
-        $scoreboards = $this->scoreboards($leagues, $days);
+        $scoreboards = $this->scoreboards($leagues, $days, $liveScores);
 
         $fixtures = [];
         foreach ($scoreboards as $dayFixtures) {
@@ -150,7 +234,163 @@ class EspnSportsService
         $fixtures = array_values($fixtures);
         usort($fixtures, fn (array $a, array $b): int => strcmp($a['start'], $b['start']));
 
-        return array_map($this->present(...), $fixtures);
+        return $fixtures;
+    }
+
+    /**
+     * Every team of [$leagueId] (empty for an unknown league or a failed
+     * fetch), with proxied crests. Rosters rarely change, so the list is
+     * cached for a week; a failure is retried after a few minutes.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function teams(string $leagueId): array
+    {
+        $league = self::findLeague($leagueId);
+        if ($league === null) {
+            return [];
+        }
+
+        $key = $this->teamsCacheKey($leagueId);
+        $teams = Cache::get($key);
+        if (! is_array($teams) && $this->isPaused()) {
+            return [];
+        }
+        if (! is_array($teams)) {
+            try {
+                $response = Http::timeout(self::REQUEST_TIMEOUT_SECONDS)
+                    ->acceptJson()
+                    ->get($this->teamsUrl($league), ['limit' => '1000']);
+            } catch (Throwable $e) {
+                $response = $e;
+            }
+            $teams = $this->storeTeams($key, $leagueId, $response);
+        }
+
+        return array_map(fn (array $team): array => [
+            ...$team,
+            'logo' => $team['logo'] !== null ? self::proxiedLogo($team['logo']) : null,
+        ], $teams);
+    }
+
+    /**
+     * The teams of each of [$leagueIds], by league, with crests as ESPN
+     * serves them: for server-side matching, which never shows them. Lists
+     * not cached yet are fetched in parallel batches.
+     *
+     * @param  list<string>  $leagueIds
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public function teamsByLeague(array $leagueIds, bool $holdsLock = false): array
+    {
+        $keys = [];
+        foreach (array_unique($leagueIds) as $leagueId) {
+            if (self::findLeague($leagueId) !== null) {
+                $keys[$this->teamsCacheKey($leagueId)] = $leagueId;
+            }
+        }
+        $cached = $keys === [] ? [] : Cache::many(array_keys($keys));
+
+        $teams = [];
+        $misses = [];
+        foreach ($keys as $key => $leagueId) {
+            if (is_array($cached[$key] ?? null)) {
+                $teams[$leagueId] = $cached[$key];
+            } else {
+                $misses[$key] = self::findLeague($leagueId);
+            }
+        }
+
+        if ($misses !== [] && ! $holdsLock) {
+            try {
+                return Cache::lock($this->fetchLockKey(), self::FETCH_LOCK_SECONDS)
+                    ->block(self::FETCH_LOCK_WAIT_SECONDS, fn (): array => $this->teamsByLeague($leagueIds, holdsLock: true));
+            } catch (LockTimeoutException) {
+                // Still fetching elsewhere: serve what's cached
+                return $teams;
+            }
+        }
+
+        foreach (array_chunk($misses, self::CONCURRENCY, preserve_keys: true) as $batch) {
+            if ($this->isPaused()) {
+                break;
+            }
+            $responses = Http::pool(fn (Pool $pool): array => array_map(
+                fn (string $key): mixed => $pool->as($key)
+                    ->timeout(self::REQUEST_TIMEOUT_SECONDS)
+                    ->acceptJson()
+                    ->get($this->teamsUrl($batch[$key]), ['limit' => '1000']),
+                array_keys($batch),
+            ));
+            $this->pauseIfRefused($responses);
+            foreach ($batch as $key => $league) {
+                $teams[self::leagueId($league)] = $this->storeTeams($key, self::leagueId($league), $responses[$key] ?? null);
+                unset($responses[$key]);
+            }
+        }
+
+        return $teams;
+    }
+
+    /**
+     * Caches a `/teams` response's teams for a week, or nothing for a few
+     * minutes when the request failed.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function storeTeams(string $key, string $leagueId, mixed $response): array
+    {
+        if (! $response instanceof Response || ! $response->successful()) {
+            Log::warning('ESPN teams fetch failed', [
+                'league' => $leagueId,
+                'reason' => match (true) {
+                    $response instanceof Response => 'HTTP '.$response->status(),
+                    $response instanceof Throwable => $response->getMessage(),
+                    default => 'no response',
+                },
+            ]);
+            Cache::put($key, [], now()->addMinutes(5));
+
+            return [];
+        }
+        $teams = self::parseTeams(json_decode($response->body(), true));
+        Cache::put($key, $teams, now()->addDays(7));
+
+        return $teams;
+    }
+
+    /**
+     * The catalogue entry for [$leagueId], or null when it isn't offered.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function findLeague(string $leagueId): ?array
+    {
+        if (self::$leaguesById === null) {
+            self::$leaguesById = [];
+            foreach (EspnLeagueCatalog::LEAGUES as $league) {
+                self::$leaguesById[self::leagueId($league)] = $league;
+            }
+        }
+
+        return self::$leaguesById[$leagueId] ?? null;
+    }
+
+    /**
+     * Whether a league is a college one ("basketball/mens-college-basketball",
+     * "soccer/usa.ncaa.m.1"), whose teams are named by school.
+     */
+    public static function isCollege(string $leagueId): bool
+    {
+        return str_contains($leagueId, 'college') || str_contains($leagueId, '.ncaa.');
+    }
+
+    /**
+     * The sport a league id belongs to ("hockey" for "hockey/nhl").
+     */
+    public static function sportOf(string $leagueId): string
+    {
+        return explode('/', $leagueId, 2)[0];
     }
 
     /**
@@ -161,7 +401,7 @@ class EspnSportsService
      */
     public function testConnection(?string $apiUrl = null): int
     {
-        $league = self::LEAGUES[0];
+        $league = EspnLeagueCatalog::LEAGUES[0];
         $response = Http::timeout(self::REQUEST_TIMEOUT_SECONDS)
             ->acceptJson()
             ->get(
@@ -184,47 +424,114 @@ class EspnSportsService
      * Each league-day's mapped fixtures, from the cache where fresh and
      * fetched in parallel batches otherwise.
      *
+     * Two things keep a wide league set (an AED profile matching every
+     * league) cheap. A league's days outside its season window aren't
+     * requested at all. And without [$liveScores], past
+     * [BULK_SOCCER_MIN_LEAGUES] soccer leagues each day's soccer comes from
+     * ESPN's all-leagues scoreboard, split by league, instead of one request
+     * per league.
+     *
      * @param  list<array<string, mixed>>  $leagues
      * @param  list<CarbonImmutable>  $days
      * @return list<list<array<string, mixed>>>
      */
-    private function scoreboards(array $leagues, array $days): array
+    private function scoreboards(array $leagues, array $days, bool $liveScores, bool $holdsLock = false): array
     {
-        $results = [];
-        $misses = [];
+        $soccerIds = [];
         foreach ($leagues as $league) {
+            if ($league['sport'] === 'soccer') {
+                $soccerIds[] = self::leagueId($league);
+            }
+        }
+        $bulkSoccer = ! $liveScores && count($soccerIds) > self::BULK_SOCCER_MIN_LEAGUES;
+
+        $perLeague = array_values(array_filter($leagues, fn (array $league): bool => ! $bulkSoccer || $league['sport'] !== 'soccer'));
+        // Read in one round trip: a wide league set has a thousand keys
+        $keys = [];
+        foreach ($perLeague as $league) {
+            $keys[] = $this->seasonCacheKey($league);
             foreach ($days as $day) {
+                $keys[] = $this->cacheKey($league, $day);
+            }
+        }
+        if ($bulkSoccer) {
+            foreach ($days as $day) {
+                $keys[] = $this->allSoccerCacheKey($day);
+            }
+        }
+        $cache = $keys === [] ? [] : Cache::many($keys);
+
+        $results = [];
+        $soccerDays = [];
+        /** @var array<string, array{0: array<string, mixed>|null, 1: CarbonImmutable}> $misses */
+        $misses = [];
+        foreach ($perLeague as $league) {
+            $season = $cache[$this->seasonCacheKey($league)] ?? null;
+            foreach ($days as $day) {
+                if ($this->isOutOfSeason($season, $day)) {
+                    continue;
+                }
                 $key = $this->cacheKey($league, $day);
-                $cached = Cache::get($key);
-                if (is_array($cached)) {
-                    $results[] = $cached;
+                $cached = $cache[$key] ?? null;
+                if (is_array($cached['fixtures'] ?? null) && (! $liveScores || $cached['fresh_until'] >= now()->getTimestamp())) {
+                    $results[] = $cached['fixtures'];
                 } else {
                     $misses[$key] = [$league, $day];
                 }
             }
         }
-
-        foreach (array_chunk($misses, self::CONCURRENCY, preserve_keys: true) as $batch) {
-            $responses = Http::pool(fn (Pool $pool): array => array_map(
-                fn (string $key): mixed => $pool->as($key)
-                    ->timeout(self::REQUEST_TIMEOUT_SECONDS)
-                    ->acceptJson()
-                    ->get($this->scoreboardUrl($batch[$key][0]), $this->scoreboardQuery($batch[$key][0], $batch[$key][1])),
-                array_keys($batch),
-            ));
-
-            foreach ($batch as $key => [$league, $day]) {
-                $fixtures = $this->readScoreboard($responses[$key] ?? null, $league, $day);
-                if ($fixtures === null) {
-                    // A short negative cache, so one failing league-day isn't
-                    // retried by every client refresh.
-                    Cache::put($key, [], now()->addMinute());
-                    $results[] = [];
-
-                    continue;
+        if ($bulkSoccer) {
+            foreach ($days as $day) {
+                $key = $this->allSoccerCacheKey($day);
+                $cached = $cache[$key] ?? null;
+                if (is_array($cached)) {
+                    $soccerDays[] = $cached;
+                } else {
+                    $misses[$key] = [null, $day];
                 }
-                Cache::put($key, $fixtures, $this->ttl($fixtures, $day));
-                $results[] = $fixtures;
+            }
+        }
+
+        // One process fetches at a time; the others wait, then read what it
+        // cached (a TV opening its guide sends several EPG requests at once).
+        if ($misses !== [] && ! $holdsLock) {
+            try {
+                return Cache::lock($this->fetchLockKey(), self::FETCH_LOCK_SECONDS)
+                    ->block(self::FETCH_LOCK_WAIT_SECONDS, fn (): array => $this->scoreboards($leagues, $days, $liveScores, holdsLock: true));
+            } catch (LockTimeoutException) {
+                // Still fetching elsewhere: serve what's cached
+                $misses = [];
+            }
+        }
+
+        // A league whose season isn't known yet is asked for one day first:
+        // the window it reports then rules out its other days (most leagues
+        // are out of season on any given day).
+        $first = [];
+        $later = [];
+        foreach ($misses as $key => $miss) {
+            $league = $miss[0];
+            $group = $league === null ? $key : self::leagueId($league);
+            if ($league === null || (! isset($first[$group]) && ! is_array($cache[$this->seasonCacheKey($league)] ?? null))) {
+                $first[$group] = [$key, $miss];
+            } else {
+                $later[$key] = $miss;
+            }
+        }
+        foreach ([array_column($first, 1, 0), $later] as $phase => $phaseMisses) {
+            if ($phase === 1 && $phaseMisses !== []) {
+                // The windows the first phase just learned
+                $seasons = Cache::many(array_values(array_unique(array_map(fn (array $miss): string => $this->seasonCacheKey($miss[0]), $phaseMisses))));
+                $phaseMisses = array_filter($phaseMisses, fn (array $miss): bool => ! $this->isOutOfSeason($seasons[$this->seasonCacheKey($miss[0])] ?? null, $miss[1]));
+            }
+            [$fetched, $fetchedSoccerDays] = $this->fetchScoreboards($phaseMisses);
+            array_push($results, ...$fetched);
+            array_push($soccerDays, ...$fetchedSoccerDays);
+        }
+
+        foreach ($soccerDays as $byLeague) {
+            foreach ($soccerIds as $leagueId) {
+                $results[] = $byLeague[$leagueId] ?? [];
             }
         }
 
@@ -232,10 +539,79 @@ class EspnSportsService
     }
 
     /**
-     * @param  array<string, mixed>  $league
-     * @return list<array<string, mixed>>|null null when the request failed
+     * Fetches [$misses] (cache key => [league, or null for the all-leagues
+     * soccer scoreboard; day]) in parallel batches and caches each.
+     *
+     * @param  array<string, array{0: array<string, mixed>|null, 1: CarbonImmutable}>  $misses
+     * @return array{0: list<list<array<string, mixed>>>, 1: list<array<string, list<array<string, mixed>>>>} league-day fixtures, and all-leagues soccer days
      */
-    private function readScoreboard(mixed $response, array $league, CarbonImmutable $day): ?array
+    private function fetchScoreboards(array $misses): array
+    {
+        $results = [];
+        $soccerDays = [];
+        foreach (array_chunk($misses, self::CONCURRENCY, preserve_keys: true) as $batch) {
+            if ($this->isPaused()) {
+                // Not cached, so the next refresh after the pause asks again
+                array_push($results, ...array_fill(0, count($batch), []));
+
+                continue;
+            }
+            $responses = Http::pool(fn (Pool $pool): array => array_map(
+                function (string $key) use ($pool, $batch): mixed {
+                    [$league, $day] = $batch[$key];
+                    $request = $pool->as($key)->timeout(self::REQUEST_TIMEOUT_SECONDS)->acceptJson();
+
+                    return $league === null
+                        ? $request->get($this->apiUrl().'/soccer/all/scoreboard', ['dates' => $day->format('Ymd'), 'limit' => '1000'])
+                        : $request->get($this->scoreboardUrl($league), $this->scoreboardQuery($league, $day));
+                },
+                array_keys($batch),
+            ));
+
+            $this->pauseIfRefused($responses);
+            foreach ($batch as $key => [$league, $day]) {
+                $json = $this->readScoreboard($responses[$key] ?? null, $league === null ? 'soccer/all' : self::leagueId($league), $day);
+                // Decoded bodies can be megabytes (the all-leagues soccer
+                // scoreboard); keep only what's parsed from them.
+                unset($responses[$key]);
+                if ($json === null) {
+                    // A short negative cache, so one failing league-day isn't
+                    // retried by every client refresh.
+                    Cache::put($key, $league === null ? [] : ['fixtures' => [], 'fresh_until' => now()->addMinute()->getTimestamp()], now()->addMinute());
+                    $results[] = [];
+
+                    continue;
+                }
+                if ($league === null) {
+                    $byLeague = self::parseAllSoccerScoreboard($json);
+                    // Big, and only read for kickoffs and teams (game
+                    // matching), so it isn't refetched for live scores.
+                    $ttl = max($this->ttl(array_merge([], ...array_values($byLeague)), $day), now()->addMinutes(self::MATCHING_STALE_MINUTES));
+                    Cache::put($key, $byLeague, $ttl);
+                    $soccerDays[] = $byLeague;
+
+                    continue;
+                }
+                $this->rememberSeason($league, $json);
+                $fixtures = self::parseScoreboard($json, self::leagueId($league));
+                // Kept past its freshness for game matching, which only reads
+                // kickoffs and teams; live readers refetch once it's stale.
+                $freshUntil = $this->ttl($fixtures, $day);
+                Cache::put($key, ['fixtures' => $fixtures, 'fresh_until' => $freshUntil->getTimestamp()], max($freshUntil, now()->addMinutes(self::MATCHING_STALE_MINUTES)));
+                $results[] = $fixtures;
+            }
+        }
+
+        return [$results, $soccerDays];
+    }
+
+    /**
+     * The decoded body of a scoreboard response, or null (logged) when the
+     * request failed.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function readScoreboard(mixed $response, string $leagueId, CarbonImmutable $day): ?array
     {
         if (! $response instanceof Response || ! $response->successful()) {
             $reason = match (true) {
@@ -244,20 +620,88 @@ class EspnSportsService
                 default => 'no response',
             };
             Log::warning('ESPN scoreboard fetch failed', [
-                'league' => self::leagueId($league),
+                'league' => $leagueId,
                 'day' => $day->format('Ymd'),
                 'reason' => $reason,
             ]);
 
             return null;
         }
+        // Not $response->json(), which keeps the decoded copy on the response
+        $json = json_decode($response->body(), true);
 
-        return self::parseScoreboard($response->json(), self::leagueId($league));
+        return is_array($json) ? $json : [];
+    }
+
+    /**
+     * Whether ESPN requests are paused after it refused or failed a batch.
+     */
+    private function isPaused(): bool
+    {
+        return Cache::has($this->pauseCacheKey());
+    }
+
+    /**
+     * Pauses ESPN requests for [PAUSE_MINUTES] when a batch is rate limited
+     * or forbidden, or mostly fails (at least [PAUSE_MIN_FAILURES] requests):
+     * without it, a wide league set would
+     * retry hundreds of requests every minute while ESPN is down.
+     *
+     * @param  array<string, mixed>  $responses
+     */
+    private function pauseIfRefused(array $responses): void
+    {
+        $failed = 0;
+        $refused = false;
+        foreach ($responses as $response) {
+            if (! $response instanceof Response || ! $response->successful()) {
+                $failed++;
+                $refused = $refused || ($response instanceof Response && in_array($response->status(), [403, 429], true));
+            }
+        }
+        // One failing league-day isn't an outage; most of a batch failing is
+        if ($refused || ($failed >= self::PAUSE_MIN_FAILURES && $failed * 2 >= count($responses))) {
+            Cache::put($this->pauseCacheKey(), true, now()->addMinutes(self::PAUSE_MINUTES));
+            Log::warning('ESPN requests paused', ['minutes' => self::PAUSE_MINUTES, 'failed' => $failed, 'of' => count($responses)]);
+        }
+    }
+
+    /**
+     * Keeps the season window a scoreboard reports (ESPN's calendar for the
+     * league), so days outside it aren't requested.
+     *
+     * @param  array<string, mixed>  $league
+     * @param  array<string, mixed>  $json
+     */
+    private function rememberSeason(array $league, array $json): void
+    {
+        $start = self::parseDate(self::string($json['leagues'][0]['calendarStartDate'] ?? null));
+        $end = self::parseDate(self::string($json['leagues'][0]['calendarEndDate'] ?? null));
+        if ($start !== null && $end !== null && $end->greaterThan($start)) {
+            Cache::put($this->seasonCacheKey($league), [$start->toIso8601ZuluString(), $end->toIso8601ZuluString()], now()->addHours(self::SEASON_CACHE_HOURS));
+        }
+    }
+
+    /**
+     * Whether [$day] is more than a day outside a league's last known
+     * [$season] window (as cached by [rememberSeason]). Unknown windows never
+     * rule a day out.
+     */
+    private function isOutOfSeason(mixed $season, CarbonImmutable $day): bool
+    {
+        if (! is_array($season) || count($season) !== 2) {
+            return false;
+        }
+
+        return $day->addDay()->lessThan(CarbonImmutable::parse($season[0]))
+            || $day->subDay()->greaterThan(CarbonImmutable::parse($season[1]));
     }
 
     /**
      * A day with a game on refreshes every minute for its score; a day long
-     * over rarely changes; a future one only gains times and broadcasters.
+     * over rarely changes. A future day only gains times and broadcasters,
+     * and so does a day without games: those refresh hourly, today and
+     * tomorrow's busy days every ten minutes.
      *
      * @param  list<array<string, mixed>>  $fixtures
      */
@@ -273,7 +717,49 @@ class EspnSportsService
             }
         }
 
-        return $day->addDays(2)->lessThan($now) ? $now->addHours(6) : $now->addMinutes(10);
+        if ($day->addDays(2)->lessThan($now)) {
+            return $now->addHours(6);
+        }
+
+        return $fixtures === [] || $day->subDay()->greaterThan($now) ? $now->addHour() : $now->addMinutes(10);
+    }
+
+    /**
+     * Maps ESPN's all-leagues soccer scoreboard to fixtures by league id.
+     * An event names its league only by ESPN's numeric id, inside its `uid`
+     * (`s:600~l:700~e:...`); leagues outside the catalogue are dropped.
+     *
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public static function parseAllSoccerScoreboard(mixed $json): array
+    {
+        $events = is_array($json) ? ($json['events'] ?? null) : null;
+        if (! is_array($events)) {
+            return [];
+        }
+        $byEspnId = [];
+        foreach (EspnLeagueCatalog::LEAGUES as $league) {
+            if ($league['sport'] === 'soccer') {
+                $byEspnId[$league['espn_id']] = $league;
+            }
+        }
+
+        $byLeague = [];
+        foreach ($events as $event) {
+            if (! is_array($event) || preg_match('/~l:(\d+)~/', (string) ($event['uid'] ?? ''), $match) !== 1) {
+                continue;
+            }
+            $league = $byEspnId[$match[1]] ?? null;
+            if ($league === null) {
+                continue;
+            }
+            $leagueId = self::leagueId($league);
+            if (($fixture = self::parseEvent($event, $leagueId)) !== null) {
+                $byLeague[$leagueId][] = [...$fixture, 'league_logo' => $league['logo'] ?? null];
+            }
+        }
+
+        return $byLeague;
     }
 
     /**
@@ -288,11 +774,13 @@ class EspnSportsService
         if (! is_array($events)) {
             return [];
         }
+        $leagueLogo = self::string($json['leagues'][0]['logos'][0]['href'] ?? null)
+            ?? (self::findLeague($leagueId)['logo'] ?? null);
 
         $fixtures = [];
         foreach ($events as $event) {
             if (is_array($event) && ($fixture = self::parseEvent($event, $leagueId)) !== null) {
-                $fixtures[] = $fixture;
+                $fixtures[] = [...$fixture, 'league_logo' => $leagueLogo];
             }
         }
 
@@ -346,6 +834,7 @@ class EspnSportsService
             'status_detail' => self::string($type['shortDetail'] ?? null) ?? '',
             'name' => self::string($event['name'] ?? null),
             'broadcasts' => $broadcasts,
+            'venue' => self::string($competition['venue']['fullName'] ?? null),
             'home' => $home,
             'away' => $away,
         ];
@@ -378,30 +867,65 @@ class EspnSportsService
      */
     private static function parseCompetitor(array $competitor): ?array
     {
-        $team = is_array($competitor['team'] ?? null) ? $competitor['team'] : null;
-        $id = self::string($team['id'] ?? null);
-        if ($team === null || $id === null) {
+        $team = is_array($competitor['team'] ?? null) ? self::parseTeam($competitor['team']) : null;
+        if ($team === null) {
             return null;
         }
-
-        $displayName = self::string($team['displayName'] ?? null) ?? self::string($team['name'] ?? null) ?? $id;
-        $logo = self::string($team['logo'] ?? null) ?? self::string($team['logos'][0]['href'] ?? null);
         $score = $competitor['score'] ?? null;
 
         return [
             'score' => is_array($score) ? self::string($score['displayValue'] ?? null) : self::string($score),
             'winner' => ($competitor['winner'] ?? false) === true,
-            'team' => [
-                'id' => $id,
-                'display_name' => $displayName,
-                'short_name' => self::string($team['shortDisplayName'] ?? null) ?? $displayName,
-                'nickname' => self::string($team['name'] ?? null) ?? $displayName,
-                'abbreviation' => self::string($team['abbreviation'] ?? null) ?? '',
-                'logo' => $logo,
-                'color' => self::hex($team['color'] ?? null),
-                'alternate_color' => self::hex($team['alternateColor'] ?? null),
-            ],
+            'team' => $team,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $team
+     * @return array<string, mixed>|null
+     */
+    private static function parseTeam(array $team): ?array
+    {
+        $id = self::string($team['id'] ?? null);
+        if ($id === null) {
+            return null;
+        }
+        $displayName = self::string($team['displayName'] ?? null) ?? self::string($team['name'] ?? null) ?? $id;
+
+        return [
+            'id' => $id,
+            'display_name' => $displayName,
+            'short_name' => self::string($team['shortDisplayName'] ?? null) ?? $displayName,
+            'nickname' => self::string($team['name'] ?? null) ?? $displayName,
+            'abbreviation' => self::string($team['abbreviation'] ?? null) ?? '',
+            'location' => self::string($team['location'] ?? null),
+            'logo' => self::string($team['logo'] ?? null) ?? self::string($team['logos'][0]['href'] ?? null),
+            'color' => self::hex($team['color'] ?? null),
+            'alternate_color' => self::hex($team['alternateColor'] ?? null),
+        ];
+    }
+
+    /**
+     * Maps an ESPN `/teams` response, alphabetically. Exposed for tests.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function parseTeams(mixed $json): array
+    {
+        $wrappers = is_array($json) ? ($json['sports'][0]['leagues'][0]['teams'] ?? null) : null;
+        if (! is_array($wrappers)) {
+            return [];
+        }
+        $teams = [];
+        foreach ($wrappers as $wrapper) {
+            $team = is_array($wrapper['team'] ?? null) ? self::parseTeam($wrapper['team']) : null;
+            if ($team !== null) {
+                $teams[] = $team;
+            }
+        }
+        usort($teams, fn (array $a, array $b): int => strcasecmp($a['display_name'], $b['display_name']));
+
+        return $teams;
     }
 
     /**
@@ -415,11 +939,23 @@ class EspnSportsService
         foreach (['home', 'away'] as $side) {
             $logo = $fixture[$side]['team']['logo'] ?? null;
             if ($logo !== null) {
-                $fixture[$side]['team']['logo'] = LogoProxyController::generateProxyUrl($logo, profile: ImageProfile::Photo);
+                $fixture[$side]['team']['logo'] = self::proxiedLogo($logo);
             }
+        }
+        if (($fixture['league_logo'] ?? null) !== null) {
+            $fixture['league_logo'] = self::proxiedLogo($fixture['league_logo']);
         }
 
         return $fixture;
+    }
+
+    /**
+     * A crest as clients load it: through the logo proxy, sized as a small
+     * image, so nothing outside this server ever reaches ESPN.
+     */
+    public static function proxiedLogo(string $url): string
+    {
+        return LogoProxyController::generateProxyUrl($url, profile: ImageProfile::Photo);
     }
 
     /**
@@ -486,6 +1022,42 @@ class EspnSportsService
      */
     private function cacheKey(array $league, CarbonImmutable $day): string
     {
-        return 'sports:espn:'.md5($this->apiUrl()).':'.self::leagueId($league).':'.$day->format('Ymd');
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':'.self::leagueId($league).':'.$day->format('Ymd');
+    }
+
+    private function fetchLockKey(): string
+    {
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':fetching';
+    }
+
+    private function pauseCacheKey(): string
+    {
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':paused';
+    }
+
+    private function teamsCacheKey(string $leagueId): string
+    {
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':teams:'.$leagueId;
+    }
+
+    /**
+     * @param  array<string, mixed>  $league
+     */
+    private function teamsUrl(array $league): string
+    {
+        return $this->apiUrl().'/'.$league['sport'].'/'.$league['slug'].'/teams';
+    }
+
+    private function allSoccerCacheKey(CarbonImmutable $day): string
+    {
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':soccer-all:'.$day->format('Ymd');
+    }
+
+    /**
+     * @param  array<string, mixed>  $league
+     */
+    private function seasonCacheKey(array $league): string
+    {
+        return 'sports:espn:v4:'.md5($this->apiUrl()).':season:'.self::leagueId($league);
     }
 }

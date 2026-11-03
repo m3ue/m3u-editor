@@ -3,12 +3,47 @@
 namespace App\Services;
 
 use App\Models\AedProfile;
+use App\Services\Sports\SportsAedResolver;
 use Carbon\Carbon;
 use Carbon\Exceptions\InvalidFormatException;
 use Throwable;
 
 class AedExtractorService
 {
+    private ?SportsAedResolver $sports;
+
+    /**
+     * One instance should serve a whole EPG build: the sports resolver loads
+     * its fixtures once and reuses them for every channel.
+     */
+    public function __construct(?SportsAedResolver $sports = null)
+    {
+        $this->sports = $sports;
+    }
+
+    /**
+     * The event for a channel title: the ESPN game it names when the profile
+     * matches sports, else the regex extraction, else the no-event fallback.
+     * Null when none applies (the channel then gets no programmes).
+     *
+     * [$days] is how far ahead the EPG is being built, which bounds the games
+     * a title can match.
+     */
+    public function resolve(AedProfile $profile, string $channelTitle, int $days = 5): ?AedEvent
+    {
+        if ($profile->sports_matching) {
+            $sports = $this->sports ??= app(SportsAedResolver::class);
+            if ($sports->appliesTo($profile)) {
+                $event = $sports->match($profile, $channelTitle, $this->extractStartTime($profile, $channelTitle), $days);
+                if ($event !== null) {
+                    return $event;
+                }
+            }
+        }
+
+        return $this->extract($profile, $channelTitle) ?? $this->fallback($profile, $channelTitle);
+    }
+
     /**
      * Extract event data from a channel title using an AED profile.
      * Returns null if the title regex doesn't match or time parsing fails.
@@ -100,6 +135,88 @@ class AedExtractorService
         );
     }
 
+    /**
+     * The programmes a channel gets from its AED profile between
+     * [$windowStart] and [$windowEnd]: pre-event padding, the event, then
+     * post-event padding when the event has a start time, otherwise the
+     * event title repeated in event-length slots. Null when the profile
+     * resolves no event (the channel then gets no programmes).
+     *
+     * `icon` and `category` fall back to the profile's; `desc` is null only
+     * for an untimed event without a description, so callers can supply
+     * their own default.
+     *
+     * @return list<array{start: Carbon, stop: Carbon, title: string, desc: ?string, icon: ?string, category: ?string}>|null
+     */
+    public function programmes(AedProfile $profile, string $channelTitle, Carbon $windowStart, Carbon $windowEnd, int $days = 5): ?array
+    {
+        $event = $this->resolve($profile, $channelTitle, $days);
+        if ($event === null) {
+            return null;
+        }
+
+        $icon = $event->icon ?? ($profile->logo_url ?: null);
+        $category = $event->category ?? ($profile->category ?: null);
+        $slotMinutes = max(1, $event->durationMinutes);
+        $programme = fn (Carbon $start, Carbon $stop, string $title, ?string $desc): array => [
+            'start' => $start->copy(),
+            'stop' => $stop->copy(),
+            'title' => $title,
+            'desc' => $desc,
+            'icon' => $icon,
+            'category' => $category,
+        ];
+        $programmes = [];
+
+        if (! $event->hasTime() || $event->start === null) {
+            $cursor = $windowStart->copy();
+            while ($cursor->lt($windowEnd)) {
+                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                $programmes[] = $programme($cursor, $slotEnd, $event->title, $event->description);
+                $cursor = $slotEnd;
+            }
+
+            return $programmes;
+        }
+
+        // Pre-event fill: window start to event start, capped at the window end so a
+        // far-off event can't generate months of padding (skipped when pre_event_format is null)
+        $preEventEnd = $event->start->lt($windowEnd) ? $event->start : $windowEnd;
+        $cursor = $windowStart->copy();
+        while ($cursor->lt($preEventEnd)) {
+            $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+            if ($slotEnd->gt($preEventEnd)) {
+                $slotEnd = $preEventEnd->copy();
+            }
+            $preTitle = $this->preEventTitle($profile, $channelTitle, $event, $cursor);
+            if ($preTitle !== null) {
+                $programmes[] = $programme($cursor, $slotEnd, $preTitle, $preTitle);
+            }
+            $cursor = $slotEnd;
+        }
+
+        // The event itself (only when it starts inside the window)
+        if ($event->start->lt($windowEnd)) {
+            $programmes[] = $programme($event->start, $event->end, $event->title, $event->description ?? $event->title);
+        }
+
+        // Post-event fill: event end to window end (skipped when post_event_format is null)
+        $postTitle = $this->postEventTitle($profile, $channelTitle, $event);
+        if ($postTitle !== null) {
+            $cursor = $event->end->copy();
+            while ($cursor->lt($windowEnd)) {
+                $slotEnd = $cursor->copy()->addMinutes($slotMinutes);
+                if ($slotEnd->gt($windowEnd)) {
+                    $slotEnd = $windowEnd->copy();
+                }
+                $programmes[] = $programme($cursor, $slotEnd, $postTitle, $postTitle);
+                $cursor = $slotEnd;
+            }
+        }
+
+        return $programmes;
+    }
+
     private function formatTimeUntil(Carbon $from, Carbon $to): string
     {
         $totalMinutes = max(0, (int) $from->diffInMinutes($to));
@@ -115,6 +232,14 @@ class AedExtractorService
         }
 
         return "{$mins} mins";
+    }
+
+    /**
+     * The start time the profile's time/date regex reads from a title, if any.
+     */
+    public function startTimeFor(AedProfile $profile, string $channelTitle): ?Carbon
+    {
+        return $this->extractStartTime($profile, $channelTitle);
     }
 
     private function extractTitle(AedProfile $profile, string $channelTitle): ?string

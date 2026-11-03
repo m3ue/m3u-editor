@@ -107,7 +107,10 @@ it('advertises the sports feature and its leagues when enabled', function () {
     expect($response->json('m3u_editor.features'))->toContain('sports')
         ->and($response->json('m3u_editor.sports.actions.fixtures'))->toBe('get_sports_fixtures')
         ->and(collect($response->json('m3u_editor.sports.leagues'))->firstWhere('id', 'hockey/nhl'))
-        ->toMatchArray(['name' => 'NHL', 'soccer_style' => false, 'default' => true]);
+        ->toBe(['id' => 'hockey/nhl', 'name' => 'NHL', 'default' => true])
+        ->and(collect($response->json('m3u_editor.sports.leagues'))->firstWhere('id', 'soccer/eng.1'))
+        ->toBe(['id' => 'soccer/eng.1', 'name' => 'Premier League', 'abbreviation' => 'EPL', 'soccer_style' => true, 'default' => true])
+        ->and($response->json('m3u_editor.sports.sport_names.rugby-league'))->toBe('Rugby League');
 });
 
 it('refuses fixtures while sports is disabled', function () {
@@ -210,4 +213,96 @@ it('saves the sports settings and tests the typed API URL', function () {
     $settings->refresh();
     expect($settings->sports_espn_enabled)->toBeTrue()
         ->and($settings->sports_espn_api_url)->toBe('https://mirror.example.com/sports');
+});
+
+it('lists every ESPN team-sport league, grouped by sport, keeping the old defaults', function () {
+    $leagues = collect(EspnSportsService::leagues());
+
+    expect($leagues->count())->toBeGreaterThan(250)
+        ->and($leagues->pluck('id')->duplicates())->toBeEmpty()
+        ->and($leagues->firstWhere('id', 'volleyball/womens-college-volleyball'))
+        ->toMatchArray(['sport' => 'volleyball', 'sport_name' => 'Volleyball', 'default' => false])
+        ->and($leagues->firstWhere('id', 'soccer/usa.ncaa.m.1'))->toMatchArray(['sport_name' => 'Soccer', 'soccer_style' => true])
+        ->and(EspnSportsService::isCollege('soccer/usa.ncaa.m.1'))->toBeTrue()
+        ->and(EspnSportsService::isCollege('soccer/eng.1'))->toBeFalse()
+        ->and($leagues->where('default', true)->pluck('id')->sort()->values()->all())->toBe([
+            'baseball/mlb', 'basketball/nba', 'football/college-football', 'football/nfl',
+            'hockey/nhl', 'soccer/eng.1', 'soccer/uefa.champions', 'soccer/usa.1',
+        ]);
+});
+
+it('matches a wide soccer league set from one all-leagues scoreboard per day', function () {
+    enableSports();
+    $soccerEvent = fn (string $id, string $espnLeagueId): array => [
+        ...espnEvent($id, '2026-11-03T23:00Z'),
+        'uid' => "s:600~l:{$espnLeagueId}~e:{$id}",
+    ];
+    Http::fake(fn (HttpRequest $request) => Http::response([
+        'events' => str_contains($request->url(), '/soccer/all/scoreboard') && $request['dates'] === '20261103'
+            ? [$soccerEvent('1', '700'), $soccerEvent('2', '5487'), $soccerEvent('3', '99999')]
+            : [],
+    ]));
+
+    $fixtures = app(EspnSportsService::class)->rawFixtures(
+        ['soccer/eng.1', 'soccer/usa.ncaa.m.1', 'soccer/esp.1', 'soccer/ger.1', 'soccer/ita.1'],
+        CarbonImmutable::parse('2026-11-03 12:00:00'),
+        CarbonImmutable::parse('2026-11-04 12:00:00'),
+        liveScores: false,
+    );
+
+    expect(collect($fixtures)->pluck('league_id', 'id')->all())->toBe(['1' => 'soccer/eng.1', '2' => 'soccer/usa.ncaa.m.1'])
+        ->and($fixtures[0]['league_logo'])->toBe('https://a.espncdn.com/i/leaguelogos/soccer/500/23.png');
+    Http::assertSent(fn (HttpRequest $request): bool => $request['limit'] === '1000');
+    Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/eng.1/'));
+});
+
+it('stops requesting a league\'s days outside its season', function () {
+    enableSports();
+    Http::fake(fn () => Http::response([
+        'leagues' => [['calendarStartDate' => '2026-02-19T08:00Z', 'calendarEndDate' => '2026-11-02T07:59Z']],
+        'events' => [],
+    ]));
+    $espn = app(EspnSportsService::class);
+
+    $espn->rawFixtures(['baseball/mlb'], CarbonImmutable::parse('2026-11-03 12:00:00'), CarbonImmutable::parse('2026-11-04 12:00:00'));
+    $sent = count(Http::recorded());
+    $espn->rawFixtures(['baseball/mlb'], CarbonImmutable::parse('2026-11-06 12:00:00'), CarbonImmutable::parse('2026-11-08 12:00:00'));
+
+    expect($sent)->toBeGreaterThan(0)
+        ->and(count(Http::recorded()))->toBe($sent);
+});
+
+it('refetches a live day for scores but lets game matching reuse it', function () {
+    enableSports();
+    Http::fake(fn () => Http::response(['events' => [espnEvent('401', '2026-11-03T17:30Z', 'in', 'STATUS_IN_PROGRESS')]]));
+    $espn = app(EspnSportsService::class);
+    $window = fn (): array => [['hockey/nhl'], CarbonImmutable::now()->subHours(2), CarbonImmutable::now()->addHours(2)];
+
+    $espn->fixtures(...$window());
+    $sent = count(Http::recorded());
+    $this->travel(5)->minutes();
+
+    $espn->rawFixtures(...[...$window(), false]);
+    expect(count(Http::recorded()))->toBe($sent);
+
+    $espn->fixtures(...$window());
+    expect(count(Http::recorded()))->toBeGreaterThan($sent);
+});
+
+it('pauses ESPN requests for a while after it rate limits a batch', function () {
+    enableSports();
+    Http::fake(fn () => Http::response('Too Many Requests', 429));
+    $espn = app(EspnSportsService::class);
+    $window = [['hockey/nhl', 'basketball/nba'], CarbonImmutable::parse('2026-11-03 12:00:00'), CarbonImmutable::parse('2026-11-04 12:00:00')];
+
+    expect($espn->rawFixtures(...$window))->toBe([]);
+    $sent = count(Http::recorded());
+    $this->travel(2)->minutes();
+    $espn->rawFixtures(...$window);
+    expect($espn->teams('hockey/nhl'))->toBe([])
+        ->and(count(Http::recorded()))->toBe($sent);
+
+    $this->travel(10)->minutes();
+    $espn->rawFixtures(...$window);
+    expect(count(Http::recorded()))->toBeGreaterThan($sent);
 });

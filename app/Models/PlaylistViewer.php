@@ -26,6 +26,11 @@ class PlaylistViewer extends Model
         return $this->hasMany(ViewerWatchProgress::class);
     }
 
+    public function sportsFollows(): HasMany
+    {
+        return $this->hasMany(ViewerSportsFollow::class);
+    }
+
     public function playlistAuth(): BelongsTo
     {
         return $this->belongsTo(PlaylistAuth::class);
