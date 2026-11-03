@@ -28,6 +28,12 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
     // Giving a timeout of 30 minutes to the Job to process the file
     public $timeout = 60 * 30;
 
+    /**
+     * TMDB's image host. Its URLs don't expire, and a cover there may be a manual TMDB
+     * match, so a sync never swaps it for the provider's (often also TMDB-hosted) cover.
+     */
+    private const TMDB_IMAGE_HOST = 'image.tmdb.org';
+
     /** Default user agent used when the playlist has none configured. */
     public string $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 
@@ -185,7 +191,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             if ($existingSeriesIds->has($item->series_id)) {
                 $listedExistingIds[] = $item->series_id;
 
-                // Already in DB — only update last_modified and the provider cover if they changed
+                // Already in DB - only update last_modified and the provider cover if they changed
                 $changes = [];
                 $storedModified = $existingSeriesIds->get($item->series_id);
                 if ($lastModified && $lastModified !== $storedModified) {
@@ -266,7 +272,8 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
      * Some providers sign cover URLs with a short expiry, so the cover saved when the series was
      * first imported stops loading a few days later. The listing carries a fresh URL, so take it
      * when the stored cover is blank or comes from the same image host. A cover from another host
-     * (TMDB, or one set by hand) is left alone.
+     * (TMDB, or one set by hand) is left alone, and so is any TMDB-hosted cover, even when the
+     * provider's covers are on TMDB too: it could be the poster a manual TMDB match picked.
      */
     private function refreshedProviderCover(?string $storedCover, mixed $providerCover): ?string
     {
@@ -282,7 +289,9 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         $storedHost = parse_url($storedCover, PHP_URL_HOST);
         $providerHost = parse_url($providerCover, PHP_URL_HOST);
 
-        return is_string($storedHost) && is_string($providerHost) && strcasecmp($storedHost, $providerHost) === 0
+        return is_string($storedHost) && is_string($providerHost)
+            && strcasecmp($storedHost, $providerHost) === 0
+            && strcasecmp($storedHost, self::TMDB_IMAGE_HOST) !== 0
             ? $providerCover
             : null;
     }

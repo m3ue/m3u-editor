@@ -69,6 +69,16 @@ it('keeps a cover from another host, such as TMDB', function () {
         ->toBe('https://image.tmdb.org/t/p/w500/poster.jpg');
 });
 
+it('keeps a TMDB cover even when the provider also serves its covers from TMDB', function () {
+    runCoverRefreshSyncs($this->playlist, [
+        [['series_id' => 14, 'name' => 'Show', 'cover' => 'https://image.tmdb.org/t/p/w600_and_h900_bestv2/provider.jpg']],
+        [['series_id' => 14, 'name' => 'Show', 'cover' => 'https://image.tmdb.org/t/p/w600_and_h900_bestv2/provider.jpg']],
+    ], fn () => Series::where('source_series_id', 14)->update(['cover' => 'https://image.tmdb.org/t/p/w500/manual-match.jpg']));
+
+    expect(Series::where('source_series_id', 14)->value('cover'))
+        ->toBe('https://image.tmdb.org/t/p/w500/manual-match.jpg');
+});
+
 it('fills a blank cover from the listing', function () {
     runCoverRefreshSyncs($this->playlist, [
         [['series_id' => 12, 'name' => 'Show']],
