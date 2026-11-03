@@ -4,6 +4,7 @@ namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Services\EspnSportsService;
 use BackedEnum;
 use Exception;
 use Filament\Actions\Action;
@@ -13,6 +14,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -403,6 +405,60 @@ class ManageIntegrationSettings extends BaseSettingsPage
                                             ->inline(false)
                                             ->columnSpanFull()
                                             ->helperText(__('When enabled, individual stream URLs in generated playlists and Xtream API responses will be rewritten to route through MediaFlow Proxy. Applies only when the m3u-proxy is not already in use for a given playlist or stream.')),
+                                    ]),
+                            ]),
+                        Tab::make(__('Sports'))
+                            ->id('sports')
+                            ->icon('heroicon-m-trophy')
+                            ->schema([
+                                Section::make(__('Sports (ESPN)'))
+                                    ->key('sports_espn')
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-trophy')
+                                    ->collapsible()
+                                    ->columns(2)
+                                    ->headerActions([
+                                        Action::make('test_sports_connection')
+                                            ->label(__('Test Connection'))
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function (Get $get): void {
+                                                try {
+                                                    $count = app(EspnSportsService::class)->testConnection($get('sports_espn_api_url'));
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title(__('Connection Successful'))
+                                                        ->body(__('The sports API answered with :count NFL games for today.', ['count' => $count]))
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Callout::make(__('Unofficial API'))
+                                            ->warning()
+                                            ->columnSpanFull()
+                                            ->description(__('This uses ESPN\'s public site API, which is unofficial and undocumented. ESPN may change or shut it down at any time without notice, and the Sports screen would then show no games. M3U Editor fetches schedules and scores on behalf of your TV apps and caches them (about a minute while a game is on), and serves team crests through the logo proxy, so the apps never contact ESPN directly.')),
+                                        Toggle::make('sports_espn_enabled')
+                                            ->label(__('Use ESPN API (Unofficial)'))
+                                            ->inline(false)
+                                            ->live()
+                                            ->columnSpanFull()
+                                            ->helperText(__('Shows the Sports screen in M3U TV. Channels are matched on the TV using your EPG and channel names, so games are only watchable when your playlist carries them.')),
+                                        TextInput::make('sports_espn_api_url')
+                                            ->label(__('API URL'))
+                                            ->url()
+                                            ->placeholder(EspnSportsService::DEFAULT_API_URL)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => (bool) $get('sports_espn_enabled'))
+                                            ->helperText(__('Optional. The base URL scoreboards are read from, as {base}/{sport}/{league}/scoreboard. Leave empty to use ESPN\'s own; set it only to point at a mirror or a fixed endpoint if ESPN moves this one.')),
                                     ]),
                             ]),
                     ]),

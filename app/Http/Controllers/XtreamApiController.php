@@ -48,6 +48,7 @@ use App\Services\DvrAccessScope;
 use App\Services\DvrRecorderService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
+use App\Services\EspnSportsService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
 use App\Services\TmdbService;
@@ -525,6 +526,17 @@ class XtreamApiController extends Controller
 
                 if (! empty($aiostreamsData)) {
                     $m3uEditorPayload['aiostreams'] = $aiostreamsData;
+                }
+
+                if (in_array('sports', $features, true)) {
+                    $m3uEditorPayload['sports'] = [
+                        'api_version' => 1,
+                        'actions' => [
+                            'fixtures' => 'get_sports_fixtures',
+                        ],
+                        'max_range_days' => EspnSportsService::MAX_RANGE_DAYS,
+                        'leagues' => EspnSportsService::leagues(),
+                    ];
                 }
 
                 $proxyData = $this->resolveProxyData($playlist, $features, $authMethod, $playlistAuth);
@@ -2345,6 +2357,8 @@ class XtreamApiController extends Controller
             return $this->managedLibraryCatalog($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'm3u_editor_sync_result') {
             return $this->managedLibrarySyncResult($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === 'get_sports_fixtures') {
+            return $this->sportsFixtures($request);
         } elseif (in_array($action, self::DVR_ACTIONS, true)) {
             $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
 
@@ -2374,6 +2388,43 @@ class XtreamApiController extends Controller
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
+    }
+
+    /**
+     * Games for the M3U TV Sports screen (`get_sports_fixtures`): every
+     * fixture of the requested competitions starting in [from, to), with
+     * live state and scores. Only served while Settings > Integrations >
+     * Sports is enabled, which is also what advertises the `sports` feature.
+     *
+     * `leagues` is a comma-separated list of league ids from the auth
+     * payload's `m3u_editor.sports.leagues`; `from` and `to` are Unix
+     * timestamps (seconds). Spans past `max_range_days` are cut short.
+     */
+    private function sportsFixtures(Request $request): JsonResponse
+    {
+        $sports = app(EspnSportsService::class);
+        if (! $sports->isEnabled()) {
+            return response()->json(['error' => 'Sports is not enabled'], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'leagues' => ['required', 'string', 'max:2000'],
+            'from' => ['required', 'integer', 'min:0'],
+            'to' => ['required', 'integer', 'gt:from'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => $validator->errors()->keys()], 422);
+        }
+
+        $leagueIds = array_values(array_filter(array_map('trim', explode(',', (string) $request->input('leagues')))));
+
+        return response()->json([
+            'fixtures' => $sports->fixtures(
+                $leagueIds,
+                Carbon::createFromTimestampUTC((int) $request->input('from')),
+                Carbon::createFromTimestampUTC((int) $request->input('to')),
+            ),
+        ]);
     }
 
     /**
@@ -3596,6 +3647,10 @@ class XtreamApiController extends Controller
 
         if ($this->canAdvertiseProxyFeature($playlist, $authMethod, $playlistAuth)) {
             $features[] = 'proxy';
+        }
+
+        if (app(EspnSportsService::class)->isEnabled()) {
+            $features[] = 'sports';
         }
 
         return $features;
