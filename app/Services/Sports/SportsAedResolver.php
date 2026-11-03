@@ -58,7 +58,7 @@ class SportsAedResolver
     private const int TITLE_TIME_TOLERANCE_HOURS = 18;
 
     /** How far back the window reaches, so games under way still match. */
-    private const int WINDOW_PAST_HOURS = 12;
+    public const int WINDOW_PAST_HOURS = 12;
 
     /**
      * Prepared fixture sets, keyed by league ids and window length. `names`

@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
+use App\Filament\Resources\AedProfiles\Pages\ListAedProfiles;
 use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Epg;
@@ -12,9 +13,11 @@ use App\Services\AedExtractorService;
 use App\Services\EpgCacheService;
 use App\Services\Sports\SportsTeamMatcher;
 use App\Settings\GeneralSettings;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
@@ -302,6 +305,43 @@ it('clears a profile\'s cached EPG only when its games change', function () {
     Storage::disk('local')->put($cachePath, '<tv/>');
     $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
     expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+});
+
+it('refreshes a profile\'s games from ESPN on demand, at most every couple of minutes', function () {
+    enableSportsAed();
+    fakeSportsAedEspn();
+    $user = User::factory()->create();
+    $this->actingAs($user);
+    $playlist = Playlist::factory()->for($user)->create();
+    $profile = sportsAedProfile($user);
+    $plain = AedProfile::factory()->for($user)->create();
+    // The rate limiter is resolved at boot, before tests switch to the array
+    // cache, so it keeps its hits in the real Redis; ids restart every run.
+    $limiterKey = 'sports-aed-refresh:'.$profile->id;
+    RateLimiter::clear($limiterKey);
+    Channel::factory()->for($user)->for($playlist)->create(['aed_profile_id' => $profile->id]);
+    $cachePath = EpgCacheService::getPlaylistEpgCachePath($playlist, false);
+    Storage::fake('local');
+
+    // Warm, with nothing changed since: the scheduled refresh keeps the file
+    $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
+    Storage::disk('local')->put($cachePath, '<tv/>');
+    $sent = count(Http::recorded());
+
+    Livewire::test(ListAedProfiles::class)
+        ->assertActionHidden(TestAction::make('refresh_games')->table($plain))
+        ->callAction(TestAction::make('refresh_games')->table($profile))
+        ->assertNotified('Games refreshed');
+    expect(Storage::disk('local')->exists($cachePath))->toBeFalse()
+        ->and(count(Http::recorded()))->toBeGreaterThan($sent);
+
+    $sent = count(Http::recorded());
+    Livewire::test(ListAedProfiles::class)
+        ->callAction(TestAction::make('refresh_games')->table($profile))
+        ->assertNotified('Games were just refreshed');
+    expect(count(Http::recorded()))->toBe($sent);
+
+    RateLimiter::clear($limiterKey);
 });
 
 it('saves the sports fields from the AED profile form', function () {

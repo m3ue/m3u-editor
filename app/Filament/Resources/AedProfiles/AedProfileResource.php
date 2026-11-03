@@ -15,11 +15,13 @@ use App\Services\AedAiRegexSuggestionService;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
 use App\Services\EspnSportsService;
+use App\Services\Sports\SportsAedRefresher;
 use App\Services\Sports\SportsAedResolver;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -44,6 +46,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\RateLimiter;
 
 use function Laravel\Ai\agent;
 
@@ -642,12 +645,42 @@ class AedProfileResource extends Resource implements CopilotResource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
-                DeleteAction::make()
-                    ->button()->hiddenLabel()->size('sm'),
+                ActionGroup::make([
+                    CopyToUserAction::make(),
+                    Action::make('refresh_games')
+                        ->label(__('Refresh Games'))
+                        ->tooltip(__('Refresh games from ESPN and rebuild the guide'))
+                        ->icon('heroicon-o-arrow-path')
+                        ->visible(fn (AedProfile $record): bool => $record->sports_matching && app(EspnSportsService::class)->isEnabled())
+                        ->action(function (AedProfile $record): void {
+                            // A forced refresh refetches every league's games, so one
+                            // per profile every couple of minutes is plenty.
+                            $limiterKey = 'sports-aed-refresh:'.$record->id;
+                            if (RateLimiter::tooManyAttempts($limiterKey, 1)) {
+                                Notification::make()
+                                    ->warning()
+                                    ->title(__('Games were just refreshed'))
+                                    ->body(__('Try again in :seconds seconds.', ['seconds' => RateLimiter::availableIn($limiterKey)]))
+                                    ->send();
+
+                                return;
+                            }
+                            RateLimiter::hit($limiterKey, 120);
+
+                            $games = app(SportsAedRefresher::class)->refresh($record, force: true);
+                            Notification::make()
+                                ->success()
+                                ->title(__('Games refreshed'))
+                                ->body(__(':count games found. The guide rebuilds the next time it is requested.', ['count' => $games]))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalDescription(fn (AedProfile $record): string => __('Fetch ":name" games fresh from ESPN and rebuild the guide for every playlist using this profile. Games already refresh on their own every 15 minutes, so this is only needed when a schedule change should show up right away.', ['name' => $record->name]))
+                        ->modalSubmitActionLabel(__('Refresh now')),
+                    DeleteAction::make(),
+                ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
                     ->slideOver()
-                    ->button()->hiddenLabel()->size('sm'),
-                CopyToUserAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([

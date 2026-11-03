@@ -213,12 +213,7 @@ class EspnSportsService
 
         $leagues = array_values(array_filter(array_map(self::findLeague(...), array_unique($leagueIds))));
 
-        $days = [];
-        for ($day = $from->subDay()->startOfDay(); $day->lessThanOrEqualTo($to->addDay()); $day = $day->addDay()) {
-            $days[] = $day;
-        }
-
-        $scoreboards = $this->scoreboards($leagues, $days, $liveScores);
+        $scoreboards = $this->scoreboards($leagues, $this->days($from, $to), $liveScores);
 
         $fixtures = [];
         foreach ($scoreboards as $dayFixtures) {
@@ -235,6 +230,26 @@ class EspnSportsService
         usort($fixtures, fn (array $a, array $b): int => strcmp($a['start'], $b['start']));
 
         return $fixtures;
+    }
+
+    /**
+     * Drops the cached scoreboards [rawFixtures] would read for [$leagueIds]
+     * over [$from, $to), so the next read fetches them from ESPN. Team lists
+     * and season windows are kept.
+     *
+     * @param  list<string>  $leagueIds
+     */
+    public function forgetFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): void
+    {
+        $leagues = array_filter(array_map(self::findLeague(...), array_unique($leagueIds)));
+        $keys = [];
+        foreach ($this->days(CarbonImmutable::instance($from)->utc(), CarbonImmutable::instance($to)->utc()) as $day) {
+            $keys[] = $this->allSoccerCacheKey($day);
+            foreach ($leagues as $league) {
+                $keys[] = $this->cacheKey($league, $day);
+            }
+        }
+        Cache::deleteMultiple($keys);
     }
 
     /**
@@ -418,6 +433,22 @@ class EspnSportsService
         }
 
         return count($events);
+    }
+
+    /**
+     * The ESPN days whose scoreboards cover [$from, $to): ESPN groups games by
+     * its own (US Eastern) day, so a day either side is included.
+     *
+     * @return list<CarbonImmutable>
+     */
+    private function days(CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $days = [];
+        for ($day = $from->subDay()->startOfDay(); $day->lessThanOrEqualTo($to->addDay()); $day = $day->addDay()) {
+            $days[] = $day;
+        }
+
+        return $days;
     }
 
     /**
