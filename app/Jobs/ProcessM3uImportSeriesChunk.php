@@ -28,6 +28,12 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
     // Giving a timeout of 30 minutes to the Job to process the file
     public $timeout = 60 * 30;
 
+    /**
+     * TMDB's image host. Its URLs don't expire, and a cover there may be a manual TMDB
+     * match, so a sync never swaps it for the provider's (often also TMDB-hosted) cover.
+     */
+    private const TMDB_IMAGE_HOST = 'image.tmdb.org';
+
     /** Default user agent used when the playlist has none configured. */
     public string $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 
@@ -147,6 +153,10 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ->where('source_category_id', $sourceCategoryId)
             ->pluck('last_modified', 'source_series_id');
 
+        $existingCovers = $playlist->series()
+            ->where('source_category_id', $sourceCategoryId)
+            ->pluck('cover', 'source_series_id');
+
         $insertBuffer = [];
         $listedExistingIds = [];
         $listedAnySeries = false;
@@ -181,13 +191,23 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             if ($existingSeriesIds->has($item->series_id)) {
                 $listedExistingIds[] = $item->series_id;
 
-                // Already in DB — only update last_modified if it changed
+                // Already in DB - only update last_modified and the provider cover if they changed
+                $changes = [];
                 $storedModified = $existingSeriesIds->get($item->series_id);
                 if ($lastModified && $lastModified !== $storedModified) {
+                    $changes['last_modified'] = $lastModified;
+                }
+
+                $refreshedCover = $this->refreshedProviderCover($existingCovers->get($item->series_id), $item->cover ?? null);
+                if ($refreshedCover !== null) {
+                    $changes['cover'] = $refreshedCover;
+                }
+
+                if ($changes !== []) {
                     $playlist->series()
                         ->where('source_series_id', $item->series_id)
                         ->where('source_category_id', $sourceCategoryId)
-                        ->update(['last_modified' => $lastModified]);
+                        ->update($changes);
                 }
 
                 continue;
@@ -244,6 +264,36 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         }
 
         $playlist->update($update);
+    }
+
+    /**
+     * The provider's new cover for a series already in the DB, or null to keep the stored one.
+     *
+     * Some providers sign cover URLs with a short expiry, so the cover saved when the series was
+     * first imported stops loading a few days later. The listing carries a fresh URL, so take it
+     * when the stored cover is blank or comes from the same image host. A cover from another host
+     * (TMDB, or one set by hand) is left alone, and so is any TMDB-hosted cover, even when the
+     * provider's covers are on TMDB too: it could be the poster a manual TMDB match picked.
+     */
+    private function refreshedProviderCover(?string $storedCover, mixed $providerCover): ?string
+    {
+        $providerCover = is_string($providerCover) ? trim($providerCover) : '';
+        if ($providerCover === '' || $providerCover === $storedCover || ! filter_var($providerCover, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+
+        if (blank($storedCover)) {
+            return $providerCover;
+        }
+
+        $storedHost = parse_url($storedCover, PHP_URL_HOST);
+        $providerHost = parse_url($providerCover, PHP_URL_HOST);
+
+        return is_string($storedHost) && is_string($providerHost)
+            && strcasecmp($storedHost, $providerHost) === 0
+            && strcasecmp($storedHost, self::TMDB_IMAGE_HOST) !== 0
+            ? $providerCover
+            : null;
     }
 
     /**
