@@ -424,6 +424,34 @@ class DvrRecording extends Model
         return $query->where('status', DvrRecordingStatus::Completed);
     }
 
+    /**
+     * The rows that represent finished library storage: completed recordings with a
+     * file, each file counted once.
+     *
+     * Recordings post-processed before output paths were unique can share one file
+     * (same title, same day). One row stands for each file: the one that recorded the
+     * largest size (a newer row may have a null or smaller figure; the file can't be
+     * smaller than its largest recording). Purged, failed and scheduled rows never
+     * count. Used by the storage widget, which reads recorded sizes only; the quota
+     * measures the same files on disk (DvrRetentionService::libraryUsageBytes).
+     */
+    public function scopeCountedForStorage(Builder $query): Builder
+    {
+        $table = $query->getModel()->getTable();
+
+        return $query
+            ->where("{$table}.status", DvrRecordingStatus::Completed->value)
+            ->whereNotNull("{$table}.file_path")
+            ->whereRaw(
+                "{$table}.id = (select largest.id from {$table} as largest"
+                ." where largest.file_path = {$table}.file_path"
+                ." and largest.dvr_setting_id = {$table}.dvr_setting_id"
+                .' and largest.status = ?'
+                .' order by coalesce(largest.file_size_bytes, -1) desc, largest.id desc limit 1)',
+                [DvrRecordingStatus::Completed->value],
+            );
+    }
+
     public function scopeFailed(Builder $query): Builder
     {
         return $query->where('status', DvrRecordingStatus::Failed);

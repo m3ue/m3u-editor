@@ -22,7 +22,11 @@ class DvrStorageOverviewWidget extends Widget
     {
         $rows = DvrSetting::with('user')
             ->withCount('recordings')
-            ->withSum(['recordings as used_bytes' => fn ($query) => $query->whereNotNull('file_size_bytes')], 'file_size_bytes')
+            // Finished library size from the recorded file sizes (no storage I/O on page
+            // load): each library file once, purged recordings excluded. The quota
+            // measures the same files on disk (DvrRetentionService::libraryUsageBytes),
+            // so the figures match unless a file was changed outside the DVR.
+            ->withSum(['recordings as used_bytes' => fn ($query) => $query->countedForStorage()], 'file_size_bytes')
             ->get()
             ->map(function (DvrSetting $setting) {
                 $usedBytes = (int) $setting->used_bytes;
