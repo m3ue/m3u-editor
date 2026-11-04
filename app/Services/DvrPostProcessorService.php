@@ -109,6 +109,8 @@ class DvrPostProcessorService
         }
 
         // ── Step 1: Concatenate HLS → single .mp4 ───────────────────────────
+        $previousRelPath = $recording->file_path;
+
         try {
             $outputRelPath = $this->reserveOutputPath($recording, $disk);
         } catch (Exception $e) {
@@ -133,7 +135,11 @@ class DvrPostProcessorService
 
             $this->concatHls($ffmpegPath, $m3u8FullPath, $outputFullPath, $outputFormat);
         } catch (Exception $e) {
-            $this->releaseEmptyReservation($recording, $disk);
+            if ($previousRelPath && $previousRelPath !== $outputRelPath) {
+                $this->restorePreviousOutput($recording, $disk, $previousRelPath, $outputRelPath);
+            } else {
+                $this->releaseEmptyReservation($recording, $disk);
+            }
             $this->markFailed($recording, "HLS concat failed: {$e->getMessage()}");
 
             return;
@@ -174,6 +180,8 @@ class DvrPostProcessorService
                 'recording_id' => $recording->id,
             ]);
         }
+
+        $this->deleteSupersededOutput($recording, $disk, $previousRelPath, $outputRelPath);
 
         // ── Step 3: Dispatch metadata enrichment or VOD integration ─────────
         try {
@@ -292,8 +300,8 @@ class DvrPostProcessorService
      * Pick and claim a library path for this recording that no other recording uses.
      *
      * buildOutputPath() is only unique per title + date (or season/episode), so two
-     * recordings of the same programme on the same day — or two jobs post-processing
-     * at once — used to write the same file, the later one silently replacing the
+     * recordings of the same programme on the same day, or two jobs post-processing
+     * at once, used to write the same file, the later one silently replacing the
      * earlier while both rows kept pointing at it. The first recording keeps the plain
      * name; later ones get " (2)", " (3)", ... before the extension.
      *
@@ -311,7 +319,11 @@ class DvrPostProcessorService
         // A previous attempt of this same recording already claimed a name. Reuse it only
         // if no other recording uses it: a legacy file shared by two rows (from before
         // names were unique) belongs to the other row too, so a reprocessed row gets its own.
+        // The saved extension must also match the current output format: if the format was
+        // changed before a re-run, fall through and build a fresh path with the new one.
+        $outputExtension = strtolower($recording->dvrSetting?->dvr_output_format ?? 'mp4');
         if ($recording->file_path && str_starts_with($recording->file_path, 'library/')
+            && strtolower(pathinfo($recording->file_path, PATHINFO_EXTENSION)) === $outputExtension
             && ! DvrRecording::where('file_path', $recording->file_path)->whereKeyNot($recording->getKey())->exists()) {
             $dir = dirname($storage->path($recording->file_path));
             if (! is_dir($dir) && ! @mkdir($dir, 0755, true) && ! is_dir($dir)) {
@@ -356,6 +368,48 @@ class DvrPostProcessorService
         }
 
         throw new Exception("Could not reserve a free output file name for {$base}");
+    }
+
+    /**
+     * Re-processing under a different output format (or name) writes a new file; once it
+     * is saved, remove the file this recording pointed at before so the user is not left
+     * with two copies. Never touches a file another recording still uses.
+     */
+    private function deleteSupersededOutput(DvrRecording $recording, string $disk, ?string $previousRelPath, string $outputRelPath): void
+    {
+        if (! $previousRelPath || $previousRelPath === $outputRelPath) {
+            return;
+        }
+
+        if (DvrRecording::where('file_path', $previousRelPath)->whereKeyNot($recording->getKey())->exists()) {
+            return;
+        }
+
+        try {
+            if (Storage::disk($disk)->exists($previousRelPath)) {
+                Storage::disk($disk)->delete($previousRelPath);
+
+                Log::info('DVR post-processing: removed previous output replaced by a re-run', [
+                    'recording_id' => $recording->id,
+                    'removed' => $previousRelPath,
+                    'file_path' => $outputRelPath,
+                ]);
+            }
+        } catch (Exception $e) {
+            Log::warning("DVR post-processing: could not remove previous output {$previousRelPath}: {$e->getMessage()}", [
+                'recording_id' => $recording->id,
+            ]);
+        }
+    }
+
+    /**
+     * A re-run that moved to a new path failed: drop the half-written new file and point
+     * the recording back at the previous output, which was left untouched.
+     */
+    private function restorePreviousOutput(DvrRecording $recording, string $disk, string $previousRelPath, string $newRelPath): void
+    {
+        @unlink(Storage::disk($disk)->path($newRelPath));
+        $recording->update(['file_path' => $previousRelPath]);
     }
 
     /**

@@ -104,6 +104,18 @@ it('reuses its own reservation when post-processing is retried', function (): vo
         ->and(Storage::disk('dvr')->allFiles('library'))->toHaveCount(1);
 });
 
+it('builds a new path with the new extension when the output format changed before a re-run', function (): void {
+    $recording = sameDayRecording($this->setting, '15:00');
+    $first = $this->service->reserveOutputPath($recording, 'dvr');
+
+    $this->setting->update(['dvr_output_format' => 'mp4']);
+    $again = $this->service->reserveOutputPath($recording->fresh(), 'dvr');
+
+    expect($first)->toEndWith('.mkv')
+        ->and($again)->toBe('library/2026/Match of the Day/Match of the Day - 2026-11-03.mp4')
+        ->and($recording->fresh()->file_path)->toBe($again);
+});
+
 it('keeps the existing name format for the first recording of a day', function (): void {
     $recording = sameDayRecording($this->setting, '15:00');
 
@@ -166,6 +178,39 @@ it('releases an empty reservation when the concat fails', function (): void {
     expect($recording->status)->toBe(DvrRecordingStatus::Failed)
         ->and($recording->file_path)->toBeNull()
         ->and(Storage::disk('dvr')->allFiles('library'))->toBe([]);
+});
+
+it('keeps the previous file and its pointer when a re-run in a new format fails', function (): void {
+    config(['dvr.ffmpeg_path' => '/bin/false']);
+    $old = 'library/2026/Match of the Day/Match of the Day - 2026-11-03.mp4';
+    Storage::disk('dvr')->put($old, 'original video');
+    $recording = sameDayRecording($this->setting, '15:00', ['status' => DvrRecordingStatus::Completed, 'file_path' => $old]);
+    Storage::disk('dvr')->put("live/{$recording->uuid}/live.m3u8", "#EXTM3U\n#EXTINF:2.0,\nlive000000.ts\n");
+    Storage::disk('dvr')->put("live/{$recording->uuid}/live000000.ts", 'not video');
+
+    $this->service->run($recording->fresh());
+
+    expect($recording->fresh()->file_path)->toBe($old)
+        ->and(Storage::disk('dvr')->get($old))->toBe('original video')
+        ->and(Storage::disk('dvr')->allFiles('library'))->toBe([$old]);
+});
+
+it('removes the previous output once a re-run has saved a new one, unless another recording uses it', function (): void {
+    $old = 'library/2026/Match of the Day/Match of the Day - 2026-11-03.mp4';
+    $new = 'library/2026/Match of the Day/Match of the Day - 2026-11-03.mkv';
+    Storage::disk('dvr')->put($old, 'old');
+    Storage::disk('dvr')->put($new, 'new');
+    $recording = sameDayRecording($this->setting, '15:00', ['file_path' => $new]);
+    $delete = fn () => (fn () => $this->deleteSupersededOutput($recording, 'dvr', $old, $new))->call($this->service);
+
+    sameDayRecording($this->setting, '20:00', ['file_path' => $old]);
+    $delete();
+    Storage::disk('dvr')->assertExists([$old, $new]);
+
+    DvrRecording::where('file_path', $old)->update(['file_path' => null]);
+    $delete();
+    Storage::disk('dvr')->assertMissing($old);
+    Storage::disk('dvr')->assertExists($new);
 });
 
 // --- recordings that already share one file (made before this fix) -------------------
