@@ -106,7 +106,7 @@ class PlaylistAuth extends Model
         }
 
         $usedBytes = $this->dvrRecordings()
-            ->whereNotNull('file_size_bytes')
+            ->countedForStorage()
             ->sum('file_size_bytes');
 
         $quotaBytes = $this->dvr_storage_quota_gb * 1024 * 1024 * 1024;
@@ -120,7 +120,7 @@ class PlaylistAuth extends Model
     public function getStorageUsedBytesAttribute(): int
     {
         return (int) $this->dvrRecordings()
-            ->whereNotNull('file_size_bytes')
+            ->countedForStorage()
             ->sum('file_size_bytes');
     }
 

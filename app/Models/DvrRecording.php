@@ -53,6 +53,7 @@ class DvrRecording extends Model
             'actual_end' => UtcDateTime::class,
             'duration_seconds' => 'integer',
             'file_size_bytes' => 'integer',
+            'file_missing_since' => UtcDateTime::class,
             'metadata' => 'array',
             'programme_start' => UtcDateTime::class,
             'programme_end' => UtcDateTime::class,
@@ -431,6 +432,37 @@ class DvrRecording extends Model
         return $query->where('status', DvrRecordingStatus::Completed);
     }
 
+    /**
+     * The rows that represent finished library storage: completed recordings with a
+     * file, each file counted once.
+     *
+     * Recordings post-processed before output paths were unique can share one file
+     * (same title, same day). One row stands for each file: the one that recorded the
+     * largest size (a newer row may have a null or smaller figure; the file can't be
+     * smaller than its largest recording). Purged, failed and scheduled rows never
+     * count, nor do files retention found missing from disk. Reads recorded sizes only,
+     * so it does no storage I/O; the quota measures the same files on disk
+     * (DvrRetentionService::libraryUsageBytes).
+     */
+    public function scopeCountedForStorage(Builder $query): Builder
+    {
+        $table = $query->getModel()->getTable();
+
+        return $query
+            ->where("{$table}.status", DvrRecordingStatus::Completed->value)
+            ->whereNotNull("{$table}.file_path")
+            ->whereNull("{$table}.file_missing_since")
+            ->where("{$table}.id", fn ($largest) => $largest
+                ->from("{$table} as largest")
+                ->select('largest.id')
+                ->whereColumn('largest.file_path', "{$table}.file_path")
+                ->whereColumn('largest.dvr_setting_id', "{$table}.dvr_setting_id")
+                ->where('largest.status', DvrRecordingStatus::Completed->value)
+                ->orderByRaw('coalesce(largest.file_size_bytes, -1) desc')
+                ->orderByDesc('largest.id')
+                ->limit(1));
+    }
+
     public function scopeFailed(Builder $query): Builder
     {
         return $query->where('status', DvrRecordingStatus::Failed);
@@ -525,15 +557,24 @@ class DvrRecording extends Model
      *
      * Only possible for recordings post-processed before output paths were made
      * unique (same title + same date wrote one file for both). Deleting either row
-     * must not delete the file the other still uses.
+     * must not delete the file the other still uses. Failed and cancelled rows don't
+     * use a file, and the same relative path on another disk is a different file.
+     *
+     * @param  list<int>  $exceptIds  Other rows being removed along with this one.
      */
-    public function fileIsSharedWithOtherRecordings(): bool
+    public function fileIsSharedWithOtherRecordings(array $exceptIds = []): bool
     {
-        return ! empty($this->file_path)
-            && static::query()
-                ->where('file_path', $this->file_path)
-                ->whereKeyNot($this->getKey())
-                ->exists();
+        if (empty($this->file_path)) {
+            return false;
+        }
+
+        return static::query()
+            ->with('dvrSetting:id,storage_disk')
+            ->where('file_path', $this->file_path)
+            ->whereKeyNot([$this->getKey(), ...$exceptIds])
+            ->whereNotIn('status', [DvrRecordingStatus::Failed->value, DvrRecordingStatus::Cancelled->value])
+            ->get(['id', 'dvr_setting_id'])
+            ->contains(fn (self $other): bool => $other->resolveStorageDisk() === $this->resolveStorageDisk());
     }
 
     /**

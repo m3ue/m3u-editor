@@ -109,7 +109,7 @@ class NeedsAttentionWidget extends Widget
 
             $overQuota = DvrSetting::query()
                 ->where('global_disk_quota_gb', '>', 0)
-                ->withSum(['recordings as used_bytes' => fn ($query) => $query->whereNotNull('file_size_bytes')], 'file_size_bytes')
+                ->withSum(['recordings as used_bytes' => fn ($query) => $query->countedForStorage()], 'file_size_bytes')
                 ->get()
                 ->filter(fn (DvrSetting $setting) => (int) $setting->used_bytes >= $setting->global_disk_quota_gb * 1024 ** 3 * 0.9)
                 ->count();

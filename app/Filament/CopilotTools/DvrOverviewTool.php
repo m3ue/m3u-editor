@@ -219,7 +219,7 @@ class DvrOverviewTool extends BaseTool
             // Disk usage
             $totalBytes = DvrRecording::where('user_id', $userId)
                 ->where('dvr_setting_id', $setting->id)
-                ->whereNotNull('file_size_bytes')
+                ->countedForStorage()
                 ->sum('file_size_bytes');
 
             $totalGb = round($totalBytes / 1024 / 1024 / 1024, 2);

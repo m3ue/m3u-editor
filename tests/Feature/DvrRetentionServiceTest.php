@@ -258,8 +258,13 @@ it('deletes oldest recordings when disk quota is exceeded', function () {
             'file_size_bytes' => 800_000_000,
         ]);
 
-    Storage::disk('dvr')->put($old->file_path, 'data');
-    Storage::disk('dvr')->put($newer->file_path, 'data');
+    // The quota measures files on disk: make them 800 MB (sparse, so no space is used).
+    foreach ([$old, $newer] as $recording) {
+        Storage::disk('dvr')->put($recording->file_path, '');
+        $handle = fopen(Storage::disk('dvr')->path($recording->file_path), 'r+');
+        ftruncate($handle, 800_000_000);
+        fclose($handle);
+    }
 
     $this->service->runAll();
 

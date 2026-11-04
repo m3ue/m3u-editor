@@ -210,6 +210,7 @@ it('shows capacity overview with disk usage', function () {
 
     makeDvrRecording($user, $setting, $channel, [
         'status' => DvrRecordingStatus::Completed,
+        'file_path' => 'library/2026/Show/Show.mkv',
         'file_size_bytes' => 1_073_741_824, // 1 GB
     ]);
 
@@ -222,8 +223,8 @@ it('shows capacity overview with disk usage', function () {
 
     expect((string) $result)
         ->toContain('Concurrent: 1 / 3 active')
-        ->toContain('Disk: 3 GB / 100 GB')
-        ->toContain('(3%)');
+        ->toContain('Disk: 1 GB / 100 GB')
+        ->toContain('(1%)');
 });
 
 it('shows capacity without quota when none set', function () {

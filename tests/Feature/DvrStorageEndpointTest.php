@@ -47,12 +47,14 @@ it('reports account-scoped usage against the global quota for the owner', functi
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
-        ->create(['file_size_bytes' => 1073741824]); // 1 GB
+        ->completed()
+        ->create(['file_path' => fake()->uuid().'.mkv', 'file_size_bytes' => 1073741824]); // 1 GB
 
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
-        ->create(['file_size_bytes' => 536870912]); // 0.5 GB
+        ->completed()
+        ->create(['file_path' => fake()->uuid().'.mkv', 'file_size_bytes' => 536870912]); // 0.5 GB
 
     $response = $this->getJson(dvrStorageUrl($this->user->name, $this->playlist->uuid));
 
@@ -75,7 +77,8 @@ it('reports unlimited account quota when global_disk_quota_gb is zero', function
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
-        ->create(['file_size_bytes' => 1073741824]);
+        ->completed()
+        ->create(['file_path' => fake()->uuid().'.mkv', 'file_size_bytes' => 1073741824]);
 
     $response = $this->getJson(dvrStorageUrl($this->user->name, $this->playlist->uuid));
 
@@ -123,7 +126,9 @@ it('reports guest-scoped usage against the guest own quota', function () {
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $auth->id,
             'file_size_bytes' => 1073741824, // 1 GB — the guest's own recording
         ]);
@@ -133,7 +138,9 @@ it('reports guest-scoped usage against the guest own quota', function () {
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $otherAuth->id,
             'file_size_bytes' => 5368709120, // 5 GB, must be excluded
         ]);
@@ -142,7 +149,9 @@ it('reports guest-scoped usage against the guest own quota', function () {
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => null,
             'file_size_bytes' => 3221225472, // 3 GB, must be excluded
         ]);
@@ -184,7 +193,9 @@ it('reports 100 percent used when the guest quota is configured as zero bytes', 
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $auth->id,
             'file_size_bytes' => 1073741824, // 1 GB
         ]);
@@ -223,7 +234,9 @@ it('reports unlimited guest quota when dvr_storage_quota_gb is null', function (
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->playlist->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $auth->id,
             'file_size_bytes' => 536870912, // 0.5 GB
         ]);
