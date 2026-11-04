@@ -17,13 +17,13 @@ use Illuminate\Support\Facades\Route;
  * Routed by the integration's unique webhook_secret so no additional auth header is needed.
  */
 Route::post('webhooks/arr/{integration:webhook_secret}', [ArrWebhookController::class, 'receive'])
-    ->middleware('throttle:120,1')
+    ->middleware('throttle:120,1,arr-webhook')
     ->name('webhooks.arr');
 
 /*
  * EPG API routes (used by the in-app EPG viewer)
  */
-Route::middleware(['throttle:60,1'])->prefix('epg')->group(function () {
+Route::middleware(['throttle:60,1,epg-api'])->prefix('epg')->group(function () {
     Route::get('{uuid}/data', [EpgApiController::class, 'getData'])
         ->name('api.epg.data');
     Route::get('playlist/{uuid}/groups', [EpgApiController::class, 'getGroupsForPlaylist'])
@@ -122,17 +122,17 @@ Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
  */
 Route::prefix('device')->group(function () {
     Route::post('code', [DeviceAuthorizationController::class, 'requestCode'])
-        ->middleware('throttle:20,1')
+        ->middleware('throttle:20,1,device-code')
         ->name('device.code');
     Route::post('token', [DeviceAuthorizationController::class, 'poll'])
-        ->middleware('throttle:60,1')
+        ->middleware('throttle:60,1,device-token')
         ->name('device.token');
 });
 
 /*
  * TV app API routes (authenticated via Xtream credentials in URL path - no Sanctum)
  */
-Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(function () {
+Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1,tv-api')->group(function () {
     Route::get('notifications', [TvApiController::class, 'notifications'])
         ->name('tv.notifications');
     Route::post('notifications/{id}/read', [TvApiController::class, 'markRead'])
@@ -146,6 +146,6 @@ Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1')->group(fu
     Route::post('player-stream/stop', [TvApiController::class, 'stopPlayerStream'])
         ->name('tv.player-stream.stop');
     Route::post('logs', [TvApiController::class, 'uploadLogs'])
-        ->middleware('throttle:6,1')
+        ->middleware('throttle:6,1,tv-logs')
         ->name('tv.logs.upload');
 });
