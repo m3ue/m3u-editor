@@ -54,6 +54,7 @@ Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('au
 Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
 
 // In-app watch progress tracking (admin panel + guest panel)
+// Fetch and update share the 60/min limit. If clients report 429s, check this first.
 Route::middleware(['throttle:60,1,watch-progress'])->group(function () {
     Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
     Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');

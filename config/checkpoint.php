@@ -95,6 +95,11 @@ return [
             'symfony/http-foundation',
             'symfony/http-kernel',
             'symfony/mime',
+            // v8.1.11 was the security patch for CVE-2026-118517, CVE-2026-118516
+            // and GHSA-hwfg-qwvh-2wfx (sanitizer host bypass, route host matching, YAML DoS)
+            'symfony/html-sanitizer',
+            'symfony/routing',
+            'symfony/yaml',
             // ── Well-known, widely-audited ecosystem packages ────────────────
             'league/flysystem',
             'vlucas/phpdotenv',

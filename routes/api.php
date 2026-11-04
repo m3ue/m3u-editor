@@ -22,6 +22,8 @@ Route::post('webhooks/arr/{integration:webhook_secret}', [ArrWebhookController::
 
 /*
  * EPG API routes (used by the in-app EPG viewer)
+ * The 60/min limit is shared by the whole group, not per endpoint. If clients
+ * report 429s here, a busy endpoint may be using up the group's allowance.
  */
 Route::middleware(['throttle:60,1,epg-api'])->prefix('epg')->group(function () {
     Route::get('{uuid}/data', [EpgApiController::class, 'getData'])
@@ -131,6 +133,8 @@ Route::prefix('device')->group(function () {
 
 /*
  * TV app API routes (authenticated via Xtream credentials in URL path - no Sanctum)
+ * The 60/min limit is shared by the whole group, not per endpoint. If clients
+ * report 429s here, a busy endpoint may be using up the group's allowance.
  */
 Route::prefix('tv/{username}/{password}')->middleware('throttle:60,1,tv-api')->group(function () {
     Route::get('notifications', [TvApiController::class, 'notifications'])
