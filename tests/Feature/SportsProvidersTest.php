@@ -287,6 +287,33 @@ it('fetches one request per day however many leagues are asked for, then reads t
         ->and(theSportsDbDayRequests())->toBe($requests);
 });
 
+it('asks by sport for a day cut short at the event limit', function () {
+    enableProviders(espn: false, theSportsDb: true);
+    $full = array_map(fn (int $id): array => tsdbEvent("full-{$id}", '2026-11-03T20:00:00'), range(1, 1500));
+    Http::fake([
+        'www.thesportsdb.com/api/v1/json/*/eventsday.php*' => function (HttpRequest $request) use ($full) {
+            $query = $request->data();
+
+            return Http::response(['events' => match (true) {
+                ($query['d'] ?? '') !== '2026-11-03' => null,
+                ($query['s'] ?? null) === 'Volleyball' => [tsdbEvent('cut-off', '2026-11-03T20:30:00', leagueId: '4545')],
+                ($query['s'] ?? null) === 'Ice Hockey' => [$full[0], tsdbEvent('also-cut-off', '2026-11-03T21:00:00')],
+                isset($query['s']) => null,
+                default => $full,
+            }]);
+        },
+    ]);
+    $provider = app(TheSportsDbService::class);
+
+    $fixtures = $provider->rawFixtures(['hockey/tsdb.4920', 'volleyball/tsdb.4545'], now(), now()->addDay(), liveScores: false);
+    $ids = array_column($fixtures, 'id');
+
+    expect($fixtures)->toHaveCount(1502)
+        ->and($ids)->toContain('cut-off', 'also-cut-off', 'full-1')
+        // Only the day that reached the limit asks again: three other days, and 14 sports
+        ->and(theSportsDbDayRequests())->toBe(4 + 14);
+});
+
 it('serves EPG requests from the cache alone', function () {
     enableProviders(espn: false, theSportsDb: true);
     fakeTheSportsDb(['2026-11-03' => [tsdbEvent('1', '2026-11-03T20:00:00')]]);

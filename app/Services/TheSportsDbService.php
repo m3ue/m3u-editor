@@ -23,7 +23,8 @@ use Throwable;
  * teams a league, too few to list a league's games or match channel titles.
  *
  * One request returns a whole day across every sport, so unlike ESPN's
- * scoreboards the cost doesn't grow with the league set. Each day is split up
+ * scoreboards the cost doesn't grow with the league set (only a day past
+ * [DAY_EVENT_LIMIT] takes more). Each day is split up
  * and cached by league, with a marker listing the leagues that played, so a
  * reader only loads the leagues it asked for. Scores between those fetches come
  * from the all-sports livescore feed, which TheSportsDB updates every 2 minutes.
@@ -76,6 +77,15 @@ class TheSportsDbService implements SportsProvider
 
     /** A game not marked finished this long after kickoff is treated as over. */
     private const int LIVE_WINDOW_HOURS = 8;
+
+    /**
+     * The most events `eventsday.php` returns. A busy Saturday reaches it, and
+     * games past it are simply left out, so such a day is asked for by sport.
+     */
+    private const int DAY_EVENT_LIMIT = 1500;
+
+    /** The team sports the catalogue holds, as TheSportsDB names them. */
+    private const array TEAM_SPORTS = ['Soccer', 'Basketball', 'Ice Hockey', 'Rugby', 'Cricket', 'Volleyball', 'Baseball', 'American Football', 'Handball', 'Field Hockey', 'Netball', 'Lacrosse', 'Australian Football', 'Gaelic'];
 
     /** Statuses of a game that's over. */
     private const array FINISHED_STATUSES = ['FT', 'AET', 'AOT', 'AP', 'PEN', 'FT_PEN', 'AWD', 'WO', 'FINAL', 'MATCH FINISHED'];
@@ -419,7 +429,12 @@ class TheSportsDbService implements SportsProvider
         }
 
         // Not $response->json(), which keeps the decoded copy on the response
-        $byLeague = self::parseEvents(json_decode($response->body(), true));
+        $json = json_decode($response->body(), true);
+        unset($response);
+        if (is_array($json['events'] ?? null) && count($json['events']) >= self::DAY_EVENT_LIMIT) {
+            $json['events'] = $this->withEventsBySport($json['events'], $day);
+        }
+        $byLeague = self::parseEvents($json);
         $freshUntil = $this->ttl(array_merge([], ...array_values($byLeague)), $day);
         $expiresAt = max($freshUntil, now()->addMinutes(self::MATCHING_STALE_MINUTES));
 
@@ -432,6 +447,46 @@ class TheSportsDbService implements SportsProvider
             Cache::putMany($entries, $expiresAt->copy()->addMinutes(5));
         }
         Cache::put($key, ['fresh_until' => $freshUntil->getTimestamp(), 'leagues' => array_keys($byLeague)], $expiresAt);
+    }
+
+    /**
+     * [$events], a day cut short at [DAY_EVENT_LIMIT], plus what each team
+     * sport's own request adds. No sport has been seen to reach the limit
+     * alone. Past the minute's budget the day stays as it is until its next
+     * refresh.
+     *
+     * @param  list<mixed>  $events
+     * @return list<mixed>
+     */
+    private function withEventsBySport(array $events, CarbonImmutable $day): array
+    {
+        $byId = array_column($events, null, 'idEvent');
+        foreach (array_chunk(self::TEAM_SPORTS, self::CONCURRENCY) as $batch) {
+            if ($this->isPaused() || ! $this->spendRequestBudget(count($batch))) {
+                break;
+            }
+            $responses = Http::pool(fn (Pool $pool): array => array_map(
+                fn (string $sport): mixed => $pool->as($sport)
+                    ->timeout(self::REQUEST_TIMEOUT_SECONDS)
+                    ->acceptJson()
+                    ->get($this->v1Url('eventsday.php'), ['d' => $day->format('Y-m-d'), 's' => $sport]),
+                $batch,
+            ));
+            $this->pauseIfRefused($responses);
+            foreach ($batch as $sport) {
+                $response = $responses[$sport] ?? null;
+                unset($responses[$sport]);
+                if (! $response instanceof Response || ! $response->successful()) {
+                    Log::warning('TheSportsDB schedule fetch failed', ['day' => $day->format('Ymd'), 'sport' => $sport, 'reason' => $this->failureReason($response)]);
+
+                    continue;
+                }
+                $sportEvents = json_decode($response->body(), true)['events'] ?? null;
+                $byId += array_column(is_array($sportEvents) ? $sportEvents : [], null, 'idEvent');
+            }
+        }
+
+        return array_values($byId);
     }
 
     /**
