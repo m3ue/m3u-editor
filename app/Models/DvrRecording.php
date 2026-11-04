@@ -110,7 +110,14 @@ class DvrRecording extends Model
             }
 
             // Delete the physical file from disk using the storage facade (file_path is relative).
-            if ($recording->file_path) {
+            // Recordings post-processed before output paths were made unique can share one
+            // file with another row (same title, same day); never delete a file another
+            // recording still points at.
+            if ($recording->file_path && $recording->fileIsSharedWithOtherRecordings()) {
+                Log::info("DvrRecording deleting hook: keeping {$recording->file_path}, another recording still uses it", [
+                    'recording_id' => $recording->id,
+                ]);
+            } elseif ($recording->file_path) {
                 $disk = $recording->dvrSetting?->storage_disk ?: config('dvr.storage_disk', 'local');
 
                 try {
@@ -539,6 +546,22 @@ class DvrRecording extends Model
     public function hasFilePath(): bool
     {
         return $this->status === DvrRecordingStatus::Completed && ! empty($this->file_path);
+    }
+
+    /**
+     * Whether another recording row points at the same file as this one.
+     *
+     * Only possible for recordings post-processed before output paths were made
+     * unique (same title + same date wrote one file for both). Deleting either row
+     * must not delete the file the other still uses.
+     */
+    public function fileIsSharedWithOtherRecordings(): bool
+    {
+        return ! empty($this->file_path)
+            && static::query()
+                ->where('file_path', $this->file_path)
+                ->whereKeyNot($this->getKey())
+                ->exists();
     }
 
     /**

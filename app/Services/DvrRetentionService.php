@@ -332,7 +332,13 @@ class DvrRetentionService
         $storageDisk = $setting->storage_disk ?: config('dvr.storage_disk');
 
         try {
-            if (Storage::disk($storageDisk)->exists($recording->file_path)) {
+            // A legacy same-day collision can leave two rows on one file: purge this row
+            // but keep the file while another recording still points at it.
+            if ($recording->fileIsSharedWithOtherRecordings()) {
+                Log::info("DVR retention: keeping {$recording->file_path}, another recording still uses it", [
+                    'recording_id' => $recording->id,
+                ]);
+            } elseif (Storage::disk($storageDisk)->exists($recording->file_path)) {
                 Storage::disk($storageDisk)->delete($recording->file_path);
             }
 
