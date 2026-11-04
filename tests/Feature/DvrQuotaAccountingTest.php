@@ -19,10 +19,13 @@ use App\Enums\DvrRecordingStatus;
 use App\Filament\Widgets\DvrStorageOverviewWidget;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
+use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\DvrRetentionService;
+use Filament\Notifications\DatabaseNotification;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\Filesystem;
@@ -236,9 +239,195 @@ it('keeps a recording whose file could not be deleted, and does not count its sp
     expect($stuck->fresh()->status)->toBe(DvrRecordingStatus::Completed)
         ->and($stuck->fresh()->file_path)->toBe('library/2026/A/A - 2026-11-01.mkv');
     Storage::disk('dvr')->assertExists($stuck->file_path);
-    // Its space wasn't freed, so the quota went on to the next file (which also can't go).
+    // Its space wasn't freed, and the newer recording isn't evicted to make up for it.
     expect($this->service->libraryUsageBytes($this->setting))->toBe(1_300_000_000)
         ->and($newer->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+});
+
+// --- third review ---------------------------------------------------------------------
+
+/** Like refuseDeletes(), but only the given path can't be deleted. */
+function refuseDeleteOf(string $refusedPath): void
+{
+    $root = Storage::disk('dvr')->path('');
+    $adapter = new class($root) extends LocalFilesystemAdapter
+    {
+        public string $refusedPath = '';
+
+        public function delete(string $path): void
+        {
+            if ($path === $this->refusedPath) {
+                throw UnableToDeleteFile::atLocation($path, 'Permission denied');
+            }
+            parent::delete($path);
+        }
+    };
+    $adapter->refusedPath = $refusedPath;
+    Storage::set('dvr', new FilesystemAdapter(new Filesystem($adapter), $adapter, ['root' => $root, 'throw' => false]));
+}
+
+it('does not evict other recordings to make up for a file it cannot delete', function (): void {
+    $stuck = quotaRecording($this->setting, $this->user, 'library/2026/S/S.mkv', 1_200_000_000, 50);
+    $a = quotaRecording($this->setting, $this->user, 'library/2026/A/A.mkv', 100_000_000, 40);
+    $b = quotaRecording($this->setting, $this->user, 'library/2026/B/B.mkv', 100_000_000, 1);
+    refuseDeleteOf('library/2026/S/S.mkv');
+
+    $this->service->runForSetting($this->setting);
+
+    expect($stuck->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($a->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($b->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+    Storage::disk('dvr')->assertExists($a->file_path);
+    Storage::disk('dvr')->assertExists($b->file_path);
+});
+
+it('keeps every row on a shared file that could not be deleted', function (): void {
+    $shared = 'library/2026/News/News - 2026-11-02.mkv';
+    $rows = collect([30, 29, 28])->map(fn (int $hours) => quotaRecording($this->setting, $this->user, $shared, 1_200_000_000, $hours));
+    refuseDeletes();
+
+    $this->service->runForSetting($this->setting);
+
+    $rows->each(fn (DvrRecording $row) => expect($row->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($row->fresh()->file_path)->toBe($shared));
+});
+
+it('evicts a file whose other row is failed, instead of counting it as shared', function (): void {
+    $path = 'library/2026/F/F.mkv';
+    $completed = quotaRecording($this->setting, $this->user, $path, 1_200_000_000, 30);
+    $failed = quotaRecording($this->setting, $this->user, $path, 1_200_000_000, 29);
+    $failed->update(['status' => DvrRecordingStatus::Failed->value]);
+
+    $this->service->runForSetting($this->setting);
+
+    expect($completed->fresh()->status)->toBe(DvrRecordingStatus::Purged);
+    Storage::disk('dvr')->assertMissing($path);
+});
+
+it('keeps a file another setting on the same disk still uses', function (): void {
+    $path = 'library/2026/N/N.mkv';
+    $mine = quotaRecording($this->setting, $this->user, $path, 1_200_000_000, 30);
+    $otherSetting = DvrSetting::factory()->enabled()->for($this->user)->create(['storage_disk' => 'dvr', 'global_disk_quota_gb' => null]);
+    $theirs = quotaRecording($otherSetting, $this->user, $path, 1_200_000_000, 30);
+
+    $this->service->runForSetting($this->setting);
+
+    expect($mine->fresh()->status)->toBe(DvrRecordingStatus::Purged)
+        ->and($theirs->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+    Storage::disk('dvr')->assertExists($path);
+});
+
+it('does not treat the same path on another disk as shared', function (): void {
+    $path = 'library/2026/N/N.mkv';
+    $mine = quotaRecording($this->setting, $this->user, $path, 1_200_000_000, 30);
+    $otherSetting = DvrSetting::factory()->enabled()->for($this->user)->create(['storage_disk' => 'elsewhere', 'global_disk_quota_gb' => null]);
+    DvrRecording::factory()->completed()->for($otherSetting, 'dvrSetting')->for($this->user)->create(['file_path' => $path]);
+
+    $this->service->runForSetting($this->setting);
+
+    expect($mine->fresh()->status)->toBe(DvrRecordingStatus::Purged);
+    Storage::disk('dvr')->assertMissing($path);
+});
+
+it('enforces the quota again once missing files have stayed missing past the grace period', function (): void {
+    $present = quotaRecording($this->setting, $this->user, 'library/2026/P/P.mkv', 5_000_000_000, 10);
+    $gone = quotaRecording($this->setting, $this->user, 'library/2026/G/G.mkv', 100_000_000, 20, onDisk: false);
+
+    // Within the grace period the guard holds: this could still be a partial mount.
+    $this->service->runForSetting($this->setting);
+    $this->travel(6)->days();
+    $this->service->runForSetting($this->setting);
+
+    expect($present->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($gone->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+
+    $this->travel(2)->days();
+    $this->service->runForSetting($this->setting);
+
+    expect($gone->fresh()->status)->toBe(DvrRecordingStatus::Purged)
+        ->and($gone->fresh()->file_path)->toBeNull()
+        ->and($present->fresh()->status)->toBe(DvrRecordingStatus::Purged);
+});
+
+it('never purges rows while no library file is present, however long that lasts', function (): void {
+    $a = quotaRecording($this->setting, $this->user, 'library/2026/A/A.mkv', 800_000_000, 20, onDisk: false);
+    $b = quotaRecording($this->setting, $this->user, 'library/2026/B/B.mkv', 800_000_000, 10, onDisk: false);
+
+    $this->service->runForSetting($this->setting);
+    $this->travel(30)->days();
+    $this->service->runForSetting($this->setting);
+
+    expect($a->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($b->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+});
+
+it('restarts the grace period when a missing file comes back', function (): void {
+    $present = quotaRecording($this->setting, $this->user, 'library/2026/P/P.mkv', 100_000_000, 10);
+    $flaky = quotaRecording($this->setting, $this->user, 'library/2026/F/F.mkv', 100_000_000, 20, onDisk: false);
+
+    $this->service->runForSetting($this->setting);
+    expect($flaky->fresh()->file_missing_since)->not->toBeNull();
+
+    Storage::disk('dvr')->put($flaky->file_path, 'back');
+    $this->travel(8)->days();
+    $this->service->runForSetting($this->setting);
+
+    expect($flaky->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($flaky->fresh()->file_missing_since)->toBeNull()
+        ->and($present->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+});
+
+it('tells the owner once when files go missing', function (): void {
+    Notification::fake();
+    quotaRecording($this->setting, $this->user, 'library/2026/P/P.mkv', 100_000_000, 10);
+    quotaRecording($this->setting, $this->user, 'library/2026/G/G.mkv', 100_000_000, 20, onDisk: false);
+
+    $this->service->runForSetting($this->setting);
+    $this->service->runForSetting($this->setting);
+
+    Notification::assertSentToTimes($this->user, DatabaseNotification::class, 1);
+});
+
+it('stops counting a missing file in the widget, matching the quota', function (): void {
+    quotaRecording($this->setting, $this->user, 'library/2026/P/P.mkv', 100_000_000, 10);
+    quotaRecording($this->setting, $this->user, 'library/2026/Q/Q.mkv', 100_000_000, 15);
+    quotaRecording($this->setting, $this->user, 'library/2026/G/G.mkv', 800_000_000, 20, onDisk: false);
+
+    expect(widgetBytes($this->user))->toBe(1_000_000_000);
+
+    $this->service->runForSetting($this->setting);
+
+    expect(widgetBytes($this->user))->toBe(200_000_000)
+        ->and($this->service->libraryUsageBytes($this->setting))->toBe(200_000_000);
+});
+
+it('evicts oldest by instant across a DST change, and a recording with no end time last', function (): void {
+    config(['app.timezone' => 'America/Denver']);
+    $this->setting->update(['global_disk_quota_gb' => 1]);
+
+    // 2026-11-01 fall-back: 07:50Z is 01:50-06:00 and 08:10Z is 01:10-07:00.
+    $older = quotaRecording($this->setting, $this->user, 'library/2026/O/O.mkv', 700_000_000, 1);
+    $older->update(['actual_end' => '2026-11-01 07:50:00+00:00']);
+    $newer = quotaRecording($this->setting, $this->user, 'library/2026/N/N.mkv', 700_000_000, 1);
+    $newer->update(['actual_end' => '2026-11-01 08:10:00+00:00']);
+    $noEnd = quotaRecording($this->setting, $this->user, 'library/2026/X/X.mkv', 100_000_000, 1);
+    DvrRecording::whereKey($noEnd->id)->update(['actual_end' => null]);
+
+    $this->service->runForSetting($this->setting);
+
+    expect($older->fresh()->status)->toBe(DvrRecordingStatus::Purged)
+        ->and($newer->fresh()->status)->toBe(DvrRecordingStatus::Completed)
+        ->and($noEnd->fresh()->status)->toBe(DvrRecordingStatus::Completed);
+});
+
+it('excludes purged rows from guest and setting storage usage', function (): void {
+    $auth = PlaylistAuth::factory()->for($this->user)->create(['dvr_enabled' => true, 'dvr_storage_quota_gb' => 1]);
+    $purged = quotaRecording($this->setting, $this->user, 'library/2026/P/P.mkv', 2_000_000_000, 10);
+    $purged->update(['playlist_auth_id' => $auth->id, 'status' => DvrRecordingStatus::Purged->value, 'file_path' => null]);
+
+    expect($auth->fresh()->hasReachedStorageQuota())->toBeFalse()
+        ->and($auth->fresh()->storage_used_bytes)->toBe(0)
+        ->and($this->setting->fresh()->storage_used_bytes)->toBe(0);
 });
 
 it('keeps a usable reference to a shared file that could not be deleted', function (): void {
