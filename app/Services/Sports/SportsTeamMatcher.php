@@ -103,8 +103,8 @@ class SportsTeamMatcher
     }
 
     /**
-     * The normalized phrases that name a fixture team (the `team` array of an
-     * EspnSportsService fixture).
+     * The normalized phrases that name a fixture team (the `team` array of a
+     * sports provider's fixture).
      *
      * A [$college] team is named by its school ("Southern Illinois", the place
      * ESPN keeps in `location`, since it abbreviates the short name to "S
@@ -130,7 +130,7 @@ class SportsTeamMatcher
         if (preg_match('/^(?:(?:AFC|FC|CF|SC|CD|AC|SV|VfB|VfL|TSG|RCD|SSC|AS)\s+)?(.+?)(?:\s+(?:FC|CF|SC|AFC))?$/u', $names[0], $matches)) {
             $names[] = $matches[1];
         }
-        $names = [...$names, ...(self::ALIASES[trim(self::normalize($names[0]))] ?? [])];
+        $names = [...$names, ...(self::ALIASES[trim(self::normalize($names[0]))] ?? []), ...($team['aliases'] ?? [])];
 
         $phrases = [];
         foreach ($names as $name) {

@@ -13,6 +13,10 @@ namespace App\Services\Sports;
  * on dark screens), and whether it's a women's or youth competition (from
  * its gender, else its name). The first leagues keep the short names,
  * defaults and scoreboard queries they were added with.
+ *
+ * ESPN's league index lists no cricket, so those leagues, last, were picked by
+ * hand from the competitions its scoreboards answer for. One-off tours aren't
+ * listed: ESPN gives each its own id.
  */
 final class EspnLeagueCatalog
 {
@@ -21,7 +25,7 @@ final class EspnLeagueCatalog
      */
     public const array LEAGUES = [
         ['sport' => 'football', 'slug' => 'nfl', 'espn_id' => '28', 'name' => 'NFL', 'abbreviation' => 'NFL', 'logo' => 'https://a.espncdn.com/i/teamlogos/leagues/500-dark/nfl.png', 'default' => true],
-        ['sport' => 'football', 'slug' => 'college-football', 'espn_id' => '23', 'name' => 'College Football', 'abbreviation' => 'NCAAF', 'logo' => 'https://a.espncdn.com/redesign/assets/img/icons/NCAASports_Football.png', 'default' => true, 'query' => ['groups' => '80']],
+        ['sport' => 'football', 'slug' => 'college-football', 'espn_id' => '23', 'name' => 'College Football', 'abbreviation' => 'NCAAF', 'logo' => 'https://a.espncdn.com/redesign/assets/img/icons/NCAASports_Football.png', 'default' => true, 'query' => ['groups' => '90']],
         ['sport' => 'football', 'slug' => 'cfl', 'espn_id' => '33', 'name' => 'CFL', 'abbreviation' => 'CFL'],
         ['sport' => 'football', 'slug' => 'ufl', 'espn_id' => '37', 'name' => 'United Football League', 'abbreviation' => 'UFL'],
         ['sport' => 'football', 'slug' => 'xfl', 'espn_id' => '36', 'name' => 'XFL', 'abbreviation' => 'XFL'],
@@ -314,5 +318,20 @@ final class EspnLeagueCatalog
         ['sport' => 'field-hockey', 'slug' => 'womens-college-field-hockey', 'espn_id' => '802', 'name' => 'NCAA Women\'s Field Hockey', 'abbreviation' => 'CFHOC', 'women' => true],
         ['sport' => 'water-polo', 'slug' => 'mens-college-water-polo', 'espn_id' => '1925', 'name' => 'NCAA Men\'s Water Polo', 'abbreviation' => 'NCAAM Water Polo'],
         ['sport' => 'water-polo', 'slug' => 'womens-college-water-polo', 'espn_id' => '1926', 'name' => 'NCAA Women\'s Water Polo', 'abbreviation' => 'NCAAW Water Polo', 'women' => true],
+        ['sport' => 'cricket', 'slug' => '8048', 'espn_id' => '8048', 'name' => 'Indian Premier League', 'abbreviation' => 'IPL', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8048.png'],
+        ['sport' => 'cricket', 'slug' => '8604', 'espn_id' => '8604', 'name' => 'ICC Men\'s T20 World Cup', 'abbreviation' => 'Men\'s T20 World Cup', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8604.png'],
+        ['sport' => 'cricket', 'slug' => '8039', 'espn_id' => '8039', 'name' => 'ICC Cricket World Cup', 'abbreviation' => 'World Cup', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8039.png'],
+        ['sport' => 'cricket', 'slug' => '19430', 'espn_id' => '19430', 'name' => 'ICC World Test Championship', 'abbreviation' => 'WTC', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/19430.png'],
+        ['sport' => 'cricket', 'slug' => '8044', 'espn_id' => '8044', 'name' => 'Big Bash League', 'abbreviation' => 'BBL', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8044.png'],
+        ['sport' => 'cricket', 'slug' => '21284', 'espn_id' => '21284', 'name' => 'Women\'s Big Bash League', 'abbreviation' => 'WBBL', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/21284.png', 'women' => true],
+        ['sport' => 'cricket', 'slug' => '8679', 'espn_id' => '8679', 'name' => 'Pakistan Super League', 'abbreviation' => 'PSL', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8679.png'],
+        ['sport' => 'cricket', 'slug' => '8653', 'espn_id' => '8653', 'name' => 'Bangladesh Premier League', 'abbreviation' => 'BPL', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8653.png'],
+        ['sport' => 'cricket', 'slug' => '8043', 'espn_id' => '8043', 'name' => 'Sheffield Shield', 'abbreviation' => 'Sheff Shield', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8043.png'],
+        ['sport' => 'cricket', 'slug' => '8052', 'espn_id' => '8052', 'name' => 'County Championship Division One', 'abbreviation' => 'County Div 1', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8052.png'],
+        ['sport' => 'cricket', 'slug' => '8053', 'espn_id' => '8053', 'name' => 'Vitality Blast', 'abbreviation' => 'Blast', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8053.png'],
+        ['sport' => 'cricket', 'slug' => '8050', 'espn_id' => '8050', 'name' => 'Ranji Trophy', 'abbreviation' => 'Ranji', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8050.png'],
+        ['sport' => 'cricket', 'slug' => '8661', 'espn_id' => '8661', 'name' => 'Syed Mushtaq Ali Trophy', 'abbreviation' => 'SMAT', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8661.png'],
+        ['sport' => 'cricket', 'slug' => '8654', 'espn_id' => '8654', 'name' => 'New Zealand Domestic Twenty20', 'abbreviation' => 'NZ T20', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8654.png'],
+        ['sport' => 'cricket', 'slug' => '8656', 'espn_id' => '8656', 'name' => 'South Africa Domestic T20', 'abbreviation' => 'SA T20', 'logo' => 'https://a.espncdn.com/i/leaguelogos/cricket/500/8656.png'],
     ];
 }

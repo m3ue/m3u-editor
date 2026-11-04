@@ -275,10 +275,14 @@ class GeneralSettings extends Settings
 
     public ?int $aiostreams_max_failover_candidates = 3;
 
-    // Sports (ESPN's unofficial public API) for the M3U TV Sports screen
+    // Sports providers (ESPN's unofficial public API, TheSportsDB) for the M3U TV Sports screen
     public ?bool $sports_espn_enabled = false;
 
     public ?string $sports_espn_api_url = null;
+
+    public ?bool $sports_tsdb_enabled = false;
+
+    public ?string $sports_tsdb_api_key = null;
 
     public ?string $tmdb_language = 'en-US';
 

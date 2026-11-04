@@ -22,7 +22,7 @@ class AedExtractorService
     }
 
     /**
-     * The event for a channel title: the ESPN game it names when the profile
+     * The event for a channel title: the game it names when the profile
      * matches sports, else the regex extraction, else the no-event fallback.
      * Null when none applies (the channel then gets no programmes).
      *

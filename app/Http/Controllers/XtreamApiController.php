@@ -50,9 +50,9 @@ use App\Services\DvrAccessScope;
 use App\Services\DvrRecorderService;
 use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
-use App\Services\EspnSportsService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\Sports\SportsService;
 use App\Services\TmdbService;
 use App\Services\VodFileNameService;
 use App\Services\WatchProgressLinker;
@@ -100,7 +100,7 @@ class XtreamApiController extends Controller
     ];
 
     /** A team's follow key: "{sport}/{league}:{team id}". */
-    private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9.-]+):([A-Za-z0-9-]+)$/';
+    private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9._-]+):([A-Za-z0-9-]+)$/';
 
     private const DVR_ACTIONS = [
         'get_dvr_recordings',
@@ -551,9 +551,9 @@ class XtreamApiController extends Controller
                             'toggle_follow' => 'toggle_sports_follow',
                             'sync_follows' => 'sync_sports_follows',
                         ],
-                        'max_range_days' => EspnSportsService::MAX_RANGE_DAYS,
-                        'leagues' => EspnSportsService::clientLeagues(),
-                        'sport_names' => EspnSportsService::sportNames(),
+                        'max_range_days' => SportsService::MAX_RANGE_DAYS,
+                        'leagues' => app(SportsService::class)->clientLeagues(),
+                        'sport_names' => app(SportsService::class)->sportNames(),
                     ];
                 }
 
@@ -2255,7 +2255,7 @@ class XtreamApiController extends Controller
         } elseif (in_array($action, self::SPORTS_ACTIONS, true)) {
             // Every Sports action is gated on the same setting that advertises
             // the `sports` feature, so a client never shown Sports can't use it.
-            if (! app(EspnSportsService::class)->isEnabled()) {
+            if (! app(SportsService::class)->isEnabled()) {
                 return response()->json(['error' => 'Sports is not enabled'], 403);
             }
 
@@ -2301,7 +2301,7 @@ class XtreamApiController extends Controller
      * Games for the M3U TV Sports screen (`get_sports_fixtures`): every
      * fixture of the requested competitions starting in [from, to), with
      * live state and scores. Only served while Settings > Integrations >
-     * Sports is enabled, which is also what advertises the `sports` feature.
+     * Sports API is enabled, which is also what advertises the `sports` feature.
      *
      * `leagues` is a comma-separated list of league ids from the auth
      * payload's `m3u_editor.sports.leagues`; `from` and `to` are Unix
@@ -2309,7 +2309,7 @@ class XtreamApiController extends Controller
      */
     private function sportsFixtures(Request $request): JsonResponse
     {
-        $sports = app(EspnSportsService::class);
+        $sports = app(SportsService::class);
 
         $validator = Validator::make($request->all(), [
             'leagues' => ['required', 'string', 'max:2000'],
@@ -2337,12 +2337,13 @@ class XtreamApiController extends Controller
      */
     private function sportsTeams(Request $request): JsonResponse
     {
+        $sports = app(SportsService::class);
         $leagueId = (string) $request->input('league', '');
-        if (EspnSportsService::findLeague($leagueId) === null) {
+        if ($sports->findLeague($leagueId) === null) {
             return response()->json(['error' => 'Invalid parameters', 'fields' => ['league']], 422);
         }
 
-        return response()->json(['teams' => app(EspnSportsService::class)->teams($leagueId)]);
+        return response()->json(['teams' => $sports->teams($leagueId)]);
     }
 
     /**
@@ -2429,7 +2430,7 @@ class XtreamApiController extends Controller
     private function parseSportsTeamKey(string $teamKey): ?array
     {
         if (! preg_match(self::SPORTS_TEAM_KEY_PATTERN, $teamKey, $matches)
-            || EspnSportsService::findLeague($matches[1]) === null) {
+            || app(SportsService::class)->findLeague($matches[1]) === null) {
             return null;
         }
 
@@ -2457,7 +2458,7 @@ class XtreamApiController extends Controller
     private function presentSportsFollows(PlaylistViewer $viewer): array
     {
         $follows = $viewer->sportsFollows()->orderBy('followed_at')->orderBy('id')->get();
-        $sports = app(EspnSportsService::class);
+        $sports = app(SportsService::class);
         $logos = [];
         foreach ($follows->pluck('league_id')->unique() as $leagueId) {
             $logos[$leagueId] = array_column($sports->teams($leagueId), 'logo', 'id');
@@ -3954,7 +3955,7 @@ class XtreamApiController extends Controller
             $features[] = 'proxy';
         }
 
-        if (app(EspnSportsService::class)->isEnabled()) {
+        if (app(SportsService::class)->isEnabled()) {
             $features[] = 'sports';
         }
 

@@ -3,8 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Models\AedProfile;
-use App\Services\EspnSportsService;
 use App\Services\Sports\SportsAedRefresher;
+use App\Services\Sports\SportsService;
 use Illuminate\Console\Command;
 
 class RefreshSportsAedEpg extends Command
@@ -27,9 +27,9 @@ class RefreshSportsAedEpg extends Command
      * See {@see SportsAedRefresher}: only a profile whose games changed has
      * its cached EPG files cleared.
      */
-    public function handle(EspnSportsService $espn, SportsAedRefresher $refresher): int
+    public function handle(SportsService $sports, SportsAedRefresher $refresher): int
     {
-        if (! $espn->isEnabled()) {
+        if (! $sports->isEnabled()) {
             return self::SUCCESS;
         }
 

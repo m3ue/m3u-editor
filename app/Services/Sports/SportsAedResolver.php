@@ -11,7 +11,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
 /**
- * The "Sports (ESPN)" step of an AED profile: finds the ESPN game a channel
+ * The "Sports" step of an AED profile: finds the game a channel
  * title names (both teams, whole words, any provider format) and turns it into
  * an AED event with the real kickoff, a clean title and the league crest.
  *
@@ -37,10 +37,14 @@ class SportsAedResolver
         'volleyball' => 120,
         'field-hockey' => 120,
         'water-polo' => 90,
+        'cricket' => 240,
+        'handball' => 90,
+        'netball' => 90,
+        'gaelic' => 90,
     ];
 
     /**
-     * Words that mark a title as a women's game. ESPN names women's sides
+     * Words that mark a title as a women's game. Providers name women's sides
      * exactly as the men's ("Arsenal"), so without one a title prefers the
      * men's game, and with one it only matches women's leagues. A bare "w"
      * counts only when it tags both sides ("Arsenal W vs Chelsea W"), not in
@@ -58,6 +62,67 @@ class SportsAedResolver
      */
     private const int TITLE_TIME_TOLERANCE_HOURS = 18;
 
+    /**
+     * Words that name a sport, and the sports they can mean. Schools field
+     * teams in many sports, so "football: UAlbany vs Bryant" must not match
+     * their volleyball game. "Football" is soccer to much of the world. An
+     * empty list is a sport no provider's catalogue covers: a tennis channel
+     * can't be any game here.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array SPORT_WORDS = [
+        'football' => ['football', 'soccer', 'australian-football'],
+        'flofootball' => ['football'],
+        'nfl' => ['football'],
+        'ncaaf' => ['football'],
+        'cfb' => ['football'],
+        'basketball' => ['basketball'],
+        'hoops' => ['basketball'],
+        'flohoops' => ['basketball'],
+        'nba' => ['basketball'],
+        'wnba' => ['basketball'],
+        'ncaab' => ['basketball'],
+        'ncaam' => ['basketball'],
+        'ncaaw' => ['basketball'],
+        'hockey' => ['hockey', 'field-hockey'],
+        'flohockey' => ['hockey', 'field-hockey'],
+        'nhl' => ['hockey'],
+        'baseball' => ['baseball'],
+        'softball' => ['baseball'],
+        'mlb' => ['baseball'],
+        'soccer' => ['soccer'],
+        'futbol' => ['soccer'],
+        'volleyball' => ['volleyball'],
+        'flovolleyball' => ['volleyball'],
+        'lacrosse' => ['lacrosse'],
+        'rugby' => ['rugby', 'rugby-league'],
+        'nrl' => ['rugby', 'rugby-league'],
+        'afl' => ['australian-football', 'football'],
+        'cricket' => ['cricket'],
+        'handball' => ['handball'],
+        'netball' => ['netball'],
+        'gaelic' => ['gaelic'],
+        'gaa' => ['gaelic'],
+        'tennis' => [],
+        'golf' => [],
+        'swimming' => [],
+        'wrestling' => [],
+        'wwe' => [],
+        'gymnastics' => [],
+        'boxing' => [],
+        'ufc' => [],
+        'mma' => [],
+        'darts' => [],
+        'snooker' => [],
+        'cycling' => [],
+        'nascar' => [],
+        'motogp' => [],
+    ];
+
+    /** Names providers give a side that isn't decided yet. */
+    private const array PLACEHOLDER_TEAMS = ['TBD', 'TBA'];
+
     /** How far back the window reaches, so games under way still match. */
     public const int WINDOW_PAST_HOURS = 12;
 
@@ -70,14 +135,14 @@ class SportsAedResolver
      */
     private array $prepared = [];
 
-    public function __construct(private readonly EspnSportsService $espn) {}
+    public function __construct(private readonly SportsService $sports) {}
 
     /**
      * Whether [$profile] should match games at all right now.
      */
     public function appliesTo(AedProfile $profile): bool
     {
-        return $profile->sports_matching && $this->espn->isEnabled();
+        return $profile->sports_matching && $this->sports->isEnabled();
     }
 
     /**
@@ -94,6 +159,10 @@ class SportsAedResolver
 
         $text = SportsTeamMatcher::normalize($channelTitle);
         $words = explode(' ', trim($text));
+        $titleSports = $this->sportsNamedBy($text, $words);
+        if ($titleSports === []) {
+            return null;
+        }
         $nameSpans = $this->nameSpans($words, $set['names']);
         $candidates = [];
         foreach (array_unique($words) as $word) {
@@ -116,6 +185,9 @@ class SportsAedResolver
         $bestRank = [PHP_INT_MAX, PHP_INT_MAX];
         foreach (array_keys($candidates) as $position) {
             $fixture = $set['fixtures'][$position];
+            if ($titleSports !== null && ! in_array($fixture['sport'], $titleSports, true)) {
+                continue;
+            }
             // A marked title only matches its kind of league; an unmarked one
             // only falls back to a women's or youth game when it has to.
             if (($titleIsWomen && ! $fixture['women']) || ($titleIsYouth && ! $fixture['youth'])) {
@@ -139,6 +211,26 @@ class SportsAedResolver
         }
 
         return $best ? $this->event($profile, $channelTitle, $best) : null;
+    }
+
+    /**
+     * The sports a title's words allow, or null when it names none. A title
+     * naming both a sport we cover and one we don't still matches the first.
+     *
+     * @param  list<string>  $words
+     * @return list<string>|null
+     */
+    private function sportsNamedBy(string $text, array $words): ?array
+    {
+        if (str_contains($text, ' field hockey ')) {
+            return ['field-hockey'];
+        }
+        if (str_contains($text, ' water polo ')) {
+            return ['water-polo'];
+        }
+        $named = array_intersect_key(self::SPORT_WORDS, array_flip($words));
+
+        return $named === [] ? null : array_merge(...array_values($named));
     }
 
     /**
@@ -247,15 +339,15 @@ class SportsAedResolver
      */
     private function event(AedProfile $profile, string $channelTitle, array $fixture): AedEvent
     {
-        $league = EspnSportsService::findLeague($fixture['league_id']);
+        $league = $this->sports->findLeague($fixture['league_id']);
         $leagueName = $league['name'] ?? $fixture['league_id'];
         $start = Carbon::createFromTimestamp($fixture['start_ts'], $profile->output_timezone ?: 'UTC');
         $duration = $profile->sports_event_duration_minutes
-            ?? self::SPORT_DURATION_MINUTES[EspnSportsService::sportOf($fixture['league_id'])]
+            ?? self::SPORT_DURATION_MINUTES[$fixture['sport']]
             ?? $profile->event_duration_minutes;
 
         $format = $profile->sports_title_format
-            ?: ($league !== null && EspnSportsService::isHomeFirst($league) ? '{home} vs {away}' : '{away} at {home}');
+            ?: ($league !== null && SportsService::isHomeFirst($league) ? '{home} vs {away}' : '{away} at {home}');
         $title = trim(str_replace(
             ['{home}', '{away}', '{league}', '{venue}', '{event}', '{channel}', '{date}', '{time}'],
             [
@@ -283,7 +375,7 @@ class SportsAedResolver
             start: $start,
             end: $start->copy()->addMinutes($duration),
             durationMinutes: $duration,
-            icon: ($fixture['league_logo'] ?? null) ? EspnSportsService::proxiedLogo($fixture['league_logo']) : null,
+            icon: ($fixture['league_logo'] ?? null) ? SportsService::proxiedLogo($fixture['league_logo']) : null,
             category: $profile->category ?: 'Sports',
         );
     }
@@ -298,9 +390,9 @@ class SportsAedResolver
      */
     private function fixtureSet(AedProfile $profile, int $days): array
     {
-        $leagueIds = $profile->sports_league_ids ?: array_column(EspnSportsService::leagues(), 'id');
+        $leagueIds = $profile->sports_league_ids ?: array_column($this->sports->leagues(), 'id');
         sort($leagueIds);
-        $days = max(1, min($days, EspnSportsService::MAX_RANGE_DAYS - 1));
+        $days = max(1, min($days, SportsService::MAX_RANGE_DAYS - 1));
         $key = implode(',', $leagueIds).'|'.$days;
 
         if (isset($this->prepared[$key])) {
@@ -326,13 +418,13 @@ class SportsAedResolver
                 }
             }
         };
-        // EPG requests never wait on ESPN: match what's cached, and have a
+        // EPG requests never wait on a provider: match what's cached, and have a
         // background refresh fetch whatever isn't yet
-        $cached = $this->espn->cachedFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days));
+        $cached = $this->sports->cachedFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days));
         $rawFixtures = $cached['fixtures'];
         // Only leagues playing in the window need their full team lists
         $playingLeagueIds = array_values(array_unique(array_column($rawFixtures, 'league_id')));
-        $teamsByLeague = $this->espn->teamsByLeague($playingLeagueIds, fetchMissing: false);
+        $teamsByLeague = $this->sports->teamsByLeague($playingLeagueIds, fetchMissing: false);
         if (! $cached['complete'] || count($teamsByLeague) < count($playingLeagueIds)) {
             RefreshSportsAedProfile::dispatch($profile->id);
         }
@@ -343,6 +435,11 @@ class SportsAedResolver
         }
         foreach ($rawFixtures as $fixture) {
             if (! isset($fixture['home']['team'], $fixture['away']['team'])) {
+                continue;
+            }
+            // Sides not decided yet: every such game would match a "TBD vs TBD" title
+            $sides = [strtoupper($fixture['home']['team']['display_name']), strtoupper($fixture['away']['team']['display_name'])];
+            if (array_intersect($sides, self::PLACEHOLDER_TEAMS) !== []) {
                 continue;
             }
             $isCollege = EspnSportsService::isCollege($fixture['league_id']);
@@ -356,11 +453,12 @@ class SportsAedResolver
             $awayKey = $fixture['league_id'].':'.$fixture['away']['team']['id'];
             $addNames($fixture['home']['team'], $homeKey);
             $addNames($fixture['away']['team'], $awayKey);
-            $league = EspnSportsService::findLeague($fixture['league_id']);
+            $league = $this->sports->findLeague($fixture['league_id']);
             // Only what matching and [event] read: thousands of games are
             // held per EPG request, so crests, colours and scores are left out.
             $fixtures[] = [
                 'league_id' => $fixture['league_id'],
+                'sport' => SportsService::sportOf($fixture['league_id']),
                 'name' => $fixture['name'],
                 'venue' => $fixture['venue'],
                 'broadcasts' => $fixture['broadcasts'],

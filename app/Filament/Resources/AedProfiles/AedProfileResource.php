@@ -15,8 +15,8 @@ use App\Models\Group;
 use App\Services\AedAiRegexSuggestionService;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
-use App\Services\EspnSportsService;
 use App\Services\Sports\SportsAedResolver;
+use App\Services\Sports\SportsService;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
@@ -110,19 +110,19 @@ class AedProfileResource extends Resource implements CopilotResource
                 ->default(true)
                 ->inline(false),
 
-            Section::make(__('Sports (ESPN)'))
+            Section::make(__('Sports API'))
                 ->compact()
                 ->collapsible()
                 ->columnSpanFull()
                 ->description(__('Match channel titles to real games by team names, in any title format. Unmatched channels fall back to the regex extraction below.'))
                 ->schema([
-                    Callout::make(__('Sports is turned off'))
+                    Callout::make(__('Sports API is turned off'))
                         ->warning()
                         ->columnSpanFull()
-                        ->description(__('Enable it under Settings > Integrations > Sports to use game matching.'))
-                        ->visible(fn (): bool => ! app(EspnSportsService::class)->isEnabled()),
+                        ->description(__('Enable it under Settings > Integrations > Sports API to use game matching.'))
+                        ->visible(fn (): bool => ! app(SportsService::class)->isEnabled()),
                     Toggle::make('sports_matching')
-                        ->label(__('Match games from ESPN'))
+                        ->label(__('Match real games'))
                         ->live()
                         ->default(false)
                         ->inline(false)
@@ -134,12 +134,11 @@ class AedProfileResource extends Resource implements CopilotResource
                                 ->label(__('Leagues'))
                                 ->multiple()
                                 ->searchable()
-                                ->options(fn (): array => collect(EspnSportsService::leagues())
-                                    ->groupBy('sport_name')
-                                    ->map(fn ($leagues): array => $leagues->pluck('name', 'id')->all())
-                                    ->all())
+                                ->options(fn (Get $get): array => app(SportsService::class)->leagueOptions((array) $get('sports_league_ids')))
                                 ->placeholder(__('All leagues'))
-                                ->helperText(__('Pick the leagues this group carries for faster EPG builds. Leave empty to match every league.'))
+                                ->hint(__('Recommended'))
+                                ->hintIcon('heroicon-m-light-bulb')
+                                ->helperText(__('Pick the leagues these channels carry. Channels then only match games in those leagues, which reduces incorrect matches and speeds up syncs and guide builds. Leave empty to check every league.'))
                                 ->columnSpanFull(),
                             TextInput::make('sports_title_format')
                                 ->label(__('Game Title Format'))
@@ -649,9 +648,9 @@ class AedProfileResource extends Resource implements CopilotResource
                     CopyToUserAction::make(),
                     Action::make('refresh_games')
                         ->label(__('Refresh Games'))
-                        ->tooltip(__('Refresh games from ESPN and rebuild the guide'))
+                        ->tooltip(__('Refresh games and rebuild the guide'))
                         ->icon('heroicon-o-arrow-path')
-                        ->visible(fn (AedProfile $record): bool => $record->sports_matching && app(EspnSportsService::class)->isEnabled())
+                        ->visible(fn (AedProfile $record): bool => $record->sports_matching && app(SportsService::class)->isEnabled())
                         ->action(function (AedProfile $record): void {
                             // A forced refresh refetches every league's games, so one
                             // per profile every couple of minutes is plenty.
@@ -668,16 +667,16 @@ class AedProfileResource extends Resource implements CopilotResource
                             RateLimiter::hit($limiterKey, 120);
 
                             // In the background: a wide league set is hundreds of
-                            // ESPN requests, too long to hold the page for
+                            // provider requests, too long to hold the page for
                             RefreshSportsAedProfile::dispatch($record->id, force: true);
                             Notification::make()
                                 ->success()
                                 ->title(__('Refreshing games'))
-                                ->body(__('Games are being fetched from ESPN in the background. The guide rebuilds the next time it is requested after that.'))
+                                ->body(__('Games are being fetched in the background. The guide rebuilds the next time it is requested after that.'))
                                 ->send();
                         })
                         ->requiresConfirmation()
-                        ->modalDescription(fn (AedProfile $record): string => __('Fetch ":name" games fresh from ESPN and rebuild the guide for every playlist using this profile. Games already refresh on their own every 15 minutes, so this is only needed when a schedule change should show up right away.', ['name' => $record->name]))
+                        ->modalDescription(fn (AedProfile $record): string => __('Fetch ":name" games fresh from your sports providers and rebuild the guide for every playlist using this profile. Games already refresh on their own every 15 minutes, so this is only needed when a schedule change should show up right away.', ['name' => $record->name]))
                         ->modalSubmitActionLabel(__('Refresh now')),
                     DeleteAction::make(),
                 ])->button()->hiddenLabel()->size('sm'),

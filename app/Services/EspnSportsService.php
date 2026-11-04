@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use App\Enums\ImageProfile;
-use App\Http\Controllers\LogoProxyController;
 use App\Services\Sports\EspnLeagueCatalog;
+use App\Services\Sports\MapsSportsData;
+use App\Services\Sports\SportsProvider;
 use App\Settings\GeneralSettings;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -30,12 +30,11 @@ use Throwable;
  * Scoreboards are fetched one ESPN day (`?dates=YYYYMMDD`) at a time: ESPN
  * answers a date range with an error.
  */
-class EspnSportsService
+class EspnSportsService implements SportsProvider
 {
-    public const string DEFAULT_API_URL = 'https://site.api.espn.com/apis/site/v2/sports';
+    use MapsSportsData;
 
-    /** Longest span one fixtures request may cover. */
-    public const int MAX_RANGE_DAYS = 14;
+    public const string DEFAULT_API_URL = 'https://site.api.espn.com/apis/site/v2/sports';
 
     /** Scoreboard requests sent to ESPN at once. */
     private const int CONCURRENCY = 6;
@@ -71,25 +70,6 @@ class EspnSportsService
 
     /** How long a league's season window is trusted before it's re-read. */
     private const int SEASON_CACHE_HOURS = 24;
-
-    /** Sports whose fixtures read home side first ("Arsenal v Chelsea"). */
-    private const array HOME_FIRST_SPORTS = ['soccer', 'rugby', 'rugby-league', 'australian-football'];
-
-    /** Display names of the sports in [EspnLeagueCatalog], in its order. */
-    private const array SPORT_NAMES = [
-        'football' => 'Football',
-        'basketball' => 'Basketball',
-        'baseball' => 'Baseball',
-        'hockey' => 'Hockey',
-        'soccer' => 'Soccer',
-        'rugby' => 'Rugby',
-        'rugby-league' => 'Rugby League',
-        'australian-football' => 'Australian Football',
-        'lacrosse' => 'Lacrosse',
-        'volleyball' => 'Volleyball',
-        'field-hockey' => 'Field Hockey',
-        'water-polo' => 'Water Polo',
-    ];
 
     /** @var array<string, array<string, mixed>>|null catalogue entries by league id */
     private static ?array $leaguesById = null;
@@ -128,52 +108,6 @@ class EspnSportsService
             'soccer_style' => self::isHomeFirst($league),
             'default' => $league['default'] ?? false,
         ], EspnLeagueCatalog::LEAGUES);
-    }
-
-    /**
-     * [leagues] as sent to clients on every login, kept small (the Xtream API
-     * isn't compressed): flags only when set, an abbreviation only when it
-     * differs from the name, and no sport, which starts the id.
-     *
-     * @return list<array{id: string, name: string, abbreviation?: string, soccer_style?: true, default?: true}>
-     */
-    public static function clientLeagues(): array
-    {
-        return array_map(fn (array $league): array => array_filter([
-            'id' => $league['id'],
-            'name' => $league['name'],
-            'abbreviation' => $league['abbreviation'] !== $league['name'] ? $league['abbreviation'] : null,
-            'soccer_style' => $league['soccer_style'] ?: null,
-            'default' => $league['default'] ?: null,
-        ], fn (mixed $value): bool => $value !== null), self::leagues());
-    }
-
-    /**
-     * Each sport's display name, by the sport that starts a league id.
-     *
-     * @return array<string, string>
-     */
-    public static function sportNames(): array
-    {
-        return array_column(self::leagues(), 'sport_name', 'sport');
-    }
-
-    /**
-     * A sport's display name ("Rugby League" for "rugby-league").
-     */
-    public static function sportName(string $sport): string
-    {
-        return __(self::SPORT_NAMES[$sport] ?? ucwords(str_replace('-', ' ', $sport)));
-    }
-
-    /**
-     * Whether a league's fixtures read home side first, as soccer's do.
-     *
-     * @param  array<string, mixed>  $league
-     */
-    public static function isHomeFirst(array $league): bool
-    {
-        return in_array($league['sport'], self::HOME_FIRST_SPORTS, true);
     }
 
     /**
@@ -387,6 +321,12 @@ class EspnSportsService
      */
     private function storeTeams(string $key, string $leagueId, mixed $response): array
     {
+        // ESPN has no team lists for some sports (cricket), and asking again won't change that
+        if ($response instanceof Response && $response->status() === 404) {
+            Cache::put($key, [], now()->addDays(7));
+
+            return [];
+        }
         if (! $response instanceof Response || ! $response->successful()) {
             Log::warning('ESPN teams fetch failed', [
                 'league' => $leagueId,
@@ -430,14 +370,6 @@ class EspnSportsService
     public static function isCollege(string $leagueId): bool
     {
         return str_contains($leagueId, 'college') || str_contains($leagueId, '.ncaa.');
-    }
-
-    /**
-     * The sport a league id belongs to ("hockey" for "hockey/nhl").
-     */
-    public static function sportOf(string $leagueId): string
-    {
-        return explode('/', $leagueId, 2)[0];
     }
 
     /**
@@ -739,6 +671,10 @@ class EspnSportsService
         $failed = 0;
         $refused = false;
         foreach ($responses as $response) {
+            // "Not here" is about one league, not ESPN: cricket has no team lists
+            if ($response instanceof Response && $response->status() === 404) {
+                continue;
+            }
             if (! $response instanceof Response || ! $response->successful()) {
                 $failed++;
                 $refused = $refused || ($response instanceof Response && in_array($response->status(), [403, 429], true));
@@ -1030,68 +966,6 @@ class EspnSportsService
         usort($teams, fn (array $a, array $b): int => strcasecmp($a['display_name'], $b['display_name']));
 
         return $teams;
-    }
-
-    /**
-     * Swaps each crest for its logo proxy URL, sized as a small image.
-     *
-     * @param  array<string, mixed>  $fixture
-     * @return array<string, mixed>
-     */
-    private function present(array $fixture): array
-    {
-        foreach (['home', 'away'] as $side) {
-            $logo = $fixture[$side]['team']['logo'] ?? null;
-            if ($logo !== null) {
-                $fixture[$side]['team']['logo'] = self::proxiedLogo($logo);
-            }
-        }
-        if (($fixture['league_logo'] ?? null) !== null) {
-            $fixture['league_logo'] = self::proxiedLogo($fixture['league_logo']);
-        }
-
-        return $fixture;
-    }
-
-    /**
-     * A crest as clients load it: through the logo proxy, sized as a small
-     * image, so nothing outside this server ever reaches ESPN.
-     */
-    public static function proxiedLogo(string $url): string
-    {
-        return LogoProxyController::generateProxyUrl($url, profile: ImageProfile::Photo);
-    }
-
-    /**
-     * ESPN instants are UTC and sometimes drop the seconds (`2026-11-04T00:00Z`).
-     */
-    private static function parseDate(?string $raw): ?CarbonImmutable
-    {
-        if ($raw === null) {
-            return null;
-        }
-        try {
-            return CarbonImmutable::parse($raw)->utc();
-        } catch (Throwable) {
-            return null;
-        }
-    }
-
-    private static function hex(mixed $raw): ?string
-    {
-        $hex = ltrim((string) self::string($raw), '#');
-
-        return preg_match('/^[0-9a-fA-F]{6}$/', $hex) === 1 ? strtolower($hex) : null;
-    }
-
-    private static function string(mixed $raw): ?string
-    {
-        if (! is_scalar($raw)) {
-            return null;
-        }
-        $text = trim((string) $raw);
-
-        return $text === '' ? null : $text;
     }
 
     /**

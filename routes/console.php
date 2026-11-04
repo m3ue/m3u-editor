@@ -59,8 +59,8 @@ if (config('services.aiostreams.enabled', true)) {
 $inProcess('app:refresh-epg')
     ->everyMinute();
 
-// Sports AED profiles: clear cached EPG files when their ESPN games change.
-// A no-op unless Settings > Integrations > Sports is on and a profile matches games.
+// Sports AED profiles: clear cached EPG files when their games change.
+// A no-op unless Settings > Integrations > Sports API is on and a profile matches games.
 $inProcess('app:refresh-sports-aed-epg')
     ->everyFifteenMinutes();
 
