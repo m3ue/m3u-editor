@@ -6,6 +6,7 @@ use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Services\EspnSportsService;
+use App\Services\Sports\SportsService;
 use App\Services\TheSportsDbService;
 use BackedEnum;
 use Exception;
@@ -467,7 +468,7 @@ class ManageIntegrationSettings extends BaseSettingsPage
                                             ->inline(false)
                                             ->live()
                                             ->columnSpanFull()
-                                            ->helperText(__('Shows the Sports screen in M3U TV. Channels are matched on the TV using your EPG and channel names, so games are only watchable when your playlist carries them.')),
+                                            ->helperText(__('Shows the Sports screen in M3U TV. Channels are matched using your EPG and channel names, so games are only watchable when your playlist carries them.')),
                                         TextInput::make('sports_espn_api_url')
                                             ->label(__('API URL'))
                                             ->url()
@@ -534,6 +535,27 @@ class ManageIntegrationSettings extends BaseSettingsPage
                                             ->required(fn (Get $get): bool => (bool) $get('sports_tsdb_enabled'))
                                             ->notIn([TheSportsDbService::FREE_KEY])
                                             ->validationMessages(['not_in' => __('The free key is not accepted. A paid TheSportsDB API key is required.')]),
+                                    ]),
+                                Section::make(__('Leagues'))
+                                    ->key('sports_leagues')
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-funnel')
+                                    ->collapsible()
+                                    ->visible(fn (Get $get): bool => (bool) $get('sports_espn_enabled') || (bool) $get('sports_tsdb_enabled'))
+                                    ->schema([
+                                        Select::make('sports_league_ids')
+                                            ->label(__('Limit to Leagues'))
+                                            ->multiple()
+                                            ->searchable()
+                                            ->options(fn (Get $get): array => app(SportsService::class)->leagueScopeOptions(
+                                                (bool) $get('sports_espn_enabled'),
+                                                (bool) $get('sports_tsdb_enabled'),
+                                                (array) $get('sports_league_ids'),
+                                            ))
+                                            ->placeholder(__('All leagues'))
+                                            ->hint(__('Recommended'))
+                                            ->hintIcon('heroicon-m-light-bulb')
+                                            ->helperText(__('Only these leagues are fetched, shown in M3U TV and offered to AED profiles, which reduces requests to the sports APIs and speeds up loading. Leave empty to use every league.')),
                                     ]),
                             ]),
                     ]),

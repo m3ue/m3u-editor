@@ -10,6 +10,7 @@ use App\Services\EspnSportsService;
 use App\Services\Sports\EspnLeagueCatalog;
 use App\Services\Sports\SportsAedRefresher;
 use App\Services\Sports\SportsAedResolver;
+use App\Services\Sports\SportsChannelMatcher;
 use App\Services\Sports\SportsService;
 use App\Services\Sports\SportsTeamMatcher;
 use App\Services\Sports\TheSportsDbLeagueCatalog;
@@ -653,4 +654,132 @@ it('keeps a saved league selectable after its provider is turned off', function 
 
     enableProviders(espn: false, theSportsDb: false);
     expect(app(SportsService::class)->leagueOptions()['Hockey'])->toHaveKey('hockey/nhl');
+});
+
+function limitSportsLeagues(array $leagueIds): void
+{
+    $settings = app(GeneralSettings::class);
+    $settings->sports_league_ids = $leagueIds;
+    $settings->save();
+}
+
+it('offers every league until Sports is limited to some', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    $all = app(SportsService::class)->leagues();
+    expect(count($all))->toBeGreaterThan(100);
+
+    limitSportsLeagues([]);
+    expect(app(SportsService::class)->leagues())->toBe($all);
+});
+
+it('offers only the limited leagues, and clients default to all of them', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl', 'soccer/ger.1', 'not/a-league']);
+
+    $sports = app(SportsService::class);
+    $leagues = collect($sports->clientLeagues());
+
+    expect($leagues->pluck('id')->all())->toBe(['football/nfl', 'soccer/ger.1'])
+        // The Bundesliga isn't a catalogue default
+        ->and($leagues->pluck('default')->all())->toBe([true, true])
+        ->and(array_keys($sports->sportNames()))->toBe(['football', 'soccer']);
+});
+
+it('fetches nothing outside the limit, whoever asks', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl']);
+    Http::fake(['site.api.espn.com/*' => Http::response(['events' => []])]);
+
+    app(SportsService::class)->rawFixtures(['football/nfl', 'hockey/nhl'], now(), now()->addDay());
+
+    Http::assertSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/football/nfl/'));
+    Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/hockey/nhl/'));
+
+    expect(app(SportsService::class)->teamsByLeague(['hockey/nhl']))->toBe([]);
+});
+
+it('keeps a limited league when the other provider takes it over', function () {
+    enableProviders(espn: false, theSportsDb: true);
+    limitSportsLeagues(['hockey/nhl']);
+
+    expect(array_column(app(SportsService::class)->leagues(), 'id'))->toBe(['hockey/tsdb.4380']);
+
+    enableProviders(espn: true, theSportsDb: true);
+
+    expect(array_column(app(SportsService::class)->leagues(), 'id'))->toBe(['hockey/nhl']);
+});
+
+it('still knows a league outside the limit, so its follows can be removed', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl']);
+
+    expect(app(SportsService::class)->findLeague('hockey/nhl'))->not->toBeNull();
+});
+
+it('limits the AED league picker and an AED profile with no leagues picked', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl']);
+    $sports = app(SportsService::class);
+
+    expect($sports->leagueOptions())->toBe(['Football' => ['football/nfl' => 'NFL']]);
+
+    // A saved pick stays listed, or saving the form would fail validation
+    expect($sports->leagueOptions(['hockey/nhl']))->toBe([
+        'Football' => ['football/nfl' => 'NFL'],
+        'Hockey' => ['hockey/nhl' => 'NHL'],
+    ]);
+
+    $profile = new AedProfile(['sports_matching' => true, 'sports_league_ids' => []]);
+    $profile->id = 1;
+    Http::fake(['site.api.espn.com/*' => Http::response(['events' => []])]);
+
+    app(SportsAedRefresher::class)->refresh($profile);
+
+    Http::assertSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/football/nfl/'));
+    Http::assertNotSent(fn (HttpRequest $request): bool => ! str_contains($request->url(), '/football/nfl/'));
+});
+
+it('lists every league to limit to, following the providers in the form', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl']);
+    $sports = app(SportsService::class);
+
+    $espnOnly = $sports->leagueScopeOptions(true, false);
+    expect($espnOnly['Hockey'])->toHaveKey('hockey/nhl')
+        ->and($espnOnly['Hockey'])->not->toHaveKey('hockey/tsdb.4920');
+
+    $both = $sports->leagueScopeOptions(true, true);
+    expect($both['Hockey'])->toHaveKey('hockey/nhl')
+        ->and($both['Hockey'])->toHaveKey('hockey/tsdb.4920')
+        // One entry for a league both carry
+        ->and($both['Hockey'])->not->toHaveKey('hockey/tsdb.4380');
+
+    // A pick from a provider now off stays listed
+    expect($sports->leagueScopeOptions(true, false, ['hockey/tsdb.4920'])['Hockey'])->toHaveKey('hockey/tsdb.4920');
+});
+
+it('saves the league limit from the settings page', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test(ManageIntegrationSettings::class)
+        ->fillForm(['sports_league_ids' => ['football/nfl', 'hockey/nhl']])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $settings = app(GeneralSettings::class);
+    $settings->refresh();
+    expect($settings->sports_league_ids)->toBe(['football/nfl', 'hockey/nhl']);
+});
+
+it('uses the limit when matching channels', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    limitSportsLeagues(['football/nfl']);
+    Http::fake(['site.api.espn.com/*' => Http::response(['events' => []])]);
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    expect(app(SportsChannelMatcher::class)->channelsFor($playlist, ['hockey/nhl'], now(), now()->addDay()))->toBe([]);
+
+    Http::assertNotSent(fn (HttpRequest $request): bool => str_contains($request->url(), '/hockey/nhl/'));
 });

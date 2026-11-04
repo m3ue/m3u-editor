@@ -4,6 +4,7 @@ namespace App\Services\Sports;
 
 use App\Services\EspnSportsService;
 use App\Services\TheSportsDbService;
+use App\Settings\GeneralSettings;
 use Carbon\CarbonInterface;
 
 /**
@@ -21,9 +22,16 @@ class SportsService
 
     public const int MAX_RANGE_DAYS = SportsProvider::MAX_RANGE_DAYS;
 
+    /** @var array<string, true> */
+    private array $leagueScope = [];
+
+    /** @var array<int, mixed>|null What [$leagueScope] was worked out from */
+    private ?array $leagueScopeSignature = null;
+
     public function __construct(
         private readonly EspnSportsService $espn,
         private readonly TheSportsDbService $theSportsDb,
+        private readonly GeneralSettings $settings,
     ) {}
 
     public function isEnabled(): bool
@@ -38,9 +46,33 @@ class SportsService
      */
     public function leagues(): array
     {
-        $espnEnabled = $this->espn->isEnabled();
+        $leagues = $this->offeredLeagues($this->espn->isEnabled(), $this->theSportsDb->isEnabled());
+        $scope = $this->leagueScope();
+        if ($scope === null) {
+            return $leagues;
+        }
+
+        // Limiting Sports to some leagues says those are the ones wanted, so
+        // clients show all of them rather than only the catalogue's defaults.
+        $scoped = [];
+        foreach ($leagues as $league) {
+            if (isset($scope[$league['id']])) {
+                $scoped[] = [...$league, 'default' => true];
+            }
+        }
+
+        return $scoped;
+    }
+
+    /**
+     * The competitions the given providers carry, ESPN's serving any both do.
+     *
+     * @return list<array{id: string, name: string, abbreviation: string, sport: string, sport_name: string, soccer_style: bool, default: bool}>
+     */
+    private function offeredLeagues(bool $espnEnabled, bool $theSportsDbEnabled): array
+    {
         $leagues = $espnEnabled ? EspnSportsService::leagues() : [];
-        if ($this->theSportsDb->isEnabled()) {
+        if ($theSportsDbEnabled) {
             foreach (TheSportsDbService::leagues() as $league) {
                 if (! $espnEnabled || ! isset(TheSportsDbService::findLeague($league['id'])['espn'])) {
                     $leagues[] = $league;
@@ -49,6 +81,35 @@ class SportsService
         }
 
         return $leagues;
+    }
+
+    /**
+     * The leagues Settings limits Sports to, as the ids serving them, so a
+     * league picked from one provider stays picked when the other takes it
+     * over. Null when it's not limited.
+     *
+     * @return array<string, true>|null
+     */
+    private function leagueScope(): ?array
+    {
+        $leagueIds = $this->settings->sports_league_ids ?: [];
+        if ($leagueIds === []) {
+            return null;
+        }
+
+        $signature = [$leagueIds, $this->espn->isEnabled(), $this->theSportsDb->isEnabled()];
+        if ($signature !== $this->leagueScopeSignature) {
+            $this->leagueScopeSignature = $signature;
+            $this->leagueScope = [];
+            foreach ($leagueIds as $leagueId) {
+                $served = $this->servedLeagueId($leagueId);
+                if ($served !== null) {
+                    $this->leagueScope[$served] = true;
+                }
+            }
+        }
+
+        return $this->leagueScope;
     }
 
     /**
@@ -62,8 +123,30 @@ class SportsService
      */
     public function leagueOptions(array $selected = []): array
     {
+        return $this->groupLeagueOptions($this->isEnabled() ? $this->leagues() : EspnSportsService::leagues(), $selected);
+    }
+
+    /**
+     * Leagues to limit Sports to in Settings: all that the providers switched
+     * on in the form carry, whatever is limited now.
+     *
+     * @param  list<string>  $selected
+     * @return array<string, array<string, string>>
+     */
+    public function leagueScopeOptions(bool $espnEnabled, bool $theSportsDbEnabled, array $selected = []): array
+    {
+        return $this->groupLeagueOptions($this->offeredLeagues($espnEnabled, $theSportsDbEnabled), $selected);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $leagues
+     * @param  list<string>  $selected
+     * @return array<string, array<string, string>>
+     */
+    private function groupLeagueOptions(array $leagues, array $selected): array
+    {
         $options = [];
-        foreach ($this->leagues() ?: EspnSportsService::leagues() as $league) {
+        foreach ($leagues as $league) {
             $options[$league['sport_name']][$league['id']] = $league['name'];
         }
         foreach ($selected as $leagueId) {
@@ -106,7 +189,8 @@ class SportsService
 
     /**
      * The catalogue entry serving [$leagueId], or null when no provider that's
-     * on carries it.
+     * on carries it. Ignores the league limit, so a team followed before a
+     * league was left out can still be unfollowed.
      *
      * @return array<string, mixed>|null
      */
@@ -204,18 +288,21 @@ class SportsService
     }
 
     /**
-     * [$leagueIds] split by the provider serving each, unknown ones dropped.
+     * [$leagueIds] split by the provider serving each. Unknown ones are dropped,
+     * and so are any outside the league limit, so nothing is fetched for them
+     * whoever asks (an older AED profile, a TV's saved picks).
      *
      * @param  list<string>  $leagueIds
      * @return list<array{0: SportsProvider, 1: list<string>}>
      */
     private function byProvider(array $leagueIds): array
     {
+        $scope = $this->leagueScope();
         $espn = [];
         $theSportsDb = [];
         foreach ($leagueIds as $leagueId) {
             $served = $this->servedLeagueId($leagueId);
-            if ($served === null) {
+            if ($served === null || ($scope !== null && ! isset($scope[$served]))) {
                 continue;
             }
             if (TheSportsDbService::owns($served)) {

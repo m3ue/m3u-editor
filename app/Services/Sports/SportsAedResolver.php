@@ -152,7 +152,49 @@ class SportsAedResolver
      */
     public function match(AedProfile $profile, string $channelTitle, ?CarbonInterface $titleTime = null, int $days = 5): ?AedEvent
     {
-        $set = $this->fixtureSet($profile, $days);
+        $set = $this->profileFixtureSet($profile, $days);
+        $reference = $titleTime ? CarbonImmutable::instance($titleTime) : CarbonImmutable::now();
+        $best = $this->bestFixture($set, $channelTitle, $reference, $titleTime !== null);
+
+        return $best ? $this->event($profile, $channelTitle, $best) : null;
+    }
+
+    /**
+     * Every game of [$leagueIds] starting in [$from, $to), prepared for
+     * [gameNamedBy]. Unlike a profile's window this may call the provider, so
+     * it's only for requests a client explicitly makes for those games.
+     *
+     * @param  list<string>  $leagueIds
+     * @return array{fixtures: list<array<string, mixed>>, index: array<string, list<int>>, names: array<string, list<array{0: list<string>, 1: string}>>}
+     */
+    public function gamesBetween(array $leagueIds, CarbonInterface $from, CarbonInterface $to): array
+    {
+        $rawFixtures = $this->sports->rawFixtures($leagueIds, $from, $to);
+        $playingLeagueIds = array_values(array_unique(array_column($rawFixtures, 'league_id')));
+
+        return $this->prepareFixtures($rawFixtures, $this->sports->teamsByLeague($playingLeagueIds));
+    }
+
+    /**
+     * The game in [$games] that [$text] names, by the rules profile matching
+     * uses. [$reference] resolves any date the text states, and the closest
+     * game to it wins a tie.
+     *
+     * @param  array{fixtures: list<array<string, mixed>>, index: array<string, list<int>>, names: array<string, list<array{0: list<string>, 1: string}>>}  $games
+     * @return array<string, mixed>|null
+     */
+    public function gameNamedBy(array $games, string $text, CarbonInterface $reference): ?array
+    {
+        return $this->bestFixture($games, $text, CarbonImmutable::instance($reference), false);
+    }
+
+    /**
+     * @param  array{fixtures: list<array<string, mixed>>, index: array<string, list<int>>, names: array<string, list<array{0: list<string>, 1: string}>>}  $set
+     * @param  bool  $referenceIsTitleTime  Whether [$reference] was read from the title itself
+     * @return array<string, mixed>|null
+     */
+    private function bestFixture(array $set, string $channelTitle, CarbonImmutable $reference, bool $referenceIsTitleTime): ?array
+    {
         if ($set['fixtures'] === []) {
             return null;
         }
@@ -176,11 +218,10 @@ class SportsAedResolver
         $titleIsYouth = array_intersect_key($wordCounts, array_flip(self::YOUTH_MARKERS)) !== []
             || preg_grep('/^u(1[5-9]|2[0-3])$/', $words) !== [];
 
-        $reference = $titleTime ? CarbonImmutable::instance($titleTime) : CarbonImmutable::now();
         // Without the profile's own time regex, a date the title states still
         // rules out other days' games: stale rotating titles, and a title
         // listing two games whose teams meet on another day.
-        $titleDates = $titleTime ? [] : SportsTitleDates::candidates($channelTitle, $reference);
+        $titleDates = $referenceIsTitleTime ? [] : SportsTitleDates::candidates($channelTitle, $reference);
         $best = null;
         $bestRank = [PHP_INT_MAX, PHP_INT_MAX];
         foreach (array_keys($candidates) as $position) {
@@ -197,10 +238,10 @@ class SportsAedResolver
                 continue;
             }
             $gap = abs($fixture['start_ts'] - $reference->getTimestamp());
-            if ($titleTime && $gap > self::TITLE_TIME_TOLERANCE_HOURS * 3600) {
+            if ($referenceIsTitleTime && $gap > self::TITLE_TIME_TOLERANCE_HOURS * 3600) {
                 continue;
             }
-            if (! $titleTime && $titleDates !== [] && ! $this->onAnyDate($fixture['start_ts'], $titleDates)) {
+            if (! $referenceIsTitleTime && $titleDates !== [] && ! $this->onAnyDate($fixture['start_ts'], $titleDates)) {
                 continue;
             }
             $rank = [(int) ($fixture['women'] && ! $titleIsWomen) + (int) ($fixture['youth'] && ! $titleIsYouth), $gap];
@@ -210,7 +251,7 @@ class SportsAedResolver
             }
         }
 
-        return $best ? $this->event($profile, $channelTitle, $best) : null;
+        return $best;
     }
 
     /**
@@ -381,14 +422,13 @@ class SportsAedResolver
     }
 
     /**
-     * The profile's leagues' fixtures in the window, each with its teams'
-     * phrases, and an index from the first word of each home-team phrase to
-     * the fixtures it can start a match for (both teams must be named, so the
-     * home side alone is a sound filter).
+     * The profile's leagues' fixtures in its window, from the cache alone: EPG
+     * requests never wait on a provider, so a background refresh fetches
+     * whatever isn't cached yet.
      *
      * @return array{fixtures: list<array<string, mixed>>, index: array<string, list<int>>, names: array<string, list<array{0: list<string>, 1: string}>>}
      */
-    private function fixtureSet(AedProfile $profile, int $days): array
+    private function profileFixtureSet(AedProfile $profile, int $days): array
     {
         $leagueIds = $profile->sports_league_ids ?: array_column($this->sports->leagues(), 'id');
         sort($leagueIds);
@@ -400,6 +440,28 @@ class SportsAedResolver
         }
 
         $now = CarbonImmutable::now('UTC');
+        $cached = $this->sports->cachedFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days));
+        // Only leagues playing in the window need their full team lists
+        $playingLeagueIds = array_values(array_unique(array_column($cached['fixtures'], 'league_id')));
+        $teamsByLeague = $this->sports->teamsByLeague($playingLeagueIds, fetchMissing: false);
+        if (! $cached['complete'] || count($teamsByLeague) < count($playingLeagueIds)) {
+            RefreshSportsAedProfile::dispatch($profile->id);
+        }
+
+        return $this->prepared[$key] = $this->prepareFixtures($cached['fixtures'], $teamsByLeague);
+    }
+
+    /**
+     * Fixtures each with their teams' phrases, and an index from the first word
+     * of each home-team phrase to the fixtures it can start a match for (both
+     * teams must be named, so the home side alone is a sound filter).
+     *
+     * @param  list<array<string, mixed>>  $rawFixtures
+     * @param  array<string, list<array<string, mixed>>>  $teamsByLeague
+     * @return array{fixtures: list<array<string, mixed>>, index: array<string, list<int>>, names: array<string, list<array{0: list<string>, 1: string}>>}
+     */
+    private function prepareFixtures(array $rawFixtures, array $teamsByLeague): array
+    {
         $fixtures = [];
         $index = [];
         $names = [];
@@ -418,16 +480,6 @@ class SportsAedResolver
                 }
             }
         };
-        // EPG requests never wait on a provider: match what's cached, and have a
-        // background refresh fetch whatever isn't yet
-        $cached = $this->sports->cachedFixtures($leagueIds, $now->subHours(self::WINDOW_PAST_HOURS), $now->addDays($days));
-        $rawFixtures = $cached['fixtures'];
-        // Only leagues playing in the window need their full team lists
-        $playingLeagueIds = array_values(array_unique(array_column($rawFixtures, 'league_id')));
-        $teamsByLeague = $this->sports->teamsByLeague($playingLeagueIds, fetchMissing: false);
-        if (! $cached['complete'] || count($teamsByLeague) < count($playingLeagueIds)) {
-            RefreshSportsAedProfile::dispatch($profile->id);
-        }
         foreach ($teamsByLeague as $leagueId => $teams) {
             foreach ($teams as $team) {
                 $addNames($team, $leagueId.':'.$team['id']);
@@ -457,6 +509,7 @@ class SportsAedResolver
             // Only what matching and [event] read: thousands of games are
             // held per EPG request, so crests, colours and scores are left out.
             $fixtures[] = [
+                'id' => $fixture['id'],
                 'league_id' => $fixture['league_id'],
                 'sport' => SportsService::sportOf($fixture['league_id']),
                 'name' => $fixture['name'],
@@ -478,6 +531,6 @@ class SportsAedResolver
             }
         }
 
-        return $this->prepared[$key] = ['fixtures' => $fixtures, 'index' => $index, 'names' => $names];
+        return ['fixtures' => $fixtures, 'index' => $index, 'names' => $names];
     }
 }

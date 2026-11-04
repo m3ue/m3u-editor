@@ -52,6 +52,7 @@ use App\Services\EmbyPublicationCatalogService;
 use App\Services\EpgCacheService;
 use App\Services\LogoCacheService;
 use App\Services\M3uProxyService;
+use App\Services\Sports\SportsChannelMatcher;
 use App\Services\Sports\SportsService;
 use App\Services\TmdbService;
 use App\Services\VodFileNameService;
@@ -93,11 +94,15 @@ class XtreamApiController extends Controller
 
     private const SPORTS_ACTIONS = [
         'get_sports_fixtures',
+        'get_sports_channels',
         'get_sports_teams',
         'get_sports_follows',
         'toggle_sports_follow',
         'sync_sports_follows',
     ];
+
+    /** `get_sports_channels` matches against the guide, so it serves about a day at a time. */
+    private const int SPORTS_CHANNELS_MAX_RANGE_SECONDS = 2 * 86400;
 
     /** A team's follow key: "{sport}/{league}:{team id}". */
     private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9._-]+):([A-Za-z0-9-]+)$/';
@@ -546,6 +551,7 @@ class XtreamApiController extends Controller
                         'api_version' => 1,
                         'actions' => [
                             'fixtures' => 'get_sports_fixtures',
+                            'channels' => 'get_sports_channels',
                             'teams' => 'get_sports_teams',
                             'follows' => 'get_sports_follows',
                             'toggle_follow' => 'toggle_sports_follow',
@@ -2261,6 +2267,7 @@ class XtreamApiController extends Controller
 
             return match ($action) {
                 'get_sports_fixtures' => $this->sportsFixtures($request),
+                'get_sports_channels' => $this->sportsChannels($request, $playlist),
                 'get_sports_teams' => $this->sportsTeams($request),
                 'get_sports_follows' => $this->sportsFollows($request, $playlist, $authMethod, $username, $password),
                 'toggle_sports_follow' => $this->toggleSportsFollow($request, $playlist, $authMethod, $username, $password),
@@ -2324,6 +2331,35 @@ class XtreamApiController extends Controller
 
         return response()->json([
             'fixtures' => $sports->fixtures(
+                $leagueIds,
+                Carbon::createFromTimestampUTC((int) $request->input('from')),
+                Carbon::createFromTimestampUTC((int) $request->input('to')),
+            ),
+        ]);
+    }
+
+    /**
+     * The playlist's channels showing each game (`get_sports_channels`), keyed
+     * by `{league_id}:{fixture_id}`, strongest match first. Takes the same
+     * parameters as `get_sports_fixtures`, but matching reads the guide, so
+     * only one day at a time: clients ask for it after showing that day's games.
+     */
+    private function sportsChannels(Request $request, $playlist): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'leagues' => ['required', 'string', 'max:2000'],
+            'from' => ['required', 'integer', 'min:0'],
+            'to' => ['required', 'integer', 'gt:from', 'max:'.((int) $request->input('from') + self::SPORTS_CHANNELS_MAX_RANGE_SECONDS)],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => $validator->errors()->keys()], 422);
+        }
+
+        $leagueIds = array_values(array_filter(array_map('trim', explode(',', (string) $request->input('leagues')))));
+
+        return response()->json([
+            'channels' => (object) app(SportsChannelMatcher::class)->channelsFor(
+                $playlist,
                 $leagueIds,
                 Carbon::createFromTimestampUTC((int) $request->input('from')),
                 Carbon::createFromTimestampUTC((int) $request->input('to')),

@@ -284,6 +284,9 @@ class GeneralSettings extends Settings
 
     public ?string $sports_tsdb_api_key = null;
 
+    /** The leagues Sports uses, as league ids. Empty means every league the providers carry. */
+    public ?array $sports_league_ids = null;
+
     public ?string $tmdb_language = 'en-US';
 
     public ?int $tmdb_confidence_threshold = 80;

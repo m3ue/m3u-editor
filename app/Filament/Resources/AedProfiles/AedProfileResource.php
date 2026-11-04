@@ -138,7 +138,7 @@ class AedProfileResource extends Resource implements CopilotResource
                                 ->placeholder(__('All leagues'))
                                 ->hint(__('Recommended'))
                                 ->hintIcon('heroicon-m-light-bulb')
-                                ->helperText(__('Pick the leagues these channels carry. Channels then only match games in those leagues, which reduces incorrect matches and speeds up syncs and guide builds. Leave empty to check every league.'))
+                                ->helperText(__('Pick the leagues these channels carry. Channels then only match games in those leagues, which reduces incorrect matches and speeds up syncs and guide builds. Leave empty to check every league available from the Sports API.'))
                                 ->columnSpanFull(),
                             TextInput::make('sports_title_format')
                                 ->label(__('Game Title Format'))

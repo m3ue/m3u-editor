@@ -951,6 +951,33 @@ class EpgCacheService
     }
 
     /**
+     * Stream every programme of [$epg] on air at some point in `($fromTs, $toTs)`,
+     * across all its channels. Reads the SQLite store only, so a legacy JSONL
+     * cache yields nothing until its next rebuild.
+     *
+     * @return Generator<int, array{channel_id: string, start_ts: int, stop_ts: int|null, title: string, subtitle: string}>
+     */
+    public function programmesAiring(Epg $epg, int $fromTs, int $toTs): Generator
+    {
+        $store = $this->programmeStore($epg);
+        if ($store === null) {
+            return;
+        }
+
+        // Buckets are local dates and programmes can start the day before
+        $dates = [];
+        for ($day = Carbon::createFromTimestampUTC($fromTs)->subDays(2); $day->getTimestamp() <= $toTs + 86400; $day->addDay()) {
+            $dates[] = $day->format('Y-m-d');
+        }
+
+        try {
+            yield from $store->readAiring($dates, $fromTs, $toTs);
+        } catch (Exception $e) {
+            Log::error("Error reading airing programmes for EPG {$epg->uuid}: {$e->getMessage()}");
+        }
+    }
+
+    /**
      * Stream cached programmes for a specific date using generators with JSONL format
      */
     private function streamCachedProgrammesForDate(Epg $epg, string $date, array $channelIds = []): Generator
