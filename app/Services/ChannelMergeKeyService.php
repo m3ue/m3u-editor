@@ -92,7 +92,7 @@ class ChannelMergeKeyService
             $channel->name,
         ])
             ->map(fn ($name) => $this->normalizeName($name))
-            ->filter()
+            ->filter(fn (?string $name): bool => $name !== null)
             ->unique()
             ->values()
             ->toArray();
