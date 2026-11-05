@@ -26,9 +26,7 @@
     >
         <div>
             <div class="mb-3 flex items-center justify-center gap-2">
-                @if (! empty($game['league_logo']))
-                    <img src="{{ $game['league_logo'] }}" alt="" loading="lazy" class="h-5 w-5 object-contain" />
-                @endif
+                @include('filament.pages.sports-games.league-logo', ['url' => $game['league_logo'] ?? null, 'class' => 'h-5 w-5'])
                 <span class="text-sm font-medium text-gray-950 dark:text-white">{{ $leagueName }}</span>
             </div>
             <div class="grid grid-cols-3 items-start gap-2">
@@ -64,9 +62,15 @@
                 @elseif ($channelRows === [])
                     <p class="{{ $mutedClass }}">{{ __('No channel in this playlist is showing this game.') }}</p>
                 @else
-                    <div class="space-y-2">
+                    <div class="-mx-2 space-y-1">
                         @foreach ($channelRows as $row)
-                            <div class="flex items-center gap-3" wire:key="sports-channel-{{ $row['channel']->id }}">
+                            <button
+                                type="button"
+                                wire:key="sports-channel-{{ $row['channel']->id }}"
+                                wire:click="playChannel({{ $row['channel']->id }})"
+                                class="focus-visible:ring-primary-500 flex w-full cursor-pointer items-center gap-3 rounded-lg p-2 text-start transition hover:bg-gray-950/5 focus-visible:ring-2 focus-visible:outline-none dark:hover:bg-white/5"
+                            >
+                                <span class="sr-only">{{ __('Play') }}</span>
                                 <img
                                     src="{{ LogoService::getChannelLogoUrl($row['channel']) }}"
                                     alt=""
@@ -87,14 +91,11 @@
                                         </div>
                                     @endif
                                 </div>
-                                <x-filament::icon-button
+                                <x-filament::icon
                                     icon="heroicon-m-play-circle"
-                                    color="primary"
-                                    size="xl"
-                                    :label="__('Play')"
-                                    wire:click="playChannel({{ $row['channel']->id }})"
+                                    class="text-primary-500 h-7 w-7 shrink-0"
                                 />
-                            </div>
+                            </button>
                         @endforeach
                     </div>
                 @endif

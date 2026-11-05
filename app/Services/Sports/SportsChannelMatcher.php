@@ -47,10 +47,31 @@ class SportsChannelMatcher
      */
     public function channelsFor(Model $playlist, array $leagueIds, CarbonInterface $from, CarbonInterface $to): array
     {
-        sort($leagueIds);
-        $key = 'sports:channels:'.sha1(implode('|', [$playlist::class, $playlist->getKey(), implode(',', $leagueIds), $from->getTimestamp(), $to->getTimestamp()]));
+        return Cache::remember(
+            $this->cacheKey($playlist, $leagueIds, $from, $to),
+            self::CACHE_SECONDS,
+            fn (): array => $this->match($playlist, $leagueIds, $from, $to),
+        );
+    }
 
-        return Cache::remember($key, self::CACHE_SECONDS, fn (): array => $this->match($playlist, $leagueIds, $from, $to));
+    /**
+     * Drops the shared run, so the next [channelsFor] matches afresh.
+     *
+     * @param  list<string>  $leagueIds
+     */
+    public function forget(Model $playlist, array $leagueIds, CarbonInterface $from, CarbonInterface $to): void
+    {
+        Cache::forget($this->cacheKey($playlist, $leagueIds, $from, $to));
+    }
+
+    /**
+     * @param  list<string>  $leagueIds
+     */
+    private function cacheKey(Model $playlist, array $leagueIds, CarbonInterface $from, CarbonInterface $to): string
+    {
+        sort($leagueIds);
+
+        return 'sports:channels:'.sha1(implode('|', [$playlist::class, $playlist->getKey(), implode(',', $leagueIds), $from->getTimestamp(), $to->getTimestamp()]));
     }
 
     /**

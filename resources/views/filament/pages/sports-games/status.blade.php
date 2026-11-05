@@ -2,7 +2,10 @@
 @if ($game['state'] === 'live')
     <x-filament::badge color="danger">{{ __('LIVE') }}</x-filament::badge>
     @if ($game['status_detail'] !== '')
-        <span class="text-xs text-gray-600 dark:text-gray-300">{{ $game['status_detail'] }}</span>
+        <span
+            class="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300"
+            title="{{ $game['status_detail'] }}"
+        >{{ $game['status_detail'] }}</span>
     @endif
 @elseif ($game['state'] === 'finished')
     <span class="text-sm font-bold text-gray-950 dark:text-white">{{ __('Final') }}</span>
