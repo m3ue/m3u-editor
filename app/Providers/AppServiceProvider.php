@@ -16,6 +16,7 @@ use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
 use App\Livewire\BackupDestinationListRecords;
+use App\Livewire\CopilotChat;
 use App\Livewire\TmdbSearch;
 use App\Models\Bouquet;
 use App\Models\Channel;
@@ -1243,6 +1244,8 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the TMDB search component
         Livewire::component('tmdb-search', TmdbSearch::class);
+        // Replaces the package's registration; package providers boot before this one.
+        Livewire::component('filament-copilot-chat', CopilotChat::class);
     }
 
     /**
