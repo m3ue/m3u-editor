@@ -83,16 +83,20 @@ class DuplicatePlaylist implements ShouldQueue
                 $newSourceCategory->save();
             }
 
-            // Copy the groups
+            // Copy the groups. parent_id is restored once every copy exists, a merged
+            // child must point at the copied parent rather than the source playlist's.
+            $newGroups = [];
             foreach ($playlist->groups()->get() as $group) {
                 $newGroup = $group->replicate(except: [
                     'id',
                     'playlist_id',
+                    'parent_id',
                 ]);
                 $newGroup->playlist_id = $newPlaylist->id;
                 $newGroup->created_at = $now;
                 $newGroup->updated_at = $now;
                 $newGroup->save();
+                $newGroups[$group->id] = ['copy' => $newGroup, 'parent_id' => $group->parent_id];
 
                 // Copy the group channels
                 foreach ($group->channels()->with('failovers')->get() as $channel) {
@@ -123,6 +127,13 @@ class DuplicatePlaylist implements ShouldQueue
                 }
             }
 
+            foreach ($newGroups as ['copy' => $newGroup, 'parent_id' => $parentId]) {
+                if ($parentId !== null) {
+                    $newGroup->parent_id = $newGroups[$parentId]['copy']->id;
+                    $newGroup->save();
+                }
+            }
+
             // Copy the playlist's bouquets (groups replicate with identical names,
             // so the name-based selections stay valid). No alias attachments.
             Bouquet::where('playlist_id', $playlist->id)
@@ -136,16 +147,19 @@ class DuplicatePlaylist implements ShouldQueue
                     $copy->saveQuietly();
                 });
 
-            // Copy the categories
+            // Copy the categories. parent_id is restored once every copy exists, same as groups.
+            $newCategories = [];
             foreach ($playlist->categories()->get() as $category) {
                 $newCategory = $category->replicate(except: [
                     'id',
                     'playlist_id',
+                    'parent_id',
                 ]);
                 $newCategory->playlist_id = $newPlaylist->id;
                 $newCategory->created_at = $now;
                 $newCategory->updated_at = $now;
                 $newCategory->save();
+                $newCategories[$category->id] = ['copy' => $newCategory, 'parent_id' => $category->parent_id];
 
                 // Copy the category series
                 foreach ($category->series()->get() as $series) {
@@ -191,6 +205,13 @@ class DuplicatePlaylist implements ShouldQueue
                             $newEpisode->save();
                         }
                     }
+                }
+            }
+
+            foreach ($newCategories as ['copy' => $newCategory, 'parent_id' => $parentId]) {
+                if ($parentId !== null) {
+                    $newCategory->parent_id = $newCategories[$parentId]['copy']->id;
+                    $newCategory->save();
                 }
             }
 
