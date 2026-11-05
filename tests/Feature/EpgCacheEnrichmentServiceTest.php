@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\EpgGenerateController;
+use App\Http\Controllers\LogoProxyController;
+use App\Http\Controllers\XtreamApiController;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
@@ -103,6 +106,45 @@ beforeEach(function () {
     };
 
     $this->service = fn (): EpgCacheEnrichmentService => app(EpgCacheEnrichmentService::class);
+});
+
+it('advertises and persists URL-bound preserved primary metadata with hash guards', function () {
+    ($this->rebuild)(['One']);
+    $context = ($this->context)();
+    $service = ($this->service)();
+    $snapshot = $service->snapshot($context, $this->epg);
+    expect($snapshot['supported_fields'] ?? [])->toContain('preserved_primary_url');
+    $row = $snapshot['programmes'][0];
+    $url = 'https://example.com/still.jpg';
+    expect($service->apply($context, $this->epg, [['id' => $row['id'], 'hash' => $row['hash'], 'changes' => ['icon' => $url, 'preserved_primary_url' => $url]]])['status'])->toBe('applied');
+    $protected = $service->snapshot($context, $this->epg)['programmes'][0];
+    expect($protected['programme']['preserved_primary_url'])->toBe($url)
+        ->and($protected['hash'])->not->toBe($row['hash']);
+    expect($service->apply($context, $this->epg, [['id' => $row['id'], 'hash' => $row['hash'], 'changes' => ['preserved_primary_url' => '']]])['status'])->toBe('stale');
+    expect($service->apply($context, $this->epg, [['id' => $protected['id'], 'hash' => $protected['hash'], 'changes' => ['preserved_primary_url' => '']]])['status'])->toBe('applied');
+    $cleared = $service->snapshot($context, $this->epg)['programmes'][0];
+    expect($cleared['programme']['preserved_primary_url'])->toBe('')->and($cleared['hash'])->not->toBe($protected['hash']);
+    foreach (['file:///private/image.jpg', 'not a URL', null, 12] as $invalid) {
+        expect($service->apply($context, $this->epg, [['id' => $cleared['id'], 'hash' => $cleared['hash'], 'changes' => ['preserved_primary_url' => $invalid]]]))->toBe(['status' => 'invalid_request', 'index' => 0, 'field' => 'preserved_primary_url']);
+    }
+});
+
+it('proxies the bound preserved scalar consistently in both artwork exports', function () {
+    $url = 'https://example.com/still.jpg';
+    $programme = ['icon' => $url, 'preserved_primary_url' => $url, 'images' => [
+        ['url' => $url, 'type' => 'still', 'width' => 1920, 'height' => 1080],
+    ]];
+    $proxy = LogoProxyController::generateProxyUrl($url);
+    $jsonController = new XtreamApiController;
+    $json = (new ReflectionMethod($jsonController, 'epgProgrammeArtwork'))->invoke($jsonController, $programme, (object) ['enable_logo_proxy' => true]);
+    expect($json['preserved_primary_url'])->toBe($proxy)->and($json['still_url'])->toBe($proxy);
+    $xmlController = new EpgGenerateController;
+    $xml = (new ReflectionMethod($xmlController, 'programmeArtworkXml'))->invoke($xmlController, $programme, $this->epg, true);
+    $document = new DOMDocument;
+    expect($document->loadXML('<programme>'.$xml['icons'].$xml['images'].'</programme>'))->toBeTrue();
+    $xpath = new DOMXPath($document);
+    expect($xpath->evaluate('string(/programme/processing-instruction("m3ue-preserved-primary")/following-sibling::*[1]/@src)'))->toBe($proxy)
+        ->and($xpath->evaluate('string(/programme/image[@type="still"])'))->toBe($proxy);
 });
 
 it('pages through the cached programmes with an id and hash per row', function () {
