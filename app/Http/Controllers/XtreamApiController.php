@@ -3497,7 +3497,11 @@ class XtreamApiController extends Controller
         $results = $query->limit($candidateLimit)->get();
 
         $linker = app(WatchProgressLinker::class);
-        $results->each(fn (ViewerWatchProgress $progress) => $linker->ensureLinked($progress, $playlist));
+        // Not an arrow function: each() stops at the first false, and ensureLinked() returns
+        // false for an unrecoverable row, which would leave every older row unlinked.
+        $results->each(function (ViewerWatchProgress $progress) use ($linker, $playlist): void {
+            $linker->ensureLinked($progress, $playlist);
+        });
 
         $enriched = $results->map(function (ViewerWatchProgress $progress): ?array {
             // vod/episode rows whose stream_id no longer resolves (and couldn't be

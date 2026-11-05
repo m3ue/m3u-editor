@@ -538,13 +538,16 @@ class Series extends Model
                     // (truncated/rate-limited answer, or a real removal - we can't tell which
                     // from one fetch) is left untouched rather than assumed gone. Only
                     // provider-sourced rows are ever considered, so locally created episodes
-                    // (DVR recordings, manual entries) are never touched.
+                    // (DVR recordings, manual entries) are never touched. Matched on the ids the
+                    // provider listed, not this run's import_batch_no: an overlapping fetch of the
+                    // same series re-stamps these rows, and would have them deleted as "stale".
                     $seasonsInResponse = array_map('intval', array_keys($eps));
-                    DB::transaction(function () use ($seasonsInResponse, $batchNo) {
+                    $episodeIdsInResponse = collect($eps)->flatten(1)->map(fn (array $ep) => (int) $ep['id'])->all();
+                    DB::transaction(function () use ($seasonsInResponse, $episodeIdsInResponse) {
                         $removedEpisodes = $this->episodes()
                             ->whereIn('season', $seasonsInResponse)
                             ->whereNotNull('source_episode_id')
-                            ->where('import_batch_no', '!=', $batchNo)
+                            ->whereNotIn('source_episode_id', $episodeIdsInResponse)
                             ->delete();
 
                         $removedSeasons = $this->seasons()
