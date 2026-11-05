@@ -46,6 +46,12 @@ class CustomDashboard extends Dashboard
                 ->icon('heroicon-m-sparkles')
                 ->url(EasyEditor::getUrl())
                 ->color('primary'),
+            Action::make('sports_games')
+                ->label(__('Sports'))
+                ->icon('heroicon-m-trophy')
+                ->url(SportsGames::getUrl())
+                ->color('danger')
+                ->visible(fn (): bool => SportsGames::canAccess()),
             Action::make('playlists')
                 ->label(__('Playlists'))
                 ->icon('heroicon-m-play-pause')
