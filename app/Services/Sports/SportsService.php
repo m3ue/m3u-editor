@@ -262,6 +262,21 @@ class SportsService
     }
 
     /**
+     * One game's details from whichever provider serves its league, or null
+     * when that's none or it has nothing (see [SportsProvider::fixtureDetails]).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function fixtureDetails(string $leagueId, string $fixtureId): ?array
+    {
+        foreach ($this->byProvider([$leagueId]) as [$provider, $served]) {
+            return $provider->fixtureDetails($served[0], $fixtureId);
+        }
+
+        return null;
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function teams(string $leagueId): array

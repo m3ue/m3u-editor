@@ -211,6 +211,148 @@ class TheSportsDbService implements SportsProvider
      *
      * @param  list<string>  $leagueIds
      */
+    public function fixtureDetails(string $leagueId, string $fixtureId): ?array
+    {
+        $league = self::findLeague($leagueId);
+        if ($league === null || ! $this->isEnabled()) {
+            return null;
+        }
+
+        $key = $this->cacheKey('details:'.$leagueId.':'.$fixtureId);
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached === false ? null : $this->presentDetails($cached);
+        }
+        if ($this->isPaused() || ! $this->spendRequestBudget(3)) {
+            return null;
+        }
+
+        $responses = Http::pool(fn (Pool $pool): array => array_map(
+            fn (string $endpoint): mixed => $pool->as($endpoint)
+                ->timeout(self::REQUEST_TIMEOUT_SECONDS)
+                ->acceptJson()
+                ->get($this->v1Url($endpoint.'.php'), ['id' => $fixtureId]),
+            ['lookupevent', 'lookupeventstats', 'lookuptimeline'],
+        ));
+        $this->pauseIfRefused($responses);
+        $decoded = [];
+        foreach ($responses as $endpoint => $response) {
+            // A game without stats or a timeline yet still has details
+            $decoded[$endpoint] = $response instanceof Response && $response->successful()
+                ? json_decode($response->body(), true)
+                : null;
+        }
+
+        $details = self::parseFixtureDetails($decoded['lookupevent'], $decoded['lookupeventstats'], $decoded['lookuptimeline'], $league);
+        if ($details === null) {
+            Log::warning('TheSportsDB game details fetch failed', [
+                'league' => $leagueId,
+                'fixture' => $fixtureId,
+                'reason' => $this->failureReason($responses['lookupevent']),
+            ]);
+            Cache::put($key, false, now()->addMinute());
+
+            return null;
+        }
+        $details['fixture'] = $this->withLiveScores([$details['fixture']])[0];
+        Cache::put($key, $details, self::detailsExpiry($details['fixture'], self::LIVE_SCORES_CACHE_MINUTES * 60));
+
+        return $this->presentDetails($details);
+    }
+
+    /**
+     * Maps `lookupevent`, `lookupeventstats` and `lookuptimeline` responses,
+     * or null without a usable game. Exposed for tests.
+     *
+     * @param  array<string, mixed>  $league
+     * @return array<string, mixed>|null
+     */
+    public static function parseFixtureDetails(mixed $eventJson, mixed $statsJson, mixed $timelineJson, array $league): ?array
+    {
+        $event = is_array($eventJson['events'][0] ?? null) ? $eventJson['events'][0] : null;
+        $fixture = $event === null ? null : self::parseEvent($event, $league);
+        if ($fixture === null) {
+            return null;
+        }
+
+        $stats = [];
+        foreach ((array) ($statsJson['eventstats'] ?? []) as $stat) {
+            $label = is_array($stat) ? self::string($stat['strStat'] ?? null) : null;
+            $home = is_array($stat) ? self::string($stat['intHome'] ?? null) : null;
+            $away = is_array($stat) ? self::string($stat['intAway'] ?? null) : null;
+            if ($label !== null && $home !== null && $away !== null) {
+                $stats[] = ['label' => $label, 'home' => $home, 'away' => $away];
+            }
+        }
+
+        $events = [];
+        foreach ((array) ($timelineJson['timeline'] ?? []) as $entry) {
+            if (is_array($entry) && ($mapped = self::timelineEvent($entry)) !== null) {
+                $events[] = $mapped;
+            }
+        }
+
+        $location = array_filter([self::string($event['strCity'] ?? null), self::string($event['strCountry'] ?? null)]);
+        $attendance = is_numeric($event['intSpectators'] ?? null) ? (int) $event['intSpectators'] : 0;
+
+        return [
+            'fixture' => $fixture,
+            'line_score' => null,
+            'events' => $events,
+            'stats' => $stats,
+            'leaders' => [],
+            'info' => [
+                'venue' => $fixture['venue'],
+                'location' => $location === [] ? null : implode(', ', $location),
+                'attendance' => $attendance > 0 ? $attendance : null,
+                'officials' => [],
+                'series' => null,
+                'home_record' => null,
+                'away_record' => null,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @return array<string, mixed>|null
+     */
+    private static function timelineEvent(array $entry): ?array
+    {
+        $type = strtolower((string) self::string($entry['strTimeline'] ?? null));
+        $detail = self::string($entry['strTimelineDetail'] ?? null);
+        $kind = match (true) {
+            str_contains($type, 'goal') => 'score',
+            str_contains($type, 'subst') => 'substitution',
+            str_contains($type, 'card') => str_contains(strtolower((string) $detail), 'red') ? 'red_card' : 'yellow_card',
+            default => null,
+        };
+        $player = self::string($entry['strPlayer'] ?? null);
+        if ($kind === null || $player === null) {
+            return null;
+        }
+        $assist = self::string($entry['strAssist'] ?? null);
+        $text = match ($kind) {
+            'substitution' => $assist === null ? $player : $player.' / '.$assist,
+            default => implode(' - ', array_filter([$player, $detail, $kind === 'score' ? $assist : null])),
+        };
+        $minute = self::string($entry['intTime'] ?? null);
+        $isHome = strtolower((string) self::string($entry['strHome'] ?? null));
+
+        return [
+            'kind' => $kind,
+            'time' => $minute === null ? null : $minute."'",
+            'side' => match ($isHome) {
+                'yes' => 'home',
+                'no' => 'away',
+                default => null,
+            },
+            'text' => $text,
+            'home_score' => null,
+            'away_score' => null,
+        ];
+    }
+
     public function forgetFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): void
     {
         $days = $this->days(CarbonImmutable::instance($from)->utc(), CarbonImmutable::instance($to)->utc());

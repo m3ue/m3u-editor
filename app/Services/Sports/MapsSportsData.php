@@ -93,6 +93,47 @@ trait MapsSportsData
     }
 
     /**
+     * [present] for a game's details, whose leaders may have photos too.
+     *
+     * @param  array<string, mixed>  $details
+     * @return array<string, mixed>
+     */
+    private function presentDetails(array $details): array
+    {
+        $details['fixture'] = $this->present($details['fixture']);
+        foreach ($details['leaders'] as &$category) {
+            foreach (['home', 'away'] as $side) {
+                $photo = $category[$side]['photo'] ?? null;
+                if ($photo !== null) {
+                    $category[$side]['photo'] = self::proxiedLogo($photo);
+                }
+            }
+        }
+        unset($category);
+
+        return $details;
+    }
+
+    /**
+     * How long a game's details stay good: [$liveSeconds] while it's on or
+     * about to start, longer the less can still change.
+     *
+     * @param  array<string, mixed>  $fixture
+     */
+    private static function detailsExpiry(array $fixture, int $liveSeconds): CarbonImmutable
+    {
+        $now = CarbonImmutable::now('UTC');
+        $start = CarbonImmutable::parse($fixture['start']);
+
+        return match ($fixture['state']) {
+            'live' => $now->addSeconds($liveSeconds),
+            'scheduled' => $start->lessThan($now->addMinutes(30)) ? $now->addSeconds($liveSeconds) : $now->addMinutes(15),
+            'finished' => $start->addDays(2)->lessThan($now) ? $now->addHours(6) : $now->addMinutes(10),
+            default => $now->addHour(),
+        };
+    }
+
+    /**
      * ESPN instants are UTC and sometimes drop the seconds (`2026-11-04T00:00Z`);
      * TheSportsDB's are UTC with no offset at all, which is why they're read as
      * UTC rather than in the server's time zone.

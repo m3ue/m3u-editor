@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Services\Sports\EspnFixtureDetails;
 use App\Services\Sports\EspnLeagueCatalog;
 use App\Services\Sports\MapsSportsData;
 use App\Services\Sports\SportsProvider;
@@ -67,6 +68,9 @@ class EspnSportsService implements SportsProvider
 
     /** Failed requests in one batch that, as half of it or more, pause ESPN requests. */
     private const int PAUSE_MIN_FAILURES = 3;
+
+    /** How long a live game's details are served before they're read again. */
+    private const int LIVE_DETAILS_CACHE_SECONDS = 30;
 
     /** How long a league's season window is trusted before it's re-read. */
     private const int SEASON_CACHE_HOURS = 24;
@@ -201,6 +205,49 @@ class EspnSportsService implements SportsProvider
      *
      * @param  list<string>  $leagueIds
      */
+    public function fixtureDetails(string $leagueId, string $fixtureId): ?array
+    {
+        $league = self::findLeague($leagueId);
+        if ($league === null || ! $this->isEnabled()) {
+            return null;
+        }
+
+        $key = 'sports:espn:v4:'.md5($this->apiUrl()).':details:'.$leagueId.':'.$fixtureId;
+        $cached = Cache::get($key);
+        if ($cached !== null) {
+            return $cached === false ? null : $this->presentDetails($cached);
+        }
+        if ($this->isPaused()) {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout(self::REQUEST_TIMEOUT_SECONDS)
+                ->acceptJson()
+                ->get($this->apiUrl().'/'.$league['sport'].'/'.$league['slug'].'/summary', ['event' => $fixtureId]);
+        } catch (Throwable $e) {
+            $response = $e;
+        }
+        $this->pauseIfRefused(['details' => $response]);
+        // Not $response->json(), which keeps the decoded copy on the response
+        $details = $response instanceof Response && $response->successful()
+            ? self::parseFixtureDetails(json_decode($response->body(), true), $leagueId)
+            : null;
+        if ($details === null) {
+            Log::warning('ESPN game details fetch failed', [
+                'league' => $leagueId,
+                'fixture' => $fixtureId,
+                'reason' => $response instanceof Throwable ? $response->getMessage() : 'HTTP '.$response->status(),
+            ]);
+            Cache::put($key, false, now()->addMinute());
+
+            return null;
+        }
+        Cache::put($key, $details, self::detailsExpiry($details['fixture'], self::LIVE_DETAILS_CACHE_SECONDS));
+
+        return $this->presentDetails($details);
+    }
+
     public function forgetFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): void
     {
         $leagues = array_filter(array_map(self::findLeague(...), array_unique($leagueIds)));
@@ -878,6 +925,20 @@ class EspnSportsService implements SportsProvider
             'home' => $home,
             'away' => $away,
         ];
+    }
+
+    /**
+     * Maps an ESPN `/summary` response, or null without a usable game in it.
+     * Exposed for tests.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function parseFixtureDetails(mixed $json, string $leagueId): ?array
+    {
+        $header = is_array($json) && is_array($json['header'] ?? null) ? $json['header'] : null;
+        $fixture = $header === null ? null : self::parseEvent($header, $leagueId);
+
+        return $fixture === null ? null : ['fixture' => $fixture, ...EspnFixtureDetails::parse($json)];
     }
 
     /**

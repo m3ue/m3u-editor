@@ -95,6 +95,7 @@ class XtreamApiController extends Controller
     private const SPORTS_ACTIONS = [
         'get_sports_fixtures',
         'get_sports_channels',
+        'get_sports_fixture_details',
         'get_sports_teams',
         'get_sports_follows',
         'toggle_sports_follow',
@@ -552,6 +553,7 @@ class XtreamApiController extends Controller
                         'actions' => [
                             'fixtures' => 'get_sports_fixtures',
                             'channels' => 'get_sports_channels',
+                            'details' => 'get_sports_fixture_details',
                             'teams' => 'get_sports_teams',
                             'follows' => 'get_sports_follows',
                             'toggle_follow' => 'toggle_sports_follow',
@@ -2268,6 +2270,7 @@ class XtreamApiController extends Controller
             return match ($action) {
                 'get_sports_fixtures' => $this->sportsFixtures($request),
                 'get_sports_channels' => $this->sportsChannels($request, $playlist),
+                'get_sports_fixture_details' => $this->sportsFixtureDetails($request),
                 'get_sports_teams' => $this->sportsTeams($request),
                 'get_sports_follows' => $this->sportsFollows($request, $playlist, $authMethod, $username, $password),
                 'toggle_sports_follow' => $this->toggleSportsFollow($request, $playlist, $authMethod, $username, $password),
@@ -2363,6 +2366,30 @@ class XtreamApiController extends Controller
                 $leagueIds,
                 Carbon::createFromTimestampUTC((int) $request->input('from')),
                 Carbon::createFromTimestampUTC((int) $request->input('to')),
+            ),
+        ]);
+    }
+
+    /**
+     * One game's details (`get_sports_fixture_details`): line score, key
+     * events, team stats, leaders and game info, as far as the provider has
+     * them. `league` and `fixture` are the game's `league_id` and `id` from
+     * `get_sports_fixtures`; `details` is null when the provider has nothing.
+     */
+    private function sportsFixtureDetails(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'league' => ['required', 'string', 'max:100'],
+            'fixture' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9._-]+$/'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => $validator->errors()->keys()], 422);
+        }
+
+        return response()->json([
+            'details' => app(SportsService::class)->fixtureDetails(
+                (string) $request->input('league'),
+                (string) $request->input('fixture'),
             ),
         ]);
     }

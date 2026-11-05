@@ -71,6 +71,16 @@ interface SportsProvider
     public function forgetFixtures(array $leagueIds, CarbonInterface $from, CarbonInterface $to): void;
 
     /**
+     * One game's details as they stand now, read on request and cached by how
+     * soon they can change, with crests through the logo proxy. Null when the
+     * provider has nothing for this game or can't be reached. A section the
+     * provider doesn't have for this game is empty.
+     *
+     * @return array{fixture: array<string, mixed>, line_score: array<string, list<string>>|null, events: list<array<string, mixed>>, stats: list<array<string, string>>, leaders: list<array<string, mixed>>, info: array<string, mixed>}|null
+     */
+    public function fixtureDetails(string $leagueId, string $fixtureId): ?array;
+
+    /**
      * Every team of [$leagueId], with crests through the logo proxy.
      *
      * @return list<array<string, mixed>>
