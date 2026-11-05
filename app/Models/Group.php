@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\RestoresProviderNameWhenCleared;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,7 +15,7 @@ use InvalidArgumentException;
 
 class Group extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, RestoresProviderNameWhenCleared, SoftDeletes;
 
     protected static function booted(): void
     {

@@ -1186,6 +1186,7 @@
     ":model cleared": ":model 已清除",
     ":movies movies · :episodes episodes": ":movies 部电影 · :episodes 集剧集",
     ":n ep": ":n 集",
+    ":name (provider: :provider)": ":name（提供商：:provider）",
     ":name + Local Media": ":name + 本地媒体",
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name 已安装",

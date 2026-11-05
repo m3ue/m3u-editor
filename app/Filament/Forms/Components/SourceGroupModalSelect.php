@@ -136,11 +136,10 @@ class SourceGroupModalSelect
                 if (! $playlistId) {
                     return [];
                 }
-                $ids = array_filter($values, fn ($value): bool => is_numeric($value));
 
                 return $isCategories
-                    ? SourceCategory::where('playlist_id', $playlistId)->whereIn('id', $ids)->pluck('name', 'id')->toArray()
-                    : SourceGroup::displayLabelsForIds($playlistId, $type, $ids);
+                    ? SourceCategory::displayLabelsForIds($playlistId, $values)
+                    : SourceGroup::displayLabelsForIds($playlistId, $type, $values);
             })
             ->afterStateHydrated(function ($component, $state, $record) use ($sourceQuery): void {
                 // Hidden twin components are still hydrated; bail out unless this is

@@ -2198,6 +2198,7 @@
     ":model cleared": ":model cleared",
     ":movies movies · :episodes episodes": ":movies movies · :episodes episodes",
     ":n ep": ":n ep",
+    ":name (provider: :provider)": ":name (provider: :provider)",
     ":name + Local Media": ":name + Local Media",
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name installed",

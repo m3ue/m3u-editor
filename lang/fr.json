@@ -1186,6 +1186,7 @@
     ":model cleared": ":model effacé",
     ":movies movies · :episodes episodes": ":movies films · :episodes épisodes",
     ":n ep": ":n ép.",
+    ":name (provider: :provider)": ":name (fournisseur : :provider)",
     ":name + Local Media": ":name + Médias locaux",
     ":name - :confidence% - :reason": ":name - :confidence% - :reason",
     ":name installed": ":name installé",
