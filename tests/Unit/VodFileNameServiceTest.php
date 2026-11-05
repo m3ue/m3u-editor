@@ -67,6 +67,11 @@ it('detects quality from common resolution shapes', function (array $streamStats
     '1080p height' => [['resolution' => '1920x1080'], '1080p'],
     '2160p as 4k' => [['resolution' => '3840x2160'], '4K'],
     'explicit 4k' => [['resolution' => '4K'], '4K'],
+    'cropped 1080p scope (issue #1807)' => [['resolution' => '1920x800'], '1080p'],
+    'cropped 720p scope' => [['resolution' => '1280x536'], '720p'],
+    'pillarboxed 1080p' => [['resolution' => '1440x1080'], '1080p'],
+    'sd stays by height' => [['resolution' => '1024x576'], '576p'],
+    'width and height stats' => [['width' => 1920, 'height' => 800], '1080p'],
 ]);
 
 it('detects display friendly audio codec and channels', function () {
