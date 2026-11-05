@@ -789,7 +789,7 @@ class ProcessM3uImport implements ShouldQueue
                             'rating' => $item->rating ?? null, // new field for rating
                             'rating_5based' => $item->rating_5based ?? null, // new field for 5-based rating
                             'source_added_at' => is_numeric($item->added ?? null) && (int) $item->added > 0
-                                ? Carbon::createFromTimestamp((int) $item->added)->toDateTimeString()
+                                ? Carbon::createFromTimestamp((int) $item->added, config('app.timezone'))->toDateTimeString()
                                 : null, // provider `added` (unix timestamp)
                         ];
                         if ($autoSort) {

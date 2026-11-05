@@ -600,7 +600,7 @@ class SyncMediaServer implements ShouldBeUnique, ShouldQueue
             return null;
         }
 
-        return $date->year > 1970 ? $date : null;
+        return $date->year > 1970 ? $date->setTimezone(config('app.timezone')) : null;
     }
 
     /**
