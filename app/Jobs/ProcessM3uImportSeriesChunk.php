@@ -185,7 +185,7 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             $listedAnySeries = true;
 
             $lastModified = isset($item->last_modified) && $item->last_modified
-                ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
+                ? Carbon::createFromTimestamp((int) $item->last_modified, config('app.timezone'))->toDateTimeString()
                 : null;
 
             if ($existingSeriesIds->has($item->series_id)) {

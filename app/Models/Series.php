@@ -368,7 +368,7 @@ class Series extends Model
                 // Use the provider-supplied timestamp when available; fall back to now + 24 hours
                 // so the freshness check treats this fetch as valid for one day.
                 $providerLastModified = isset($info['last_modified']) && $info['last_modified']
-                    ? Carbon::createFromTimestamp((int) $info['last_modified'])
+                    ? Carbon::createFromTimestamp((int) $info['last_modified'], config('app.timezone'))
                     : now()->addDay();
 
                 $update = [
