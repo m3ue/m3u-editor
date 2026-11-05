@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\MediaServerException;
 use App\Models\MediaServerIntegration;
 use App\Models\User;
 use App\Services\AIOStreamsService;
@@ -167,4 +168,29 @@ it('stores a wildcard when the manifest declares meta without restricting idPref
     AIOStreamsService::make($integration)->testConnection();
 
     expect($integration->aiostreams_meta_id_prefixes)->toBe(['*']);
+});
+
+it('reports an HTTP failure as a MediaServerException once retries run out (issue #1809)', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake(['aiostreams.test/*' => Http::response([], 503)]);
+
+    expect(fn () => (new AIOStreamsService($integration))->testConnection())
+        ->toThrow(MediaServerException::class, 'Failed to fetch manifest: HTTP 503');
+});
+
+it('reports a connection failure without quoting the manifest URL (issue #1809)', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake(['aiostreams.test/*' => Http::failedConnection()]);
+
+    $thrown = null;
+    try {
+        (new AIOStreamsService($integration))->testConnection();
+    } catch (MediaServerException $e) {
+        $thrown = $e;
+    }
+
+    expect($thrown)->not->toBeNull()
+        ->and($thrown->getMessage())->not->toContain('aiostreams.test');
 });
