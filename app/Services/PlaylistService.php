@@ -192,7 +192,7 @@ class PlaylistService
 
     /**
      * The credentials to embed in a playlist's M3U/HDHR URLs: the first enabled
-     * Playlist Auth, then an alias' own credentials, then the owner's Custom
+     * unexpired Playlist Auth, then an alias' own credentials, then the owner's Custom
      * Password login. UUID login leaves the URLs credential-free (the UUID in the
      * path already grants access), and a disabled default login has none to give.
      *
@@ -202,13 +202,13 @@ class PlaylistService
     public static function getOutputCredentials($playlist): ?object
     {
         if (method_exists($playlist, 'playlistAuths')) {
-            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
+            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->notExpired()->first();
             if ($playlistAuth) {
                 return $playlistAuth;
             }
         }
 
-        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject && ! $playlist->isExpired()) {
             return $playlist->authObject;
         }
 

@@ -13,6 +13,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Services\ChannelNumberSequence;
 use App\Services\PlaylistUrlService;
 use Illuminate\Http\Request;
@@ -640,10 +641,11 @@ class PlaylistGenerateController extends Controller
     }
 
     /**
-     * Check the credentials sent to an M3U/HDHR output. Playlist Auths (or an alias'
-     * own credentials) always work. Otherwise the playlist's default login decides:
-     * UUID login keeps the output public while no auths are assigned, Custom Password
-     * requires the owner's name and custom password, and Disabled requires an auth.
+     * Check the credentials sent to an M3U/HDHR output. Unexpired Playlist Auths (or an
+     * unexpired alias' own credentials) always work. Otherwise the playlist's default login
+     * decides: UUID login keeps the output public while no auths are assigned (an expired
+     * auth still counts as assigned), Custom Password requires the owner's name and custom
+     * password, and Disabled requires an auth.
      *
      * Returns whether access is allowed, and the matched credentials (null for the
      * public UUID login).
@@ -654,12 +656,14 @@ class PlaylistGenerateController extends Controller
     private function resolveOutputAuth($playlist, mixed $username, mixed $password): array
     {
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
+        $usableAuths = $auths->reject(fn (PlaylistAuth $auth): bool => $auth->isExpired());
         // For PlaylistAlias, also check direct alias credentials as fallback
         if ($auths->isEmpty() && $playlist instanceof PlaylistAlias && $playlist->authObject) {
             $auths = collect([$playlist->authObject]);
+            $usableAuths = $playlist->isExpired() ? collect() : $auths;
         }
 
-        $matchedAuth = $auths->first(fn ($auth) => $username === $auth->username && $password === $auth->password);
+        $matchedAuth = $usableAuths->first(fn ($auth) => $username === $auth->username && $password === $auth->password);
         if ($matchedAuth) {
             return [true, $matchedAuth];
         }

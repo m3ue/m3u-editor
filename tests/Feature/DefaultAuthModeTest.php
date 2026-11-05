@@ -21,10 +21,12 @@ use App\Models\DvrRecording;
 use App\Models\DvrSetting;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\StreamFileSetting;
 use App\Models\User;
 use App\Services\PlaylistCredentialResolver;
+use App\Services\PlaylistService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -419,4 +421,74 @@ it('queues STRM rewrites when the playlist\'s internal password changes', functi
 
     Bus::assertDispatched(SyncVodStrmFiles::class, fn (SyncVodStrmFiles $job): bool => $job->playlist?->is($this->playlist) === true);
     Bus::assertDispatched(SyncSeriesStrmFiles::class, fn (SyncSeriesStrmFiles $job): bool => $job->playlist_id === $this->playlist->id);
+});
+
+describe('expired playlist auths on M3U/HDHR output (issue #1817)', function () {
+    beforeEach(function () {
+        defaultAuthSetMode($this->playlist, DefaultAuthMode::Disabled);
+        $this->auth = defaultAuthAttachGuest($this->playlist);
+        $this->m3uUrl = fn (string $username, string $password): string => "/{$this->playlist->uuid}/playlist.m3u?username={$username}&password={$password}";
+        $this->lineupUrl = fn (string $username, string $password): string => "/{$this->playlist->uuid}/hdhr/{$username}/{$password}/lineup.json";
+    });
+
+    it('rejects an expired auth on both outputs', function () {
+        $this->auth->update(['expires_at' => now()->subMinute()]);
+
+        $this->get(($this->m3uUrl)('guest-1', 'guest-pass'))->assertUnauthorized();
+        $this->get(($this->lineupUrl)('guest-1', 'guest-pass'))->assertUnauthorized();
+    });
+
+    it('still accepts an unexpired auth on both outputs', function () {
+        $this->auth->update(['expires_at' => now()->addHour()]);
+
+        $this->get(($this->m3uUrl)('guest-1', 'guest-pass'))->assertOk();
+        $this->get(($this->lineupUrl)('guest-1', 'guest-pass'))->assertOk();
+    });
+
+    it('does not turn a UUID login playlist public when its only auth expires', function () {
+        defaultAuthSetMode($this->playlist, DefaultAuthMode::Uuid);
+        $this->auth->update(['expires_at' => now()->subMinute()]);
+
+        $this->get("/{$this->playlist->uuid}/playlist.m3u")->assertUnauthorized();
+    });
+
+    it('still accepts a custom password login alongside an expired auth', function () {
+        defaultAuthSetMode($this->playlist, DefaultAuthMode::Custom, 'custom-pass');
+        $this->auth->update(['expires_at' => now()->subMinute()]);
+
+        $this->get(($this->m3uUrl)('owner', 'custom-pass'))->assertOk();
+    });
+
+    it('skips expired auths when picking credentials for generated URLs', function () {
+        $this->auth->update(['expires_at' => now()->subMinute()]);
+        $valid = PlaylistAuth::create([
+            'name' => 'Valid',
+            'username' => 'guest-2',
+            'password' => 'guest-pass-2',
+            'enabled' => true,
+            'user_id' => $this->playlist->user_id,
+        ]);
+        $this->playlist->playlistAuths()->attach($valid);
+
+        expect(PlaylistService::getOutputCredentials($this->playlist)->username)->toBe('guest-2');
+    });
+
+    it('rejects the own credentials of an expired alias', function () {
+        $alias = PlaylistAlias::create([
+            'name' => 'Alias',
+            'uuid' => fake()->uuid(),
+            'user_id' => $this->playlist->user_id,
+            'playlist_id' => $this->playlist->id,
+            'username' => 'alias-user',
+            'password' => 'alias-pass',
+            'expires_at' => now()->subMinute(),
+        ]);
+
+        $this->get("/{$alias->uuid}/playlist.m3u?username=alias-user&password=alias-pass")->assertUnauthorized();
+        $this->get("/{$alias->uuid}/playlist.m3u")->assertUnauthorized();
+
+        $alias->update(['expires_at' => now()->addHour()]);
+
+        $this->get("/{$alias->uuid}/playlist.m3u?username=alias-user&password=alias-pass")->assertOk();
+    });
 });
