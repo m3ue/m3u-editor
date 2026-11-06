@@ -1,12 +1,13 @@
 <?php
 
 /**
- * Allow and block bouquets.
+ * Allow and block bouquets, and hiding an alias's own picks.
  */
 
 use App\Filament\Forms\Components\SourceGroupModalSelect;
 use App\Filament\Resources\Bouquets\Pages\ListBouquets;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
+use App\Filament\Resources\PlaylistAliases\PlaylistAliasResource;
 use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
@@ -177,6 +178,151 @@ describe('other targets', function () {
         $alias->bouquets()->attach($block);
 
         expect($alias->fresh()->channels()->pluck('channels.id')->all())->toBe([$this->news->id]);
+    });
+});
+
+describe('hiding the selection', function () {
+    it('delivers everything except the picks when they are hidden', function () {
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => ['selected_groups' => ['UK: NEWS'], 'hide_selected_groups' => true],
+        ]);
+
+        expect($alias->fresh()->hasLiveGroupFilter())->toBeTrue()
+            ->and($alias->fresh()->getAllowedLiveGroupNames())->toBe([])
+            ->and(deliveredIds($alias))->toBe([$this->sports->id])
+            ->and(deliveredIds($alias, isVod: true))->toBe([$this->film->id]);
+    });
+
+    it('delivers everything when hiding with nothing picked', function () {
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => ['selected_groups' => [], 'hide_selected_groups' => true],
+        ]);
+
+        expect($alias->fresh()->hasLiveGroupFilter())->toBeFalse()
+            ->and(deliveredIds($alias))->toBe([$this->sports->id, $this->news->id]);
+    });
+
+    it('hides VOD and series picks per type', function () {
+        $comedy = modesChannel($this->user, $this->playlist, 'COMEDY', isVod: true);
+        SourceCategory::create(['playlist_id' => $this->playlist->id, 'source_category_id' => 10, 'name' => 'Drama']);
+        Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 10]);
+        $other = Series::factory()->for($this->playlist)->for($this->user)->create(['enabled' => true, 'source_category_id' => 20]);
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => [
+                'selected_vod_groups' => ['ACTION'],
+                'hide_selected_vod_groups' => true,
+                'selected_categories' => ['Drama'],
+                'hide_selected_categories' => true,
+            ],
+        ]);
+
+        expect(deliveredIds($alias, isVod: true))->toBe([$comedy->id])
+            ->and(deliveredIds($alias))->toBe([$this->sports->id, $this->news->id])
+            ->and($alias->fresh()->series()->pluck('series.id')->all())->toBe([$other->id]);
+    });
+
+    it('hides the picks from what an allow bouquet delivers', function () {
+        $extra = modesChannel($this->user, $this->playlist, 'UK: MUSIC');
+        $allow = Bouquet::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'group_selections' => ['selected_groups' => ['UK: SPORTS', 'UK: NEWS']],
+        ]);
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => ['selected_groups' => ['UK: NEWS'], 'hide_selected_groups' => true],
+        ]);
+        $alias->bouquets()->attach($allow);
+
+        expect(deliveredIds($alias))->toBe([$this->sports->id])
+            ->and(deliveredIds($alias))->not->toContain($extra->id);
+    });
+
+    it('hides a merged alias pick only from the source it was picked from', function () {
+        $other = Playlist::factory()->for($this->user)->createQuietly();
+        $otherSports = modesChannel($this->user, $other, 'UK: SPORTS');
+        $merged = MergedPlaylist::factory()->for($this->user)->create();
+        $merged->playlists()->attach([$this->playlist->id, $other->id]);
+        $alias = modesAlias($this->user, [
+            'merged_playlist_id' => $merged->id,
+            'group_filter' => [
+                'selected_groups' => [['playlist_id' => $this->playlist->id, 'name' => 'UK: SPORTS']],
+                'hide_selected_groups' => true,
+            ],
+        ]);
+
+        $delivered = deliveredIds($alias);
+        expect($delivered)->toContain($otherSports->id)
+            ->and($delivered)->toContain($this->news->id)
+            ->and($delivered)->not->toContain($this->sports->id);
+    });
+
+    it('leaves hidden picks out of the Xtream category list', function () {
+        $sportsGroup = modesGroup($this->user, $this->playlist, 'UK: SPORTS');
+        $newsGroup = modesGroup($this->user, $this->playlist, 'UK: NEWS');
+        $this->sports->update(['group_id' => $sportsGroup->id]);
+        $this->news->update(['group_id' => $newsGroup->id]);
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => ['selected_groups' => ['UK: SPORTS'], 'hide_selected_groups' => true],
+        ]);
+
+        expect(array_column(XtreamCategoryService::groupCategories($alias->fresh(), false), 'category_name'))->toBe(['UK: NEWS']);
+    });
+
+    it('saves the switch from the alias form', function () {
+        SourceGroup::create(['playlist_id' => $this->playlist->id, 'name' => 'UK: NEWS', 'type' => 'live']);
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => ['selected_groups' => ['UK: NEWS']],
+        ]);
+        $this->actingAs($this->user);
+
+        Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()])
+            ->assertSee(__('Allowed live groups'))
+            ->fillForm([
+                'xtream_config' => [['url' => 'http://example.com:8080', 'username' => 'alias-user', 'password' => 'alias-pass']],
+                'group_filter.hide_selected_groups' => true,
+            ])
+            ->assertSee(__('Hidden live groups'))
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $alias->refresh();
+        expect($alias->group_filter['hide_selected_groups'])->toBeTrue()
+            ->and($alias->group_filter['selected_groups'])->toBe(['UK: NEWS'])
+            ->and(deliveredIds($alias))->toBe([$this->sports->id]);
+    });
+
+    it('lists every delivered group, custom ones included, in the custom sort pane', function () {
+        $sportsGroup = modesGroup($this->user, $this->playlist, 'UK: SPORTS');
+        $sportsGroup->update(['sort_order' => 1]);
+        $newsGroup = modesGroup($this->user, $this->playlist, 'UK: NEWS');
+        $newsGroup->update(['sort_order' => 2]);
+        $curated = modesGroup($this->user, $this->playlist, 'My Sports', custom: true);
+        $curated->update(['name_internal' => 'My Sports', 'sort_order' => 3]);
+        modesGroup($this->user, $this->playlist, 'UK: EMPTY');
+        $this->sports->update(['group_id' => $sportsGroup->id]);
+        $this->news->update(['group_id' => $newsGroup->id]);
+        modesChannel($this->user, $this->playlist, 'UK: MUSIC', $curated);
+        $alias = modesAlias($this->user, [
+            'playlist_id' => $this->playlist->id,
+            'group_filter' => [
+                'selected_groups' => ['UK: NEWS'],
+                'hide_selected_groups' => true,
+                'sort_live_groups_custom' => true,
+                'live_group_order' => ['My Sports'],
+            ],
+        ]);
+        $this->actingAs($this->user);
+
+        $livewire = Livewire::test(EditPlaylistAlias::class, ['record' => $alias->getRouteKey()]);
+
+        expect(PlaylistAliasResource::liveGroupSortNames($livewire->get('data.group_filter.live_group_order')))
+            ->toBe(['My Sports', 'UK: SPORTS']);
     });
 });
 
