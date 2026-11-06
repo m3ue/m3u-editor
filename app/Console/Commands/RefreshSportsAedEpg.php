@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Services\Sports\SportsAedRefresher;
 use App\Services\Sports\SportsService;
@@ -14,18 +15,20 @@ class RefreshSportsAedEpg extends Command
      *
      * @var string
      */
-    protected $signature = 'app:refresh-sports-aed-epg';
+    protected $signature = 'app:refresh-sports-aed-epg {--now : Fetch here and wait, instead of queueing it}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Clear cached EPG files of sports-matching AED profiles whose games changed';
+    protected $description = 'Refresh the games of sports-matching AED profiles, clearing cached EPG files where they changed';
 
     /**
-     * See {@see SportsAedRefresher}: only a profile whose games changed has
-     * its cached EPG files cleared.
+     * The schedule runs this inside schedule:run, where anything slow would hold
+     * up every task after it, so the fetching itself is queued. See
+     * {@see SportsAedRefresher}: only a profile whose games changed has its
+     * cached EPG files cleared.
      */
     public function handle(SportsService $sports, SportsAedRefresher $refresher): int
     {
@@ -35,7 +38,11 @@ class RefreshSportsAedEpg extends Command
 
         $profiles = 0;
         AedProfile::query()->where('sports_matching', true)->each(function (AedProfile $profile) use ($refresher, &$profiles): void {
-            $refresher->refresh($profile);
+            if ($this->option('now')) {
+                $refresher->refresh($profile);
+            } else {
+                RefreshSportsAedProfile::dispatch($profile->id);
+            }
             $profiles++;
         });
 

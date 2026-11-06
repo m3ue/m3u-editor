@@ -2,6 +2,7 @@
 
 namespace App\Services\Sports;
 
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Services\EpgCacheService;
 use Carbon\CarbonImmutable;
@@ -20,22 +21,79 @@ use Illuminate\Support\Facades\Cache;
  */
 class SportsAedRefresher
 {
+    /** About the most a worker can fetch before other queued work should get a turn. */
+    private const int GAME_BATCH_LEAGUES = 30;
+
     public function __construct(private readonly SportsService $sports) {}
 
     /**
-     * Refreshes [$profile]'s games and returns how many it has in its window.
-     * [$force] (a manual refresh) refetches them instead of reading
-     * the cache, and clears the profile's EPG files whatever changed.
+     * Refreshes [$profile]'s games in one go and returns how many it has in its
+     * window. This holds the caller for as long as the provider takes, so
+     * background work uses {@see RefreshSportsAedProfile}, which runs these
+     * steps one at a time. [$force] (a manual refresh) refetches the games
+     * instead of reading the cache, and clears the profile's EPG files whatever
+     * changed.
      */
     public function refresh(AedProfile $profile, bool $force = false): int
     {
-        [$leagueIds, $from, $to] = $this->window($profile);
-
         if ($force) {
-            $this->sports->forgetFixtures($leagueIds, $from, $to);
+            $this->forgetGames($profile);
         }
-        $fixtures = $this->sports->rawFixtures($leagueIds, $from, $to, liveScores: false);
-        $this->fetchTeams($fixtures);
+        foreach ($this->gameBatches($profile) as $leagueIds) {
+            $this->fetchGames($profile, $leagueIds);
+        }
+        $this->fetchMissingTeams($profile);
+
+        return $this->finishRefresh($profile, $force);
+    }
+
+    /**
+     * The profile's leagues as separately fetchable batches, each short enough
+     * not to hold a worker for long. Soccer stays together: a wide set of it is
+     * read from one all-leagues scoreboard, which is only used, and only found
+     * again by game matching, when they're asked for at once.
+     *
+     * @return list<list<string>>
+     */
+    public function gameBatches(AedProfile $profile): array
+    {
+        [$leagueIds] = $this->window($profile);
+        $soccer = array_values(array_filter($leagueIds, fn (string $leagueId): bool => str_starts_with($leagueId, 'soccer/')));
+        $others = array_values(array_diff($leagueIds, $soccer));
+
+        return [...($soccer === [] ? [] : [$soccer]), ...array_chunk($others, self::GAME_BATCH_LEAGUES)];
+    }
+
+    /**
+     * Drops the cached games of the profile's window, so the next fetch reads
+     * them from the providers. Done once before the batches rather than per
+     * batch, because a provider can cache a whole day across leagues.
+     */
+    public function forgetGames(AedProfile $profile): void
+    {
+        [$leagueIds, $from, $to] = $this->window($profile);
+        $this->sports->forgetFixtures($leagueIds, $from, $to);
+    }
+
+    /**
+     * Fetches one batch of {@see gameBatches} into the cache.
+     *
+     * @param  list<string>  $leagueIds
+     */
+    public function fetchGames(AedProfile $profile, array $leagueIds): void
+    {
+        [, $from, $to] = $this->window($profile);
+        $this->sports->rawFixtures($leagueIds, $from, $to, liveScores: false);
+    }
+
+    /**
+     * Compares the cached games with the last run, clears the profile's EPG
+     * files if they changed (or when [$force]), and returns how many it has.
+     */
+    public function finishRefresh(AedProfile $profile, bool $force = false): int
+    {
+        [$leagueIds, $from, $to] = $this->window($profile);
+        $fixtures = $this->sports->cachedFixtures($leagueIds, $from, $to)['fixtures'];
 
         $fingerprint = md5(json_encode(array_map(fn (array $fixture): array => [
             $fixture['league_id'],
@@ -57,7 +115,7 @@ class SportsAedRefresher
     /**
      * Fetches the team lists a profile's games still lack, and returns how
      * many are still missing. Providers with a rate limit can't fetch them all
-     * at once on a first run, so a caller with time to spare calls this again.
+     * at once on a first run, so this can be called again later.
      */
     public function fetchMissingTeams(AedProfile $profile): int
     {

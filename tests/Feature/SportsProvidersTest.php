@@ -411,7 +411,29 @@ it('stops at the minute\'s request budget and leaves room for schedules', functi
     expect(count($provider->teamsByLeague($leagueIds)))->toBeGreaterThan(count($first));
 });
 
-it('paces a first run\'s team lists in the background job until they stop coming', function () {
+/**
+ * Runs the job as the queue would: each release comes back as the next attempt.
+ *
+ * @return list<int> the delay of each release
+ */
+function runRefreshJobLikeTheQueue(AedProfile $profile, bool $force = false): array
+{
+    $delays = [];
+    for ($attempt = 1; $attempt <= 100; $attempt++) {
+        $job = (new RefreshSportsAedProfile($profile->id, $force))->withFakeQueueInteractions();
+        $job->job->attempts = $attempt;
+        $job->handle(app(SportsService::class), app(SportsAedRefresher::class));
+        if (! $job->job->isReleased()) {
+            return $delays;
+        }
+        $delays[] = $job->job->releaseDelay;
+        test()->travel($job->job->releaseDelay)->seconds();
+    }
+
+    throw new RuntimeException('The job never finished');
+}
+
+it('waits for a first run\'s team lists by releasing the job, never by sleeping on a worker', function () {
     Sleep::fake();
     enableProviders(espn: false, theSportsDb: true);
     $events = array_map(
@@ -420,14 +442,52 @@ it('paces a first run\'s team lists in the background job until they stop coming
         range(1, 50),
     );
     fakeTheSportsDb(['2026-11-03' => $events]);
-    Sleep::whenFakingSleep(fn () => $this->travel(1)->minutes());
+    $leagueIds = array_column(array_slice(TheSportsDbService::leagues(), 0, 50), 'id');
     $user = User::factory()->create();
-    $profile = AedProfile::factory()->for($user)->sportsMatching(array_column(array_slice(TheSportsDbService::leagues(), 0, 50), 'id'))->create();
+    $profile = AedProfile::factory()->for($user)->sportsMatching($leagueIds)->create();
 
-    (new RefreshSportsAedProfile($profile->id))->handle(app(SportsService::class), app(SportsAedRefresher::class));
+    $delays = runRefreshJobLikeTheQueue($profile);
 
-    Sleep::assertSleptTimes(1);
-    expect(app(TheSportsDbService::class)->teamsByLeague(array_column(array_slice(TheSportsDbService::leagues(), 0, 50), 'id'), fetchMissing: false))->toHaveCount(50);
+    Sleep::assertNeverSlept();
+    expect($delays)->toContain(60)
+        ->and(app(TheSportsDbService::class)->teamsByLeague($leagueIds, fetchMissing: false))->toHaveCount(50);
+});
+
+it('gives way between batches of a wide league set, keeping soccer together', function () {
+    Sleep::fake();
+    enableProviders(espn: true, theSportsDb: false);
+    Http::fake(fn () => Http::response(['events' => [], 'leagues' => [], 'sports' => []]));
+    $leagueIds = array_column(EspnSportsService::leagues(), 'id');
+    $soccer = array_values(array_filter($leagueIds, fn (string $id): bool => str_starts_with($id, 'soccer/')));
+    $user = User::factory()->create();
+    $profile = AedProfile::factory()->for($user)->sportsMatching($leagueIds)->create();
+
+    $batches = app(SportsAedRefresher::class)->gameBatches($profile);
+
+    expect($batches[0])->toBe($soccer)
+        ->and(max(array_map('count', array_slice($batches, 1))))->toBeLessThanOrEqual(30)
+        ->and(array_merge(...$batches))->toEqualCanonicalizing($leagueIds);
+
+    $delays = runRefreshJobLikeTheQueue($profile);
+
+    Sleep::assertNeverSlept();
+    expect(array_slice($delays, 0, count($batches) - 1))->toBe(array_fill(0, count($batches) - 1, 5));
+});
+
+it('still reads a few soccer leagues back after a batched refresh', function () {
+    enableProviders(espn: true, theSportsDb: false);
+    Http::fake(fn () => Http::response(['events' => [], 'leagues' => []]));
+    $soccer = array_slice(array_values(array_filter(
+        array_column(EspnSportsService::leagues(), 'id'),
+        fn (string $id): bool => str_starts_with($id, 'soccer/'),
+    )), 0, 5);
+    $user = User::factory()->create();
+    $profile = AedProfile::factory()->for($user)->sportsMatching($soccer)->create(['dummy_epg_days' => 2]);
+
+    runRefreshJobLikeTheQueue($profile);
+
+    $now = CarbonImmutable::now('UTC');
+    expect(app(SportsService::class)->cachedFixtures($soccer, $now->subHours(SportsAedResolver::WINDOW_PAST_HOURS), $now->addDays(2))['complete'])->toBeTrue();
 });
 
 it('matches a channel title by a team\'s nickname from the team list', function () {

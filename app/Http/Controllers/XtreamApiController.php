@@ -105,6 +105,12 @@ class XtreamApiController extends Controller
     /** `get_sports_channels` matches against the guide, so it serves about a day at a time. */
     private const int SPORTS_CHANNELS_MAX_RANGE_SECONDS = 2 * 86400;
 
+    /**
+     * Longest `leagues` list, in characters: room for every league of every
+     * provider. Clients send a long one in a POST body, where no URL limit applies.
+     */
+    private const int SPORTS_LEAGUES_MAX_LENGTH = 32000;
+
     /** A team's follow key: "{sport}/{league}:{team id}". */
     private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9._-]+):([A-Za-z0-9-]+)$/';
 
@@ -2322,7 +2328,7 @@ class XtreamApiController extends Controller
         $sports = app(SportsService::class);
 
         $validator = Validator::make($request->all(), [
-            'leagues' => ['required', 'string', 'max:2000'],
+            'leagues' => ['required', 'string', 'max:'.self::SPORTS_LEAGUES_MAX_LENGTH],
             'from' => ['required', 'integer', 'min:0'],
             'to' => ['required', 'integer', 'gt:from'],
         ]);
@@ -2350,7 +2356,7 @@ class XtreamApiController extends Controller
     private function sportsChannels(Request $request, $playlist): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'leagues' => ['required', 'string', 'max:2000'],
+            'leagues' => ['required', 'string', 'max:'.self::SPORTS_LEAGUES_MAX_LENGTH],
             'from' => ['required', 'integer', 'min:0'],
             'to' => ['required', 'integer', 'gt:from', 'max:'.((int) $request->input('from') + self::SPORTS_CHANNELS_MAX_RANGE_SECONDS)],
         ]);
@@ -2846,7 +2852,7 @@ class XtreamApiController extends Controller
 
             $days = (int) ($profile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5);
             $programmes = [];
-            foreach ($extractor->programmes($profile, (string) $channel->title, $windowStart, $windowEnd, $days) ?? [] as $programme) {
+            foreach ($extractor->programmes($profile, (string) ($channel->title_custom ?? $channel->title), $windowStart, $windowEnd, $days) ?? [] as $programme) {
                 $programmes[] = [
                     'id' => 'aed-'.md5($channel->id.'-'.$programme['start']->timestamp),
                     'start' => $programme['start']->toISOString(),
