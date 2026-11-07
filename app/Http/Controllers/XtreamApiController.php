@@ -4711,7 +4711,11 @@ class XtreamApiController extends Controller
         $query = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with(['channel', 'dvrSetting', 'recordingRule'])
-            ->orderByDesc('scheduled_start');
+            ->orderByDesc('scheduled_start')
+            // Tie-breaker so limit/offset pages stay stable when recordings
+            // share a start time (a series rule can schedule several airings
+            // at once); without it a row can repeat or be skipped across pages.
+            ->orderByDesc('id');
 
         if ($status) {
             $statusEnum = DvrRecordingStatus::tryFrom($status);
