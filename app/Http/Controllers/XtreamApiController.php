@@ -1270,6 +1270,7 @@ class XtreamApiController extends Controller
                 'backdrop_path' => $backdropPaths,
                 'tmdb' => (string) $tmdb,
                 'tmdb_id' => (int) ($tmdb ?: 0),
+                'imdb_id' => (string) ($seriesItem->getMovieDbIds()['imdb'] ?? ''),
                 'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                 'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
                 'category_id' => (string) ($seriesItem->category?->effective_id ?? $seriesItem->category_id ?? 'all'),
@@ -1783,6 +1784,7 @@ class XtreamApiController extends Controller
             $defaultInfo = [
                 'kinopoisk_url' => $info['kinopoisk_url'] ?? '',
                 'tmdb_id' => $channel->getTmdbId() ?? 0,
+                'imdb_id' => (string) ($channel->getImdbId() ?? ''),
                 // Same title_custom/title precedence get_vod_streams uses, so a renamed
                 // title is reflected here too - o_name intentionally stays untouched,
                 // it's the original provider name.
