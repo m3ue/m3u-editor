@@ -13,6 +13,7 @@
 
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
+use App\Filament\Resources\Groups\Pages\ListGroups;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportChunk;
@@ -790,12 +791,41 @@ describe('group auto sort follows the provider category order', function () {
         expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeTrue()
             ->and($customGroup->fresh()->isSortOrderLockedToProvider())->toBeFalse();
 
-        // Plain M3U playlists number groups from Channel Auto Sort instead
+        // Plain M3U playlists follow Group Auto Sort too, not Channel Auto Sort (issue #1821)
         $playlist->update(['xtream' => false, 'auto_sort_groups' => false, 'auto_sort' => true]);
-        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeTrue();
-
-        $playlist->update(['auto_sort' => false]);
         expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeFalse();
+
+        $playlist->update(['auto_sort_groups' => true, 'auto_sort' => false]);
+        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeTrue();
+    });
+
+    it('only lists groups the next sync will not renumber in sort mode', function () {
+        $locked = providerGroupMovePlaylist($this->user);
+        $locked->update(['auto_sort_groups' => true]);
+        $unlocked = providerGroupMovePlaylist($this->user);
+        $unlocked->update(['auto_sort_groups' => false]);
+
+        $makeGroup = fn (Playlist $playlist, string $name, bool $custom) => Group::create([
+            'name' => $name,
+            'name_internal' => $name,
+            'playlist_id' => $playlist->id,
+            'user_id' => $this->user->id,
+            'custom' => $custom,
+            'type' => 'live',
+        ]);
+        $lockedProvider = $makeGroup($locked, 'Locked Provider', false);
+        $lockedCustom = $makeGroup($locked, 'Locked Custom', true);
+        $unlockedProvider = $makeGroup($unlocked, 'Unlocked Provider', false);
+
+        expect(Group::sortOrderUnlocked()->pluck('id')->all())
+            ->toEqualCanonicalizing([$lockedCustom->id, $unlockedProvider->id]);
+
+        $this->actingAs($this->user);
+        Livewire\Livewire::test(ListGroups::class, ['activeTab' => (string) $locked->id])
+            ->assertCanSeeTableRecords([$lockedProvider, $lockedCustom])
+            ->call('toggleTableReordering')
+            ->assertCanSeeTableRecords([$lockedCustom])
+            ->assertCanNotSeeTableRecords([$lockedProvider]);
     });
 });
 

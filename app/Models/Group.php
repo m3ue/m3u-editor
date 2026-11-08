@@ -68,8 +68,7 @@ class Group extends Model
     }
 
     /**
-     * Whether the playlist's auto sort keeps this group in provider order. Xtream imports
-     * follow Group Auto Sort; plain M3U imports number groups from Channel Auto Sort.
+     * Whether the playlist's Group Auto Sort keeps this group in provider order.
      * Custom groups are never touched by the import, so they stay freely sortable.
      */
     public function isSortOrderLockedToProvider(): bool
@@ -78,7 +77,18 @@ class Group extends Model
             return false;
         }
 
-        return (bool) ($this->playlist->xtream ? $this->playlist->auto_sort_groups : $this->playlist->auto_sort);
+        return (bool) $this->playlist->auto_sort_groups;
+    }
+
+    /**
+     * Groups whose sort order is not locked to the provider (see isSortOrderLockedToProvider()).
+     * Used to limit drag reordering to rows the next sync will not renumber.
+     */
+    public function scopeSortOrderUnlocked(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $subQuery) => $subQuery
+            ->where('groups.custom', true)
+            ->orWhereHas('playlist', fn (Builder $playlistQuery) => $playlistQuery->where('auto_sort_groups', false)));
     }
 
     public function playlist(): BelongsTo

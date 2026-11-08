@@ -69,6 +69,15 @@ class Category extends Model
         return (bool) $this->playlist?->auto_sort_categories;
     }
 
+    /**
+     * Categories whose sort order is not locked to the provider (see isSortOrderLockedToProvider()).
+     * Used to limit drag reordering to rows the next sync will not renumber.
+     */
+    public function scopeSortOrderUnlocked(Builder $query): Builder
+    {
+        return $query->whereHas('playlist', fn (Builder $playlistQuery) => $playlistQuery->where('auto_sort_categories', false));
+    }
+
     public function playlist(): BelongsTo
     {
         return $this->belongsTo(Playlist::class);
