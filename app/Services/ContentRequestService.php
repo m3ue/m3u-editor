@@ -98,7 +98,18 @@ class ContentRequestService
 
                 $resultKey = $mediaType.':'.$externalId;
 
+                $provider = [
+                    'integration_id' => $integration->id,
+                    'integration_name' => $integration->name,
+                    'already_available' => (bool) ($item['existsInLibrary'] ?? false),
+                    'seasons' => $mediaType === 'series'
+                        ? $this->resolveSeasons($service, $item)
+                        : [],
+                ];
+
                 if (isset($results[$resultKey])) {
+                    $results[$resultKey]['providers'][] = $provider;
+
                     continue;
                 }
 
@@ -121,18 +132,43 @@ class ContentRequestService
                     'cast_list' => $tmdbDetails['cast_list'] ?? [],
                     'clearlogo' => $tmdbDetails['logo_url'] ?? null,
                     'director' => $this->normalizeDirectors($tmdbDetails['director'] ?? null),
-                    'seasons' => $mediaType === 'series'
-                        ? $this->resolveSeasons($service, $item)
-                        : [],
-                    'already_available' => (bool) ($item['existsInLibrary'] ?? false),
+                    'seasons' => $provider['seasons'],
+                    'already_available' => $provider['already_available'],
+                    'providers' => [$provider],
                 ];
             }
         }
 
         return [
-            'results' => array_values($results),
+            'results' => array_values(array_map($this->applyDefaultProvider(...), $results)),
             'searched_providers' => $searchedProviders,
             'unavailable_providers' => $unavailableProviders,
+        ];
+    }
+
+    /**
+     * Points a merged search result's top-level provider fields at the first
+     * integration that doesn't already have the title, so one integration
+     * that has it can't hide another that could still take the request
+     * (m3u-tv #137). The title only counts as already available when every
+     * integration has it. Clients that predate `providers` keep working off
+     * these top-level fields.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function applyDefaultProvider(array $result): array
+    {
+        $providers = collect($result['providers']);
+        $default = $providers->first(fn (array $provider): bool => ! $provider['already_available'])
+            ?? $providers->first();
+
+        return [
+            ...$result,
+            'integration_id' => $default['integration_id'],
+            'integration_name' => $default['integration_name'],
+            'seasons' => $default['seasons'],
+            'already_available' => $providers->every(fn (array $provider): bool => $provider['already_available']),
         ];
     }
 
