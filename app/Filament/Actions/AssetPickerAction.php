@@ -23,11 +23,15 @@ class AssetPickerAction
             ->schema([
                 FileUpload::make('logo_file')
                     ->label(__('Logo image'))
-                    ->image()
                     ->required()
                     ->disk('public')
                     ->directory('assets/library')
-                    ->visibility('public'),
+                    ->visibility('public')
+                    ->acceptedFileTypes(AssetInventoryService::SAFE_IMAGE_MIME_TYPES)
+                    ->rules([
+                        'mimes:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                        'extensions:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                    ]),
             ])
             ->action(function (array $data, Set $schemaSet) use ($field): void {
                 $path = $data['logo_file'];

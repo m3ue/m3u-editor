@@ -118,8 +118,24 @@ class MergedSourceGroupModalSelect
                 $stored = PlaylistAlias::selectionPairs($record?->group_selections[$selectionKey] ?? []);
                 if (! empty($stored)) {
                     $resolvedTokens = array_map(PlaylistAlias::selectionToken(...), $pairs);
-                    $stale = array_filter($stored, fn (array $pair) => ! in_array(PlaylistAlias::selectionToken($pair), $resolvedTokens, true)
-                        && ! self::pairResolves($scopedQuery([$pair['playlist_id']]), $pair));
+                    $stale = array_filter($stored, function (array $pair) use ($resolvedTokens, $playlistIds, $scopedQuery): bool {
+                        if (in_array(PlaylistAlias::selectionToken($pair), $resolvedTokens, true)) {
+                            return false;
+                        }
+
+                        // A pair whose source is currently out of the picker's scope (its
+                        // Include Live/VOD Channels toggle was switched off, or it was
+                        // dropped from the merged playlist) can't be resolved here at all
+                        // right now - that is not the same thing as the provider having
+                        // deleted/renamed the group, so it must be kept as stale rather
+                        // than checked against (and wrongly found in) the source's table
+                        // regardless of whether it is actually in scope.
+                        if (! in_array($pair['playlist_id'], $playlistIds, true)) {
+                            return true;
+                        }
+
+                        return ! self::pairResolves($scopedQuery([$pair['playlist_id']]), $pair);
+                    });
 
                     if (! empty($stale) && (! empty($ids) || count($stale) === count($stored))) {
                         $pairs = array_merge($pairs, array_values($stale));

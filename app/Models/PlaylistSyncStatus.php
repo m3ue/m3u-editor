@@ -104,4 +104,22 @@ class PlaylistSyncStatus extends Model
                 ['status', 'added'],
             ]);
     }
+
+    public function removedCategories(): HasMany
+    {
+        return $this->logs()
+            ->where([
+                ['type', 'category'],
+                ['status', 'removed'],
+            ]);
+    }
+
+    public function addedCategories(): HasMany
+    {
+        return $this->logs()
+            ->where([
+                ['type', 'category'],
+                ['status', 'added'],
+            ]);
+    }
 }

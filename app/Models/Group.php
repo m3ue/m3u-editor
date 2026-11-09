@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\RestoresProviderNameWhenCleared;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,7 +15,7 @@ use InvalidArgumentException;
 
 class Group extends Model
 {
-    use HasFactory, SoftDeletes;
+    use HasFactory, RestoresProviderNameWhenCleared, SoftDeletes;
 
     protected static function booted(): void
     {
@@ -49,6 +50,45 @@ class Group extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Groups the provider did not supply under their name_internal: no source group of the
+     * same type shares it. A custom group named like a provider group is left out, so a
+     * selection of that provider name never also matches the custom group (and its channels
+     * from other provider groups). Mirrors Category::scopeNonProvider().
+     */
+    public function scopeNonProvider(Builder $query): Builder
+    {
+        return $query->whereNotExists(fn ($subQuery) => $subQuery->selectRaw('1')
+            ->from('source_groups')
+            ->whereColumn('source_groups.playlist_id', 'groups.playlist_id')
+            ->whereColumn('source_groups.type', 'groups.type')
+            ->whereColumn('source_groups.name', 'groups.name_internal'));
+    }
+
+    /**
+     * Whether the playlist's Group Auto Sort keeps this group in provider order.
+     * Custom groups are never touched by the import, so they stay freely sortable.
+     */
+    public function isSortOrderLockedToProvider(): bool
+    {
+        if ($this->custom || ! $this->playlist) {
+            return false;
+        }
+
+        return (bool) $this->playlist->auto_sort_groups;
+    }
+
+    /**
+     * Groups whose sort order is not locked to the provider (see isSortOrderLockedToProvider()).
+     * Used to limit drag reordering to rows the next sync will not renumber.
+     */
+    public function scopeSortOrderUnlocked(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $subQuery) => $subQuery
+            ->where('groups.custom', true)
+            ->orWhereHas('playlist', fn (Builder $playlistQuery) => $playlistQuery->where('auto_sort_groups', false)));
     }
 
     public function playlist(): BelongsTo

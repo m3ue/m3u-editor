@@ -226,7 +226,7 @@ trait HasBrowseShowsFiltersForm
             ->label(__('Channel'))
             ->searchable()
             ->options(fn (): array => [
-                0 => __('From Original Source').($this->sourceChannelName ? ' — '.Str::limit($this->sourceChannelName, 20) : ''),
+                0 => __('From Original Source').($this->sourceChannelName ? ' - '.Str::limit($this->sourceChannelName, 20) : ''),
                 -1 => __('Any channel'),
             ])
             ->getSearchResultsUsing(function (string $search): array {
@@ -253,7 +253,7 @@ trait HasBrowseShowsFiltersForm
             ->getOptionLabelUsing(function (mixed $value): ?string {
                 $id = (int) $value;
                 if ($id === 0) {
-                    return __('From Original Source').($this->sourceChannelName ? ' — '.Str::limit($this->sourceChannelName, 20) : '');
+                    return __('From Original Source').($this->sourceChannelName ? ' - '.Str::limit($this->sourceChannelName, 20) : '');
                 }
                 if ($id === -1) {
                     return __('Any channel');

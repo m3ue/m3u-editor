@@ -235,6 +235,18 @@ class CachedContentFile extends Model
     }
 
     /**
+     * Rows the app delivers itself: provider downloads, including arr rows
+     * that have fallen back. The opposite of arrTracked().
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeNotArrTracked(Builder $query): Builder
+    {
+        return $query->where('source', '!=', 'arr');
+    }
+
+    /**
      * Make an auto-cached file manual so retention never deletes it.
      * Returns whether anything changed.
      */

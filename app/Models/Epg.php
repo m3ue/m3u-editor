@@ -38,6 +38,8 @@ class Epg extends Model
         'source_type' => EpgSourceType::class,
         'sd_token_expires_at' => 'datetime',
         'sd_login_cooldown_until' => 'datetime',
+        'sd_auth_blocked_code' => 'integer',
+        'sd_backoff_attempts' => 'integer',
         'sd_last_sync' => 'datetime',
         'sd_station_ids' => 'array',
         'sd_lineup_ids' => 'array',
@@ -111,6 +113,15 @@ class Epg extends Model
     }
 
     /**
+     * A SchedulesDirect EPG while SCHEDULES_DIRECT_ENABLED is off: it can't sync,
+     * but the guide data it already imported keeps being served.
+     */
+    public function isSchedulesDirectDisabled(): bool
+    {
+        return $this->isSchedulesDirect() && ! config('services.schedules_direct.enabled', true);
+    }
+
+    /**
      * A stored Schedules Direct token is usable when it exists and still has a
      * safety margin left before its real expiry. Schedules Direct tokens are
      * valid for 24 hours; the small margin absorbs clock skew and keeps a
@@ -132,6 +143,16 @@ class Epg extends Model
     {
         return $this->sd_login_cooldown_until
             && $this->sd_login_cooldown_until->isFuture();
+    }
+
+    /**
+     * True when Schedules Direct permanently rejected this account's login
+     * (expired, invalid user, application disabled or inactive). No /token
+     * request is made until the credentials change or the user retries.
+     */
+    public function isSchedulesDirectAuthBlocked(): bool
+    {
+        return $this->sd_auth_blocked_code !== null;
     }
 
     /**

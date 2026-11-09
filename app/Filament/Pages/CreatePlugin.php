@@ -136,7 +136,7 @@ class CreatePlugin extends Page
                         ->schema([
                             Section::make(__('Data Tables'))
                                 ->compact()
-                                ->description(__('Each table gets a physical schema declaration and a full create / edit / delete UI under the plugin\'s Data tab. Add the base name only — the host prefixes it automatically (e.g. profiles → plugin_{id}_profiles).'))
+                                ->description(__('Each table gets a physical schema declaration and a full create / edit / delete UI under the plugin\'s Data tab. Add the base name only, the host prefixes it automatically (e.g. profiles → plugin_{id}_profiles).'))
                                 ->schema([
                                     TagsInput::make('tables')
                                         ->hiddenLabel()

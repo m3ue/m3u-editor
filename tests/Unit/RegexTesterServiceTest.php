@@ -31,6 +31,20 @@ it('normalizes sample text into trimmed non-empty lines', function (): void {
     ]);
 });
 
+it('keeps a valid sample line containing only "0"', function (): void {
+    $samples = RegexTesterService::normalizeSamples("0\n00\n1");
+
+    expect($samples)->toBe(['0', '00', '1']);
+
+    $results = RegexTesterService::test('^0$', 'u', 'zero', $samples);
+
+    expect($results)->toHaveCount(3)
+        ->and($results[0]['matches'])->toBeTrue()
+        ->and($results[0]['output'])->toBe('zero')
+        ->and($results[1]['matches'])->toBeFalse()
+        ->and($results[2]['matches'])->toBeFalse();
+});
+
 it('matches samples against a valid pattern', function (): void {
     $results = RegexTesterService::test('^US:', 'ui', '', ['US: BBC One', 'UK: Sky News', 'US: CNN']);
 

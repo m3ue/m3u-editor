@@ -14,7 +14,9 @@ use App\Settings\GeneralSettings;
 use App\Traits\ProviderRequestDelay;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -49,7 +51,42 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         public ?int $totalBatches = null,
         public ?int $currentBatch = null,
         public ?int $syncRunId = null,
+        public ?int $batchAfterId = null,
     ) {}
+
+    /**
+     * Enabled series that still need a provider metadata fetch.
+     *
+     * @return Builder<Series>
+     */
+    public static function eligibleSeriesQuery(?int $userId, ?int $playlistId, bool $overwriteExisting): Builder
+    {
+        return Series::query()
+            ->where([
+                ['enabled', true],
+                ['user_id', $userId],
+            ])
+            ->when($playlistId, fn (Builder $query) => $query->where('playlist_id', $playlistId))
+            ->needsMetadataRefresh($overwriteExisting);
+    }
+
+    /**
+     * Plan the next batches as id chunks past $afterId. Each batch then selects by id
+     * cursor rather than offset: a successful fetch removes a series from the eligible
+     * set, so an offset computed up front would skip series that are still waiting.
+     *
+     * @return Collection<int, Collection<int, int>>
+     */
+    public static function planBatches(?int $userId, ?int $playlistId, bool $overwriteExisting, int $afterId, int $batches): Collection
+    {
+        return self::eligibleSeriesQuery($userId, $playlistId, $overwriteExisting)
+            ->where('id', '>', $afterId)
+            ->orderBy('id')
+            ->limit($batches * self::BATCH_SIZE)
+            ->pluck('id')
+            ->chunk(self::BATCH_SIZE)
+            ->values();
+    }
 
     /**
      * Execute the job.
@@ -100,15 +137,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         // episodes exist) are excluded entirely so their batch jobs never pay
         // the throttle slot + delay for a provider call that would be skipped
         // anyway — see Series::isMetadataFresh()/scopeNeedsMetadataRefresh().
-        $totalCount = Series::query()
-            ->where([
-                ['enabled', true],
-                ['user_id', $this->user_id],
-            ])
-            ->when($this->playlist_id, function ($query) {
-                $query->where('playlist_id', $this->playlist_id);
-            })
-            ->needsMetadataRefresh($this->overwrite_existing)
+        $totalCount = self::eligibleSeriesQuery($this->user_id, $this->playlist_id, $this->overwrite_existing)
             ->count();
 
         if ($totalCount === 0) {
@@ -154,8 +183,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
         // Build first chain
         $jobs = [];
         $jobsInFirstChain = min($jobsPerChain, $totalBatches);
+        $plannedBatches = self::planBatches($this->user_id, $this->playlist_id, $this->overwrite_existing, 0, $jobsInFirstChain);
+        $afterId = 0;
 
-        for ($batch = 0; $batch < $jobsInFirstChain; $batch++) {
+        foreach ($plannedBatches as $batch => $batchIds) {
             $offset = $batch * $batchSize;
 
             $jobs[] = new self(
@@ -170,7 +201,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                 totalBatches: $totalBatches,
                 currentBatch: $batch + 1,
                 syncRunId: $this->syncRunId, // so a failed batch can fail the pipeline phase
+                batchAfterId: $afterId,
             );
+
+            $afterId = $batchIds->last();
         }
 
         // Add checker job at the end of the chain
@@ -184,6 +218,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             user_id: $this->user_id,
             sync_stream_files: $this->sync_stream_files,
             syncRunId: $this->syncRunId,
+            lastSeriesId: $afterId,
         );
 
         // Dispatch the chain
@@ -216,20 +251,10 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
             'batch_size' => self::BATCH_SIZE,
         ]);
 
-        // Get series IDs for this batch (using offset/limit instead of chunkById).
-        // Filtered the same way as dispatchBatches()'s count so the offsets stay
-        // aligned with totalBatches/totalCount.
-        $seriesIds = Series::query()
-            ->where([
-                ['enabled', true],
-                ['user_id', $this->user_id],
-            ])
-            ->when($this->playlist_id, function ($query) {
-                $query->where('playlist_id', $this->playlist_id);
-            })
-            ->needsMetadataRefresh($this->overwrite_existing)
+        // Get series IDs for this batch, from the id cursor planBatches() gave it.
+        $seriesIds = self::eligibleSeriesQuery($this->user_id, $this->playlist_id, $this->overwrite_existing)
+            ->where('id', '>', $this->batchAfterId ?? 0)
             ->orderBy('id')
-            ->skip($this->batchOffset)
             ->take(self::BATCH_SIZE)
             ->pluck('id')
             ->toArray();

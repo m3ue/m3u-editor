@@ -38,7 +38,10 @@ class FlushJobsTable extends Command
             $where = ['created_at', '<=',  $olderThan];
             $this->info("Flushing jobs table where job is older than {$olderThan->toDateTimeString()}...");
             $this->info('Clearing: '.Job::whereDate(...$where)->count().' jobs');
-            Job::whereDate(...$where)->truncate();
+            // truncate() ignores query constraints and always empties the whole
+            // table, which would delete fresh staging rows for jobs dispatched
+            // but not yet consumed. Use delete() so only the matched rows go.
+            Job::whereDate(...$where)->delete();
             $this->info('Jobs table flushed successfully.');
         }
     }

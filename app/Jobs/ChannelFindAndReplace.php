@@ -154,7 +154,7 @@ class ChannelFindAndReplace implements ShouldQueue
                 $newValue = str_ireplace($find, $replace, $valueToModify);
             }
 
-            if ($newValue && $newValue !== $valueToModify) {
+            if ($newValue !== null && $newValue !== $valueToModify) {
                 $updatesMap[$channel->id] = $newValue;
             }
         }

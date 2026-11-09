@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Filament\Resources\TvDevices\TvDeviceResource;
 use App\Http\Controllers\Controller;
 use App\Models\DeviceAuthorization;
+use App\Models\PlaylistAuth;
 use App\Services\DeviceCodeGeneratorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -80,23 +81,31 @@ class DeviceAuthorizationController extends Controller
             }
 
             if ($deviceAuth->status === 'approved' && ! $deviceAuth->isConsumed()) {
-                $playlistAuth = $deviceAuth->playlistAuth;
+                $playlistAuths = $deviceAuth->grantedPlaylistAuths();
 
-                if ($playlistAuth === null) {
+                if ($playlistAuths->isEmpty()) {
                     $deviceAuth->delete();
 
                     return response()->json(['status' => 'expired']);
                 }
 
                 $deviceAuth->update(['consumed_at' => now()]);
-                $username = $playlistAuth->username;
-                $password = $playlistAuth->password;
                 $deviceAuth->delete();
 
+                $primary = $playlistAuths->first();
+
+                // username/password stay the primary credential for TV builds
+                // that predate `playlists`, which lists every granted
+                // credential in the admin's order, primary first.
                 return response()->json([
                     'status' => 'approved',
-                    'username' => $username,
-                    'password' => $password,
+                    'username' => $primary->username,
+                    'password' => $primary->password,
+                    'playlists' => $playlistAuths->map(fn (PlaylistAuth $playlistAuth): array => [
+                        'name' => $playlistAuth->name,
+                        'username' => $playlistAuth->username,
+                        'password' => $playlistAuth->password,
+                    ])->all(),
                 ]);
             }
 
@@ -104,7 +113,7 @@ class DeviceAuthorizationController extends Controller
             // since the row is deleted right after being consumed above).
             $now = now();
             $pacedTooFast = $deviceAuth->last_polled_at !== null
-                && $now->diffInSeconds($deviceAuth->last_polled_at) < $deviceAuth->interval_seconds;
+                && $deviceAuth->last_polled_at->diffInSeconds($now) < $deviceAuth->interval_seconds;
 
             $deviceAuth->increment('poll_attempts');
             $deviceAuth->last_polled_at = $now;

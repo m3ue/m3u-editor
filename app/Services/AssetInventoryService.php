@@ -12,6 +12,25 @@ use Illuminate\Support\Str;
 class AssetInventoryService
 {
     /**
+     * Extensions accepted for user-uploaded assets. Raster images only - SVG is deliberately
+     * excluded (it can embed <script> and this app has no sanitizer for it), and nothing here
+     * is an executable server-side extension, since uploaded files are served back from the
+     * public disk with a Content-Type derived from this same extension.
+     *
+     * @var list<string>
+     */
+    public const SAFE_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'ico'];
+
+    /**
+     * MIME types matching {@see SAFE_IMAGE_EXTENSIONS}, for Filament's acceptedFileTypes().
+     *
+     * @var list<string>
+     */
+    public const SAFE_IMAGE_MIME_TYPES = [
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/x-icon', 'image/vnd.microsoft.icon',
+    ];
+
+    /**
      * @return array<int, array{disk: string, directory: string, source: string}>
      */
     protected function directories(): array

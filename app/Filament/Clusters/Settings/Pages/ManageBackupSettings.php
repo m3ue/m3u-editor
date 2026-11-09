@@ -65,9 +65,26 @@ class ManageBackupSettings extends BaseSettingsPage
                                     ->rules([new Cron])
                                     ->live()
                                     ->hintAction(CronHelperAction::make(name: 'backup-cron', cronField: 'auto_backup_database_schedule'))
-                                    ->helperText(fn ($get) => CronExpression::isValidExpression($get('auto_backup_database_schedule'))
-                                        ? 'Next scheduled backup: '.(new CronExpression($get('auto_backup_database_schedule')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
-                                        : 'Specify the CRON schedule for automatic backups, e.g. "0 3 * * *".'),
+                                    ->helperText(function ($get) {
+                                        // isValidExpression() only checks syntax - a syntactically valid
+                                        // expression with no calendar occurrence (e.g. "0 0 31 2 *", a
+                                        // February 31st) still throws from getNextRunDate(). That throw
+                                        // must not abort the form's live render; fall back to the plain
+                                        // helper text and let the Cron rule reject it on save instead.
+                                        if (! CronExpression::isValidExpression($get('auto_backup_database_schedule'))) {
+                                            return 'Specify the CRON schedule for automatic backups, e.g. "0 3 * * *".';
+                                        }
+
+                                        try {
+                                            $nextRun = (new CronExpression($get('auto_backup_database_schedule')))
+                                                ->getNextRunDate()
+                                                ->format(app(DateFormatService::class)->getFormat());
+
+                                            return "Next scheduled backup: {$nextRun}";
+                                        } catch (\RuntimeException) {
+                                            return 'This schedule is syntactically valid but never occurs on a calendar.';
+                                        }
+                                    }),
                                 TextInput::make('auto_backup_database_max_backups')
                                     ->label(__('Max Backups'))
                                     ->type('number')

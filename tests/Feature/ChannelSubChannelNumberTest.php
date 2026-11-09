@@ -267,7 +267,9 @@ it('imports tvg-chno sub-channels instead of truncating them', function () {
         (new ProcessM3uImport($playlist, force: true, isNew: true))->handle();
         (new ProcessM3uImportChunk(Job::pluck('id')->all(), batchCount: 1))->handle();
 
-        $numbers = $playlist->channels()->get()
+        // Without an explicit order, Postgres returns rows in heap order, which depends on
+        // free space left by earlier tests in the same parallel process
+        $numbers = $playlist->channels()->orderBy('id')->get()
             ->mapWithKeys(fn (Channel $channel) => [$channel->title => [$channel->channel, $channel->channel_minor]])
             ->all();
 

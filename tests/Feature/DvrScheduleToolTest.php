@@ -144,6 +144,46 @@ it('search scopes to users mapped channels only', function () {
         ->toContain("No upcoming programmes found matching 'xyznonexistent'");
 });
 
+it('search does not broaden to every channel when the requested channel name cannot be resolved', function () {
+    $user = User::factory()->create();
+    $epg = Epg::factory()->for($user)->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    $epgChannelAlpha = EpgChannel::factory()->for($epg)->for($user)->create([
+        'channel_id' => 'channel.alpha',
+        'display_name' => 'Alpha',
+    ]);
+    Channel::factory()->for($user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannelAlpha->id,
+        'enabled' => true,
+    ]);
+    makeEpgProgramme($epgChannelAlpha, $user, ['title' => 'Shared Title']);
+
+    $epgChannelBeta = EpgChannel::factory()->for($epg)->for($user)->create([
+        'channel_id' => 'channel.beta',
+        'display_name' => 'Beta',
+    ]);
+    Channel::factory()->for($user)->for($playlist)->create([
+        'epg_channel_id' => $epgChannelBeta->id,
+        'enabled' => true,
+    ]);
+    makeEpgProgramme($epgChannelBeta, $user, ['title' => 'Shared Title']);
+
+    $this->actingAs($user);
+
+    $tool = makeScheduleTool();
+    $result = $tool->handle(new Request([
+        'action' => 'search',
+        'query' => 'Shared Title',
+        'channel' => 'Missing Station',
+    ]));
+
+    expect((string) $result)
+        ->toContain("No channel found matching 'Missing Station'")
+        ->not->toContain('Alpha')
+        ->not->toContain('Beta');
+});
+
 it('search ignores programmes from another EPG that reuses the channel XMLTV id', function () {
     $user = User::factory()->create();
     $otherEpg = Epg::factory()->for($user)->create();

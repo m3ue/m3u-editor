@@ -67,6 +67,11 @@ class GeneralSettings extends Settings
 
     public ?bool $proxy_stop_oldest_on_limit = false;
 
+    // Null keeps the legacy ENV default until the proxy settings page is saved.
+    public ?bool $proxy_normalize_live_output = null;
+
+    public string $proxy_normalization_encoder = 'cpu';
+
     // Silence detection - detect silent audio streams and trigger failover
     public ?bool $enable_silence_detection = false;
 
@@ -269,6 +274,18 @@ class GeneralSettings extends Settings
     public ?int $aiostreams_rate_limit = 20;
 
     public ?int $aiostreams_max_failover_candidates = 3;
+
+    // Sports providers (ESPN's unofficial public API, TheSportsDB) for the M3U TV Sports screen
+    public ?bool $sports_espn_enabled = false;
+
+    public ?string $sports_espn_api_url = null;
+
+    public ?bool $sports_tsdb_enabled = false;
+
+    public ?string $sports_tsdb_api_key = null;
+
+    /** The leagues Sports uses, as league ids. Empty means every league the providers carry. */
+    public ?array $sports_league_ids = null;
 
     public ?string $tmdb_language = 'en-US';
 

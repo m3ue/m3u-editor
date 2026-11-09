@@ -14,6 +14,7 @@ use App\Filament\Pages\LogViewer;
 use App\Filament\Pages\M3uProxyStreamMonitor;
 use App\Filament\Pages\PluginsDashboard;
 use App\Filament\Pages\ReleaseLogs;
+use App\Filament\Pages\SystemHealth;
 use App\Filament\Resources\AedProfiles\AedProfileResource;
 use App\Filament\Resources\Assets\AssetResource;
 use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
@@ -46,7 +47,6 @@ use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
-use App\Settings\GeneralSettings;
 use Filament\Navigation\NavigationItem;
 
 /**
@@ -108,17 +108,17 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-play-pause',
                 'available' => fn () => true,
                 'items' => [
-                    'playlists' => ['resolve' => fn () => PlaylistResource::getNavigationItems()],
-                    'custom_playlists' => ['resolve' => fn () => CustomPlaylistResource::getNavigationItems()],
-                    'merged_playlists' => ['resolve' => fn () => MergedPlaylistResource::getNavigationItems()],
-                    'playlist_aliases' => ['resolve' => fn () => PlaylistAliasesCluster::getNavigationItems()],
-                    'playlist_viewers' => ['resolve' => fn () => PlaylistViewerResource::getNavigationItems()],
-                    'playlist_auths' => ['resolve' => fn () => PlaylistAuthResource::getNavigationItems()],
-                    'stream_file_settings' => ['resolve' => fn () => StreamFileSettingResource::getNavigationItems()],
-                    'channel_scrubbers' => ['resolve' => fn () => ChannelScrubberResource::getNavigationItems()],
+                    'playlists' => self::entry(PlaylistResource::class),
+                    'custom_playlists' => self::entry(CustomPlaylistResource::class),
+                    'merged_playlists' => self::entry(MergedPlaylistResource::class),
+                    'playlist_aliases' => self::entry(PlaylistAliasesCluster::class),
+                    'playlist_viewers' => self::entry(PlaylistViewerResource::class),
+                    'playlist_auths' => self::entry(PlaylistAuthResource::class),
+                    'stream_file_settings' => self::entry(StreamFileSettingResource::class),
+                    'channel_scrubbers' => self::entry(ChannelScrubberResource::class),
                     'cached_downloads' => [
                         // Hidden while caching is off, matching the resource's canAccess().
-                        'available' => fn () => (bool) (app(GeneralSettings::class)->enable_cache ?? false),
+                        'available' => fn () => CachedContentFileResource::canAccess(),
                         'resolve' => fn () => CachedContentFileResource::getNavigationItems(),
                     ],
                 ],
@@ -128,9 +128,9 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-video-camera',
                 'available' => fn () => auth()->user()?->canUseDvr() ?? false,
                 'items' => [
-                    'dvr_recordings' => ['resolve' => fn () => DvrRecordingResource::getNavigationItems()],
-                    'dvr_recording_rules' => ['resolve' => fn () => DvrRecordingRuleResource::getNavigationItems()],
-                    'browse_shows' => ['resolve' => fn () => BrowseShows::getNavigationItems()],
+                    'dvr_recordings' => self::entry(DvrRecordingResource::class),
+                    'dvr_recording_rules' => self::entry(DvrRecordingRuleResource::class),
+                    'browse_shows' => self::entry(BrowseShows::class),
                 ],
             ],
             'integrations' => [
@@ -138,7 +138,7 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-server-stack',
                 'available' => fn () => true,
                 'items' => [
-                    'media_server_integrations' => ['resolve' => fn () => MediaServersCluster::getNavigationItems()],
+                    'media_server_integrations' => self::entry(MediaServersCluster::class),
                     'networks' => [
                         'available' => fn () => config('proxy.proxy_integration_enabled', true),
                         'resolve' => fn () => NetworkResource::getNavigationItems(),
@@ -150,8 +150,8 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-tv',
                 'available' => fn () => true,
                 'items' => [
-                    'groups' => ['resolve' => fn () => GroupResource::getNavigationItems()],
-                    'channels' => ['resolve' => fn () => ChannelResource::getNavigationItems()],
+                    'groups' => self::entry(GroupResource::class),
+                    'channels' => self::entry(ChannelResource::class),
                 ],
             ],
             'vod_channels' => [
@@ -159,9 +159,9 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-film',
                 'available' => fn () => true,
                 'items' => [
-                    'vod_groups' => ['resolve' => fn () => VodGroupResource::getNavigationItems()],
-                    'vod_dynamic_groups' => ['resolve' => fn () => VodDynamicGroupResource::getNavigationItems()],
-                    'vods' => ['resolve' => fn () => VodResource::getNavigationItems()],
+                    'vod_groups' => self::entry(VodGroupResource::class),
+                    'vod_dynamic_groups' => self::entry(VodDynamicGroupResource::class),
+                    'vods' => self::entry(VodResource::class),
                 ],
             ],
             'series' => [
@@ -169,9 +169,9 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-play',
                 'available' => fn () => true,
                 'items' => [
-                    'categories' => ['resolve' => fn () => CategoryResource::getNavigationItems()],
-                    'series_dynamic_groups' => ['resolve' => fn () => SeriesDynamicGroupResource::getNavigationItems()],
-                    'series' => ['resolve' => fn () => SeriesResource::getNavigationItems()],
+                    'categories' => self::entry(CategoryResource::class),
+                    'series_dynamic_groups' => self::entry(SeriesDynamicGroupResource::class),
+                    'series' => self::entry(SeriesResource::class),
                 ],
             ],
             'epg' => [
@@ -179,11 +179,11 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-calendar-days',
                 'available' => fn () => true,
                 'items' => [
-                    'epgs' => ['resolve' => fn () => EpgResource::getNavigationItems()],
-                    'merged_epgs' => ['resolve' => fn () => MergedEpgResource::getNavigationItems()],
-                    'epg_channels' => ['resolve' => fn () => EpgChannelResource::getNavigationItems()],
-                    'epg_maps' => ['resolve' => fn () => EpgMapResource::getNavigationItems()],
-                    'aed_profiles' => ['resolve' => fn () => AedProfileResource::getNavigationItems()],
+                    'epgs' => self::entry(EpgResource::class),
+                    'merged_epgs' => self::entry(MergedEpgResource::class),
+                    'epg_channels' => self::entry(EpgChannelResource::class),
+                    'epg_maps' => self::entry(EpgMapResource::class),
+                    'aed_profiles' => self::entry(AedProfileResource::class),
                 ],
             ],
             'proxy' => [
@@ -191,8 +191,8 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-arrows-right-left',
                 'available' => fn () => config('proxy.proxy_integration_enabled', true) && (auth()->user()?->canUseProxy() ?? false),
                 'items' => [
-                    'stream_profiles' => ['resolve' => fn () => StreamProfileResource::getNavigationItems()],
-                    'stream_monitor' => ['resolve' => fn () => M3uProxyStreamMonitor::getNavigationItems()],
+                    'stream_profiles' => self::entry(StreamProfileResource::class),
+                    'stream_monitor' => self::entry(M3uProxyStreamMonitor::class),
                 ],
             ],
             'plugins' => [
@@ -200,10 +200,10 @@ final class AdminNavigationSchema
                 'icon' => 'heroicon-m-puzzle-piece',
                 'available' => fn () => true,
                 'items' => [
-                    'plugins_dashboard' => ['resolve' => fn () => PluginsDashboard::getNavigationItems()],
-                    'plugins' => ['resolve' => fn () => PluginResource::getNavigationItems()],
-                    'plugin_install_reviews' => ['resolve' => fn () => PluginInstallReviewResource::getNavigationItems()],
-                    'create_plugin' => ['resolve' => fn () => CreatePlugin::getNavigationItems()],
+                    'plugins_dashboard' => self::entry(PluginsDashboard::class),
+                    'plugins' => self::entry(PluginResource::class),
+                    'plugin_install_reviews' => self::entry(PluginInstallReviewResource::class),
+                    'create_plugin' => self::entry(CreatePlugin::class),
                 ],
             ],
             'tools' => [
@@ -212,13 +212,14 @@ final class AdminNavigationSchema
                 'collapsed' => true,
                 'available' => fn () => true,
                 'items' => [
-                    'personal_access_tokens' => ['resolve' => fn () => PersonalAccessTokenResource::getNavigationItems()],
-                    'assets' => ['resolve' => fn () => AssetResource::getNavigationItems()],
-                    'post_processes' => ['resolve' => fn () => PostProcessResource::getNavigationItems()],
-                    'log_viewer' => ['resolve' => fn () => LogViewer::getNavigationItems()],
-                    'release_logs' => ['resolve' => fn () => ReleaseLogs::getNavigationItems()],
-                    'backups' => ['resolve' => fn () => Backups::getNavigationItems()],
-                    'queue_monitor' => ['resolve' => fn () => QueueMonitorResource::getNavigationItems()],
+                    'personal_access_tokens' => self::entry(PersonalAccessTokenResource::class),
+                    'assets' => self::entry(AssetResource::class),
+                    'post_processes' => self::entry(PostProcessResource::class),
+                    'log_viewer' => self::entry(LogViewer::class),
+                    'release_logs' => self::entry(ReleaseLogs::class),
+                    'system_health' => self::entry(SystemHealth::class),
+                    'backups' => self::entry(Backups::class),
+                    'queue_monitor' => self::entry(QueueMonitorResource::class),
                     'api_docs' => [
                         'resolve' => fn () => [
                             NavigationItem::make('API Docs')
@@ -231,6 +232,24 @@ final class AdminNavigationSchema
                     ],
                 ],
             ],
+        ];
+    }
+
+    /**
+     * A page or resource entry, gated the way Filament's own
+     * registerNavigationItems() gates it. This menu replaces Filament's
+     * default navigation and calls getNavigationItems() directly, so without
+     * this an admin-only page or a feature-flagged resource would still be
+     * linked for users who cannot open it.
+     *
+     * @param  class-string  $class
+     * @return array{available: \Closure, resolve: \Closure}
+     */
+    private static function entry(string $class): array
+    {
+        return [
+            'available' => fn (): bool => $class::shouldRegisterNavigation() && $class::canAccess(),
+            'resolve' => fn () => $class::getNavigationItems(),
         ];
     }
 

@@ -24,7 +24,7 @@ class TagRenamePropagationService
 
         $oldName = json_decode($tag->getRawOriginal('name') ?? '', true)['en'] ?? null;
         $newName = $tag->getTranslation('name', 'en');
-        if (! $oldName || ! $newName || $oldName === $newName) {
+        if ($oldName === null || $oldName === '' || $newName === null || $newName === '' || $oldName === $newName) {
             return;
         }
 

@@ -8,16 +8,20 @@ use App\Filament\Concerns\HasCopilotSupport;
 use App\Filament\Resources\AedProfiles\Pages\CreateAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\EditAedProfile;
 use App\Filament\Resources\AedProfiles\Pages\ListAedProfiles;
+use App\Jobs\RefreshSportsAedProfile;
 use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Group;
 use App\Services\AedAiRegexSuggestionService;
 use App\Services\AedExtractorService;
 use App\Services\DateFormatService;
+use App\Services\Sports\SportsAedResolver;
+use App\Services\Sports\SportsService;
 use App\Settings\GeneralSettings;
 use App\Traits\HasUserFiltering;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -33,6 +37,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -41,6 +46,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\RateLimiter;
 
 use function Laravel\Ai\agent;
 
@@ -103,6 +109,50 @@ class AedProfileResource extends Resource implements CopilotResource
                     : __('Only use this profile if no EPG channel is assigned.'))
                 ->default(true)
                 ->inline(false),
+
+            Section::make(__('Sports API'))
+                ->compact()
+                ->collapsible()
+                ->columnSpanFull()
+                ->description(__('Match channel titles to real games by team names, in any title format. Unmatched channels fall back to the regex extraction below.'))
+                ->schema([
+                    Callout::make(__('Sports API is turned off'))
+                        ->warning()
+                        ->columnSpanFull()
+                        ->description(__('Enable it under Settings > Integrations > Sports API to use game matching.'))
+                        ->visible(fn (): bool => ! app(SportsService::class)->isEnabled()),
+                    Toggle::make('sports_matching')
+                        ->label(__('Match real games'))
+                        ->live()
+                        ->default(false)
+                        ->inline(false)
+                        ->columnSpanFull(),
+                    Grid::make(2)
+                        ->visible(fn (Get $get): bool => (bool) $get('sports_matching'))
+                        ->schema([
+                            Select::make('sports_league_ids')
+                                ->label(__('Leagues'))
+                                ->multiple()
+                                ->searchable()
+                                ->options(fn (Get $get): array => app(SportsService::class)->leagueOptions((array) $get('sports_league_ids')))
+                                ->placeholder(__('All leagues'))
+                                ->hint(__('Recommended'))
+                                ->hintIcon('heroicon-m-light-bulb')
+                                ->helperText(__('Pick the leagues these channels carry. Channels then only match games in those leagues, which reduces incorrect matches and speeds up syncs and guide builds. Leave empty to check every league available from the Sports API.'))
+                                ->columnSpanFull(),
+                            TextInput::make('sports_title_format')
+                                ->label(__('Game Title Format'))
+                                ->placeholder('{away} at {home}')
+                                ->helperText(__('Variables: {home}, {away}, {league}, {venue}, {event}, {channel}, {date}, {time}. Leave empty for "{away} at {home}" ("{home} vs {away}" for soccer).')),
+                            TextInput::make('sports_event_duration_minutes')
+                                ->label(__('Game Duration (minutes)'))
+                                ->numeric()
+                                ->minValue(15)
+                                ->maxValue(720)
+                                ->placeholder(__('By sport'))
+                                ->helperText(__('Leave empty to use a typical length per sport (e.g. 165 for hockey, 210 for football).')),
+                        ]),
+                ]),
 
             Section::make(__('Source Extraction'))
                 ->compact()
@@ -267,7 +317,11 @@ class AedProfileResource extends Resource implements CopilotResource
                             $set('category', $data['ai_category'] ?? '');
                         })
                 )
-                ->description(__('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
+                ->description(fn (Get $get): string => $get('sports_matching')
+                    ? __('Used for channels that don\'t match a game. The time and date patterns also narrow which game a channel matches.')
+                    : __('Define regex patterns to extract event data from the channel title. Capture group 1 is used when present; otherwise the full match.'))
+                ->collapsible()
+                ->collapsed(fn (Get $get): bool => (bool) $get('sports_matching'))
                 ->schema([
                     Grid::make(2)->schema([
                         TextInput::make('title_regex')
@@ -332,7 +386,9 @@ class AedProfileResource extends Resource implements CopilotResource
 
             Section::make(__('Output Format'))
                 ->compact()
-                ->description(__('Define how the extracted data is formatted in the generated EPG programme.'))
+                ->description(fn (Get $get): string => $get('sports_matching')
+                    ? __('Timezone, pre/post-event padding, category and EPG days apply to every channel. Title, description, duration and no-event format apply only to channels that don\'t match a game.')
+                    : __('Define how the extracted data is formatted in the generated EPG programme.'))
                 ->schema([
                     Grid::make(2)->schema([
                         Select::make('output_timezone')
@@ -430,6 +486,10 @@ class AedProfileResource extends Resource implements CopilotResource
                             Hidden::make('_no_event_format')->default($get('no_event_format') ?? '{channel}'),
                             Hidden::make('_pre_event_format')->default($get('pre_event_format')),
                             Hidden::make('_post_event_format')->default($get('post_event_format')),
+                            Hidden::make('_sports_matching')->default((bool) $get('sports_matching')),
+                            Hidden::make('_sports_league_ids')->default($get('sports_league_ids') ?? []),
+                            Hidden::make('_sports_title_format')->default($get('sports_title_format')),
+                            Hidden::make('_sports_event_duration_minutes')->default($get('sports_event_duration_minutes')),
                             Hidden::make('tested')->default(false),
                             Hidden::make('match_count')->default(''),
 
@@ -474,14 +534,25 @@ class AedProfileResource extends Resource implements CopilotResource
                                         $profile->no_event_format = $get('_no_event_format') ?? '{channel}';
                                         $profile->pre_event_format = $get('_pre_event_format') ?: null;
                                         $profile->post_event_format = $get('_post_event_format') ?: null;
+                                        $profile->sports_matching = (bool) $get('_sports_matching');
+                                        $profile->sports_league_ids = $get('_sports_league_ids') ?: null;
+                                        $profile->sports_title_format = $get('_sports_title_format') ?: null;
+                                        $profile->sports_event_duration_minutes = filled($get('_sports_event_duration_minutes'))
+                                            ? (int) $get('_sports_event_duration_minutes')
+                                            : null;
 
                                         $service = app(AedExtractorService::class);
+                                        $sports = app(SportsAedResolver::class);
                                         $rows = [];
                                         foreach ($titles as $title) {
-                                            $result = $service->extract($profile, $title);
+                                            $result = $sports->appliesTo($profile)
+                                                ? $sports->match($profile, $title, $service->startTimeFor($profile, $title))
+                                                : null;
+                                            $isGame = $result !== null;
+                                            $result ??= $service->extract($profile, $title);
                                             $rows[] = [
                                                 'input' => $title,
-                                                'status' => $result ? __('Match') : __('No match'),
+                                                'status' => $isGame ? __('Game match') : ($result ? __('Match') : __('No match')),
                                                 'extracted_title' => $result?->title ?? '',
                                                 'time' => $result?->hasTime()
                                                     ? $result->start->format('M j g:i A T').' - '.$result->end->format('g:i A')
@@ -489,7 +560,7 @@ class AedProfileResource extends Resource implements CopilotResource
                                             ];
                                         }
 
-                                        $matched = count(array_filter($rows, fn ($r) => $r['status'] === __('Match')));
+                                        $matched = count(array_filter($rows, fn ($r) => $r['status'] !== __('No match')));
                                         $total = count($rows);
                                         $set('match_count', __("{$matched} of {$total} titles matched"));
                                         $set('results', $rows);
@@ -516,7 +587,11 @@ class AedProfileResource extends Resource implements CopilotResource
                                     TextEntry::make('status')
                                         ->hiddenLabel()
                                         ->badge()
-                                        ->color(fn (string $state): string => $state === __('Match') ? 'success' : 'gray'),
+                                        ->color(fn (string $state): string => match ($state) {
+                                            __('Game match') => 'info',
+                                            __('Match') => 'success',
+                                            default => 'gray',
+                                        }),
                                     TextInput::make('extracted_title')->hiddenLabel()->disabled(),
                                     TextInput::make('time')->hiddenLabel()->disabled(),
                                 ])
@@ -569,12 +644,44 @@ class AedProfileResource extends Resource implements CopilotResource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->recordActions([
-                DeleteAction::make()
-                    ->button()->hiddenLabel()->size('sm'),
+                ActionGroup::make([
+                    CopyToUserAction::make(),
+                    Action::make('refresh_games')
+                        ->label(__('Refresh Games'))
+                        ->tooltip(__('Refresh games and rebuild the guide'))
+                        ->icon('heroicon-o-arrow-path')
+                        ->visible(fn (AedProfile $record): bool => $record->sports_matching && app(SportsService::class)->isEnabled())
+                        ->action(function (AedProfile $record): void {
+                            // A forced refresh refetches every league's games, so one
+                            // per profile every couple of minutes is plenty.
+                            $limiterKey = 'sports-aed-refresh:'.$record->id;
+                            if (RateLimiter::tooManyAttempts($limiterKey, 1)) {
+                                Notification::make()
+                                    ->warning()
+                                    ->title(__('Games were just refreshed'))
+                                    ->body(__('Try again in :seconds seconds.', ['seconds' => RateLimiter::availableIn($limiterKey)]))
+                                    ->send();
+
+                                return;
+                            }
+                            RateLimiter::hit($limiterKey, 120);
+
+                            // In the background: a wide league set is hundreds of
+                            // provider requests, too long to hold the page for
+                            RefreshSportsAedProfile::dispatch($record->id, force: true);
+                            Notification::make()
+                                ->success()
+                                ->title(__('Refreshing games'))
+                                ->body(__('Games are being fetched in the background. The guide rebuilds the next time it is requested after that.'))
+                                ->send();
+                        })
+                        ->requiresConfirmation()
+                        ->modalDescription(fn (AedProfile $record): string => __('Fetch ":name" games fresh from your sports providers and rebuild the guide for every playlist using this profile. Games already refresh on their own every 15 minutes, so this is only needed when a schedule change should show up right away.', ['name' => $record->name]))
+                        ->modalSubmitActionLabel(__('Refresh now')),
+                    DeleteAction::make(),
+                ])->button()->hiddenLabel()->size('sm'),
                 EditAction::make()
                     ->slideOver()
-                    ->button()->hiddenLabel()->size('sm'),
-                CopyToUserAction::make()
                     ->button()->hiddenLabel()->size('sm'),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([

@@ -269,6 +269,35 @@ it('rejects unknown capabilities before writing any files', function () {
     expect(Plugin::query()->where('plugin_id', $pluginId)->exists())->toBeFalse();
 });
 
+it('rejects an unknown capability with --force without deleting the existing scaffold', function () {
+    $name = 'Force Guard '.Str::upper(Str::random(4));
+    $pluginId = Str::slug($name);
+    $pluginPath = generatedPluginPath($pluginId);
+
+    cleanupGeneratedPlugin($pluginId);
+
+    try {
+        $this->artisan('make:plugin', [
+            'name' => $name,
+            '--bare' => true,
+        ])->assertSuccessful();
+
+        File::put($pluginPath.'/marker.txt', 'keep-me');
+
+        $this->artisan('make:plugin', [
+            'name' => $name,
+            '--bare' => true,
+            '--force' => true,
+            '--capability' => ['not-real'],
+        ])->assertFailed()
+            ->expectsOutputToContain('Unknown capability value(s)');
+
+        expect(File::exists($pluginPath.'/marker.txt'))->toBeTrue();
+    } finally {
+        cleanupGeneratedPlugin($pluginId);
+    }
+});
+
 it('scaffolds schema tables and ui_tables when --table options are provided', function () {
     $name = 'Table Scaffold '.Str::upper(Str::random(4));
     $pluginId = Str::slug($name);

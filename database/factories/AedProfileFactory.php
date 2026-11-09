@@ -23,4 +23,15 @@ class AedProfileFactory extends Factory
             'post_event_format' => 'Signing Off',
         ];
     }
+
+    /**
+     * Matches channel titles against ESPN fixtures before the regex fields.
+     */
+    public function sportsMatching(?array $leagueIds = null): static
+    {
+        return $this->state(fn (): array => [
+            'sports_matching' => true,
+            'sports_league_ids' => $leagueIds,
+        ]);
+    }
 }

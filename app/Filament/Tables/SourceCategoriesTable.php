@@ -4,6 +4,7 @@ namespace App\Filament\Tables;
 
 use App\Filament\Tables\Traits\FiltersBySelection;
 use App\Filament\Tables\Traits\HasBouquetPickerColumns;
+use App\Models\Category;
 use App\Models\SourceCategory;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\TextColumn;
@@ -32,13 +33,37 @@ class SourceCategoriesTable
                     $query->where('playlist_id', $playlistId);
                 }
 
-                return $query;
+                // Same approach as SourceGroupsTable: a correlated subquery keeps search and
+                // sort on the real source_categories.name column.
+                $customName = Category::query()
+                    ->select('name')
+                    ->whereColumn('categories.name_internal', 'source_categories.name')
+                    ->whereColumn('categories.playlist_id', 'source_categories.playlist_id')
+                    ->limit(1);
+
+                return $query->select('source_categories.*')->selectSub($customName, 'display_name');
             })
             ->defaultSort('name', 'asc')
             ->columns([
                 TextColumn::make('name')
                     ->label(__('Category Name'))
-                    ->searchable()
+                    ->formatStateUsing(fn ($state, $record) => SourceCategory::labelWithProviderName($record->display_name, $state))
+                    // Match the custom name as well as the source name, case-insensitively
+                    // on PostgreSQL too, as SourceGroupsTable does.
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        $term = '%'.mb_strtolower($search).'%';
+
+                        return $query->where(function (Builder $query) use ($term): void {
+                            $query->whereRaw('LOWER(source_categories.name) LIKE ?', [$term])
+                                ->orWhereExists(function ($subQuery) use ($term): void {
+                                    $subQuery->selectRaw('1')
+                                        ->from('categories')
+                                        ->whereColumn('categories.name_internal', 'source_categories.name')
+                                        ->whereColumn('categories.playlist_id', 'source_categories.playlist_id')
+                                        ->whereRaw('LOWER(categories.name) LIKE ?', [$term]);
+                                });
+                        });
+                    })
                     ->sortable(),
                 self::sourcePlaylistColumn($table),
                 self::bouquetMembershipColumn($table),

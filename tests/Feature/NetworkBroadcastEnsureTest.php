@@ -45,3 +45,24 @@ it('enables network, generates schedule and starts broadcast via ensure command'
     expect($network->broadcast_pid)->toBe(22222);
     expect($network->programmes()->count())->toBeGreaterThan(0);
 });
+
+it('reports failure instead of false success when schedule generation and broadcast start both fail (issue #1730)', function () {
+    $network = Network::factory()->create([
+        'broadcast_enabled' => false,
+        'schedule_type' => 'manual',
+    ]);
+
+    $network->programmes()->delete();
+
+    // Real services: no content means generateSchedule creates nothing, and
+    // restart's startRequested() fails ordinarily (no programme to broadcast)
+    // without throwing.
+    $this->artisan('network:broadcast:ensure', ['network' => $network->id])
+        ->assertExitCode(1);
+
+    $network->refresh();
+
+    expect($network->programmes()->count())->toBe(0);
+    expect($network->broadcast_pid)->toBeNull();
+    expect($network->broadcast_started_at)->toBeNull();
+});

@@ -3,6 +3,7 @@
 use App\Filament\Resources\Playlists\Pages\EditPlaylist;
 use App\Models\Playlist;
 use App\Models\SourceCategory;
+use App\Models\SourceGroup;
 use App\Models\User;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -94,6 +95,40 @@ it('offers playlist categories for series release date rules', function () {
             Assert::assertSame([
                 'all' => 'All categories',
                 $category->name => $category->name,
+            ], $group->getOptions());
+
+            return true;
+        });
+});
+
+it('preserves a numeric source group name as its own option key (issue #1697)', function () {
+    SourceGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'name' => '2024',
+        'type' => 'live',
+        'source_group_id' => 1,
+    ]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'sort_alpha_config' => [[
+                'enabled' => true,
+                'target' => 'live_groups',
+                'group' => ['all'],
+                'column' => 'title',
+                'sort' => 'ASC',
+            ]],
+        ])
+        ->assertFormFieldExists('sort_alpha_config', function (Repeater $field): bool {
+            $item = collect($field->getItems())->first();
+            $group = $item?->getFlatFields(withHidden: true)['group'] ?? null;
+
+            Assert::assertInstanceOf(Select::class, $group);
+            // Selecting the visible "2024" option must save "2024", not a
+            // reindexed position like 0 - see issue #1697.
+            Assert::assertSame([
+                'all' => 'All groups',
+                '2024' => '2024',
             ], $group->getOptions());
 
             return true;

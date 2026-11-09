@@ -162,7 +162,11 @@ class TorrentTitleParser
      */
     private function findTitleBreak(string $str): int
     {
-        $len = mb_strlen($str);
+        // Byte length, not mb_strlen(): PREG_OFFSET_CAPTURE always returns byte offsets
+        // (the /u modifier doesn't change that), and the caller slices with a byte-based
+        // substr(). Seeding/falling back to a character count here could land $min
+        // inside a multibyte character's byte sequence, corrupting the sliced title.
+        $len = strlen($str);
         $min = $len;
 
         // Year preceded by a delimiter — use last match so title-leading years don't break early

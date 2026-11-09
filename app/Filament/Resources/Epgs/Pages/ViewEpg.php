@@ -35,12 +35,14 @@ class ViewEpg extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            EpgResource::getRetrySdLoginAction(),
             EpgResource::getManageSdLineupsAction(),
 
             Action::make('refresh')
                 ->label(__('Process'))
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
+                ->hidden(fn (): bool => $this->getRecord()->isSchedulesDirectDisabled())
                 ->action(function () {
                     $record = $this->getRecord();
                     $record->update([

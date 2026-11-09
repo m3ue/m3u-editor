@@ -81,6 +81,30 @@ it('merges channels without stream ids by normalized name fallback', function ()
     ]);
 });
 
+it('merges channels whose normalized name is the valid name 0 (issue #1813)', function () {
+    $master = ($this->makeMergeChannel)([
+        'playlist_id' => $this->primaryPlaylist->id,
+        'title' => '0',
+        'name' => '0',
+    ]);
+
+    $fallback = ($this->makeMergeChannel)([
+        'playlist_id' => $this->fallbackPlaylist->id,
+        'title' => '0',
+        'name' => '0',
+    ]);
+
+    ($this->runAliasFallbackMerge)([
+        'enabled' => true,
+        'mode' => 'normalized_name',
+    ]);
+
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $master->id,
+        'channel_failover_id' => $fallback->id,
+    ]);
+});
+
 it('does not strip quality labels during normalized fallback matching', function () {
     ($this->makeMergeChannel)([
         'playlist_id' => $this->primaryPlaylist->id,

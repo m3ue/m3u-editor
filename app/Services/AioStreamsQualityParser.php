@@ -194,7 +194,10 @@ class AioStreamsQualityParser
             return null;
         }
 
-        return (int) ($matches[1] ?: $matches[2]);
+        // A matched "0" (e.g. "👤 0") is a valid seeder count, not a missing one - the
+        // ?: operator treats the string "0" as falsy and fell through to $matches[2],
+        // which doesn't exist for this alternative, raising "Undefined array key 2".
+        return (int) (($matches[1] ?? '') !== '' ? $matches[1] : $matches[2]);
     }
 
     /**

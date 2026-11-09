@@ -3,13 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Jobs\CreateBackup;
+use App\Jobs\PruneOldBackups;
 use App\Settings\GeneralSettings;
-use Carbon\Carbon;
 use Cron\CronExpression;
 use Illuminate\Console\Command;
-use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackup;
-use Spatie\Backup\BackupDestination\Backup;
-use Spatie\Backup\BackupDestination\BackupDestination as SpatieBackupDestination;
+use Illuminate\Support\Facades\Bus;
 
 class RunScheduledBackups extends Command
 {
@@ -40,41 +38,15 @@ class RunScheduledBackups extends Command
 
                 $max = $settings->auto_backup_database_max_backups;
                 $deleteAfterDays = $settings->auto_backup_database_delete_after_days;
-                if ($max > 0 || $deleteAfterDays > 0) {
-                    $data = [];
-                    foreach (FilamentSpatieLaravelBackup::getDisks() as $disk) {
-                        $data = array_merge($data, FilamentSpatieLaravelBackup::getBackupDestinationData($disk));
-                    }
 
-                    // Order by backup date
-                    $data = collect($data)->sortByDesc('date');
-
-                    // Determine which backups should be deleted for exceeding the max backups count...
-                    $toDelete = collect();
-                    if ($max > 0 && $data->count() >= $max) {
-                        $toDelete = $data->slice($max - 1);
-                    }
-
-                    // ...and which should be deleted for being older than the configured retention period
-                    if ($deleteAfterDays > 0) {
-                        $cutoff = now()->subDays($deleteAfterDays);
-                        $expired = $data->filter(fn ($record) => Carbon::parse($record['date'])->lt($cutoff));
-                        $toDelete = $toDelete->merge($expired)->unique('path');
-                    }
-
-                    foreach ($toDelete as $record) {
-                        $this->info("Deleting old backup: {$record['path']}");
-                        SpatieBackupDestination::create($record['disk'], config('backup.backup.name'))
-                            ->backups()
-                            ->first(function (Backup $backup) use ($record) {
-                                return $backup->path() === $record['path'];
-                            })
-                            ->delete();
-                    }
-                }
-
-                // Run the backup
-                app('Illuminate\Contracts\Bus\Dispatcher')->dispatch(new CreateBackup);
+                // Create the replacement backup first, then prune to the configured
+                // max/age limits. Pruning before the replacement exists (the previous
+                // behavior) could leave zero backups available if the replacement
+                // job was delayed or failed.
+                Bus::chain([
+                    new CreateBackup,
+                    new PruneOldBackups($max, $deleteAfterDays, requireBackupSince: now()),
+                ])->dispatch();
             }
         }
     }

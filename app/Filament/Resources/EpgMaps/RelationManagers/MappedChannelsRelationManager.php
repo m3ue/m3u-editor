@@ -127,8 +127,13 @@ class MappedChannelsRelationManager extends RelationManager
                 $affectedPlaylists->push($custom);
             }
         }
+        // clearPlaylistEpgCacheFile() returns false when there was nothing to clear;
+        // Collection::each() stops on the first false return, so the callback must not
+        // forward it or later playlists get silently skipped.
         $affectedPlaylists->unique(fn ($playlist) => $playlist->getTable().'-'.$playlist->id)
-            ->each(fn ($playlist) => EpgCacheService::clearPlaylistEpgCacheFile($playlist));
+            ->each(function ($playlist) {
+                EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+            });
 
         Notification::make()
             ->success()

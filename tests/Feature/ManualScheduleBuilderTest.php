@@ -467,6 +467,32 @@ it('copies a day schedule to another date', function () {
     expect($targetProgs[1]->pinned_start_time->format('Y-m-d H:i'))->toBe('2026-03-07 01:00');
 });
 
+it('weekly template copies a valid next-week entry even when a later day-local sort_order ties resolve out of chronological order (issue #1687)', function () {
+    Carbon::setTestNow($now = Carbon::parse('2026-02-04 00:00:00', 'UTC'));
+
+    $this->network->update(['schedule_window_days' => 10]);
+
+    $builder = Livewire::test(ManualScheduleBuilder::class, ['record' => $this->network->id]);
+
+    // D: two 30-minute entries, day-local sort_order 0 and 1.
+    $builder->call('addProgramme', '2026-02-04', 'UTC', Channel::class, $this->channel->id, 1800);
+    $builder->call('addProgramme', '2026-02-04', 'UTC', Channel::class, $this->channel->id, 1800);
+
+    // D+4: one entry with its own day-local sort_order=0 (ties with D's first entry).
+    $builder->call('addProgramme', '2026-02-08', 'UTC', Channel::class, $this->channel->id, 1800);
+
+    $builder->call('applyWeeklyTemplate');
+
+    // D+7 00:30 (A1's shifted slot) must exist even though B0's shifted D+11 date
+    // falls outside the 10-day window and could end the copy loop prematurely
+    // under a sort_order-only, non-chronological ordering.
+    $copiedA1 = NetworkProgramme::where('network_id', $this->network->id)
+        ->where('start_time', Carbon::parse('2026-02-11 00:30:00', 'UTC'))
+        ->first();
+
+    expect($copiedA1)->not->toBeNull();
+});
+
 it('includes manual programmes in EPG output', function () {
     NetworkProgramme::create([
         'network_id' => $this->network->id,

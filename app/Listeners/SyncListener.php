@@ -304,6 +304,8 @@ class SyncListener
                 data: $data,
                 type: $type,
                 syncMode: $syncMode,
+                channelIds: $type === 'series' ? [] : array_map('intval', (array) ($rule['channels'] ?? [])),
+                channelNamePatterns: $type === 'series' ? [] : array_values(array_filter((array) ($rule['channel_name_patterns'] ?? []), 'is_string')),
             ));
         }
     }

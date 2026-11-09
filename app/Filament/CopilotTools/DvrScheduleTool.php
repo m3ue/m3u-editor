@@ -214,9 +214,10 @@ class DvrScheduleTool extends BaseTool
 
         if ($channel !== '') {
             $channelId = $this->resolveChannelIdForUser($channel, $userId);
-            if ($channelId !== null) {
-                $programmesBuilder->where('channels.id', $channelId);
+            if ($channelId === null) {
+                return "No channel found matching '{$channel}' in your playlists.";
             }
+            $programmesBuilder->where('channels.id', $channelId);
         }
 
         if ($query !== '') {

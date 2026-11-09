@@ -46,16 +46,34 @@ class NetworkBroadcastEnsure extends Command
         // Generate schedule if missing
         if ($network->programmes()->count() === 0) {
             $this->info('Generating schedule...');
-            $scheduleService->generateSchedule($network);
-            $this->info('Schedule generated');
+            $generatedCount = $scheduleService->generateSchedule($network);
+
+            if ($generatedCount > 0) {
+                $this->info('Schedule generated');
+            } else {
+                $this->warn('Schedule generation produced no programmes');
+            }
         }
 
         // Attempt to restart broadcast (stop if running, then start)
         $this->info('Starting/restarting broadcast via heal');
 
         try {
-            $broadcastService->restart($network);
-            $this->info('Broadcast started (or already running)');
+            $started = $broadcastService->restart($network);
+            $network->refresh();
+
+            if ($started) {
+                $this->info('Broadcast started (or already running)');
+            } elseif ($network->isWaitingForConnection()) {
+                // On-demand mode deferring the start until a viewer connects is a
+                // healthy outcome, not a failure - do not report it as either started
+                // or an error.
+                $this->info('Broadcast deferred - waiting for viewer connection (on-demand)');
+            } else {
+                $this->error('Broadcast did not start: '.($network->broadcast_error ?? 'unknown reason'));
+
+                return self::FAILURE;
+            }
         } catch (\Throwable $e) {
             Log::error('Failed to start broadcast via ensure command', ['network_id' => $network->id, 'error' => $e->getMessage()]);
             $this->error('Failed to start broadcast: '.$e->getMessage());

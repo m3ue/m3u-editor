@@ -113,14 +113,17 @@ class PluginScaffoldService
         $pluginId = Str::slug(trim($name));
         $pluginPath = rtrim($targetDirectory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$pluginId;
 
-        if (File::exists($pluginPath)) {
-            if (! $force) {
-                throw new InvalidArgumentException("Plugin directory [{$pluginId}] already exists. Use force to replace it.");
-            }
-            File::deleteDirectory($pluginPath);
+        if (File::exists($pluginPath) && ! $force) {
+            throw new InvalidArgumentException("Plugin directory [{$pluginId}] already exists. Use force to replace it.");
         }
 
+        // Build (and validate) the scaffold's files before touching an existing directory,
+        // so an invalid capability/hook/cleanup mode is rejected without deleting it.
         $files = $this->scaffold($name, $description, $capabilities, $hooks, $cleanupMode, $lifecycle, $bare, $tables);
+
+        if (File::exists($pluginPath)) {
+            File::deleteDirectory($pluginPath);
+        }
 
         File::ensureDirectoryExists($pluginPath);
 

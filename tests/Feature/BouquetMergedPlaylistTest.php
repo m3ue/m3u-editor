@@ -247,3 +247,84 @@ it('creates a merged-target bouquet through the resource, persisting pairs from 
             ['playlist_id' => $this->sourceB->id, 'name' => 'Sports'],
         ]);
 });
+
+it('allows the same bouquet name on two different merged playlists (issue #1760)', function () {
+    $otherMerged = MergedPlaylist::factory()->for($this->user)->create();
+
+    Livewire::test(ListBouquets::class)
+        ->callAction('create', data: [
+            'name' => 'Shared lineup',
+            'target_type' => 'merged_playlist',
+            'target_id' => $this->merged->id,
+            'merged_playlist_id' => $this->merged->id,
+            'playlist_id' => null,
+            'custom_playlist_id' => null,
+        ])
+        ->assertHasNoActionErrors();
+
+    Livewire::test(ListBouquets::class)
+        ->callAction('create', data: [
+            'name' => 'Shared lineup',
+            'target_type' => 'merged_playlist',
+            'target_id' => $otherMerged->id,
+            'merged_playlist_id' => $otherMerged->id,
+            'playlist_id' => null,
+            'custom_playlist_id' => null,
+        ])
+        ->assertHasNoActionErrors();
+
+    expect(Bouquet::where('name', 'Shared lineup')->count())->toBe(2);
+});
+
+it('still rejects reusing a bouquet name on the same merged playlist', function () {
+    Bouquet::factory()->forMergedPlaylist($this->merged)->create([
+        'user_id' => $this->user->id,
+        'name' => 'Shared lineup',
+    ]);
+
+    Livewire::test(ListBouquets::class)
+        ->callAction('create', data: [
+            'name' => 'Shared lineup',
+            'target_type' => 'merged_playlist',
+            'target_id' => $this->merged->id,
+            'merged_playlist_id' => $this->merged->id,
+            'playlist_id' => null,
+            'custom_playlist_id' => null,
+        ])
+        ->assertHasActionErrors(['name']);
+});
+
+it('keeps a bouquet pair whose source currently has Include Live Channels off after a metadata-only save (issue #1688)', function () {
+    $alias = bmMergedAlias($this->user, $this->merged);
+    $bouquet = Bouquet::factory()->forMergedPlaylist($this->merged)->create([
+        'user_id' => $this->user->id,
+        'description' => 'Original description',
+        'group_selections' => ['selected_groups' => [
+            ['playlist_id' => $this->sourceA->id, 'name' => 'Sports'],
+        ]],
+    ]);
+    $alias->bouquets()->attach($bouquet);
+
+    expect($alias->channels()->where('channels.is_vod', false)->pluck('title')->all())->toBe(['A Sports']);
+
+    // Source A stops contributing live content, without detaching it or its
+    // SourceGroup row - its "Sports" source group still exists in the table.
+    $this->merged->playlists()->updateExistingPivot($this->sourceA->id, ['include_live' => false]);
+
+    Livewire::test(ListBouquets::class)
+        ->mountTableAction('edit', $bouquet)
+        ->set('mountedActions.0.data.description', 'Updated description only')
+        ->callMountedTableAction()
+        ->assertHasNoTableActionErrors();
+
+    $bouquet->refresh();
+    expect($bouquet->description)->toBe('Updated description only')
+        ->and($bouquet->getSelectedLiveGroupSelections())->toBe([
+            ['playlist_id' => $this->sourceA->id, 'name' => 'Sports'],
+        ]);
+
+    // Re-enabling the source restores exactly the original selection.
+    $this->merged->playlists()->updateExistingPivot($this->sourceA->id, ['include_live' => true]);
+    $alias->refresh();
+    expect($alias->channels()->where('channels.is_vod', false)->pluck('title')->all())->toBe(['A Sports']);
+});

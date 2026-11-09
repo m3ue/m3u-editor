@@ -81,9 +81,14 @@ class DynamicGroupItemSnapshot extends Model
             return ['added' => collect(), 'removed' => collect(), 'has_previous' => false];
         }
 
+        // item_id 0 is the marker row writeSnapshot() inserts for a run that
+        // matched zero local items - it stands for "this run happened,
+        // membership is empty", not a real item, so it must never leak into
+        // the added/removed sets below.
         $currentIds = static::query()
             ->where('dynamic_group_id', $dynamicGroupId)
             ->where('sync_run_id', $currentRunId)
+            ->where('item_id', '!=', 0)
             ->pluck('item_id');
 
         $previousRunId = static::query()
@@ -99,6 +104,7 @@ class DynamicGroupItemSnapshot extends Model
         $previousIds = static::query()
             ->where('dynamic_group_id', $dynamicGroupId)
             ->where('sync_run_id', $previousRunId)
+            ->where('item_id', '!=', 0)
             ->pluck('item_id');
 
         return [
@@ -121,6 +127,7 @@ class DynamicGroupItemSnapshot extends Model
         return static::query()
             ->where('dynamic_group_id', $dynamicGroupId)
             ->where('sync_run_id', $runId)
+            ->where('item_id', '!=', 0) // exclude the empty-run marker row
             ->get(['item_id', 'item_type'])
             ->keyBy('item_id')
             ->map(fn ($row): string => $row->item_type);

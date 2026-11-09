@@ -1,0 +1,197 @@
+name: Test Build
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Test build name, published as test-<name> (e.g. 1638 or sd-auth-fix)'
+        required: true
+        type: string
+      ref:
+        description: 'Branch, tag or commit SHA to build (defaults to the branch selected above)'
+        required: false
+        type: string
+        default: ''
+      channel:
+        description: 'Channel the build reports as (version shown, update checks, m3u-proxy branch)'
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - experimental
+
+concurrency:
+  group: deploy-test-${{ inputs.name }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/m3u-editor
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Resolve the commit and Docker tag before building
+  resolve:
+    name: Resolve Build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.sha.outputs.sha }}
+      proxy_commit: ${{ steps.proxy.outputs.commit }}
+    steps:
+      - name: Validate build name
+        id: tag
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          if ! echo "$NAME" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,60}$'; then
+            echo "::error::Invalid build name '$NAME' (use lowercase letters, numbers, '.', '_' or '-')"
+            exit 1
+          fi
+          echo "tag=test-$NAME" >> $GITHUB_OUTPUT
+          echo "📦 Docker tag: test-$NAME"
+
+      # Fails if the ref does not exist
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve commit
+        id: sha
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "📦 Commit: $SHA"
+
+      - name: Get m3u-proxy latest commit
+        id: proxy
+        run: |
+          PROXY_COMMIT=$(git ls-remote https://github.com/${{ github.repository_owner }}/m3u-proxy.git refs/heads/${{ inputs.channel }} | cut -f1)
+          if ! echo "$PROXY_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Could not resolve m3u-proxy ${{ inputs.channel }} to a commit SHA (got: '$PROXY_COMMIT')"
+            exit 1
+          fi
+          echo "commit=$PROXY_COMMIT" >> $GITHUB_OUTPUT
+          echo "📦 m3u-proxy commit: $PROXY_COMMIT"
+
+  # Run CI against the exact commit being built
+  ci-check:
+    name: CI Validation
+    needs: [resolve]
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+    secrets: inherit
+
+  push-amd64:
+    name: Build & Push (amd64)
+    runs-on: ubuntu-latest
+    needs: [resolve, ci-check]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push amd64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}-amd64
+          build-args: |
+            GIT_BRANCH=${{ inputs.channel }}
+            GIT_COMMIT=${{ needs.resolve.outputs.sha }}
+            GIT_TAG=${{ needs.resolve.outputs.tag }}
+            M3U_PROXY_REPO=https://github.com/${{ github.repository_owner }}/m3u-proxy.git
+            M3U_PROXY_BRANCH=${{ inputs.channel }}
+            M3U_PROXY_COMMIT=${{ needs.resolve.outputs.proxy_commit }}
+          cache-from: type=gha,scope=test-amd64
+          cache-to: type=gha,mode=max,scope=test-amd64
+          provenance: false
+          sbom: false
+
+  push-arm64:
+    name: Build & Push (arm64)
+    runs-on: ubuntu-22.04-arm
+    needs: [resolve, ci-check]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}-arm64
+          build-args: |
+            GIT_BRANCH=${{ inputs.channel }}
+            GIT_COMMIT=${{ needs.resolve.outputs.sha }}
+            GIT_TAG=${{ needs.resolve.outputs.tag }}
+            M3U_PROXY_REPO=https://github.com/${{ github.repository_owner }}/m3u-proxy.git
+            M3U_PROXY_BRANCH=${{ inputs.channel }}
+            M3U_PROXY_COMMIT=${{ needs.resolve.outputs.proxy_commit }}
+          cache-from: type=gha,scope=test-arm64
+          cache-to: type=gha,mode=max,scope=test-arm64
+          provenance: false
+          sbom: false
+
+  push-manifest:
+    name: Create Multi-arch Manifest
+    runs-on: ubuntu-latest
+    needs: [resolve, push-amd64, push-arm64]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push test manifest
+        run: |
+          docker buildx imagetools create -t ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }} \
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}-amd64 \
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}-arm64
+
+      - name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}
+
+      - name: Summary
+        run: |
+          echo "## 🧪 Test Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY_IMAGE }}:${{ needs.resolve.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ needs.resolve.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Channel:** \`${{ inputs.channel }}\`" >> $GITHUB_STEP_SUMMARY

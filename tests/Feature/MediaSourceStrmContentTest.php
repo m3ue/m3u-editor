@@ -2,6 +2,7 @@
 
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Jobs\SyncVodStrmFiles;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\MediaServerIntegration;
@@ -165,4 +166,43 @@ it('writes the media episode URL into the series strm file when matched', functi
 
     expect($files)->not->toBeEmpty()
         ->and(array_values($files)[0])->toBe('http://app.test/media-server/2/stream/def.mp4');
+});
+
+it('uses the series category as a filename suffix even when category is not also a folder component', function () {
+    $category = Category::factory()->for($this->provider)->for($this->user)->create(['name' => 'Drama']);
+
+    $setting = StreamFileSetting::factory()->for($this->user)->create([
+        'type' => 'series',
+        'enabled' => true,
+        'location' => $this->syncDir,
+        'url_type' => 'original',
+        'path_structure' => [],
+        'filename_metadata' => ['category'],
+    ]);
+
+    $series = Series::factory()->for($this->provider)->for($this->user)->create([
+        'enabled' => true,
+        'name' => 'Sample Show',
+        'category_id' => $category->id,
+        'stream_file_setting_id' => $setting->id,
+    ]);
+    $season = Season::factory()->create(['series_id' => $series->id, 'playlist_id' => $this->provider->id, 'season_number' => 1]);
+    Episode::factory()->for($this->provider)->for($this->user)->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'enabled' => true,
+        'title' => 'Pilot',
+        'url' => 'http://provider.test/sample/1/1.mp4',
+        'container_extension' => 'mp4',
+    ]);
+
+    (new SyncSeriesStrmFiles(series: $series))->handle($this->settings);
+
+    $files = strmFilesIn($this->syncDir);
+    $filenames = array_map('basename', array_keys($files));
+
+    expect($filenames)->toContain('S01E01 - Pilot - Drama.strm')
+        ->not->toContain('S01E01 - Pilot - Uncategorized.strm');
 });

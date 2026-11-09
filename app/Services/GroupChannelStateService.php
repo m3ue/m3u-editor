@@ -6,6 +6,7 @@ use App\Facades\SortFacade;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use App\Models\Group;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Enable/disable every channel in a group, matching the canonical behaviour of
@@ -25,7 +26,7 @@ class GroupChannelStateService
      */
     public function enable(Group $group, bool $dispatchSync = true): void
     {
-        $group->channels()->update(['enabled' => true]);
+        $this->channelsQuery($group)->update(['enabled' => true]);
 
         if ($group->type !== 'live') {
             return;
@@ -37,7 +38,12 @@ class GroupChannelStateService
             ->where('enabled', true)
             ->max('channel') ?? 0;
 
-        SortFacade::bulkRecountGroupChannels($group, $maxChannel + 1);
+        // A merged group never owns channels directly, so the numeric-sort recount
+        // (which matches on group_id) has nothing to renumber here; the descendant
+        // channels keep the numbering they already had under their own child group.
+        if (! $group->is_merged) {
+            SortFacade::bulkRecountGroupChannels($group, $maxChannel + 1);
+        }
 
         if ($dispatchSync) {
             SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_enable');
@@ -49,7 +55,7 @@ class GroupChannelStateService
      */
     public function disable(Group $group, bool $dispatchSync = true): void
     {
-        $group->channels()->update(['enabled' => false]);
+        $this->channelsQuery($group)->update(['enabled' => false]);
 
         if ($group->type !== 'live') {
             return;
@@ -58,5 +64,19 @@ class GroupChannelStateService
         if ($dispatchSync) {
             SyncPlexDvrJob::dispatchIfConfigured(trigger: 'group_disable');
         }
+    }
+
+    /**
+     * Channels this state change should affect: a merged group's descendants when
+     * given a merged parent (which never owns channels directly), otherwise the
+     * group's own channels.
+     */
+    private function channelsQuery(Group $group): Builder
+    {
+        if ($group->is_merged) {
+            return Channel::query()->whereIn('group_id', $group->children()->pluck('id'));
+        }
+
+        return $group->channels()->getQuery();
     }
 }

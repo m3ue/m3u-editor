@@ -12,6 +12,7 @@ use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessVodChannels implements ShouldQueue
@@ -185,6 +186,14 @@ class ProcessVodChannels implements ShouldQueue
         $completionJob = $this->completionJob;
         $syncRunId = $this->syncRunId;
 
+        // Reset this run's per-channel outcome counters. Channel::fetchMetadata()
+        // swallows provider failures and returns false rather than throwing, so
+        // Bus::batch()'s own failedJobs count never reflects per-channel failures -
+        // these counters are how the finally callback below tells them apart from
+        // a fully successful run.
+        Cache::forever(ProcessVodChannelsChunk::attemptedCacheKey($playlist->id), 0);
+        Cache::forever(ProcessVodChannelsChunk::failedCacheKey($playlist->id), 0);
+
         // Dispatch the chunks as a batch rather than a chain: chunks are independent
         // and idempotent (whereNull('last_metadata_fetch')), so one chunk failing
         // (e.g. a transient SQLite lock) must not discard every other chunk still
@@ -198,20 +207,27 @@ class ProcessVodChannels implements ShouldQueue
             ->allowFailures()
             ->finally(function (Batch $batch) use ($playlist, $completionJob, $syncRunId): void {
                 if ($batch->failedJobs > 0) {
-                    $error = "{$batch->failedJobs} of {$batch->totalJobs} VOD chunk(s) failed while processing \"{$playlist->name}\". Successfully processed channels were kept; failed ones will be retried on the next sync.";
+                    $error = __(':failed of :total VOD chunk(s) failed while processing ":playlist". Successfully processed channels were kept; failed ones will be retried on the next sync.', ['failed' => $batch->failedJobs, 'total' => $batch->totalJobs, 'playlist' => $playlist->name]);
                     Log::warning($error);
                     Notification::make()
                         ->warning()
-                        ->title("VOD sync completed with errors on \"{$playlist->name}\"")
+                        ->title(__('VOD sync completed with errors on ":playlist"', ['playlist' => $playlist->name]))
                         ->body($error)
                         ->broadcast($playlist->user)
                         ->sendToDatabase($playlist->user);
                 }
 
+                $metadataAttempted = (int) Cache::get(ProcessVodChannelsChunk::attemptedCacheKey($playlist->id), 0);
+                $metadataFailed = (int) Cache::get(ProcessVodChannelsChunk::failedCacheKey($playlist->id), 0);
+                Cache::forget(ProcessVodChannelsChunk::attemptedCacheKey($playlist->id));
+                Cache::forget(ProcessVodChannelsChunk::failedCacheKey($playlist->id));
+
                 dispatch(new ProcessVodChannelsComplete(
                     playlist: $playlist,
                     completionJob: $completionJob,
                     syncRunId: $syncRunId,
+                    metadataAttempted: $metadataAttempted,
+                    metadataFailed: $metadataFailed,
                 ));
             })
             ->dispatch();

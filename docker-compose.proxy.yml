@@ -40,6 +40,9 @@ services:
       - PG_USER=${PG_USER:-m3ue}
       - PG_PASSWORD=${PG_PASSWORD:-changeme}
       - PG_PORT=${PG_PORT:-5432}
+      - POSTGRES_VERSION=${POSTGRES_VERSION:-17} # Set to 18 + restart to upgrade embedded Postgres in place
+      - POSTGRES_ROLLBACK=${POSTGRES_ROLLBACK:-false} # Required alongside a lowered POSTGRES_VERSION to actually roll back
+      - PG_CLIENT_VERSION=${PG_CLIENT_VERSION:-}
       
       # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql
@@ -117,7 +120,7 @@ services:
     restart: unless-stopped
     # Don't expose port externally - only accessible via internal network
     # ports:
-    #   - "${PROXY_PORT:-38085}:${PROXY_PORT:-38085}"  # Uncomment only if you need direct external access
+    #   - "${M3U_PROXY_PORT:-38085}:${M3U_PROXY_PORT:-38085}"  # Uncomment only if you need direct external access
     networks:
       - m3u-network
     depends_on:
@@ -126,7 +129,7 @@ services:
     #devices:
     #  - /dev/dri:/dev/dri
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:${PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:${M3U_PROXY_PORT:-38085}/health?api_token=${M3U_PROXY_TOKEN:-changeme}"]
       interval: 30s
       timeout: 2s
       retries: 12

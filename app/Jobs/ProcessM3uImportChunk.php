@@ -115,7 +115,7 @@ class ProcessM3uImportChunk implements ShouldQueue
                 'catchup_source',
                 'shift',
                 // 'tvg_shift', // new field for TVG shift (don't update user overridden value)
-                'is_vod', // new field for VOD
+                // 'is_vod', // part of the upsert key
                 'container_extension', // new field for container extension
                 'year', // new field for year
                 'rating', // new field for rating
@@ -126,8 +126,19 @@ class ProcessM3uImportChunk implements ShouldQueue
                 $updateColumns[] = 'sort';
             }
 
+            // `group_id` is not in the update list, so re-home channels the provider moved here first
+            if ($groupId) {
+                $bulk = ProcessM3uImport::applyProviderGroupMoves(
+                    (int) $job->variables['playlistId'],
+                    (int) $groupId,
+                    $groupName,
+                    $bulk,
+                    $job->batch_no,
+                );
+            }
+
             // Upsert the channels
-            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: $updateColumns);
+            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id', 'is_vod'], update: $updateColumns);
         }
     }
 }

@@ -56,7 +56,7 @@ class SourceGroupsTable
             ->columns([
                 TextColumn::make('name')
                     ->label(__('Group Name'))
-                    ->formatStateUsing(fn ($state, $record) => filled($record->display_name) ? $record->display_name : $state)
+                    ->formatStateUsing(fn ($state, $record) => SourceGroup::labelWithProviderName($record->display_name, $state))
                     // Match the displayed (custom) name as well as the source name. Uses
                     // LOWER(...) on both sides so it stays case-insensitive on PostgreSQL,
                     // whose LIKE is case-sensitive (unlike SQLite/MySQL).

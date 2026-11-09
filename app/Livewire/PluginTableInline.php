@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Models\Plugin;
 use App\Models\PluginTableRecord;
 use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUiRequestCache;
 use App\Plugins\PluginUiTableRegistry;
 use App\Services\DateFormatService;
 use Filament\Actions\Action;
@@ -28,7 +29,6 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -66,7 +66,7 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
         $plugin = $this->record;
         $definition = app(PluginUiTableRegistry::class)->tableFor($plugin, $this->tableId);
 
-        if ($definition !== null && Schema::hasTable((string) $definition['table'])) {
+        if ($definition !== null && app(PluginUiRequestCache::class)->hasTable((string) $definition['table'])) {
             $this->tableDefinition = $definition;
             app(PluginUiTableRegistry::class)->prefillRows($plugin, $definition);
         }
@@ -98,9 +98,9 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
             }
         }
 
-        if ($tableName && Schema::hasColumn($tableName, 'updated_at')) {
+        if ($tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'updated_at')) {
             $table->defaultSort('updated_at', 'desc');
-        } elseif ($tableName && Schema::hasColumn($tableName, 'id')) {
+        } elseif ($tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'id')) {
             $table->defaultSort('id', 'desc');
         }
 
@@ -295,19 +295,19 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     {
         $tableName = $this->tableName();
 
-        if ($tableName && Schema::hasColumn($tableName, 'extension_plugin_id')) {
+        if ($tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_id')) {
             $data['extension_plugin_id'] = $this->record->getKey();
         }
 
-        if ($this->runId !== null && $tableName && Schema::hasColumn($tableName, 'extension_plugin_run_id')) {
+        if ($this->runId !== null && $tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_run_id')) {
             $data['extension_plugin_run_id'] = $this->runId;
         }
 
-        if ($this->playlistId !== null && $tableName && Schema::hasColumn($tableName, 'playlist_id')) {
+        if ($this->playlistId !== null && $tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'playlist_id')) {
             $data['playlist_id'] = $this->playlistId;
         }
 
-        if ($creating && $tableName && Schema::hasColumn($tableName, 'user_id') && blank($data['user_id'] ?? null)) {
+        if ($creating && $tableName && app(PluginUiRequestCache::class)->hasColumn($tableName, 'user_id') && blank($data['user_id'] ?? null)) {
             $data['user_id'] = auth()->id();
         }
 
@@ -357,20 +357,20 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
 
         $filters = [];
 
-        if ($this->runId === null && Schema::hasColumn($tableName, 'extension_plugin_run_id')) {
+        if ($this->runId === null && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_run_id')) {
             $filters[] = SelectFilter::make('extension_plugin_run_id')
                 ->label(__('Run'))
                 ->options(fn (): array => $this->runFilterOptions());
         }
 
-        if ($this->playlistId === null && Schema::hasColumn($tableName, 'playlist_id')) {
+        if ($this->playlistId === null && app(PluginUiRequestCache::class)->hasColumn($tableName, 'playlist_id')) {
             $filters[] = SelectFilter::make('playlist_id')
                 ->label(__('Playlist'))
                 ->options(fn (): array => $this->playlistFilterOptions());
         }
 
         foreach (['result_type' => __('Type'), 'decision' => __('Decision')] as $column => $label) {
-            if (Schema::hasColumn($tableName, $column)) {
+            if (app(PluginUiRequestCache::class)->hasColumn($tableName, $column)) {
                 $filters[] = SelectFilter::make($column)
                     ->label($label)
                     ->options(fn (): array => $this->filterOptions($column));
@@ -434,7 +434,7 @@ class PluginTableInline extends Component implements HasActions, HasForms, HasTa
     {
         $options = $this->filterOptions('playlist_id');
         $ids = array_keys($options);
-        if ($ids === [] || ! Schema::hasTable('playlists')) {
+        if ($ids === [] || ! app(PluginUiRequestCache::class)->hasTable('playlists')) {
             return $options;
         }
 

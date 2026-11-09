@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
+beforeEach(fn () => fakeSchedulesDirectChangeDetection());
+
 it('fetches station artwork and includes in XMLTV', function () {
     $user = User::factory()->create();
 
@@ -251,4 +253,16 @@ it('adds no extra image when a 16:9 one is already among the picks', function ()
 
     expect(collect($artwork['SH012345670000'])->map(fn (array $image) => basename($image['url']))->all())
         ->toBe(['wide.jpg', 'square.jpg']);
+});
+
+it('versions proxied artwork URLs with the image lastUpdate', function () {
+    Http::fake(fn ($request) => Http::response([[
+        'programID' => 'EP000000010002',
+        'data' => [[...sdImage('episode-wide.jpg', 'Iconic', '16x9', 960, 540, 'Episode'), 'lastUpdate' => '2018-06-05T20:48:00Z']],
+    ]]));
+
+    $artwork = (new SchedulesDirectService)->getProgramArtwork('token', ['EP000000010002'], 'epg-uuid');
+
+    expect($artwork['EP000000010002'][0]['url'])->toEndWith('/schedules-direct/epg-uuid/image/episode-wide.jpg?v='.strtotime('2018-06-05T20:48:00Z'))
+        ->and($artwork['EP000000010002'][0]['last_update'])->toBe(strtotime('2018-06-05T20:48:00Z'));
 });

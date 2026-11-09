@@ -9,6 +9,7 @@ use App\Models\DeviceAuthorization;
 use App\Models\PlaylistAuth;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -19,6 +20,7 @@ use Filament\Schemas\Schema;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 
 class PairDevice extends Page
 {
@@ -56,7 +58,7 @@ class PairDevice extends Page
 
     public function getSubheading(): string|Htmlable|null
     {
-        return __('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.');
+        return __('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credentials to sign it in with.');
     }
 
     public function mount(): void
@@ -65,8 +67,18 @@ class PairDevice extends Page
 
         $this->data = [
             'user_code' => self::normalizeUserCode($code),
-            'playlist_auth_id' => null,
+            'playlist_auth_ids' => self::emptyCredentialRows(),
         ];
+    }
+
+    /**
+     * One empty row, keyed the way Filament keys repeater items.
+     *
+     * @return array<string, null>
+     */
+    private static function emptyCredentialRows(): array
+    {
+        return [(string) Str::uuid() => null];
     }
 
     public function content(Schema $schema): Schema
@@ -76,7 +88,7 @@ class PairDevice extends Page
                 Section::make(__('Pair a Device'))
                     ->icon('heroicon-o-qr-code')
                     ->compact()
-                    ->description(__('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credential to sign it in with.'))
+                    ->description(__('Enter the code shown on M3U TV, or scan its QR code with your phone, then choose which credentials to sign it in with.'))
                     ->schema([
                         TextInput::make('user_code')
                             ->label(__('Device Code'))
@@ -85,18 +97,27 @@ class PairDevice extends Page
                             ->placeholder('XXXX-XXXX')
                             ->mask('****-****')
                             ->stripCharacters('-'),
-                        Select::make('playlist_auth_id')
+                        Repeater::make('playlist_auth_ids')
                             ->label(__('Grant Access As'))
-                            ->required()
-                            ->searchable()
+                            ->simple(
+                                Select::make('playlist_auth_id')
+                                    ->label(__('Credential'))
+                                    ->required()
+                                    ->searchable()
+                                    ->distinct()
+                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                                    ->options(fn (): array => PlaylistAuth::where('user_id', auth()->id())->pluck('name', 'id')->all()),
+                            )
+                            ->minItems(1)
+                            ->reorderable()
+                            ->addActionLabel(__('Add credential'))
                             ->hintAction(Action::make('manage')
                                 ->icon('heroicon-o-arrow-top-right-on-square')
                                 ->iconPosition('after')
                                 ->label(__('Manage Auth'))
                                 ->url(PlaylistAuthResource::getUrl())
                                 ->openUrlInNewTab())
-                            ->options(fn (): array => PlaylistAuth::where('user_id', auth()->id())->pluck('name', 'id')->all())
-                            ->helperText(__('M3U TV will sign in using this credential\'s username and password.')),
+                            ->helperText(__('M3U TV saves each credential as a playlist, in this order, and signs in with the first one.')),
                     ]),
                 SchemaActions::make([
                     Action::make('approve')
@@ -161,11 +182,17 @@ class PairDevice extends Page
             return;
         }
 
-        $playlistAuth = PlaylistAuth::where('id', $data['playlist_auth_id'] ?? null)
-            ->where('user_id', auth()->id())
-            ->first();
+        $playlistAuthIds = collect($data['playlist_auth_ids'] ?? [])
+            ->filter()
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
 
-        if ($playlistAuth === null) {
+        $ownedCount = PlaylistAuth::whereIn('id', $playlistAuthIds)
+            ->where('user_id', auth()->id())
+            ->count();
+
+        if ($playlistAuthIds->isEmpty() || $ownedCount !== $playlistAuthIds->count()) {
             RateLimiter::hit($rateLimitKey, 600);
 
             Notification::make()
@@ -176,10 +203,11 @@ class PairDevice extends Page
             return;
         }
 
-        DB::transaction(function () use ($deviceAuth, $playlistAuth): void {
+        DB::transaction(function () use ($deviceAuth, $playlistAuthIds): void {
             $deviceAuth->update([
                 'status' => 'approved',
-                'playlist_auth_id' => $playlistAuth->id,
+                'playlist_auth_id' => $playlistAuthIds->first(),
+                'playlist_auth_ids' => $playlistAuthIds->all(),
                 'approved_by_user_id' => auth()->id(),
                 'approved_ip' => request()->ip(),
             ]);
@@ -187,7 +215,7 @@ class PairDevice extends Page
 
         RateLimiter::clear($rateLimitKey);
 
-        $this->data = ['user_code' => '', 'playlist_auth_id' => null];
+        $this->data = ['user_code' => '', 'playlist_auth_ids' => self::emptyCredentialRows()];
 
         Notification::make()
             ->success()

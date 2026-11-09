@@ -23,6 +23,7 @@ class ArrIntegration extends Model
             'cache_enabled' => 'boolean',
             'cache_cleanup' => 'boolean',
             'cache_failback' => 'boolean',
+            'is_default_cache_target' => 'boolean',
             'api_key' => 'encrypted',
             'last_test_at' => 'datetime',
             'quality_profile_id' => 'integer',
@@ -41,6 +42,18 @@ class ArrIntegration extends Model
         static::creating(function (self $model) {
             if (empty($model->webhook_secret)) {
                 $model->webhook_secret = (string) Str::uuid();
+            }
+        });
+
+        // At most one default cache target per user, per integration type.
+        static::saved(function (self $model) {
+            if ($model->is_default_cache_target) {
+                static::query()
+                    ->where('user_id', $model->user_id)
+                    ->where('type', $model->type)
+                    ->whereKeyNot($model->id)
+                    ->where('is_default_cache_target', true)
+                    ->update(['is_default_cache_target' => false]);
             }
         });
     }

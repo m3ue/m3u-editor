@@ -345,3 +345,53 @@ it('generates a schedule when the network contains only pinned content in shuffl
     expect($generated)->toBe(1)
         ->and(NetworkProgramme::where('network_id', $network->id)->count())->toBe(1);
 });
+
+it('does not overlap a pin with the protected currently-airing programme', function () {
+    // Monday 2026-01-05 08:00 UTC - a programme is already airing [07:50, 08:50],
+    // and a pin is anchored for today at 08:20, squarely inside that interval
+    // (and after $startFrom, so the window-start guard doesn't skip it for an
+    // unrelated reason before the collision check ever runs).
+    Carbon::setTestNow(Carbon::parse('2026-01-05 08:00:00'));
+
+    $network = Network::factory()->create([
+        'schedule_type' => 'sequential',
+        'loop_content' => true,
+        'schedule_window_days' => 7,
+        'auto_regenerate_schedule' => false,
+    ]);
+
+    $filler = makePinChannel(1800);
+    addPinContent($network, $filler, ['sort_order' => 1]);
+
+    $currentChannel = makePinChannel(3600);
+    $currentProgramme = NetworkProgramme::create([
+        'network_id' => $network->id,
+        'title' => 'Currently Airing',
+        'start_time' => Carbon::parse('2026-01-05 07:50:00'),
+        'end_time' => Carbon::parse('2026-01-05 08:50:00'),
+        'duration_seconds' => 3600,
+        'contentable_type' => Channel::class,
+        'contentable_id' => $currentChannel->id,
+    ]);
+
+    $pin = makePinChannel(1800);
+    addPinContent($network, $pin, [
+        'sort_order' => 2,
+        'pin_day_of_week' => 'monday',
+        'pin_time_of_day' => '08:20',
+    ]);
+
+    app(NetworkScheduleService::class)->generateSchedule($network, forceReset: false);
+
+    $pinnedProgramme = NetworkProgramme::where('network_id', $network->id)
+        ->where('contentable_id', $pin->id)
+        ->first();
+
+    // The protected currently-airing programme survives untouched, and the colliding
+    // pin occurrence is skipped the same way a pin-vs-pin collision already is.
+    expect(NetworkProgramme::find($currentProgramme->id))
+        ->not->toBeNull()
+        ->and(NetworkProgramme::find($currentProgramme->id)->end_time->toDateTimeString())
+        ->toBe('2026-01-05 08:50:00')
+        ->and($pinnedProgramme)->toBeNull();
+});

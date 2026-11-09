@@ -7,6 +7,7 @@ use App\Models\CustomPlaylist;
 use App\Models\EpgChannel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\EpgCacheService;
 use App\Services\ProviderMigrationPlanner;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -112,6 +113,12 @@ class CopyAttributesToPlaylist implements ShouldQueue
             return $results;
         }
 
+        // Bulk channel writes skip model events, so drop the target's generated
+        // XMLTV/gzip guide; otherwise copied EPG mappings stay invisible until it expires.
+        if ($results > 0) {
+            EpgCacheService::clearPlaylistEpgCacheFile($playlist);
+        }
+
         // If here, success! Notify the user
         $body = $this->migrationMode
             ? "\"{$sourcePlaylist->name}\" configuration migrated onto \"{$playlist->name}\". ".$this->summarizeReport()
@@ -190,8 +197,25 @@ class CopyAttributesToPlaylist implements ShouldQueue
             $sourceGroupSortOrders[strtolower($g->name ?? '')] = $g->sort_order ?? 0;
         }
 
-        // Build the target fields to select for matching
-        $targetFieldsToSelect = array_unique(array_merge(['id'], $this->channelMatchAttributes));
+        // Build the target fields to select for matching. These also need every
+        // custom/attribute field that buildUpdateData()'s overwrite guard reads -
+        // otherwise an unselected field looks empty on the target and the guard
+        // wrongly allows an overwrite even when "Overwrite Existing Attributes"
+        // is off.
+        $targetFieldsToSelect = array_unique(array_merge(['id'], $this->channelMatchAttributes, [
+            'name_custom',
+            'title_custom',
+            'stream_id_custom',
+            'logo',
+            'enabled',
+            'group',
+            'group_id',
+            'shift',
+            'channel',
+            'channel_minor',
+            'station_id',
+            'sort',
+        ]));
 
         // If we're creating missing channels, we process from source → target
         // Otherwise, we process from target → source (for updates only)
@@ -976,7 +1000,16 @@ class CopyAttributesToPlaylist implements ShouldQueue
             }
 
             // Normalize the value for consistent matching
-            $keyParts[] = strtolower(trim((string) $value));
+            $keyPart = strtolower(trim((string) $value));
+
+            // The "Channel Number" match attribute must compare the full sub-channel
+            // number (major.minor, e.g. 5.1), not just the major number - otherwise
+            // 5.1 and 5.2 are treated as the same channel.
+            if ($attribute === 'channel') {
+                $keyPart .= '.'.strtolower(trim((string) ($channel->channel_minor ?? '')));
+            }
+
+            $keyParts[] = $keyPart;
         }
 
         // Create a composite key by joining all parts with a delimiter

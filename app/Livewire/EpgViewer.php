@@ -52,6 +52,13 @@ class EpgViewer extends Component implements HasActions, HasForms
     #[Locked]
     public $editingChannelId = null;
 
+    /**
+     * The guide date the JS viewer was showing when the edit modal was opened, so a save
+     * refreshes that same day's programmes instead of always today's.
+     */
+    #[Locked]
+    public $editingDate = null;
+
     #[Locked]
     public $viewOnly = false;
 
@@ -195,6 +202,7 @@ class EpgViewer extends Component implements HasActions, HasForms
                     $this->dispatch('refresh-epg-data', $channelData);
                 }
                 $this->editingChannelId = null;
+                $this->editingDate = null;
             })
             ->slideOver()
             ->modalWidth('4xl');
@@ -422,8 +430,9 @@ class EpgViewer extends Component implements HasActions, HasForms
     protected function fetchProgrammeData($epgChannel, $channelId, int $tvgShift = 0)
     {
         try {
-            // Get today's date for programme lookup
-            $today = now()->format('Y-m-d');
+            // Use the date the JS viewer was showing when the edit was opened, so the
+            // refreshed payload matches the currently visible day instead of always today.
+            $today = $this->editingDate ?? now()->format('Y-m-d');
 
             // Get the EPG that this channel belongs to - ensure it's fully loaded
             $epg = $epgChannel->epg;
@@ -461,9 +470,10 @@ class EpgViewer extends Component implements HasActions, HasForms
         }
     }
 
-    public function openChannelEdit($channelId)
+    public function openChannelEdit($channelId, ?string $date = null)
     {
         $this->editingChannelId = $channelId;
+        $this->editingDate = $date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : null;
         $this->mountAction('editChannel');
     }
 

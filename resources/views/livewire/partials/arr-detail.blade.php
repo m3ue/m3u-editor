@@ -1,4 +1,23 @@
 <div x-init="$wire.call('loadDetailEpisodes')">
+    @if ($detailResult && count($detailCandidates) > 1)
+        <div class="border-b border-gray-200 bg-gray-50/60 px-4 py-2.5 dark:border-gray-700 dark:bg-white/[0.02]">
+            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {{ __('Request Destination') }}
+            </label>
+            <x-filament::input.wrapper class="w-full">
+                <x-filament::input.select wire:change="switchDetailIntegration($event.target.value)">
+                    @foreach ($detailCandidates as $candidate)
+                        <option
+                            value="{{ $candidate['integrationId'] }}"
+                            @selected((int) $candidate['integrationId'] === $detailIntegration?->id)
+                        >
+                            {{ $candidate['integrationName'] }}
+                        </option>
+                    @endforeach
+                </x-filament::input.select>
+            </x-filament::input.wrapper>
+        </div>
+    @endif
     @if ($detailResult)
         @php
             $detailIsSonarr = ($detailResult['integrationType'] ?? '') === 'sonarr';
@@ -169,7 +188,7 @@
                                 x-bind:class="{ 'rotate-90': open }"
                             />
                             <span class="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                                {{ __('Interactive Search') }}{{ $detailReleasesLabel ? ' — ' . $detailReleasesLabel : '' }}
+                                {{ __('Interactive Search') }}{{ $detailReleasesLabel ? ' - ' . $detailReleasesLabel : '' }}
                             </span>
                             <span wire:loading wire:target="loadDetailReleases,loadEpisodeReleases"
                                 ><x-filament::loading-indicator class="text-primary-500 h-3 w-3"

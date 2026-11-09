@@ -13,6 +13,10 @@ class PluginHookDispatcher
 
     public function dispatch(string $hook, array $payload = [], array $options = []): Collection
     {
+        if (! config('plugins.enabled', true)) {
+            return collect();
+        }
+
         $plugins = $this->pluginManager->enabledPluginsForHook($hook);
 
         $plugins->each(function ($plugin) use ($hook, $payload, $options) {

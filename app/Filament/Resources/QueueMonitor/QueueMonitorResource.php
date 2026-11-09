@@ -166,6 +166,15 @@ class QueueMonitorResource extends Resource
                     ->button()->hiddenLabel()->size('sm')
                     ->visible(fn (QueueMonitor $record): bool => $record->failed)
                     ->action(function (QueueMonitor $record): void {
+                        if (app('queue.failer')->find($record->job_id) === null) {
+                            Notification::make()
+                                ->title(__('Failed job is no longer available to retry'))
+                                ->warning()
+                                ->send();
+
+                            return;
+                        }
+
                         Artisan::call('queue:retry', ['id' => [$record->job_id]]);
 
                         Notification::make()
@@ -189,11 +198,23 @@ class QueueMonitorResource extends Resource
                         ->icon('heroicon-m-arrow-path')
                         ->color('warning')
                         ->action(function (Collection $records): void {
-                            $ids = $records->where('failed', true)->pluck('job_id')->all();
+                            $failer = app('queue.failer');
 
-                            if (! empty($ids)) {
-                                Artisan::call('queue:retry', ['id' => $ids]);
+                            $ids = $records->where('failed', true)
+                                ->pluck('job_id')
+                                ->filter(fn (string $jobId): bool => $failer->find($jobId) !== null)
+                                ->all();
+
+                            if (empty($ids)) {
+                                Notification::make()
+                                    ->title(__('No failed jobs are available to retry'))
+                                    ->warning()
+                                    ->send();
+
+                                return;
                             }
+
+                            Artisan::call('queue:retry', ['id' => $ids]);
 
                             Notification::make()
                                 ->title(__('Failed jobs queued for retry'))

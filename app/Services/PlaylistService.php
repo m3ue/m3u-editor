@@ -192,7 +192,7 @@ class PlaylistService
 
     /**
      * The credentials to embed in a playlist's M3U/HDHR URLs: the first enabled
-     * Playlist Auth, then an alias' own credentials, then the owner's Custom
+     * unexpired Playlist Auth, then an alias' own credentials, then the owner's Custom
      * Password login. UUID login leaves the URLs credential-free (the UUID in the
      * path already grants access), and a disabled default login has none to give.
      *
@@ -202,13 +202,13 @@ class PlaylistService
     public static function getOutputCredentials($playlist): ?object
     {
         if (method_exists($playlist, 'playlistAuths')) {
-            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
+            $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->notExpired()->first();
             if ($playlistAuth) {
                 return $playlistAuth;
             }
         }
 
-        if ($playlist instanceof PlaylistAlias && $playlist->authObject) {
+        if ($playlist instanceof PlaylistAlias && $playlist->authObject && ! $playlist->isExpired()) {
             return $playlist->authObject;
         }
 
@@ -528,7 +528,10 @@ class PlaylistService
      */
     public function authenticate($username, $password): array|bool
     {
-        if (empty($username) || empty($password)) {
+        // empty() treats the string "0" as empty, which would reject a deliberately
+        // saved Custom Password of "0" before it ever reaches the resolver below,
+        // even though every other default-login consumer accepts that value (#1761).
+        if (! filled($username) || ! filled($password)) {
             return false;
         }
 
@@ -709,11 +712,13 @@ class PlaylistService
         // SIPTV/TiviMate sends utc/lutc as UNIX epochs (UTC)
         $xtreamTimeshiftPresent = $request->filled('timeshift_duration') && $request->filled('timeshift_date');
 
-        // Use the portal/provider timezone (DST-aware). Standard playlists carry their own
-        // server_timezone; Custom/Merged/Alias playlists can be composed of channels from
-        // several different source playlists, so resolve via the channel's own originating
-        // playlist instead. Last resort UTC.
-        $timezoneSource = $playlist instanceof Playlist ? $playlist : $channel?->playlist;
+        // Use the portal/provider timezone (DST-aware). Resolve via the channel's own
+        // originating playlist first: a catchup failover can swap in a channel from a
+        // different provider than the credentials playlist, and the archive window must be
+        // built using that provider's timezone, not the one the client authenticated against.
+        // Custom/Merged/Alias playlists can likewise be composed of channels from several
+        // different source playlists. Last resort UTC.
+        $timezoneSource = $channel?->playlist ?? ($playlist instanceof Playlist ? $playlist : null);
         $providerTz = $timezoneSource?->server_timezone
             ?? $timezoneSource?->xtream_status['server_info']['timezone']
             ?? 'Etc/UTC';
@@ -1851,7 +1856,7 @@ class PlaylistService
     }
 
     /**
-     * Merge the selected Group/Category records' provider-stable names into a
+     * Merge the selected Group/Category records' stable names (name_internal) into a
      * bouquet's selections. Public static so tests can exercise the handler
      * directly. $type: 'live' | 'vod' | 'category'.
      */
@@ -1860,24 +1865,6 @@ class PlaylistService
         $bouquet = Bouquet::where('user_id', auth()->id())->find($bouquetId);
         if (! $bouquet || ! $bouquet->playlist_id) {
             Notification::make()->danger()->title(__('Bouquet not found'))->send();
-
-            return;
-        }
-
-        // Custom groups (user-created, no matching SourceGroup row) only ever match
-        // is_custom channels via the fallback name path - provider channels moved into
-        // them never match. Adding them to a bouquet would make the staleness tooling
-        // falsely flag them, and "Clean up missing" would then delete a half-working
-        // selection. Category records have no `custom` column at all.
-        $originalCount = $records->count();
-        $records = $records->reject(fn ($record) => $record->custom ?? false)->values();
-        $skippedCustomCount = $originalCount - $records->count();
-
-        if ($records->isEmpty()) {
-            Notification::make()
-                ->danger()
-                ->title(__('Custom groups cannot be added to bouquets'))
-                ->send();
 
             return;
         }
@@ -1916,9 +1903,6 @@ class PlaylistService
             'added' => $added,
             'existing' => $names->count() - $added,
         ]);
-        if ($skippedCustomCount > 0) {
-            $body .= ' '.__(':skipped custom group(s) skipped.', ['skipped' => $skippedCustomCount]);
-        }
 
         Notification::make()
             ->success()

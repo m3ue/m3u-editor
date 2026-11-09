@@ -10,6 +10,7 @@ use App\Jobs\CompleteSyncPhase;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MatchMediaServerSources;
 use App\Jobs\MergeChannels;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessChannelScrubber;
@@ -492,7 +493,7 @@ class SyncPipelineService
                 return ($rule['group_filter'] ?? 'selected') === 'new_only' || ! empty($rule['groups'] ?? []);
             });
 
-        $jobs = $rules->map(function (array $rule) use ($playlist): ?AutoSyncGroupsToCustomPlaylist {
+        $jobs = $rules->map(function (array $rule) use ($playlist, $run): ?AutoSyncGroupsToCustomPlaylist {
             $groupFilter = $rule['group_filter'] ?? 'selected';
 
             if ($groupFilter === 'new_only') {
@@ -500,6 +501,8 @@ class SyncPipelineService
                 $groupIds = Group::where('playlist_id', $playlist->id)
                     ->where('type', $groupType)
                     ->where('new', true)
+                    // Restored groups are flagged new for the sync log, but only groups created this run count here
+                    ->when($run->started_at, fn ($query, $startedAt) => $query->where('created_at', '>=', $startedAt))
                     ->pluck('id')
                     ->map(fn ($id): int => (int) $id)
                     ->all();
@@ -523,6 +526,12 @@ class SyncPipelineService
                 ],
                 type: $rule['type'] === 'series_categories' ? 'series' : 'channel',
                 syncMode: $rule['sync_mode'] ?? 'full_sync',
+                channelIds: $groupFilter === 'new_only' || $rule['type'] === 'series_categories'
+                    ? []
+                    : array_map('intval', (array) ($rule['channels'] ?? [])),
+                channelNamePatterns: $groupFilter === 'new_only' || $rule['type'] === 'series_categories'
+                    ? []
+                    : array_values(array_filter((array) ($rule['channel_name_patterns'] ?? []), 'is_string')),
             );
         })->filter()->values()->all();
 
@@ -614,6 +623,24 @@ class SyncPipelineService
         Log::error("SyncPipeline: Run {$run->id} failed — {$reason}");
     }
 
+    /**
+     * Stop a playlist's in-flight sync when the user resets its status. Its
+     * running SyncRun is cancelled, so no further phase is dispatched and the
+     * next sync starts a fresh run, and its queued import jobs are skipped
+     * (see SkipIfSyncReset).
+     */
+    public function cancelActiveRuns(Playlist $playlist): void
+    {
+        SkipIfSyncReset::recordReset($playlist);
+
+        $playlist->syncRuns()
+            ->where('status', SyncRunStatus::Running->value)
+            ->update([
+                'status' => SyncRunStatus::Cancelled->value,
+                'finished_at' => now(),
+            ]);
+    }
+
     // ── Pipeline builder ─────────────────────────────────────────────────────
 
     /** @return SyncRunPhase[] */
@@ -656,7 +683,7 @@ class SyncPipelineService
         $autoProbeVod = (bool) $playlist->auto_probe_vod_streams;
         $probeIncludesDisabled = (bool) ($playlist->auto_probe_vod_streams_include_disabled ?? false);
 
-        $probeVod = $autoProbeVod && ($hasVod || ($hasSeries && $probeIncludesDisabled
+        $probeVod = $autoProbeVod && ($hasVod || ($probeIncludesDisabled
             && $playlist->channels()->where('is_vod', true)->exists()));
 
         $probeSeries = $autoProbeVod && ($hasSeries || ($hasVod && $playlist->episodes()

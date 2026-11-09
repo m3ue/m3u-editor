@@ -8,6 +8,7 @@ use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\User;
 use App\Models\ViewerWatchProgress;
+use App\Services\WatchProgressLinker;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -196,4 +197,86 @@ it('stores tmdb_id when recording vod watch progress', function () {
     $response->assertOk();
 
     expect(ViewerWatchProgress::where('stream_id', $channel->id)->first()->tmdb_id)->toBe(550);
+});
+
+function orphanedEpisodeProgress(PlaylistViewer $viewer, Series $series, int $season, int $episode, array $attributes = []): ViewerWatchProgress
+{
+    return ViewerWatchProgress::create(array_merge([
+        'playlist_viewer_id' => $viewer->id,
+        'content_type' => 'episode',
+        'stream_id' => 999999,
+        'series_id' => $series->id,
+        'season_number' => $season,
+        'episode_number' => $episode,
+        'tmdb_id' => null,
+        'position_seconds' => 120,
+        'duration_seconds' => 1800,
+        'completed' => false,
+        'last_watched_at' => now(),
+    ], $attributes));
+}
+
+it('relinks an episode without a tmdb_id by series, season and episode number (issue #1819)', function () {
+    $series = Series::factory()->for($this->user)->for($this->playlist)->create();
+    $episode = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id,
+        'season' => 2,
+        'episode_num' => 5,
+    ]);
+    $progress = orphanedEpisodeProgress($this->viewer, $series, 2, 5);
+
+    $response = getRecentlyWatchedForViewer($this->viewer);
+
+    $response->assertOk();
+    expect($response->json())->toHaveCount(1)
+        ->and($progress->refresh()->stream_id)->toBe($episode->id);
+});
+
+it('does not relink across series or to a different episode number', function () {
+    $series = Series::factory()->for($this->user)->for($this->playlist)->create();
+    $otherSeries = Series::factory()->for($this->user)->for($this->playlist)->create();
+    Episode::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'series_id' => $otherSeries->id, 'season' => 2, 'episode_num' => 5,
+    ]);
+    Episode::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id, 'season' => 2, 'episode_num' => 6,
+    ]);
+    $progress = orphanedEpisodeProgress($this->viewer, $series, 2, 5);
+
+    getRecentlyWatchedForViewer($this->viewer)->assertOk();
+
+    expect($progress->refresh()->stream_id)->toBe(999999);
+});
+
+it('keeps a relinkable episode row out of the prune', function () {
+    $series = Series::factory()->for($this->user)->for($this->playlist)->create();
+    $episode = Episode::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id, 'season' => 2, 'episode_num' => 5,
+    ]);
+    $progress = orphanedEpisodeProgress($this->viewer, $series, 2, 5);
+
+    app(WatchProgressLinker::class)->pruneOrphaned();
+
+    expect($progress->fresh()?->stream_id)->toBe($episode->id);
+});
+
+it('keeps relinking older rows after an unrecoverable one (issue #1819)', function () {
+    $series = Series::factory()->for($this->user)->for($this->playlist)->create();
+    $episode = Episode::factory()->create([
+        'user_id' => $this->user->id, 'playlist_id' => $this->playlist->id,
+        'series_id' => $series->id, 'season' => 1, 'episode_num' => 1,
+    ]);
+
+    // Newest row first: nothing left to relink it to.
+    orphanedEpisodeProgress($this->viewer, $series, 9, 9, ['last_watched_at' => now()]);
+    $older = orphanedEpisodeProgress($this->viewer, $series, 1, 1, ['stream_id' => 888888, 'last_watched_at' => now()->subDay()]);
+
+    getRecentlyWatchedForViewer($this->viewer)->assertOk();
+
+    expect($older->refresh()->stream_id)->toBe($episode->id);
 });

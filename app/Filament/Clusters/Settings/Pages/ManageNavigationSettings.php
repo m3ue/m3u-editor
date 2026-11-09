@@ -237,7 +237,13 @@ class ManageNavigationSettings extends BaseSettingsPage
         $groups = $data['groups'] ?? [];
         unset($data['groups']);
 
-        $data['admin_nav_layout'] = $this->buildLayout($groups);
+        // Read the layout as it's still persisted (before this save overwrites it),
+        // so a group/item that's temporarily unavailable (e.g. Cached Downloads
+        // while caching is disabled) and therefore absent from the submitted
+        // $groups doesn't lose its saved hidden/order preference.
+        $previousLayout = app(GeneralSettings::class)->admin_nav_layout ?: [];
+
+        $data['admin_nav_layout'] = $this->buildLayout($groups, $previousLayout);
         $data['admin_nav_active_preset'] = 'custom';
 
         return $data;
@@ -246,28 +252,60 @@ class ManageNavigationSettings extends BaseSettingsPage
     /**
      * Collapse the editor's repeater rows back into the stored
      * order/hidden shape, for both the live layout and the Simplified
-     * Default preset snapshot.
+     * Default preset snapshot. Preserves the previous layout's entries for
+     * any group/item that's currently unavailable and therefore missing
+     * from $groups.
      *
      * @param  list<array{key: string, visible: bool, items?: list<array{key: string, visible: bool}>}>  $groups
+     * @param  array{groups?: array{order?: list<string>, hidden?: list<string>}, items?: array<string, array{order?: list<string>, hidden?: list<string>}>}  $previousLayout
      * @return array{groups: array{order: list<string>, hidden: list<string>}, items: array<string, array{order: list<string>, hidden: list<string>}>}
      */
-    private function buildLayout(array $groups): array
+    private function buildLayout(array $groups, array $previousLayout = []): array
     {
+        $submittedGroupKeys = array_column($groups, 'key');
+        $previousGroupOrder = $previousLayout['groups']['order'] ?? [];
+        $previousGroupHidden = $previousLayout['groups']['hidden'] ?? [];
+        $staleGroupKeys = array_diff($previousGroupOrder, $submittedGroupKeys);
+        $staleHiddenGroupKeys = array_intersect($staleGroupKeys, $previousGroupHidden);
+
         $layout = [
             'groups' => [
-                'order' => array_column($groups, 'key'),
-                'hidden' => array_column(array_filter($groups, fn (array $group) => ! $group['visible']), 'key'),
+                'order' => [...$submittedGroupKeys, ...$staleGroupKeys],
+                'hidden' => [
+                    ...array_column(array_filter($groups, fn (array $group) => ! $group['visible']), 'key'),
+                    ...$staleHiddenGroupKeys,
+                ],
             ],
             'items' => [],
         ];
 
+        $previousItems = $previousLayout['items'] ?? [];
+
         foreach ($groups as $group) {
             $items = $group['items'] ?? [];
+            $submittedItemKeys = array_column($items, 'key');
+
+            $previousGroupItemLayout = $previousItems[$group['key']] ?? [];
+            $previousItemOrder = $previousGroupItemLayout['order'] ?? [];
+            $previousItemHidden = $previousGroupItemLayout['hidden'] ?? [];
+            $staleItemKeys = array_diff($previousItemOrder, $submittedItemKeys);
+            $staleHiddenItemKeys = array_intersect($staleItemKeys, $previousItemHidden);
 
             $layout['items'][$group['key']] = [
-                'order' => array_column($items, 'key'),
-                'hidden' => array_column(array_filter($items, fn (array $item) => ! $item['visible']), 'key'),
+                'order' => [...$submittedItemKeys, ...$staleItemKeys],
+                'hidden' => [
+                    ...array_column(array_filter($items, fn (array $item) => ! $item['visible']), 'key'),
+                    ...$staleHiddenItemKeys,
+                ],
             ];
+        }
+
+        // Groups that are entirely unavailable right now (not just one item within
+        // them) keep their whole previous item layout untouched.
+        foreach ($staleGroupKeys as $groupKey) {
+            if (isset($previousItems[$groupKey])) {
+                $layout['items'][$groupKey] = $previousItems[$groupKey];
+            }
         }
 
         return $layout;

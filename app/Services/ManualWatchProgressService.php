@@ -90,10 +90,19 @@ class ManualWatchProgressService
                 : ['stream_id' => null, 'tmdb_id' => $resolved['tmdb_id']]),
         ]);
 
+        // Resolve the duration actually being stored (an explicit one, or the suggested
+        // fallback) before clamping position against it - clamping against the caller's
+        // own, possibly-null $durationSeconds let position exceed a restored suggested
+        // duration whenever the caller cleared its duration input.
+        $resolvedDurationSeconds = $durationSeconds ?? $this->suggestDurationSeconds($viewer, $mediaType, $tmdbId, $seasonNumber, $episodeNumber);
+        if ($resolvedDurationSeconds) {
+            $positionSeconds = min($positionSeconds, $resolvedDurationSeconds);
+        }
+
         $progress->forceFill([
             'tmdb_id' => $resolved['tmdb_id'],
             'position_seconds' => $positionSeconds,
-            'duration_seconds' => $durationSeconds ?? $this->suggestDurationSeconds($viewer, $mediaType, $tmdbId, $seasonNumber, $episodeNumber),
+            'duration_seconds' => $resolvedDurationSeconds,
             'completed' => $completed,
             'last_watched_at' => now(),
             ...($contentType === 'episode' ? [

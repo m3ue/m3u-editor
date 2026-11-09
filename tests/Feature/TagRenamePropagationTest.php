@@ -158,6 +158,33 @@ it('ignores category tags whose uuid does not match any custom playlist', functi
         ->and($alias->refresh()->group_filter['selected_categories'])->toBe(['Loose Cat']);
 });
 
+it('rewrites bouquet and alias references when renaming a group literally named 0 (issue #1728)', function () {
+    $tag = Tag::findOrCreate('0', $this->custom->uuid);
+    $bouquet = Bouquet::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => null,
+        'custom_playlist_id' => $this->custom->id,
+        'group_selections' => ['selected_groups' => ['0']],
+    ]);
+    $alias = PlaylistAlias::create([
+        'name' => 'A', 'uuid' => fake()->uuid(), 'user_id' => $this->user->id,
+        'playlist_id' => null, 'custom_playlist_id' => $this->custom->id,
+        'xtream_config' => null,
+        'group_filter' => [
+            'selected_groups' => ['0'],
+            'sort_live_groups_custom' => true,
+            'live_group_order' => ['0'],
+        ],
+    ]);
+
+    $tag->setTranslation('name', 'en', 'News');
+    $tag->save();
+
+    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['News'])
+        ->and($alias->refresh()->group_filter['selected_groups'])->toBe(['News'])
+        ->and($alias->group_filter['live_group_order'])->toBe(['News']);
+});
+
 it('rewrites alias live_group_order on group tag renames but not on category tag renames', function () {
     $groupTag = Tag::findOrCreate('Old Group', $this->custom->uuid);
     $alias = PlaylistAlias::create([

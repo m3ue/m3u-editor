@@ -62,8 +62,10 @@ class EnrichDvrRecordings extends Command
         foreach ($recordings as $recording) {
             $label = "[{$recording->id}] {$recording->title}";
 
-            if ($integrateOnly || ! empty($recording->metadata)) {
-                // Metadata already present (or skipped) — go straight to VOD integration
+            if ($integrateOnly || (! $this->option('all') && ! empty($recording->metadata))) {
+                // Metadata already present (or skipped) - go straight to VOD integration.
+                // --all explicitly promises to re-enrich even already-enriched recordings,
+                // so existing metadata must not bypass the enrichment pipeline in that mode.
                 IntegrateDvrRecordingToVod::dispatch($recording->id)->onQueue('dvr-post');
                 $this->line("  → Queued VOD integration for {$label}");
             } else {

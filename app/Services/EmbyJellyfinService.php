@@ -354,13 +354,19 @@ class EmbyJellyfinService implements MediaServer
                 return $this->libraryResult(true, false, 'Managed Emby library is pending inventory.');
             }
 
-            $createAttempted = true;
-            $response = $this->client(withoutRedirecting: true)->post('/Library/VirtualFolders', [
+            $payload = [
                 'Name' => $name,
                 'CollectionType' => $collectionType,
                 'Paths' => $paths,
                 'RefreshLibrary' => $refreshLibrary,
-            ]);
+            ];
+            $libraryOptions = $this->newLibraryOptions($collectionType, $paths);
+            if ($libraryOptions !== null) {
+                $payload['LibraryOptions'] = $libraryOptions;
+            }
+
+            $createAttempted = true;
+            $response = $this->client(withoutRedirecting: true)->post('/Library/VirtualFolders', $payload);
 
             if ($response->serverError()) {
                 $reconciledLibrary = $this->fetchLibraries(withoutRedirecting: true, failClosed: true)
@@ -423,6 +429,69 @@ class EmbyJellyfinService implements MediaServer
                     : 'Emby library request failed before creation.',
             );
         }
+    }
+
+    /**
+     * Build the LibraryOptions Emby's own web UI sends when adding a library.
+     * Without them, an API-created library has no TypeOptions, so every
+     * metadata and image downloader is off and items never get artwork or
+     * online metadata. Returns null when discovery fails, keeping the
+     * previous options-less create as the fallback.
+     *
+     * @param  list<string>  $paths
+     * @return array<string, mixed>|null
+     */
+    private function newLibraryOptions(string $collectionType, array $paths): ?array
+    {
+        try {
+            $response = $this->client(withoutRedirecting: true)->get('/Libraries/AvailableOptions', [
+                'LibraryContentType' => $collectionType,
+                'IsNewLibrary' => 'true',
+            ]);
+        } catch (Exception $exception) {
+            Log::warning('EmbyJellyfinService: Library options discovery failed', [
+                'integration_id' => $this->integration->id,
+                'exception' => $exception::class,
+            ]);
+
+            return null;
+        }
+
+        $available = $response->json();
+        if (! $response->successful() || ! is_array($available) || ! is_array($available['TypeOptions'] ?? null)) {
+            return null;
+        }
+
+        $enabledNames = fn (mixed $fetchers): array => collect(is_array($fetchers) ? $fetchers : [])
+            ->filter(fn (mixed $fetcher): bool => is_array($fetcher)
+                && is_string($fetcher['Name'] ?? null)
+                && ($fetcher['DefaultEnabled'] ?? false) === true)
+            ->pluck('Name')
+            ->all();
+
+        $typeOptions = collect($available['TypeOptions'])
+            ->filter(fn (mixed $typeOption): bool => is_array($typeOption) && is_string($typeOption['Type'] ?? null))
+            ->map(fn (array $typeOption): array => [
+                'Type' => $typeOption['Type'],
+                'MetadataFetchers' => $enabledNames($typeOption['MetadataFetchers'] ?? null),
+                'MetadataFetcherOrder' => [],
+                'ImageFetchers' => $enabledNames($typeOption['ImageFetchers'] ?? null),
+                'ImageFetcherOrder' => [],
+                'ImageOptions' => [],
+            ])
+            ->values()
+            ->all();
+
+        if ($typeOptions === []) {
+            return null;
+        }
+
+        $defaults = is_array($available['DefaultLibraryOptions'] ?? null) ? $available['DefaultLibraryOptions'] : [];
+
+        return array_replace($defaults, [
+            'PathInfos' => array_map(fn (string $path): array => ['Path' => $path], $paths),
+            'TypeOptions' => $typeOptions,
+        ]);
     }
 
     /**

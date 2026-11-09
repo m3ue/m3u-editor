@@ -51,15 +51,6 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     protected static ?string $title = 'Managed Libraries';
 
     /**
-     * Cap on how many catalog items the "Preview" action renders into the
-     * DOM. The full item list (used for the actual sync) can run into the
-     * thousands for a large library, which is enough to crash the browser
-     * once rendered as one big <pre> block — the revision hash and every
-     * other field are still computed from the complete, untruncated catalog.
-     */
-    private const int PREVIEW_ITEM_LIMIT = 50;
-
-    /**
      * Per-request memo for outputPathOptions(), keyed by destination mode
      * (and target library for "existing"). The same options are otherwise
      * recomputed on every options()/visible()/required() closure call for
@@ -503,10 +494,12 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->limit(40)
                     ->tooltip(fn (EmbyLibraryMapping $record): string => $record->output_path),
                 ToggleColumn::make('enabled')
-                    ->label(__('Enabled')),
+                    ->label(__('Enabled'))
+                    ->tooltip(__('Enable or disable publishing this mapping.')),
                 TextColumn::make('status')
                     ->label(__('Status'))
                     ->badge()
+                    ->tooltip(fn (EmbyLibraryMapping $record): string => $record->status_summary ?: Str::headline($record->status))
                     ->color(fn (string $state): string => match ($state) {
                         'synced' => 'success',
                         'failed', 'drifted' => 'danger',
@@ -525,7 +518,10 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->placeholder(__('Never')),
                 IconColumn::make('is_managed')
                     ->label(__('Managed'))
-                    ->boolean(),
+                    ->boolean()
+                    ->tooltip(fn (EmbyLibraryMapping $record): string => $record->is_managed
+                        ? __('This library is managed by m3u-editor.')
+                        : __('This is an existing Emby library.')),
                 TextColumn::make('error_summary')
                     ->label(__('Last error'))
                     ->limit(50)
@@ -552,11 +548,13 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                 DeleteAction::make()
                     ->button()
                     ->size('sm')
-                    ->hiddenLabel(),
+                    ->hiddenLabel()
+                    ->tooltip(__('Delete this mapping')),
                 EditAction::make()
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
+                    ->tooltip(__('Edit this mapping'))
                     ->mutateDataUsing(fn (array $data, EmbyLibraryMapping $record, EditAction $action): array => $this->surfaceValidationErrors(
                         $action,
                         fn (): array => $this->prepareMappingData($data, $record),
@@ -569,34 +567,8 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
                     ->button()
                     ->size('sm')
                     ->hiddenLabel()
+                    ->tooltip(__('Reconcile the published library with Emby'))
                     ->action(fn (EmbyLibraryMapping $record) => $this->reconcile($record)),
-                Action::make('preview')
-                    ->label(__('Preview'))
-                    ->icon('heroicon-o-eye')
-                    ->modalHeading(__('Catalog plan preview'))
-                    ->modalWidth('4xl')
-                    ->modalContent(function (EmbyLibraryMapping $record) {
-                        $catalog = app(EmbyPublicationCatalogService::class)->buildMapping($record);
-                        $itemsTotal = count($catalog['items']);
-
-                        // Only the rendered JSON is capped — 'revision' was already
-                        // hashed from, and the sync still uses, the complete item list.
-                        $catalog['items'] = array_slice($catalog['items'], 0, self::PREVIEW_ITEM_LIMIT);
-
-                        return view(
-                            'filament.resources.media-server-integrations.relation-managers.emby-library-mapping-preview',
-                            [
-                                'catalog' => $catalog,
-                                'itemsTotal' => $itemsTotal,
-                                'itemsShown' => count($catalog['items']),
-                            ],
-                        );
-                    })
-                    ->button()
-                    ->size('sm')
-                    ->hiddenLabel()
-                    ->slideOver()
-                    ->modalSubmitAction(false),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkActionGroup::make([

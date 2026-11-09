@@ -20,6 +20,7 @@ use App\Models\Bouquet;
 use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\Series;
@@ -453,6 +454,21 @@ describe('getChannelQuery custom playlist live group ordering', function () {
 
         expect($content)->toContain('group-title="My Sports"')
             ->and($content)->not->toContain('group-title="Provider Sports"');
+    });
+
+    it('labels M3U series episodes with the custom category tag rather than the provider category (issue #1671)', function () {
+        $providerCategory = Category::factory()->for($this->user)->for($this->playlist)->create(['name' => 'Provider Drama']);
+        $series = Series::factory()->for($this->user)->for($this->playlist)->for($providerCategory)->create(['enabled' => true]);
+        $series->episodes()->save(Episode::factory()->for($this->user)->for($this->playlist)->make(['enabled' => true]));
+        $this->customPlaylist->series()->attach($series->id);
+        tagSeries($this->customPlaylist, 'My Collection', [$series]);
+
+        $this->customPlaylist->update(['include_series_in_m3u' => true]);
+
+        $content = $this->get("/{$this->customPlaylist->uuid}/playlist.m3u")->assertOk()->streamedContent();
+
+        expect($content)->toContain('group-title="My Collection"')
+            ->and($content)->not->toContain('group-title="Provider Drama"');
     });
 
     it('emits M3U group-titles in the alias custom order', function () {

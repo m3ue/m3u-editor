@@ -90,7 +90,7 @@ RUN NODE_ENV=production npm run build && \
 ########################################
 # Stage 3: m3u-proxy builder - prepares Python proxy service
 ########################################
-FROM alpine:3.22.6 AS proxy_builder
+FROM alpine:3.24.2 AS proxy_builder
 
 # Optional pinned m3u-proxy commit (full 40-char SHA). When set, the clone is
 # checked out at exactly this commit and the build fails if it is invalid or
@@ -134,7 +134,7 @@ RUN --mount=type=bind,target=/build-context \
 ########################################
 # Stage 3.5: Comskip builder — compiles commercial detection tool
 ########################################
-FROM alpine:3.22.6 AS comskip_builder
+FROM alpine:3.24.2 AS comskip_builder
 
 WORKDIR /tmp
 
@@ -142,6 +142,8 @@ WORKDIR /tmp
 # Uses --virtual=builddeps to keep only the final binary in this layer.
 # ffmpeg-dev must come from edge to match the runtime ffmpeg ABI.
 # @edge tag doesn't work inside --virtual, so install ffmpeg-dev separately.
+# Both are built with -std=gnu17 because GCC 15 defaults to C23, where their
+# K&R-style empty-parameter declarations (e.g. getopt(), OutputFrame()) break.
 RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
     echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
     apk update && \
@@ -153,10 +155,10 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     cd argtable2-13/ && \
     cp $(automake --print-libdir)/config.guess . && \
     cp $(automake --print-libdir)/config.sub . && \
-    ./configure CFLAGS="-Wno-implicit-function-declaration" && make && make install && \
+    ./configure CFLAGS="-std=gnu17 -Wno-implicit-function-declaration" && make && make install && \
     cd /tmp && \
     git clone --depth 1 --branch V0.83 https://github.com/erikkaashoek/Comskip && \
-    cd Comskip && ./autogen.sh && ./configure && \
+    cd Comskip && ./autogen.sh && ./configure CFLAGS="-std=gnu17" && \
     sed -i '/is->dec_ctx->ticks_per_frame = /d; s/is->dec_ctx->ticks_per_frame/1/g' mpeg2dec.c && \
     make && \
     mkdir -p /opt/comskip && cp comskip /opt/comskip/ && \
@@ -165,7 +167,7 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
 ########################################
 # Stage 4: Runtime image
 ########################################
-FROM alpine:3.22.6 AS runtime
+FROM alpine:3.24.2 AS runtime
 
 # Labels for image metadata
 LABEL org.opencontainers.image.title="m3u-editor" \
@@ -217,9 +219,18 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     spirv-tools@edge \
     vulkan-loader@edge \
     nginx \
-    postgresql \
-    postgresql-client \
-    postgresql-contrib \
+    # Both full server generations ship side by side so start-container can
+    # opt an existing install into PostgreSQL 18 (POSTGRES_VERSION=18) and
+    # pg_upgrade it in place - see docker/8.4/pg-cluster.sh. Everything always
+    # runs from the explicit /usr/libexec/postgresql<N>/ binaries, never the
+    # unversioned /usr/bin ones, so the apk-chosen PATH default below only
+    # matters for anything that still shells out to a bare `psql`/`pg_dump`.
+    postgresql17 \
+    postgresql17-client \
+    postgresql17-contrib \
+    postgresql18 \
+    postgresql18-client \
+    postgresql18-contrib \
     python3 \
     py3-pip \
     php84-cli \
@@ -261,14 +272,22 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
         fi; \
     fi && \
     ln -s /usr/bin/php84 /usr/bin/php && \
+    # Installing both server generations flips Alpine's unversioned /usr/bin
+    # default (postgres, initdb, pg_dump, ...) to the newest one (18). Pin it
+    # back to 17 so anything that still shells out to a bare `psql`/`pg_dump`
+    # (and a fresh install's first initdb) keeps matching the data directory
+    # an existing install already has on disk. pg-cluster.sh always uses the
+    # explicit /usr/libexec/postgresql<N>/ binaries regardless of this default.
+    pg_versions set-default 17 && \
     rm -rf /var/cache/apk/*
 
 # Create user and group early for proper file ownership
 RUN addgroup ${WWWGROUP} && \
     adduser -h /var/www/html -s /bin/bash -G ${WWWGROUP} -D ${WWWUSER}
 
-# Setup cron for Laravel scheduler
-RUN echo '* * * * * cd /var/www/html && /usr/bin/php artisan schedule:run >> /dev/null 2>&1' | crontab -
+# Setup cron for Laravel scheduler. PHP_INI_SCAN_DIR adds docker/8.4/php-scheduler.ini (an
+# opcache file cache) to this run and the commands it starts; start-container clears the cache on boot.
+RUN echo '* * * * * cd /var/www/html && mkdir -p /tmp/opcache-cli && PHP_INI_SCAN_DIR=:/etc/php84/scheduler.d /usr/bin/php artisan schedule:run >> /dev/null 2>&1' | crontab -
 
 # Create required directories with proper ownership
 RUN mkdir -p \
@@ -286,6 +305,7 @@ RUN mkdir -p \
 # Copy configuration files (these change less frequently)
 COPY --chown=${WWWUSER}:${WWWGROUP} ./docker/8.4/redis.conf /etc/redis/redis.tmpl
 COPY --chown=root:root ./docker/8.4/php.ini /etc/php84/conf.d/99-m3ue.ini
+COPY --chown=root:root ./docker/8.4/php-scheduler.ini /etc/php84/scheduler.d/opcache.ini
 COPY --chown=root:root ./docker/8.4/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY --chown=root:root ./docker/8.4/nginx/nginx.conf /etc/nginx/nginx.tmpl
 COPY --chown=root:root ./docker/8.4/nginx/laravel.conf /etc/nginx/conf.d/laravel.tmpl

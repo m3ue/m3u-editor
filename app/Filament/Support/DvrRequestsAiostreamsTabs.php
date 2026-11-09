@@ -212,7 +212,8 @@ class DvrRequestsAiostreamsTabs
     {
         return Tab::make(__('Requests'))
             ->icon('heroicon-m-squares-plus')
-            ->hidden(fn () => ! auth()->user()->canUseIntegrations())
+            // One closure: hiddenOn() would replace an earlier hidden() predicate.
+            ->hidden(fn (string $operation): bool => $operation === 'create' || ! auth()->user()->canUseIntegrations())
             ->schema([
                 Section::make(__('Content Requests'))
                     ->icon('heroicon-m-squares-plus')
@@ -224,8 +225,7 @@ class DvrRequestsAiostreamsTabs
                             ->default(false)
                             ->inline(false),
                     ]),
-            ])
-            ->hiddenOn('create');
+            ]);
     }
 
     public static function aiostreamsTab(): Tab
@@ -239,10 +239,13 @@ class DvrRequestsAiostreamsTabs
 
         return Tab::make(__('AIOStreams'))
             ->icon('heroicon-m-film')
-            ->hidden(fn () => MediaServerIntegration::where('user_id', auth()->id())
-                ->where('type', 'aiostreams')
-                ->where('enabled', true)
-                ->doesntExist()
+            // One closure: hiddenOn() would replace an earlier hidden() predicate.
+            ->hidden(fn (string $operation): bool => $operation === 'create'
+                || ! config('services.aiostreams.enabled', true)
+                || MediaServerIntegration::where('user_id', auth()->id())
+                    ->where('type', 'aiostreams')
+                    ->where('enabled', true)
+                    ->doesntExist()
             )
             ->schema([
                 Section::make(__('AIOStreams Access'))
@@ -256,7 +259,6 @@ class DvrRequestsAiostreamsTabs
                             ->nullable()
                             ->helperText(__('Select which AIOStreams integration to expose on this playlist. Leave blank to disable AIOStreams for this playlist.')),
                     ]),
-            ])
-            ->hiddenOn('create');
+            ]);
     }
 }

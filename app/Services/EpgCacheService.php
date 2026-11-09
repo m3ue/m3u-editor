@@ -411,7 +411,9 @@ class EpgCacheService
             while (@$reader->read()) {
                 // Process channels
                 if ($reader->nodeType == XMLReader::ELEMENT && $reader->name === 'channel') {
-                    $channelId = trim($reader->getAttribute('id') ?: '');
+                    // "0" is a valid XMLTV channel id and must not be coerced away by `?:`,
+                    // which treats the string "0" as falsy.
+                    $channelId = trim($reader->getAttribute('id') ?? '');
                     $innerXML = $reader->readOuterXml();
                     $innerReader = new XMLReader;
                     $innerReader->xml($innerXML);
@@ -440,7 +442,9 @@ class EpgCacheService
                     }
                     $innerReader->close();
 
-                    if ($channelId) {
+                    // "0" is a valid nonempty XMLTV channel id, so this must check for an empty
+                    // string rather than PHP truthiness.
+                    if ($channelId !== '') {
                         $channelBatch[$channelId] = $channel;
                         $channelCount++;
 
@@ -461,11 +465,15 @@ class EpgCacheService
                         break;
                     }
 
-                    $channelId = trim($reader->getAttribute('channel') ?: '');
-                    $start = trim($reader->getAttribute('start') ?: '');
-                    $stop = trim($reader->getAttribute('stop') ?: '');
+                    // "0" is a valid XMLTV channel id and must not be coerced away by `?:`,
+                    // which treats the string "0" as falsy.
+                    $channelId = trim($reader->getAttribute('channel') ?? '');
+                    $start = trim($reader->getAttribute('start') ?? '');
+                    $stop = trim($reader->getAttribute('stop') ?? '');
 
-                    if (! $channelId || ! $start) {
+                    // "0" is a valid nonempty XMLTV channel id, so this must check for an empty
+                    // string rather than PHP truthiness.
+                    if ($channelId === '' || $start === '') {
                         continue;
                     }
 
@@ -476,7 +484,10 @@ class EpgCacheService
                         continue;
                     }
 
-                    $date = $startDateTime->format('Y-m-d');
+                    // Bucket by the app's default timezone day, not the source feed's own
+                    // offset, so lookups keyed off "today"/"tomorrow" (also app-timezone based)
+                    // find programmes regardless of how the source spelled its UTC offset.
+                    $date = $startDateTime->copy()->setTimezone(date_default_timezone_get())->format('Y-m-d');
 
                     // Track date range
                     if ($dateRangeTracker['min_date'] === null || $date < $dateRangeTracker['min_date']) {
@@ -674,11 +685,15 @@ class EpgCacheService
                     break;
                 }
 
-                $channelId = trim($programReader->getAttribute('channel') ?: '');
-                $start = trim($programReader->getAttribute('start') ?: '');
-                $stop = trim($programReader->getAttribute('stop') ?: '');
+                // "0" is a valid XMLTV channel id and must not be coerced away by `?:`,
+                // which treats the string "0" as falsy.
+                $channelId = trim($programReader->getAttribute('channel') ?? '');
+                $start = trim($programReader->getAttribute('start') ?? '');
+                $stop = trim($programReader->getAttribute('stop') ?? '');
 
-                if (! $channelId || ! $start) {
+                // "0" is a valid nonempty XMLTV channel id, so this must check for an empty
+                // string rather than PHP truthiness.
+                if ($channelId === '' || $start === '') {
                     continue;
                 }
 
@@ -936,6 +951,33 @@ class EpgCacheService
     }
 
     /**
+     * Stream every programme of [$epg] on air at some point in `($fromTs, $toTs)`,
+     * across all its channels. Reads the SQLite store only, so a legacy JSONL
+     * cache yields nothing until its next rebuild.
+     *
+     * @return Generator<int, array{channel_id: string, start_ts: int, stop_ts: int|null, title: string, subtitle: string}>
+     */
+    public function programmesAiring(Epg $epg, int $fromTs, int $toTs): Generator
+    {
+        $store = $this->programmeStore($epg);
+        if ($store === null) {
+            return;
+        }
+
+        // Buckets are local dates and programmes can start the day before
+        $dates = [];
+        for ($day = Carbon::createFromTimestampUTC($fromTs)->subDays(2); $day->getTimestamp() <= $toTs + 86400; $day->addDay()) {
+            $dates[] = $day->format('Y-m-d');
+        }
+
+        try {
+            yield from $store->readAiring($dates, $fromTs, $toTs);
+        } catch (Exception $e) {
+            Log::error("Error reading airing programmes for EPG {$epg->uuid}: {$e->getMessage()}");
+        }
+    }
+
+    /**
      * Stream cached programmes for a specific date using generators with JSONL format
      */
     private function streamCachedProgrammesForDate(Epg $epg, string $date, array $channelIds = []): Generator
@@ -1065,14 +1107,17 @@ class EpgCacheService
     private function parseXmltvDateTime(string $datetime): ?Carbon
     {
         try {
-            if (preg_match('/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?/', $datetime, $matches)) {
-                $year = $matches[1];
-                $month = $matches[2];
-                $day = $matches[3];
-                $hour = $matches[4];
-                $minute = $matches[5];
-                $second = $matches[6];
-                $timezone = $matches[7] ?? '+0000';
+            // The XMLTV DTD allows an initial substring of YYYYMMDDhhmmss, so hour/minute/second
+            // precision below full seconds is valid and must not be discarded.
+            if (preg_match('/(\d{8,14})\s*([+-]\d{4})?/', $datetime, $matches) && strlen($matches[1]) % 2 === 0) {
+                $digits = str_pad($matches[1], 14, '0');
+                $year = substr($digits, 0, 4);
+                $month = substr($digits, 4, 2);
+                $day = substr($digits, 6, 2);
+                $hour = substr($digits, 8, 2);
+                $minute = substr($digits, 10, 2);
+                $second = substr($digits, 12, 2);
+                $timezone = $matches[2] ?? '+0000';
 
                 $dateString = "{$year}-{$month}-{$day} {$hour}:{$minute}:{$second}";
 
@@ -1169,8 +1214,13 @@ class EpgCacheService
             $playlist instanceof MergedPlaylist => 'merged_playlist_id',
             default => 'playlist_id',
         };
+        // clearPlaylistEpgCacheFile() returns false when there was nothing to clear;
+        // Builder::each() stops on the first false return, so the callback must not
+        // forward it or later aliases get silently skipped.
         PlaylistAlias::where($aliasForeignKey, $playlist->id)
-            ->each(fn (PlaylistAlias $alias) => self::clearPlaylistEpgCacheFile($alias));
+            ->each(function (PlaylistAlias $alias) {
+                self::clearPlaylistEpgCacheFile($alias);
+            });
     }
 
     /**

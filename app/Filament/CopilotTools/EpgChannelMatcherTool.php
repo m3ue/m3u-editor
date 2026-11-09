@@ -289,8 +289,12 @@ class EpgChannelMatcherTool extends BaseTool
         );
 
         if ($totalUnmapped > $offset + $limit) {
-            $nextOffset = $offset + $limit;
-            $lines[] = "More channels available. Call this tool again with offset={$nextOffset} to continue.";
+            // Not $offset + $limit: applying this batch's exact/fuzzy matches removes
+            // those channels from the still-unmapped set this tool queries, which shifts
+            // every later channel up by that many positions. Re-querying at the SAME
+            // offset after applying is what actually reaches the next unseen channels -
+            // advancing by $limit would skip over whatever just got resolved.
+            $lines[] = "More channels available. After resolving this batch, call this tool again with offset={$offset} to continue.";
         }
 
         $lines[] = '';

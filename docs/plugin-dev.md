@@ -640,6 +640,64 @@ Common field keys:
 - `multiple` — allow multiple selections (`select`, `model_select`, `table_select`)
 - `placeholder` — select placeholder text
 
+### Conditional fields and sections
+
+`visible_when` maps another field's name to a list of allowed values. All conditions
+must match. Numbers compare by value, so `2` and `"2"` are equivalent; other values,
+including booleans and `null`, must match exactly. For example:
+
+```json
+{
+  "id": "source_playlist_id",
+  "type": "model_select",
+  "label": "Reference playlist",
+  "model": "App\\Models\\Playlist",
+  "scope": "owned",
+  "visible_when": { "source_mode": ["native_playlist"] }
+}
+```
+
+Names follow the same prefix rules as `depends_on`. The host makes controlling
+fields reactive. Visibility changes retain saved and unsaved values; they do not
+reset fields, disable settings, or change validation rules. Hidden fields are still
+validated, so a field that can be hidden (it declares `visible_when` or
+`visibility_provider`, or sits inside a section that does) cannot set `required`;
+manifest validation rejects that combination. Use optional fields or valid defaults
+for inactive settings, and check required values in plugin code. Existing
+`depends_on` option resets still apply independently.
+
+For conditions requiring plugin logic, declare `visibility_provider` and a
+`visibility_depends_on` list. The plugin may implement this optional method:
+
+```php
+public function isFieldVisible(string $provider, PluginSelectOptionsContext $context): bool
+{
+    return $provider === 'download_key'
+        && $context->value('settings.download_method') === 'api';
+}
+```
+
+The existing form context carries the current user, plugin settings, field
+metadata and declared dependency values. Providers must be read-only, return a
+boolean and enforce ownership on model lookups. Missing or failing providers hide
+the affected component and log a warning. Static conditions and a provider may be
+combined; both must allow visibility. Visibility is presentation, not authorization.
+Older hosts ignore these optional manifest properties and display every field;
+the optional method does not add a required interface to existing plugin classes.
+
+Dynamic options and visibility results are reused only within a request, keyed by
+user, plugin configuration, provider, dependency state and field definition.
+Plugin validation scans are also reused within the UI request; current registry
+trust is checked before each provider access. Execution, trust and explicit
+validation still verify files afresh. Equivalent model/table option queries,
+individual label lookups (including missing labels), and table existence/column
+metadata are shared within the request. Labels are resolved independently of
+dropdown limits. Table cells serialize only their displayed attribute and declared
+provider dependencies, retaining Eloquent's date and enum formatting without
+decoding unrelated JSON columns. Plugin table writes clear option, label and visibility results.
+Schema apply/purge also clears these results and table metadata, including when
+a schema change fails partway through.
+
 ### select
 
 ```json

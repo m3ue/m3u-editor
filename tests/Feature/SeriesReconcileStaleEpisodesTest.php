@@ -17,6 +17,7 @@ use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -165,4 +166,28 @@ it('keeps locally created episodes that have no provider id', function () {
     $this->series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false);
 
     expect(Episode::where('series_id', $this->series->id)->whereNull('source_episode_id')->count())->toBe(1);
+});
+
+it('keeps episodes the provider still lists when an overlapping fetch re-stamped them (issue #1819)', function () {
+    fakeReconcileSequence(
+        ['1' => [reconcileEpisode(1001, 1), reconcileEpisode(1002, 2)]],
+        ['1' => [reconcileEpisode(1001, 1), reconcileEpisode(1002, 2)]],
+    );
+
+    $this->series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false);
+    $idsBefore = Episode::where('series_id', $this->series->id)->orderBy('id')->pluck('id')->all();
+
+    // The second fetch upserts, then the other run's upsert lands right before its sweep.
+    $restamped = false;
+    DB::connection()->beforeExecuting(function (string $query) use (&$restamped): void {
+        if (! $restamped && str_starts_with($query, 'delete from "episodes"')) {
+            $restamped = true;
+            DB::table('episodes')->where('series_id', $this->series->id)->update(['import_batch_no' => 'other-run']);
+        }
+    });
+
+    $this->series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false);
+
+    expect($restamped)->toBeTrue()
+        ->and(Episode::where('series_id', $this->series->id)->orderBy('id')->pluck('id')->all())->toBe($idsBefore);
 });

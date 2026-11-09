@@ -54,7 +54,8 @@ Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('au
 Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
 
 // In-app watch progress tracking (admin panel + guest panel)
-Route::middleware(['throttle:60,1'])->group(function () {
+// Fetch and update share the 60/min limit. If clients report 429s, check this first.
+Route::middleware(['throttle:60,1,watch-progress'])->group(function () {
     Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
     Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
 });
@@ -101,15 +102,6 @@ Route::post('/webhook/test', WebhookTestController::class)
     ->name('webhook.test.post');
 Route::get('/webhook/test', WebhookTestController::class)
     ->name('webhook.test.get');
-
-// If local env, show PHP info screen
-Route::get('/phpinfo', function () {
-    if (app()->environment('local')) {
-        phpinfo();
-    } else {
-        abort(404);
-    }
-});
 
 /*
  * Logo proxy route - cache and serve remote logos
@@ -463,16 +455,26 @@ Route::prefix('series-rules')->group(function () {
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->prefix('playlist')->group(function () {
+Route::middleware(['throttle:5,1,playlist-sync'])->prefix('playlist')->group(function () {
     Route::get('{uuid}/sync', [PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
 });
 
 // EPG API routes (rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->prefix('epg')->group(function () {
+Route::middleware(['throttle:5,1,epg-sync'])->prefix('epg')->group(function () {
     Route::get('{uuid}/sync', [EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });
+
+/*
+ * Flutter TV web app entry point (aligned with the /m3u-proxy prefix).
+ * Everything after /m3u-tv/ is a static file already served directly by
+ * Herd/nginx (public/m3u-tv/*); only the bare entry path falls through to
+ * the router, since Herd's static-file check requires an exact file match
+ * and won't resolve a directory to its index.html.
+ */
+Route::get('/m3u-tv', fn () => redirect('/m3u-tv/'));
+Route::get('/m3u-tv/', fn () => response()->file(public_path('m3u-tv/index.html')));
 
 /*
  * Xtream API endpoints at root

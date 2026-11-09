@@ -957,7 +957,22 @@ class BrowseShows extends Page
             }
             $epgId = $channelQuery->value('epg_channels.channel_id');
 
-            return $epgId ? [$epgId] : null;
+            if ($epgId) {
+                return [$epgId];
+            }
+
+            // No explicit EPG-channel mapping: fall back to the channel's own
+            // stream_id (tvg-id), matching the broader scope's merge logic below.
+            $streamIdQuery = DB::table('channels')
+                ->where('channels.id', $this->channel_id)
+                ->whereNotNull('channels.stream_id')
+                ->where('channels.stream_id', '!=', '');
+            if (! $includeDisabled) {
+                $streamIdQuery->where('channels.enabled', true);
+            }
+            $streamId = $streamIdQuery->value('channels.stream_id');
+
+            return $streamId ? [$streamId] : [];
         }
 
         $epgMapBase = DB::table('channels')

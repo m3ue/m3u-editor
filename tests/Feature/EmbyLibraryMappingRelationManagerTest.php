@@ -2326,7 +2326,7 @@ it('shows mapping state and toggles publishing without deleting state', function
         'pageClass' => EditMediaServerIntegration::class,
     ])->assertCanSeeTableRecords([$mapping])
         ->assertSee('Redacted failure')
-        ->assertTableActionExists('preview')
+        ->assertTableActionDoesNotExist('preview')
         ->assertTableActionExists('reconcile')
         ->assertTableActionExists('edit')
         ->assertTableActionExists('delete')
@@ -2336,7 +2336,7 @@ it('shows mapping state and toggles publishing without deleting state', function
         ->and($mapping->exists)->toBeTrue();
 });
 
-it('previews the exact canonical dry-run plan without mutating the mapping', function () {
+it('explains mapping icon controls without exposing the catalog plan', function () {
     config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
@@ -2346,23 +2346,23 @@ it('previews the exact canonical dry-run plan without mutating the mapping', fun
         'source_identifier' => '*',
         'source_label' => 'All eligible items',
         'target_library_id' => null,
-        'last_planned_revision' => null,
+        'status' => 'failed',
+        'status_summary' => 'Emby rejected the last publication.',
     ]);
-    $plan = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
 
-    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
-    ])->assertTableActionExists(
-        'preview',
-        fn (FilamentAction $action): bool => str_contains(
-            (string) $action->getModalContent(),
-            $plan['revision'],
-        ),
-        $mapping,
-    );
+    ])->assertTableActionDoesNotExist('preview')
+        ->assertTableActionExists('delete', fn (FilamentAction $action): bool => $action->getTooltip() === 'Delete this mapping', $mapping)
+        ->assertTableActionExists('edit', fn (FilamentAction $action): bool => $action->getTooltip() === 'Edit this mapping', $mapping)
+        ->assertTableActionExists('reconcile', fn (FilamentAction $action): bool => $action->getTooltip() === 'Reconcile the published library with Emby', $mapping);
 
-    expect($mapping->refresh()->last_planned_revision)->toBeNull();
+    $columns = collect($component->instance()->getTable()->getColumns())->keyBy->getName();
+
+    expect($columns['enabled']->record($mapping)->getTooltip())->toBe('Enable or disable publishing this mapping.')
+        ->and($columns['status']->record($mapping)->getTooltip())->toBe('Emby rejected the last publication.')
+        ->and($columns['is_managed']->record($mapping)->getTooltip())->toBe('This library is managed by m3u-editor.');
 });
 
 it('defers reconcile with a generic pending result while the managed library is unresolved', function () {
@@ -2753,41 +2753,30 @@ it('disambiguates same-named VOD groups across playlists in the Source search, w
         ->assertSet('mountedActions.0.data.sources', ['vod:'.$groupB->id]);
 });
 
-it('caps the number of items rendered in the Preview modal without affecting the actual revision hash', function () {
+it('describes an unmanaged library and falls back to its human-readable status', function () {
     config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
-    $playlist = Playlist::factory()->for($user)->createQuietly();
     $integration = MediaServerIntegration::factory()->for($user)->createQuietly(['type' => 'emby']);
     $mapping = EmbyLibraryMapping::factory()->for($user)->for($integration, 'integration')->create([
         'source_kind' => 'all',
         'source_identifier' => '*',
         'source_label' => 'All eligible items',
-        'collection_type' => 'movies',
         'target_library_id' => null,
+        'status' => 'cleanup_pending',
+        'status_summary' => null,
+        'is_managed' => false,
     ]);
 
-    // More than the 50-item preview cap.
-    Channel::factory()->for($user)->for($playlist)->count(60)->createQuietly([
-        'is_vod' => true, 'enabled' => true,
-    ]);
-
-    $fullPlan = app(EmbyPublicationCatalogService::class)->buildMapping($mapping);
-    expect($fullPlan['items'])->toHaveCount(60);
-
-    Livewire::test(EmbyLibraryMappingsRelationManager::class, [
+    $component = Livewire::test(EmbyLibraryMappingsRelationManager::class, [
         'ownerRecord' => $integration,
         'pageClass' => EditMediaServerIntegration::class,
-    ])->assertTableActionExists('preview', function (FilamentAction $action) use ($fullPlan): bool {
-        $modalHtml = (string) $action->getModalContent();
+    ])->assertTableActionDoesNotExist('preview');
 
-        // The rendered JSON only carries 50 items...
-        $renderedItemCount = substr_count($modalHtml, '&quot;canonical_id&quot;');
+    $columns = collect($component->instance()->getTable()->getColumns())->keyBy->getName();
 
-        // ...but the revision shown is still the hash of the complete, untruncated catalog.
-        return $renderedItemCount === 50
-            && str_contains($modalHtml, $fullPlan['revision']);
-    }, $mapping);
+    expect($columns['status']->record($mapping)->getTooltip())->toBe('Cleanup Pending')
+        ->and($columns['is_managed']->record($mapping)->getTooltip())->toBe('This is an existing Emby library.');
 });
 
 it('persists a pending mapping when a newly created library is not immediately inventoried', function () {

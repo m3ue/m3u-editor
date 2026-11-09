@@ -339,7 +339,7 @@ class MergeChannels implements ShouldQueue
             ->mapWithKeys(function ($channel) use ($matcher, $config) {
                 $key = $matcher->fallbackKeyFor($channel, $config);
 
-                return $key ? [$channel->id => ['key' => $key, 'channel' => $channel]] : [];
+                return $key !== null ? [$channel->id => ['key' => $key, 'channel' => $channel]] : [];
             })
             ->groupBy('key')
             ->map(fn ($items) => $items->pluck('channel'));
@@ -391,6 +391,7 @@ class MergeChannels implements ShouldQueue
 
         $regexChannelsQuery
             ->when($this->groupId, fn ($q) => $q->where('group_id', $this->groupId))
+            ->when($this->newChannelsOnly, fn ($q) => $q->where('new', true))
             ->select(['id', 'user_id', 'playlist_id', 'group_id', 'title', 'title_custom',
                 'name', 'name_custom', 'stream_id', 'stream_id_custom', 'url', 'url_custom', 'sort',
                 'catchup', 'enabled', 'last_scrubber_live'])

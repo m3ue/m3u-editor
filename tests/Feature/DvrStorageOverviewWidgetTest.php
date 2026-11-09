@@ -40,15 +40,18 @@ it('computes per-user storage with quota', function () {
         ->enabled()
         ->create(['global_disk_quota_gb' => 10]);
 
+    // Library size: each completed recording's file (see DvrStorageOverviewWidget).
     DvrRecording::factory()
+        ->completed()
         ->for($user)
         ->for($dvrSetting)
-        ->create(['file_size_bytes' => 1073741824]); // 1 GB
+        ->create(['file_size_bytes' => 1073741824, 'file_path' => 'library/2026/A/A.mkv']); // 1 GB
 
     DvrRecording::factory()
+        ->completed()
         ->for($user)
         ->for($dvrSetting)
-        ->create(['file_size_bytes' => 536870912]); // 0.5 GB
+        ->create(['file_size_bytes' => 536870912, 'file_path' => 'library/2026/B/B.mkv']); // 0.5 GB
 
     DvrRecording::factory()
         ->for($user)

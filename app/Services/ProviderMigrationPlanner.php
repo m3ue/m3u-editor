@@ -157,6 +157,18 @@ class ProviderMigrationPlanner
     }
 
     /**
+     * The same EPG proposal a bulk {@see plan()} call would have produced for this pair, for a
+     * single pair resolved after the fact (e.g. a manual "Change match" choice on an otherwise
+     * unmatched or ambiguous row, which the initial plan never computed a proposal for).
+     *
+     * @return array<string, mixed>
+     */
+    public function epgProposalForPair(Playlist $source, Playlist $target, Channel $sourceChannel, Channel $targetChannel): array
+    {
+        return $this->epgProposal($source, $sourceChannel, $targetChannel, $this->buildTargetEpgIndex($target));
+    }
+
+    /**
      * Build a lookup of the target playlist's own EPG channels by normalized identity so an
      * expired-provider mapping can be re-pointed at the working provider's equivalent.
      *

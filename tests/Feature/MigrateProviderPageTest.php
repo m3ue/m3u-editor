@@ -4,11 +4,12 @@ use App\Filament\Resources\Playlists\Pages\MigrateProvider;
 use App\Jobs\CopyAttributesToPlaylist;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\ProviderMigrationPlanRow;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -55,8 +56,8 @@ it('renders for the playlist owner', function () {
 it('is not reachable for a user who does not own the playlist', function () {
     $source = Playlist::factory()->create(['user_id' => User::factory()->create()->id]);
 
-    expect(fn () => Livewire::test(MigrateProvider::class, ['record' => $source->id]))
-        ->toThrow(ModelNotFoundException::class);
+    Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->assertNotFound();
 });
 
 it('is not found for a network playlist', function () {
@@ -191,6 +192,81 @@ it('releases another row when a manual match points at an already-claimed replac
         ->and($autoMatched->refresh()->matched_target_channel_id)->toBeNull()
         ->and($autoMatched->bucket)->toBe('unmatched')
         ->and($autoMatched->include)->toBeFalse();
+});
+
+it('computes the EPG proposal for a row resolved manually via change match', function () {
+    ['source' => $source, 'target' => $target] = pageFixture($this->user);
+
+    $epg = Epg::factory()->create(['user_id' => $this->user->id]);
+    $sourceEpgChannel = EpgChannel::factory()->create(['user_id' => $this->user->id, 'epg_id' => $epg->id]);
+
+    // Names deliberately don't match, so this row starts unmatched - exactly the "manually
+    // resolved after starting unmatched" case #1759 describes.
+    $sourceOther = Channel::factory()->create([
+        'playlist_id' => $source->id, 'user_id' => $this->user->id, 'is_vod' => false,
+        'name' => 'Documentary One', 'stream_id' => '777', 'enabled' => true,
+        'epg_channel_id' => $sourceEpgChannel->id,
+    ]);
+    $targetOther = Channel::factory()->create([
+        'playlist_id' => $target->id, 'user_id' => $this->user->id, 'is_vod' => false,
+        'name' => 'Something Else Entirely', 'stream_id' => '778', 'enabled' => false,
+        'epg_channel_id' => null,
+    ]);
+
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->set('data.preserve_epg', true)
+        ->call('buildPreview');
+
+    $row = ProviderMigrationPlanRow::query()
+        ->where('session_key', $component->get('sessionKey'))
+        ->where('source_channel_id', $sourceOther->id)
+        ->firstOrFail();
+
+    expect($row->bucket)->toBe('unmatched')
+        ->and($row->epg_status)->toBe('none')
+        ->and($row->epg_channel_id)->toBeNull();
+
+    $component->callAction(
+        TestAction::make('changeMatch')->table($row),
+        ['matched_target_channel_id' => $targetOther->id],
+    );
+
+    $row->refresh();
+    expect($row->matched_target_channel_id)->toBe($targetOther->id)
+        ->and($row->bucket)->toBe('matched')
+        ->and($row->epg_status)->toBe('ok')
+        ->and($row->epg_channel_id)->toBe($sourceEpgChannel->id);
+});
+
+it('clears the EPG proposal when a row is unmatched via change match', function () {
+    ['source' => $source, 'target' => $target, 'sourceZee' => $sourceZee] = pageFixture($this->user);
+
+    $epg = Epg::factory()->create(['user_id' => $this->user->id]);
+    $sourceEpgChannel = EpgChannel::factory()->create(['user_id' => $this->user->id, 'epg_id' => $epg->id]);
+    $sourceZee->update(['epg_channel_id' => $sourceEpgChannel->id]);
+
+    $component = Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->set('data.target_playlist_id', $target->id)
+        ->set('data.preserve_epg', true)
+        ->call('buildPreview');
+
+    $row = ProviderMigrationPlanRow::query()
+        ->where('session_key', $component->get('sessionKey'))
+        ->where('source_channel_id', $sourceZee->id)
+        ->firstOrFail();
+
+    expect($row->epg_status)->toBe('ok');
+
+    $component->callAction(
+        TestAction::make('changeMatch')->table($row),
+        ['matched_target_channel_id' => null],
+    );
+
+    $row->refresh();
+    expect($row->matched_target_channel_id)->toBeNull()
+        ->and($row->epg_status)->toBe('none')
+        ->and($row->epg_channel_id)->toBeNull();
 });
 
 it('lists which custom playlist each matched channel belongs to, with its custom group tag', function () {

@@ -1058,3 +1058,20 @@ it('plans VodProbe without VodMetadata for disabled vod only when include disabl
     expect($run->phases)->not->toContain(SyncRunPhase::VodProbe->value)
         ->toContain(SyncRunPhase::SeriesProbe->value);
 });
+
+it('plans VodProbe for a disabled-only VOD catalogue with include disabled on, even with no enabled series', function () {
+    // Regression: the planner previously keyed the "probe disabled VOD" path on
+    // an enabled series existing ($hasSeries), so Include Disabled was silently
+    // ignored for a playlist with no series content at all - not just no enabled
+    // VOD, which the "disabled vod only" test above already covers via a series.
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_probe_vod_streams' => true,
+        'auto_probe_vod_streams_include_disabled' => true,
+    ]);
+    Channel::factory()->for($playlist)->for($this->user)->create(['enabled' => false, 'is_vod' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::VodProbe->value);
+});

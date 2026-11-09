@@ -258,6 +258,42 @@ test('year rollover still moves an early-january date seen in late december into
     expect($result->start->toDateString())->toBe('2027-01-02');
 });
 
+test('a mixed date format list still applies year rollover to a yearless match, even though an explicit-year alternative is also listed', function () {
+    // Regression: AedExtractorService::extractStartTime() checked str_contains() on
+    // the entire pipe-separated date_format list for 'Y', not the specific alternative
+    // that actually parsed. With 'm.d.Y|m.d', the unmatched 'm.d.Y' alternative's 'Y'
+    // suppressed year-rollover inference for a title that only matched the yearless 'm.d'.
+    Carbon::setTestNow(Carbon::create(2026, 12, 30, 12, 0, 0, 'UTC'));
+
+    $profile = makeProfile([
+        'time_regex' => ' (\d{2}:\d{2})\)',
+        'date_regex' => '\((\d{2}\.\d{2}(?:\.\d{4})?) ',
+        'date_format' => 'm.d.Y|m.d',
+        'time_format' => 'H:i',
+    ]);
+
+    $result = (new AedExtractorService)->extract($profile, 'Synthetic Event (01.02 19:00)');
+
+    // "m.d" means January 2 - a near-term date, so nearest-year inference must roll
+    // it forward to 2027, exactly as it would for the single-format 'm.d' case above.
+    expect($result->start->toDateString())->toBe('2027-01-02');
+});
+
+test('a mixed date format list still honors an explicit year when the explicit-year alternative actually matches', function () {
+    Carbon::setTestNow(Carbon::create(2026, 12, 30, 12, 0, 0, 'UTC'));
+
+    $profile = makeProfile([
+        'time_regex' => ' (\d{2}:\d{2})\)',
+        'date_regex' => '\((\d{2}\.\d{2}(?:\.\d{4})?) ',
+        'date_format' => 'm.d.Y|m.d',
+        'time_format' => 'H:i',
+    ]);
+
+    $result = (new AedExtractorService)->extract($profile, 'Synthetic Event (01.02.2027 19:00)');
+
+    expect($result->start->toDateString())->toBe('2027-01-02');
+});
+
 test('year rollover moves a late-december date seen in early january into last year', function () {
     Carbon::setTestNow(Carbon::create(2027, 1, 2, 10, 0, 0, 'UTC'));
 

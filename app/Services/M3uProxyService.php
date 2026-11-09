@@ -1179,6 +1179,9 @@ class M3uProxyService
         // so they must NEVER reuse an existing pooled live stream. We detect this early and skip
         // all pool reuse paths when timeshift parameters are present on the request.
         $isTimeshiftRequest = PlaylistService::isTimeshiftRequest($request);
+        $normalizeLiveOutput = ! $profile && ! $isTimeshiftRequest
+            && ($channel->proxy_options['normalize_live_output'] ?? app(GeneralSettings::class)->proxy_normalize_live_output ?? config('proxy.normalize_live_output', false)) === true
+            && $this->isNormalizableLiveChannel($channel, PlaylistUrlService::getChannelUrl($channel, $playlist));
 
         // Catchup players request this URL again for every seek (each Range probe), while the
         // stream from their previous request may still be open. Hand the same client its own
@@ -1310,7 +1313,7 @@ class M3uProxyService
         // If a pooled stream exists, we can reuse it without consuming additional capacity.
         // (Same logic as the transcoded pool check above, but for direct streams)
         if (! $profile) {
-            $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
+            $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null, 'channel', $normalizeLiveOutput);
 
             if ($existingStreamId && ! $isTimeshiftRequest) {
                 Log::debug('Reusing existing pooled direct stream (bypassing capacity check)', [
@@ -1440,6 +1443,7 @@ class M3uProxyService
                         'channels.url_custom',
                         'channels.playlist_id',
                         'channels.custom_playlist_id',
+                        'channels.is_vod',
                     ])->get();
 
                 foreach ($failoverChannels as $failoverChannel) {
@@ -1495,12 +1499,8 @@ class M3uProxyService
             if (! $selectedProfile) {
                 // Check if reuse was detected inside the lock (another request is creating this stream).
                 if (ProfileService::isChannelStreamActive($originalChannelId, $originalPlaylistUuid)) {
-                    // For non-transcoded streams, findExistingPooledStream only matches transcoded
-                    // streams (requires metadata.transcoding=true), so check the channel stream key
-                    // in Redis first. Then verify the proxy still has an active stream for this
-                    // channel — the Redis key can outlive the proxy stream (restart, timeout, etc.).
-                    $existingStreamId = ProfileService::getChannelActiveStreamId($originalChannelId, $originalPlaylistUuid)
-                        ?? $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null);
+                    // Redis mappings do not encode normalization mode. Verify proxy metadata.
+                    $existingStreamId = $this->findExistingPooledStream($originalChannelId, $originalPlaylistUuid, null, null, 'channel', $normalizeLiveOutput);
 
                     if ($existingStreamId && ! $isTimeshiftRequest) {
                         $activeChannelStreams = self::getActiveStreamsCountByMetadata('original_channel_id', (string) $originalChannelId);
@@ -1751,7 +1751,8 @@ class M3uProxyService
             }
 
             try {
-                $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata);
+                $streamId = $this->createStream($primaryUrl, $failovers, $userAgent, $headers, $metadata,
+                    $normalizeLiveOutput && $this->isNormalizableLiveChannel($actualChannel, $primaryUrl));
             } catch (Exception $e) {
                 if ($selectedProfile && $reservationId) {
                     ProfileService::cancelReservation($selectedProfile, $reservationId);
@@ -2732,6 +2733,7 @@ class M3uProxyService
         ?string $userAgent = null,
         ?array $headers = [],
         ?array $metadata = [],
+        bool $normalizeLiveOutput = false,
     ): string {
         try {
             $endpoint = $this->apiBaseUrl.'/streams';
@@ -2741,6 +2743,11 @@ class M3uProxyService
                 'url' => $url,
                 'metadata' => $metadata,
             ];
+
+            if ($normalizeLiveOutput) {
+                $payload['normalize_live_output'] = true;
+                $payload['normalization_encoder'] = $this->normalizationEncoder();
+            }
 
             // Handle strict_live_ts flag if set in metadata
             if ($metadata['strict_live_ts'] ?? false) {
@@ -3215,6 +3222,15 @@ class M3uProxyService
         return $url.$separator.http_build_query(['username' => $username]);
     }
 
+    /**
+     * Only raw live MPEG-TS inputs are supported. Extensionless IPTV endpoints are
+     * allowed, but opting in still requires the operator to verify MPEG-TS codecs.
+     */
+    private function isNormalizableLiveChannel(Channel $channel, ?string $url): bool
+    {
+        return $channel->is_vod === false && in_array(strtolower($this->getFormatFromUrl($url)), ['', 'ts', 'mpegts'], true);
+    }
+
     private function getFormatFromUrl(?string $url): string
     {
         $path = parse_url($url ?? '', PHP_URL_PATH) ?? $url ?? '';
@@ -3278,6 +3294,14 @@ class M3uProxyService
         return ProxyFacade::getBaseUrl().'/m3u-proxy';
     }
 
+    protected function normalizationEncoder(): string
+    {
+        // Only expose the worker's supported presets; never send arbitrary commands/devices.
+        $encoder = app(GeneralSettings::class)->proxy_normalization_encoder;
+
+        return in_array($encoder, ['cpu', 'vaapi', 'qsv'], true) ? $encoder : 'cpu';
+    }
+
     /**
      * Find an existing pooled transcoded stream for the given channel.
      * This allows multiple clients to connect to the same transcoded stream without
@@ -3293,7 +3317,7 @@ class M3uProxyService
      * @param  string  $type  The type of model ('channel' or 'episode') for metadata keys
      * @return string|null Stream ID if found, null otherwise
      */
-    protected function findExistingPooledStream(int $modelId, string $playlistUuid, ?int $profileId = null, ?int $providerProfileId = null, string $type = 'channel'): ?string
+    protected function findExistingPooledStream(int $modelId, string $playlistUuid, ?int $profileId = null, ?int $providerProfileId = null, string $type = 'channel', bool $normalizeLiveOutput = false): ?string
     {
         try {
             // Query m3u-proxy for streams by ORIGINAL channel ID metadata
@@ -3332,6 +3356,32 @@ class M3uProxyService
                 }
 
                 $isTranscoded = ($metadata['transcoding'] ?? null) === 'true';
+                if ($type === 'channel' && $profileId === null) {
+                    $expectedNormalization = false;
+                    if ($normalizeLiveOutput) {
+                        // Capacity failover may have selected a non-TS or VOD source.
+                        // Match creation's effective mode using the pool's actual source,
+                        // never the original requested URL. Unknown opt-in sources fail closed.
+                        $sourceUrl = $stream['url'] ?? null;
+                        if (($metadata['type'] ?? null) !== 'channel'
+                            || empty($metadata['id']) || empty($metadata['playlist_uuid'])
+                            || ! is_string($sourceUrl) || $sourceUrl === '') {
+                            continue;
+                        }
+                        $sourceChannel = Channel::withoutGlobalScope(ExcludeAioFailoverClonesScope::class)->find($metadata['id']);
+                        if (! $sourceChannel || $sourceChannel->is_vod === null) {
+                            continue;
+                        }
+                        $expectedNormalization = $this->isNormalizableLiveChannel($sourceChannel, $sourceUrl);
+                    }
+                    if ((($metadata['normalize_live_output'] ?? null) === 'true') !== $expectedNormalization) {
+                        continue;
+                    }
+                    // Older normalized pools predate encoder metadata and always used CPU.
+                    if ($expectedNormalization && ($metadata['normalization_encoder'] ?? 'cpu') !== $this->normalizationEncoder()) {
+                        continue;
+                    }
+                }
                 $transcodingMatch = $profileId !== null
                     ? ($isTranscoded && ($metadata['profile_id'] ?? null) == $profileId)
                     : ! $isTranscoded;
@@ -3613,7 +3663,7 @@ class M3uProxyService
             // If the failover chain is exhausted for an AIOStreams-backed channel,
             // asynchronously re-resolve fresh candidates for the *next* playback
             // attempt rather than trying to serve a URL synchronously mid-request.
-            if ($nextUrl === null && $channel->aio_integration_id) {
+            if ($nextUrl === null && $channel->aio_integration_id && config('services.aiostreams.enabled', true)) {
                 ResolveAioStreamsChannel::dispatch($channel->id);
             }
 
@@ -3748,7 +3798,7 @@ class M3uProxyService
             // If the failover chain is exhausted for an AIOStreams-backed episode,
             // asynchronously re-resolve fresh candidates for the *next* playback
             // attempt rather than trying to serve a URL synchronously mid-request.
-            if ($nextUrl === null && $episode->is_custom && $episode->aio_item_id) {
+            if ($nextUrl === null && $episode->is_custom && $episode->aio_item_id && config('services.aiostreams.enabled', true)) {
                 ResolveAioStreamsEpisode::dispatch($episode->id);
             }
 

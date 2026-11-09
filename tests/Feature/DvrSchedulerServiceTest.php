@@ -1441,6 +1441,56 @@ it('retries a failed recording within the airing window when attempt_count is be
     expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
 });
 
+it('retries a failed recording once the programme has already started airing (issue #1665)', function () {
+    config(['dvr.max_attempts_per_airing' => 3]);
+
+    $rule = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['series_title' => 'Already Airing Show']);
+
+    // Programme started 10 minutes ago and is still airing (ends in 20 minutes).
+    $programme = EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'Already Airing Show',
+        'epg_channel_id' => 'test.channel',
+        'start_time' => now()->subMinutes(10),
+        'end_time' => now()->addMinutes(20),
+    ]);
+
+    // Pre-existing failed recording (attempt 1), still inside its airing window.
+    $failedRecording = DvrRecording::factory()
+        ->failed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($rule, 'recordingRule')
+        ->create([
+            'title' => 'Already Airing Show',
+            'dvr_recording_rule_id' => $rule->id,
+            'programme_start' => $programme->start_time,
+            'epg_programme_data' => ['epg_channel_id' => 'test.channel'],
+            'scheduled_start' => $programme->start_time->copy(),
+            'scheduled_end' => $programme->end_time->copy(),
+            'user_cancelled' => false,
+            'attempt_count' => 1,
+        ]);
+
+    Queue::fake();
+
+    $this->service->matchAndSchedule(30);
+
+    $failedRecording->refresh();
+
+    // The already-started programme must still be matched and the existing Failed
+    // row resurrected to Scheduled - it must not be skipped just because its
+    // start_time has already passed.
+    expect($failedRecording->status)->toBe(DvrRecordingStatus::Scheduled)
+        ->and($failedRecording->error_message)->toBeNull()
+        ->and($failedRecording->attempt_count)->toBe(1);
+
+    expect(DvrRecording::where('dvr_recording_rule_id', $rule->id)->count())->toBe(1);
+});
+
 it('does not retry a failed recording when attempt_count has reached max', function () {
     config(['dvr.max_attempts_per_airing' => 3]);
 

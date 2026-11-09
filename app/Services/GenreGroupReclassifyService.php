@@ -204,6 +204,9 @@ class GenreGroupReclassifyService
                             'name_internal' => $targetName,
                             'user_id' => $playlist->user_id,
                             'type' => 'vod',
+                            // Not a provider category: without this the next sync removes it as one
+                            // that disappeared, the same as the DVR and merged groups.
+                            'custom' => true,
                             // Genre groups we create ourselves must default to enabled.
                             // `Group.enabled` gates the default-enabled state of future
                             // auto-imported channels assigned to this group (see

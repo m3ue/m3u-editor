@@ -263,3 +263,17 @@ it('counts total items across all queues', function () {
 
     expect($component->get('totalCount'))->toBe(4);
 });
+
+it('interpolates the rejected request title in the Simplified Chinese notification (issue #1725)', function () {
+    $previousLocale = app()->getLocale();
+    app()->setLocale('zh_CN');
+
+    try {
+        $body = __('":title" request has been rejected.', ['title' => 'Breaking Bad']);
+    } finally {
+        app()->setLocale($previousLocale);
+    }
+
+    expect($body)->toContain('Breaking Bad')
+        ->and($body)->not->toContain('：title');
+});

@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Builder;
  * Matches on tmdb_id, which - unlike the internal id - is stable across a
  * resync, and is only available for rows recorded after tmdb_id started
  * being captured on write (see WatchProgressController::resolveTmdbId()).
+ * Episodes without one fall back to series + season + episode number, since
+ * the series row survives a metadata refresh that recreates its episodes.
  *
  * Shared between the live "get_recently_watched" API response (relink on
  * read, so the fix is visible immediately) and the offline prune command /
@@ -228,9 +230,9 @@ class WatchProgressLinker
      */
     private function resolveOrphanAction(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): string
     {
-        $replacement = $progress->tmdb_id
-            ? $this->findContentByTmdbId($progress->content_type, $progress->tmdb_id, $playlist)
-            : null;
+        $replacement = $progress->content_type === 'episode'
+            ? $this->findEpisode($progress, $playlist)
+            : $this->findChannel($progress, $playlist);
 
         if ($replacement) {
             return $this->conflictsWithExistingRow($progress, $replacement->id) ? 'delete' : 'relink';
@@ -303,6 +305,15 @@ class WatchProgressLinker
 
     private function findEpisode(ViewerWatchProgress $progress, Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist): ?Episode
     {
-        return $progress->tmdb_id ? $this->findContentByTmdbId('episode', $progress->tmdb_id, $playlist) : null;
+        $episode = $progress->tmdb_id ? $this->findContentByTmdbId('episode', $progress->tmdb_id, $playlist) : null;
+        if ($episode || ! $progress->series_id || $progress->season_number === null || $progress->episode_number === null) {
+            return $episode;
+        }
+
+        return Episode::where('user_id', $playlist->user_id)
+            ->where('series_id', $progress->series_id)
+            ->where('season', $progress->season_number)
+            ->where('episode_num', $progress->episode_number)
+            ->first();
     }
 }

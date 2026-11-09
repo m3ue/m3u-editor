@@ -15,9 +15,8 @@ use App\Events\PlaylistUpdated;
 use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
-use App\Listeners\AlertOnJobFailed;
-use App\Listeners\PersistUserLocale;
 use App\Livewire\BackupDestinationListRecords;
+use App\Livewire\CopilotChat;
 use App\Livewire\TmdbSearch;
 use App\Models\Bouquet;
 use App\Models\Channel;
@@ -54,7 +53,6 @@ use App\Support\ApiDocs\DocumentXtreamApiResponses;
 use App\Support\ApiDocs\MergeSameStatusResponses;
 use App\Support\ApiDocs\PruneUnreferencedSchemas;
 use App\Support\CopilotProvider;
-use CraftForge\FilamentLanguageSwitcher\Events\LocaleChanged;
 use Dedoc\Scramble\Scramble;
 use Dedoc\Scramble\Support\Generator\OpenApi;
 use Dedoc\Scramble\Support\Generator\SecurityScheme;
@@ -75,7 +73,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
-use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
@@ -214,12 +211,6 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the OIDC Socialite driver (when enabled)
         $this->registerOidcProvider();
-
-        // Persist user locale preference when changed via the language switcher
-        $this->registerLocaleListener();
-
-        // Forward failed queue jobs to Discord/Slack when configured
-        $this->registerJobFailedAlertListener();
 
         // Livewire components
         $this->registerLivewireComponents();
@@ -361,6 +352,22 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(60)->by(optional($request->user())->id ?: $request->ip());
         });
+
+        // Named separately as well as keyed by route class: even callbacks from
+        // the same proxy IP/token cannot consume another callback's allowance.
+        foreach (['resolver', 'webhook', 'broadcast', 'dvr'] as $callback) {
+            RateLimiter::for('m3u-proxy-callback-'.$callback, function (Request $request) use ($callback) {
+                $configured = config('proxy.callback_rate_limits.'.$callback, 120);
+                $limit = is_int($configured) || is_string($configured)
+                    ? filter_var($configured, FILTER_VALIDATE_INT, [
+                        'options' => ['min_range' => 1, 'max_range' => 60000],
+                    ])
+                    : false;
+
+                return Limit::perMinute($limit === false ? 120 : $limit)
+                    ->by($callback.'|'.$request->route()->getDomain().'|'.$request->ip());
+            });
+        }
 
         // Note: Proxy rate limiting is handled by ProxyRateLimitMiddleware for better performance
 
@@ -624,6 +631,18 @@ class AppServiceProvider extends ServiceProvider
                 if (! $epg->sync_interval) {
                     $epg->sync_interval = '0 */6 * * *';
                 }
+                // New Schedules Direct credentials lift a recorded permanent login
+                // rejection, so the next sync tries them. A different username is a
+                // different provider account, so its login cooldown no longer applies.
+                if ($epg->isDirty(['sd_username', 'sd_password'])) {
+                    $epg->sd_auth_blocked_code = null;
+                    $epg->sd_auth_blocked_message = null;
+                }
+                if ($epg->isDirty('sd_username')) {
+                    $epg->sd_login_cooldown_until = null;
+                    $epg->sd_cooldown_reason = null;
+                    $epg->sd_backoff_attempts = 0;
+                }
 
                 return $epg;
             });
@@ -763,6 +782,12 @@ class AppServiceProvider extends ServiceProvider
                     $group->channels()
                         ->update(['group' => $group->name]);
                 }
+
+                // Channels without their own AED profile inherit the group's, and AED
+                // programmes are built into the cached EPG output files.
+                if (array_key_exists('aed_profile_id', $changes) && $group->playlist_id) {
+                    EpgCacheService::clearForGroup($group->id, (int) $group->playlist_id);
+                }
             });
 
             // Custom playlist group/category tags: propagate renames into bouquets
@@ -774,6 +799,20 @@ class AppServiceProvider extends ServiceProvider
                 if (empty($channel->uuid)) {
                     $channel->uuid = Str::orderedUuid()->toString();
                 }
+            });
+
+            // A changed EPG mapping or AED profile is saved immediately, but the generated
+            // XMLTV/gzip output files are served from an output cache that is otherwise only
+            // invalidated by the sync/mapping job chains. Without this, a manual EPG
+            // reassignment or AED profile change through the Channel edit form or the EPG
+            // viewer leaves stale output files with the old programmes until that cache's
+            // own TTL expires.
+            Channel::updated(function (Channel $channel) {
+                if (! $channel->wasChanged(['epg_channel_id', 'aed_profile_id'])) {
+                    return;
+                }
+
+                EpgCacheService::clearForChannelIds([$channel->id]);
             });
 
             // Failover channels
@@ -1208,6 +1247,8 @@ class AppServiceProvider extends ServiceProvider
 
         // Register the TMDB search component
         Livewire::component('tmdb-search', TmdbSearch::class);
+        // Replaces the package's registration; package providers boot before this one.
+        Livewire::component('filament-copilot-chat', CopilotChat::class);
     }
 
     /**
@@ -1222,22 +1263,6 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             SocialiteWasCalled::class,
             [OIDCExtendSocialite::class, 'handle'],
-        );
-    }
-
-    private function registerLocaleListener(): void
-    {
-        Event::listen(
-            LocaleChanged::class,
-            PersistUserLocale::class,
-        );
-    }
-
-    private function registerJobFailedAlertListener(): void
-    {
-        Event::listen(
-            JobFailed::class,
-            AlertOnJobFailed::class,
         );
     }
 

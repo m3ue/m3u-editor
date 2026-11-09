@@ -8,6 +8,7 @@ use App\Models\DvrRecording;
 use App\Services\DvrPostProcessorService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -25,6 +26,21 @@ class PostProcessDvrRecording implements ShouldQueue
     public function __construct(public readonly int $recordingId)
     {
         $this->onQueue('dvr-post');
+    }
+
+    /**
+     * One post-processing run per recording at a time. The job is dispatched from the
+     * proxy callback, the recorder's stop fallback and two "re-run" actions, so two
+     * attempts can be queued for one recording; running them together would write the
+     * same output file and temp directory. A duplicate that arrives while one is running
+     * is dropped (that run finishes the work). If a worker dies the lock expires after
+     * timeout + 5 min, before the queue re-delivers the job (retry_after is 130 min).
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [(new WithoutOverlapping((string) $this->recordingId))->dontRelease()->expireAfter($this->timeout + 300)];
     }
 
     public function handle(DvrPostProcessorService $postProcessor): void

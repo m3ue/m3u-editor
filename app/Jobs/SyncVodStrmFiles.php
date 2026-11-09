@@ -143,6 +143,24 @@ class SyncVodStrmFiles implements ShouldQueue
         if ($totalCount === 0) {
             Log::info('STRM Sync: No VOD channels to process');
 
+            // Cleanup must still run with zero enabled channels - e.g. disabling the
+            // last enabled VOD at this location leaves its tracked file/mapping behind
+            // otherwise, since there's no batch left to carry the cleanup chain forward.
+            // CheckVodStrmProgress treats totalChannels=0 as already complete and
+            // dispatches cleanup immediately.
+            dispatch(new CheckVodStrmProgress(
+                currentOffset: 0,
+                totalChannels: 0,
+                notify: $this->notify,
+                all_playlists: $this->all_playlists,
+                playlist_id: $this->resolvePlaylistId(),
+                user_id: $this->resolveUserId(),
+                needsCleanup: true,
+                channel_ids: $this->channel_ids,
+                syncRunId: $this->syncRunId,
+                completionPhase: $this->completionPhase,
+            ));
+
             return;
         }
 
@@ -246,20 +264,36 @@ class SyncVodStrmFiles implements ShouldQueue
             $channels->loadMissing('mediaSourceMatch.mediaChannel');
         }
 
-        // Get the default sync location for bulk mapping cache
-        $defaultSyncLocation = $globalStreamFileSetting?->location ?? $settings->vod_stream_file_sync_location ?? '';
+        // PERFORMANCE OPTIMIZATION: Bulk load all existing mappings for these channels in
+        // one query. Resolve each channel's own effective sync_location first (a per-channel
+        // Location Override can differ from the global default) and bulk-load mappings across
+        // every distinct location actually in play, keyed by location. A cache keyed by just
+        // the global location would miss every overridden channel and make syncFileWithCache()
+        // below wrongly treat its existing mapping as not found, creating a duplicate.
+        $resolvedSettingsByChannelId = [];
+        foreach ($channels as $channel) {
+            $resolvedSettingsByChannelId[$channel->id] = $this->resolveVodSyncSettings($channel, $settings, $globalStreamFileSetting);
+        }
 
-        // PERFORMANCE OPTIMIZATION: Bulk load all existing mappings for these channels
-        // This reduces N queries (one per channel) to 1 query for all channels
-        $syncLocation = rtrim($defaultSyncLocation, '/');
-        $mappingCache = null;
-        if ($channels->count() > 1 && ! empty($syncLocation)) {
-            $channelIds = $channels->pluck('id')->toArray();
-            $mappingCache = StrmFileMapping::bulkLoadForSyncables(
-                Channel::class,
-                $channelIds,
-                $syncLocation
-            );
+        $mappingCacheByLocation = [];
+        if ($channels->count() > 1) {
+            $syncLocationsInPlay = collect($resolvedSettingsByChannelId)
+                ->pluck('sync_location')
+                ->filter()
+                ->map(fn (string $location): string => rtrim($location, '/'))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+
+            if (! empty($syncLocationsInPlay)) {
+                $channelIds = $channels->pluck('id')->toArray();
+                $mappingCacheByLocation = StrmFileMapping::bulkLoadForSyncablesAcrossLocations(
+                    Channel::class,
+                    $channelIds,
+                    $syncLocationsInPlay
+                );
+            }
         }
 
         // NFO service instance (lazy-loaded per channel if needed)
@@ -268,7 +302,7 @@ class SyncVodStrmFiles implements ShouldQueue
         // Loop through each channel and sync
         foreach ($channels as $channel) {
             // Resolve settings with priority chain: Channel > Group > Global Profile > Legacy Settings
-            $sync_settings = $this->resolveVodSyncSettings($channel, $settings, $globalStreamFileSetting);
+            $sync_settings = $resolvedSettingsByChannelId[$channel->id];
 
             // Initialize NFO service if needed for this channel
             if (($sync_settings['generate_nfo'] ?? false) && ! $nfoService) {
@@ -509,20 +543,26 @@ class SyncVodStrmFiles implements ShouldQueue
                 'name_filter_patterns' => $nameFilterPatterns,
             ];
 
-            // Use intelligent sync with pre-loaded cache - handles create, rename, and URL updates
-            // Capture the returned mapping so the NFO generator can use it for hash optimization,
-            // since $mappingCache was built before this sync and won't contain newly-created entries.
+            // Use intelligent sync with this channel's own location's pre-loaded cache -
+            // handles create, rename, and URL updates. Capture the returned mapping so the
+            // NFO generator can use it for hash optimization, since the cache was built
+            // before this sync and won't contain newly-created entries.
             $channelMapping = StrmFileMapping::syncFileWithCache(
                 $channel,
                 $syncLocation,
                 $filePath,
                 $url,
                 $pathOptions,
-                $mappingCache
+                $mappingCacheByLocation[$syncLocation] ?? null
             );
 
-            // Generate movie NFO file if enabled (pass mapping for hash optimization)
-            if ($nfoService) {
+            // Generate movie NFO file if enabled (pass mapping for hash optimization).
+            // Checked against this channel's own resolved setting, not merely whether
+            // $nfoService has been lazily instantiated yet - that service instance is
+            // shared/reused across the whole chunk once any earlier channel needed it,
+            // so checking its truthiness alone would also generate NFOs for a later,
+            // explicitly NFO-disabled channel.
+            if (($sync_settings['generate_nfo'] ?? false) && $nfoService) {
                 $nfoOptions = [
                     'name_filter_enabled' => $nameFilterEnabled,
                     'name_filter_patterns' => $nameFilterPatterns,

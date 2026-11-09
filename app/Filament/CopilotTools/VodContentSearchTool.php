@@ -82,10 +82,14 @@ class VodContentSearchTool extends BaseTool
             });
         }
 
-        // Genre exclusion: exclude if either the group OR info.genre matches.
+        // Genre exclusion: exclude if either the group OR info.genre matches. `group NOT LIKE`
+        // evaluates to NULL (not true) for a NULL group, which a WHERE clause treats as false
+        // and would wrongly exclude every groupless VOD regardless of its actual genre - a
+        // NULL group must count as "doesn't match" instead.
         foreach ($excludeGenres as $genre) {
-            $query->where('group', "NOT {$like}", "%{$genre}%")
-                ->whereRaw("COALESCE({$genreExpr}, '') NOT {$like} ?", ["%{$genre}%"]);
+            $query->where(function ($q) use ($genre, $like): void {
+                $q->whereNull('group')->orWhere('group', "NOT {$like}", "%{$genre}%");
+            })->whereRaw("COALESCE({$genreExpr}, '') NOT {$like} ?", ["%{$genre}%"]);
         }
 
         if ($yearMin !== null) {

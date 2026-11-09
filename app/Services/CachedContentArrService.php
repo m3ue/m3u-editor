@@ -227,6 +227,9 @@ class CachedContentArrService
                 ->where('type', $type)
                 ->enabled()
                 ->cacheEnabled()
+                // Prefer the instance explicitly marked as the caching default when there's
+                // more than one eligible (issue #1669); otherwise fall back to the oldest.
+                ->orderByDesc('is_default_cache_target')
                 ->orderBy('id')
                 ->first();
         }

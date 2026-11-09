@@ -1,13 +1,16 @@
 #!/bin/bash
 # generate-release-log.sh
 #
-# Generates release notes by finding the true version-bump commits on each branch
-# via config/dev.php history (--first-parent). Does NOT rely on git tags.
+# Generates release notes. Dev and experimental releases are found from their
+# version-bump commits in config/dev.php history (--first-parent). Master releases
+# are found from their release tags (vX.Y.Z), since master is only tagged at release.
 #
 # Usage:
 #   ./tools/generate-release-log.sh                         # auto-detect: preview next release (unreleased changes)
 #   ./tools/generate-release-log.sh v0.10.0-exp             # reproduce: show what was IN this release
 #   ./tools/generate-release-log.sh v0.9.18-exp v0.10.0-exp # explicit: range between two named versions
+#   ./tools/generate-release-log.sh v0.13.7                 # master release (no suffix)
+#   ./tools/generate-release-log.sh v0.13.5 v0.13.7         # master range
 
 set -euo pipefail
 
@@ -34,7 +37,7 @@ build_version_map() {
     while IFS= read -r hash; do
         ver=$(git show "${hash}:config/dev.php" 2>/dev/null \
               | grep "${version_key}" \
-              | grep -oE "[0-9]+\.[0-9]+\.[0-9]+[-a-z]*" | head -1 || true)
+              | grep -oE "[0-9]+(\.[0-9]+){2,3}[-a-z]*" | head -1 || true)
         [[ -z "$ver" ]] && continue
 
         if [[ "$ver" != "$prev_ver" ]]; then
@@ -47,6 +50,18 @@ build_version_map() {
 
     # Emit the final (oldest) version
     [[ -n "$prev_ver" && -n "$last_hash" ]] && echo "$prev_ver $last_hash"
+}
+
+# build_tag_map
+#
+# Master releases: one line per release tag (vX.Y.Z or vX.Y.Z.N, no suffix),
+# "<version> <tagged-commit>", newest-version-first.
+#
+build_tag_map() {
+    local tag
+    while IFS= read -r tag; do
+        echo "${tag#v} $(git rev-parse "${tag}^{commit}")"
+    done < <(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+(\.[0-9]+){2,3}$')
 }
 
 # lookup_version_commit <version_map_file> <version>
@@ -69,8 +84,12 @@ if [[ $# -ge 1 ]]; then
         REMOTE_BRANCH="origin/dev"
         VERSION_KEY="dev_version"
         TAG_SUFFIX="-dev"
+    elif [[ "$first_arg" =~ ^v?[0-9]+(\.[0-9]+){2,3}$ ]]; then
+        REMOTE_BRANCH="origin/master"
+        VERSION_KEY=""
+        TAG_SUFFIX=""
     else
-        echo "Error: version must end in -exp or -dev (e.g. v0.10.0-exp)" >&2
+        echo "Error: version must be a release (v0.13.7) or end in -exp or -dev (e.g. v0.10.0-exp)" >&2
         exit 1
     fi
 else
@@ -82,8 +101,12 @@ else
         REMOTE_BRANCH="origin/dev"
         VERSION_KEY="dev_version"
         TAG_SUFFIX="-dev"
+    elif [[ "$BRANCH" == "master" ]]; then
+        REMOTE_BRANCH="origin/master"
+        VERSION_KEY=""
+        TAG_SUFFIX=""
     else
-        echo "Error: not on a known release branch (dev/experimental)." >&2
+        echo "Error: not on a known release branch (master/dev/experimental)." >&2
         echo "Pass a version explicitly: $0 v0.10.0-exp" >&2
         exit 1
     fi
@@ -94,7 +117,11 @@ fi
 VERSION_MAP_FILE=$(mktemp)
 trap 'rm -f "$VERSION_MAP_FILE"' EXIT
 
-build_version_map "$REMOTE_BRANCH" "$VERSION_KEY" > "$VERSION_MAP_FILE"
+if [[ -n "$VERSION_KEY" ]]; then
+    build_version_map "$REMOTE_BRANCH" "$VERSION_KEY" > "$VERSION_MAP_FILE"
+else
+    build_tag_map > "$VERSION_MAP_FILE"
+fi
 
 # ---------- Resolve PREV_REF / HEAD_REF / PREV_PREV_REF ----------
 
@@ -103,7 +130,7 @@ if [[ $# -eq 2 ]]; then
     prev_ver="${1#v}"   # strip leading 'v'
     curr_ver="${2#v}"
 
-    # Prefer release tags over version map lookups — tags point to the exact SHA used
+    # Prefer release tags over version map lookups: tags point to the exact SHA used
     # by the workflow and are immune to rollback/re-bump noise in the version map.
     prev_tag_commit=$(git rev-parse --verify "v${prev_ver}" 2>/dev/null || true)
     if [[ -n "$prev_tag_commit" ]]; then
@@ -185,6 +212,10 @@ else
     prev_ver=$(awk 'NR==2{print $1}' "$VERSION_MAP_FILE")
     PREV_PREV_REF=$(lookup_version_commit "$VERSION_MAP_FILE" "$prev_ver")
 fi
+
+# Master tag ranges never overlap, so there is nothing to dedup against, and a commit
+# whose subject repeats an earlier release's (e.g. a second CVE bump) must still be listed.
+[[ -z "$VERSION_KEY" ]] && PREV_PREV_REF=""
 
 echo "Branch      : $BRANCH"
 echo "Remote      : $REMOTE_BRANCH"

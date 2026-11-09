@@ -229,7 +229,7 @@ class ArrIntegrationResource extends Resource
                                     ->formatStateUsing(fn (): bool => false)
                                     ->disabled()
                                     ->dehydrated(false)
-                                    ->hidden(fn (): bool => app(CachedContentDispatchService::class)->isEnabled()),
+                                    ->hidden(fn (): bool => ! config('cached_content.enabled', true) || app(CachedContentDispatchService::class)->isEnabled()),
 
                                 Toggle::make('cache_cleanup')
                                     ->label(__('Remove after leaving dynamic groups'))
@@ -247,6 +247,16 @@ class ArrIntegrationResource extends Resource
                                     ->hintIcon(
                                         'heroicon-m-question-mark-circle',
                                         tooltip: __('Kicks in when a movie or episode fails to download, or still isn\'t downloaded or downloading after 24 hours. The title is then unmonitored here. Nothing is ever deleted from the arr.')
+                                    )
+                                    ->visible(fn (Get $get): bool => (bool) $get('cache_enabled') && app(CachedContentDispatchService::class)->isEnabled())
+                                    ->default(false),
+
+                                Toggle::make('is_default_cache_target')
+                                    ->label(__('Default for automatic caching'))
+                                    ->helperText(__('When more than one Sonarr/Radarr integration is enabled for caching, Cache Now and dynamic group caching send new titles here. Only one default is kept per type; turning this on turns it off for the others.'))
+                                    ->hintIcon(
+                                        'heroicon-m-question-mark-circle',
+                                        tooltip: __('Ignored while this is the only caching-enabled integration of its type, or while caching is off.')
                                     )
                                     ->visible(fn (Get $get): bool => (bool) $get('cache_enabled') && app(CachedContentDispatchService::class)->isEnabled())
                                     ->default(false),

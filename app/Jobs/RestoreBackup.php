@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Job;
 use App\Models\User;
+use App\Services\PostgresDumpBinaryResolver;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,7 +29,7 @@ class RestoreBackup implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(): void
+    public function handle(PostgresDumpBinaryResolver $dumpBinaryResolver): void
     {
         $connectionName = config('backup.backup.source.databases')[0] ?? config('database.default');
         $isSqlite = config("database.connections.{$connectionName}.driver") === 'sqlite';
@@ -36,6 +37,8 @@ class RestoreBackup implements ShouldQueue
         $safetyCopy = null;
 
         try {
+            $dumpBinaryResolver->configure($connectionName);
+
             // Flush the jobs table
             Job::truncate();
 

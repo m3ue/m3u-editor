@@ -153,6 +153,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Embedded NGINX
+    |--------------------------------------------------------------------------
+    |
+    | Whether the container runs its own NGINX (set to false by the
+    | external-all compose files, which front the app with their own server)
+    |
+    */
+
+    'nginx_enabled' => env('NGINX_ENABLED', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Shared Streaming Configuration
     |--------------------------------------------------------------------------
     |

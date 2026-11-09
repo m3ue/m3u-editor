@@ -6,6 +6,7 @@
  */
 
 use App\Filament\Tables\SourceCategoriesTable;
+use App\Models\Category;
 use App\Models\Playlist;
 use App\Models\SourceCategory;
 use App\Models\User;
@@ -90,4 +91,43 @@ it('shows no categories when filtering to selected only with an empty selection'
 it('shows all categories when filtering to unselected only with an empty selection', function () {
     filterCategories($this->playlist, false, [])
         ->assertCanSeeTableRecords([$this->action, $this->comedy, $this->drama]);
+});
+
+it('shows a renamed category with its provider name', function () {
+    Category::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Laughs',
+        'name_internal' => 'Comedy',
+    ]);
+
+    Livewire::test(SourceCategoriesTableHarness::class, ['playlistId' => $this->playlist->id])
+        ->assertSee('Laughs (provider: Comedy)')
+        ->assertSee('Action');
+
+    expect(SourceCategory::displayLabelsForIds($this->playlist->id, [$this->comedy->id, $this->action->id]))
+        ->toBe([$this->action->id => 'Action', $this->comedy->id => 'Laughs (provider: Comedy)']);
+});
+
+it('finds a renamed category by either its custom or its provider name', function () {
+    Category::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Laughs',
+        'name_internal' => 'Comedy',
+    ]);
+
+    foreach (['laughs', 'comedy'] as $term) {
+        Livewire::test(SourceCategoriesTableHarness::class, ['playlistId' => $this->playlist->id])
+            ->searchTable($term)
+            ->assertCanSeeTableRecords([$this->comedy])
+            ->assertCanNotSeeTableRecords([$this->action, $this->drama]);
+    }
+});
+
+it('ignores a rename from another playlist', function () {
+    $otherPlaylist = Playlist::factory()->for($this->user)->create();
+    Category::factory()->for($otherPlaylist)->for($this->user)->create([
+        'name' => 'Not this one',
+        'name_internal' => 'Comedy',
+    ]);
+
+    expect(SourceCategory::displayLabelsForIds($this->playlist->id, [$this->comedy->id]))
+        ->toBe([$this->comedy->id => 'Comedy']);
 });

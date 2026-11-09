@@ -160,7 +160,10 @@ class GroupController extends Controller
     /**
      * Update a group
      *
-     * Update specific fields of a group. Only the provided fields will be updated. Updated values are stored in custom fields (e.g., `name_internal`).
+     * Update specific fields of a group. Only the provided fields will be updated. A `name`
+     * update is stored as the group's effective display name (`name`), the same column the
+     * Filament Name field writes to, so the rename is reflected consistently everywhere -
+     * list/detail responses, the channel's group field and generated playlist output.
      */
     public function update(Request $request, int $id): JsonResponse
     {
@@ -183,7 +186,7 @@ class GroupController extends Controller
         ]);
 
         if (array_key_exists('name', $validated)) {
-            $group->name_internal = $validated['name'];
+            $group->name = $validated['name'];
         }
         if (array_key_exists('sort_order', $validated)) {
             $group->sort_order = $validated['sort_order'];
@@ -201,6 +204,18 @@ class GroupController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Cannot change group type while it contains channels of the opposite type',
+                ], 422);
+            }
+
+            // A merged group's own type must match every one of its children's
+            // (see Group::assertMergedGroupRulesHold()) - any existing child was
+            // created to match the CURRENT type, so changing the parent's type
+            // always breaks that invariant for it. Reject rather than silently
+            // leaving the parent and its children on different types.
+            if ($group->is_merged && $group->children()->exists()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cannot change a merged group\'s type while it has child groups',
                 ], 422);
             }
 
@@ -270,6 +285,17 @@ class GroupController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Target group must be the same type as the source group',
+            ], 422);
+        }
+
+        // A merged group is a container only and never owns channels directly (see
+        // Group::scopeAssignableTarget()) - moving channels into one would create
+        // direct ownership the merged-group invariant doesn't allow, leaving the
+        // channel invisible to the merged parent's own enable/disable actions.
+        if ($targetGroup->is_merged) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Target group cannot be a merged group',
             ], 422);
         }
 

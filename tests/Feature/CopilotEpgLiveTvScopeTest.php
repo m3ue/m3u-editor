@@ -237,3 +237,54 @@ it('applies mappings only to eligible live TV channels', function () {
         ->and($vod->refresh()->epg_channel_id)->toBeNull()
         ->and($disabled->refresh()->epg_channel_id)->toBeNull();
 });
+
+it('does not skip an eligible channel when the apply-then-continue offset advice is followed', function () {
+    $group = copilotEpgGroup('Sequential Group');
+    $channelA = copilotEpgChannel($group, 'Channel A');
+    $channelB = copilotEpgChannel($group, 'Channel B');
+    $channelC = copilotEpgChannel($group, 'Channel C');
+
+    foreach (['Channel A', 'Channel B', 'Channel C'] as $name) {
+        EpgChannel::factory()->for($this->epg)->for($this->user)->create([
+            'name' => $name,
+            'display_name' => $name,
+            'channel_id' => str($name)->slug(),
+        ]);
+    }
+
+    $matcher = new EpgChannelMatcherTool;
+
+    // Step 1: limit=1, offset=0 offers A and advises re-calling at offset=0
+    // (not offset=1) once this batch is resolved.
+    $first = (string) $matcher->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+        'limit' => 1,
+        'offset' => 0,
+    ]));
+
+    expect($first)->toContain("Channel #{$channelA->id} \"Channel A\"")
+        ->toContain('offset=0');
+
+    // Step 2: explicitly confirm and apply A's offered mapping.
+    $mappedEpgChannelId = EpgChannel::where('name', 'Channel A')->value('id');
+    (new EpgMappingApplyTool)->handle(new Request([
+        'epg_id' => $this->epg->id,
+        'mappings' => json_encode([
+            ['channel_id' => $channelA->id, 'epg_channel_id' => $mappedEpgChannelId],
+        ], JSON_THROW_ON_ERROR),
+    ]));
+
+    // Step 3: follow the tool's own continuation advice (offset=0, since A is now mapped).
+    $second = (string) $matcher->handle(new Request([
+        'playlist_id' => $this->playlist->id,
+        'group' => $group->name,
+        'epg_id' => $this->epg->id,
+        'limit' => 1,
+        'offset' => 0,
+    ]));
+
+    expect($second)->toContain("Channel #{$channelB->id} \"Channel B\"")
+        ->not->toContain("Channel #{$channelC->id} \"Channel C\"");
+});

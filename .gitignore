@@ -3,6 +3,7 @@
 /public/build
 /public/hot
 /public/storage
+/public/m3u-tv
 /storage/*.key
 /storage/logs
 /storage/pail

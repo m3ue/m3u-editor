@@ -265,18 +265,18 @@ it('flags debug mode only when it is on in production', function () {
 
     config(['app.debug' => false]);
     app()->detectEnvironment(fn () => 'production');
-    Cache::forget('dashboard_system_health');
+    Cache::forget('dashboard_system_health_checks');
     expect($row()['ok'])->toBeTrue()
         ->and($row()['detail'])->toBe('Disabled');
 
     config(['app.debug' => true]);
     app()->detectEnvironment(fn () => 'production');
-    Cache::forget('dashboard_system_health');
+    Cache::forget('dashboard_system_health_checks');
     expect($row()['ok'])->toBeFalse()
         ->and($row()['detail'])->toBe('Enabled');
 
     config(['app.debug' => true]);
     app()->detectEnvironment(fn () => 'local');
-    Cache::forget('dashboard_system_health');
+    Cache::forget('dashboard_system_health_checks');
     expect($row()['ok'])->toBeTrue();
 });

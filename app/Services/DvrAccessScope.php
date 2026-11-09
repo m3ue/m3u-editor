@@ -216,6 +216,14 @@ class DvrAccessScope
 
         $settingIds = self::settingIdsForPlaylist($playlist);
 
-        return $settingIds === [] ? null : DvrSetting::find($settingIds[0]);
+        if ($settingIds === []) {
+            return null;
+        }
+
+        // settingIdsForPlaylist() returns every source's setting regardless of its
+        // own enabled flag (that filtering is the read-side's job); the any-channel
+        // write fallback this docblock promises must pick an actually enabled one,
+        // not just the first id regardless of order.
+        return DvrSetting::whereIn('id', $settingIds)->where('enabled', true)->first();
     }
 }

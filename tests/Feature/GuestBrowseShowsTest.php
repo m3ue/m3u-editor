@@ -379,6 +379,41 @@ it('includes disabled channels in guest channel options when include_disabled_ch
         ->toContain($disabled->id);
 });
 
+it('restricts guest search to the selected channel using tvg-id when there is no explicit EPG mapping', function () {
+    $epg = Epg::factory()->for($this->user)->create();
+
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_id' => 'r07.a',
+        'epg_channel_id' => null,
+        'enabled' => true,
+    ]);
+    Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'stream_id' => 'r07.b',
+        'epg_channel_id' => null,
+        'enabled' => true,
+    ]);
+
+    EpgProgramme::factory()->for($epg)->create([
+        'title' => 'R07 Programme A',
+        'epg_channel_id' => 'r07.a',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+    EpgProgramme::factory()->for($epg)->create([
+        'title' => 'R07 Programme B',
+        'epg_channel_id' => 'r07.b',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    $component = makeGuestBrowseShows();
+    $component->channel_id = $channelA->id;
+    $component->search();
+
+    expect($component->groupedShows)->toHaveCount(1)
+        ->and($component->groupedShows[0]['title'])->toBe('R07 Programme A');
+});
+
 it('includes programmes from disabled channels for guests when include_disabled_channels is true', function () {
     $this->dvrSetting->update(['include_disabled_channels' => true]);
 

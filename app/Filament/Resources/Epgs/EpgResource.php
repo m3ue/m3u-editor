@@ -11,6 +11,7 @@ use App\Filament\Resources\EpgResource\Pages;
 use App\Filament\Resources\Epgs\Pages\ListEpgs;
 use App\Filament\Resources\Epgs\Pages\ViewEpg;
 use App\Jobs\GenerateEpgCache;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
 use App\Models\Playlist;
@@ -238,6 +239,7 @@ class EpgResource extends Resource implements CopilotResource
                                 ->send();
                         })
                         ->disabled(fn ($record): bool => $record->status === Status::Processing)
+                        ->hidden(fn (Epg $record): bool => $record->isSchedulesDirectDisabled())
                         ->requiresConfirmation()
                         ->icon('heroicon-o-arrow-path')
                         ->modalIcon('heroicon-o-arrow-path')
@@ -286,6 +288,8 @@ class EpgResource extends Resource implements CopilotResource
                         ->icon('heroicon-o-arrow-uturn-left')
                         ->color('warning')
                         ->action(function ($record) {
+                            // Stop the sync still in flight, so a new one doesn't run beside it
+                            SkipIfSyncReset::recordReset($record);
                             $record->update([
                                 'status' => Status::Pending,
                                 'processing' => false,
@@ -309,6 +313,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->modalIcon('heroicon-o-arrow-uturn-left')
                         ->modalDescription(__('Reset EPG status so it can be processed again. Only perform this action if you are having problems with the EPG syncing.'))
                         ->modalSubmitActionLabel(__('Yes, reset now')),
+                    self::getRetrySdLoginAction(),
                     self::getManageSdLineupsAction(),
                     self::getSdDeleteAction(),
                 ])->button()->hiddenLabel()->size('sm'),
@@ -323,6 +328,10 @@ class EpgResource extends Resource implements CopilotResource
                         ->label(__('Process selected'))
                         ->action(function (Collection $records): void {
                             foreach ($records as $record) {
+                                if ($record->isSchedulesDirectDisabled()) {
+                                    continue;
+                                }
+
                                 $record->update([
                                     'status' => Status::Processing,
                                     'progress' => 0,
@@ -408,9 +417,11 @@ class EpgResource extends Resource implements CopilotResource
                 ->label(__('EPG type'))
                 ->columnSpan(1)
                 ->grouped()
-                ->options([
+                ->options(fn (): array => config('services.schedules_direct.enabled', true) ? [
                     'url' => 'File, URL or Path',
                     'schedules_direct' => 'SchedulesDirect',
+                ] : [
+                    'url' => 'File, URL or Path',
                 ])
                 ->icons([
                     'url' => 'heroicon-s-link',
@@ -435,6 +446,11 @@ class EpgResource extends Resource implements CopilotResource
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value)
                 ->schema([
+                    Callout::make(__('SchedulesDirect login rejected'))
+                        ->danger()
+                        ->columnSpanFull()
+                        ->visible(fn (?Epg $record): bool => (bool) $record?->isSchedulesDirectAuthBlocked())
+                        ->description(fn (?Epg $record): ?string => $record?->sd_auth_blocked_message),
                     Grid::make()
                         ->columns(2)
                         ->schema([
@@ -457,7 +473,19 @@ class EpgResource extends Resource implements CopilotResource
                                 ->required(fn (Get $get): bool => $get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value)
                                 ->searchable()
                                 ->preload()
-                                ->options(function (SchedulesDirectService $service) {
+                                ->options(function (SchedulesDirectService $service, ?string $state) {
+                                    // No discovery requests while the integration is switched off;
+                                    // keep the saved country selectable so the record stays editable.
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        $options = ['USA' => 'United States', 'CAN' => 'Canada'];
+
+                                        if (filled($state)) {
+                                            $options[$state] ??= $state;
+                                        }
+
+                                        return $options;
+                                    }
+
                                     try {
                                         $countries = $service->getCountries();
                                         $options = [];
@@ -494,6 +522,10 @@ class EpgResource extends Resource implements CopilotResource
                                 ->multiple()
                                 ->searchable()
                                 ->getSearchResultsUsing(function (string $search, Get $get, SchedulesDirectService $service) {
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        return [];
+                                    }
+
                                     $country = $get('sd_country');
                                     $postalCode = $get('sd_postal_code');
                                     $username = $get('sd_username');
@@ -545,6 +577,10 @@ class EpgResource extends Resource implements CopilotResource
                                 })
                                 ->getOptionLabelsUsing(function (array $values, Get $get, SchedulesDirectService $service): array {
                                     $labels = array_combine($values, $values);
+
+                                    if (! config('services.schedules_direct.enabled', true)) {
+                                        return $labels;
+                                    }
 
                                     try {
                                         $country = $get('sd_country');
@@ -601,6 +637,7 @@ class EpgResource extends Resource implements CopilotResource
                         ->schema([
                             Actions::make([
                                 Action::make('test_connection')
+                                    ->hidden(fn (): bool => ! config('services.schedules_direct.enabled', true))
                                     ->label(__('Test Connection'))
                                     ->icon('heroicon-o-wifi')
                                     ->color('gray')
@@ -635,6 +672,7 @@ class EpgResource extends Resource implements CopilotResource
                                         }
                                     }),
                                 Action::make('browse_lineups')
+                                    ->hidden(fn (): bool => ! config('services.schedules_direct.enabled', true))
                                     ->label(__('View Lineups'))
                                     ->icon('heroicon-o-tv')
                                     ->color('gray')
@@ -820,9 +858,18 @@ class EpgResource extends Resource implements CopilotResource
                                 ->live()
                                 ->placeholder(__('0 */6 * * *'))
                                 ->hintAction(CronHelperAction::make(name: 'epg-sync-cron', cronField: 'sync_interval'))
-                                ->helperText(fn ($get) => $get('sync_interval') && CronExpression::isValidExpression($get('sync_interval'))
-                                    ? 'Next scheduled sync: '.(new CronExpression($get('sync_interval')))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
-                                    : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".')
+                                ->helperText(function (Get $get): string {
+                                    $syncInterval = $get('sync_interval');
+                                    $helperText = $syncInterval && CronExpression::isValidExpression($syncInterval)
+                                        ? 'Next scheduled sync: '.(new CronExpression($syncInterval))->getNextRunDate()->format(app(DateFormatService::class)->getFormat())
+                                        : 'Specify the CRON schedule for automatic sync, e.g. "0 */6 * * *".';
+
+                                    if ($get('source_type') === EpgSourceType::SCHEDULES_DIRECT->value) {
+                                        $helperText .= ' '.__('Schedules Direct will sync, at most, once per hour, regardless of configured schedule.');
+                                    }
+
+                                    return $helperText;
+                                })
                                 ->hidden(fn (Get $get): bool => ! $get('auto_sync')),
                         ]),
                     Grid::make()
@@ -897,6 +944,44 @@ class EpgResource extends Resource implements CopilotResource
     }
 
     /**
+     * Shared "Retry SchedulesDirect Login" action used in the table, edit page, and view page.
+     * Lifts a recorded permanent login rejection (e.g. after the account was renewed)
+     * and runs one sync, which tries the login again.
+     */
+    public static function getRetrySdLoginAction(): Action
+    {
+        return Action::make('retry_sd_login')
+            ->label(__('Retry SchedulesDirect Login'))
+            ->icon('heroicon-o-key')
+            ->color('warning')
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && ! $record->isSchedulesDirectDisabled() && $record->isSchedulesDirectAuthBlocked())
+            ->requiresConfirmation()
+            ->modalIcon('heroicon-o-key')
+            ->modalDescription(fn (Epg $record): string => (string) $record->sd_auth_blocked_message)
+            ->modalSubmitActionLabel(__('Yes, retry login'))
+            ->action(function (Epg $record): void {
+                app(SchedulesDirectService::class)->clearAuthBlock($record);
+
+                $record->update([
+                    'status' => Status::Processing,
+                    'progress' => 0,
+                    'sd_progress' => 0,
+                    'cache_progress' => 0,
+                    'resync_attempt' => 0,
+                ]);
+                app('Illuminate\Contracts\Bus\Dispatcher')
+                    ->dispatch(new ProcessEpgImport($record, force: true));
+
+                Notification::make()
+                    ->success()
+                    ->title(__('EPG is processing'))
+                    ->body(__('EPG is being processed in the background. Depending on the size of the guide data, this may take a while. You will be notified on completion.'))
+                    ->duration(10000)
+                    ->send();
+            });
+    }
+
+    /**
      * Shared "Manage SD Lineups" action used in the table, edit page, and view page.
      * Filament injects the current $record via type-hint in all three contexts.
      */
@@ -906,7 +991,7 @@ class EpgResource extends Resource implements CopilotResource
             ->label(__('Manage SD Lineups'))
             ->icon('heroicon-o-list-bullet')
             ->color('warning')
-            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect())
+            ->visible(fn (Epg $record): bool => $record->isSchedulesDirect() && ! $record->isSchedulesDirectDisabled())
             ->modalHeading(__('Manage SchedulesDirect Lineups'))
             ->modalDescription(__('View and remove lineups from your SchedulesDirect account.'))
             ->modalSubmitActionLabel(__('Remove Selected Lineup'))

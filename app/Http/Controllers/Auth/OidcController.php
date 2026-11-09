@@ -54,6 +54,20 @@ class OidcController
             $user = User::where('name', $oidcUser->getName())->first();
         }
 
+        // A match via email or username (not oidc_id) only means this account *shares* that
+        // identity, not that it belongs to this IdP identity. If it's already bound to a
+        // different one, reject rather than let a different OIDC identity that merely shares
+        // an email or display name silently hijack an account someone else already linked.
+        if ($user && $user->oidc_id && $user->oidc_id !== $oidcUser->getId()) {
+            Log::warning('OIDC login denied: matched account is already linked to a different identity', [
+                'oidc_id' => $oidcUser->getId(),
+                'matched_user_id' => $user->id,
+            ]);
+
+            return redirect()->route('filament.admin.auth.login')
+                ->with('oidc_error', 'This account is already linked to a different SSO identity. Contact your administrator.');
+        }
+
         if ($user) {
             // Link OIDC identity to existing user if not already linked
             if (! $user->oidc_id) {

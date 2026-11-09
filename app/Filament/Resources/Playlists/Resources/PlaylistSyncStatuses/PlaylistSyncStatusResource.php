@@ -131,6 +131,16 @@ class PlaylistSyncStatusResource extends Resource implements CopilotResource
                     ->counts('removedGroups')
                     ->toggleable()
                     ->sortable(),
+                TextColumn::make('added_categories_count')
+                    ->label(__('Added Categories'))
+                    ->counts('addedCategories')
+                    ->toggleable()
+                    ->sortable(),
+                TextColumn::make('removed_categories_count')
+                    ->label(__('Removed Categories'))
+                    ->counts('removedCategories')
+                    ->toggleable()
+                    ->sortable(),
                 TextColumn::make('added_series_count')
                     ->label(__('Added Series'))
                     ->counts('addedSeries')

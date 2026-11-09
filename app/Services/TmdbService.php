@@ -54,6 +54,14 @@ class TmdbService
      */
     public const MAX_DYNAMIC_GROUP_PAGES = 10;
 
+    /**
+     * Minimum title similarity (0-100) required for the year-only fallback match
+     * in searchMovie() (Strategy 3). A shared release year alone isn't enough to
+     * accept a result - without this floor, an unrelated title that merely shares
+     * a year with the search can get matched (issue #1590).
+     */
+    protected const MIN_YEAR_ONLY_MATCH_SIMILARITY = 35.0;
+
     protected ?string $apiKey;
 
     protected string $language;
@@ -320,25 +328,46 @@ class TmdbService
                     }
                 }
 
-                // Strategy 3: Take first result if year matches exactly
+                // Strategy 3: Take first result if year matches exactly - but only
+                // when the title is at least loosely similar too. A shared year alone
+                // isn't a strong enough signal: results with the same release year but
+                // an unrelated title would otherwise get matched (issue #1590).
                 if (! empty($results) && $year) {
+                    $normalizedForFallback = $this->normalizeForComparison($normalizedTitle);
                     foreach ($results as $result) {
                         $resultYear = isset($result['release_date']) ? (int) substr($result['release_date'], 0, 4) : null;
-                        if ($resultYear === $year) {
-                            Log::debug('TMDB: Using first result with matching year', [
+                        if ($resultYear !== $year) {
+                            continue;
+                        }
+
+                        $resultSimilarity = $this->calculateSimilarity(
+                            $normalizedForFallback,
+                            $this->normalizeForComparison($result['title'] ?? ''),
+                        );
+                        if ($resultSimilarity < self::MIN_YEAR_ONLY_MATCH_SIMILARITY) {
+                            Log::debug('TMDB: Skipping year-only match, title too dissimilar', [
                                 'title' => $result['title'] ?? 'N/A',
                                 'year' => $resultYear,
+                                'similarity' => $resultSimilarity,
                             ]);
-                            $externalIds = $this->getMovieExternalIds($result['id']);
 
-                            return [
-                                'tmdb_id' => $result['id'],
-                                'imdb_id' => $externalIds['imdb_id'] ?? null,
-                                'title' => $result['title'] ?? null,
-                                'release_date' => $result['release_date'] ?? null,
-                                'confidence' => 50,
-                            ];
+                            continue;
                         }
+
+                        Log::debug('TMDB: Using first result with matching year', [
+                            'title' => $result['title'] ?? 'N/A',
+                            'year' => $resultYear,
+                            'similarity' => $resultSimilarity,
+                        ]);
+                        $externalIds = $this->getMovieExternalIds($result['id']);
+
+                        return [
+                            'tmdb_id' => $result['id'],
+                            'imdb_id' => $externalIds['imdb_id'] ?? null,
+                            'title' => $result['title'] ?? null,
+                            'release_date' => $result['release_date'] ?? null,
+                            'confidence' => 50,
+                        ];
                     }
                 }
 
@@ -1102,6 +1131,90 @@ class TmdbService
 
             return null;
         }
+    }
+
+    /**
+     * Get full details for a VOD item's TMDB ID, trying the movie endpoint first
+     * and falling back to the TV series endpoint when the ID isn't a movie.
+     *
+     * Movie and TV series have separate id numbering on TMDB, so a stored
+     * tmdb_id that was actually matched (or manually picked) as a TV series
+     * previously returned nothing from getMovieDetails(), silently leaving
+     * VOD items like a TV series mapped onto a movie id with no plot/artwork
+     * ever fetched (issue #1590). The TV result is remapped onto the same
+     * movie-shaped keys so callers don't need to branch on media type.
+     *
+     * @param  string|null  $knownMediaType  'movie' or 'tv' if already known (e.g. from a
+     *                                       previous successful lookup), to skip straight to
+     *                                       the right endpoint instead of trying movie first.
+     * @return array|null Movie-shaped details, with 'media_type' set to 'movie' or 'tv'
+     */
+    public function getMovieDetailsWithTvFallback(int $tmdbId, ?string $knownMediaType = null): ?array
+    {
+        if ($knownMediaType === 'tv') {
+            $tvFirst = $this->mapTvDetailsToMovieShape($tmdbId);
+            if ($tvFirst) {
+                return $tvFirst;
+            }
+        }
+
+        $details = $this->getMovieDetails($tmdbId);
+        if ($details) {
+            $details['media_type'] = 'movie';
+
+            return $details;
+        }
+
+        if ($knownMediaType === 'tv') {
+            // Already tried above.
+            return null;
+        }
+
+        $tvDetails = $this->mapTvDetailsToMovieShape($tmdbId);
+        if ($tvDetails) {
+            Log::info('TMDB: Movie lookup failed, found a matching TV series instead', [
+                'tmdb_id' => $tmdbId,
+            ]);
+        }
+
+        return $tvDetails;
+    }
+
+    /**
+     * Fetch TV series details and remap them onto the same keys getMovieDetails()
+     * returns, so callers can handle either media type uniformly.
+     */
+    private function mapTvDetailsToMovieShape(int $tmdbId): ?array
+    {
+        $tvDetails = $this->getTvSeriesDetails($tmdbId);
+        if (! $tvDetails) {
+            return null;
+        }
+
+        return [
+            'tmdb_id' => $tvDetails['tmdb_id'],
+            'imdb_id' => $tvDetails['imdb_id'],
+            'title' => $tvDetails['name'],
+            'original_title' => $tvDetails['original_name'],
+            'overview' => $tvDetails['overview'],
+            'poster_url' => $tvDetails['poster_url'],
+            'backdrop_url' => $tvDetails['backdrop_url'],
+            'logo_url' => $tvDetails['logo_url'],
+            'release_date' => $tvDetails['first_air_date'],
+            'genres' => $tvDetails['genres'],
+            'vote_average' => $tvDetails['vote_average'],
+            'vote_count' => $tvDetails['vote_count'],
+            'runtime' => null,
+            'status' => $tvDetails['status'],
+            'cast' => $tvDetails['cast'],
+            'cast_list' => $tvDetails['cast_list'],
+            'director' => $tvDetails['director'],
+            'youtube_trailer' => $tvDetails['youtube_trailer'],
+            'certification' => $tvDetails['certification'],
+            'studios' => $tvDetails['networks'],
+            'recommendations' => $tvDetails['recommendations'],
+            'media_type' => 'tv',
+        ];
     }
 
     /**

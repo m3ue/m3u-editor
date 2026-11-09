@@ -12,6 +12,7 @@ class EditEpg extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            EpgResource::getRetrySdLoginAction(),
             EpgResource::getManageSdLineupsAction(),
             EpgResource::getSdDeleteAction(),
         ];

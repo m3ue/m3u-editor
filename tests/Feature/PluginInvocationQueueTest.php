@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\Resources\Plugins\Pages\EditPlugin;
+use App\Filament\Resources\Plugins\PluginResource;
 use App\Jobs\ExecutePluginInvocation;
 use App\Models\Plugin;
 use App\Models\PluginRun;
@@ -436,6 +437,19 @@ it('routes plugin hooks through the dedicated worker', function () {
     });
 });
 
+it('dispatches no plugin hooks while plugins are disabled', function () {
+    Queue::fake();
+    config()->set('plugins.enabled', false);
+
+    createPluginForInvocationQueueTests([
+        'hooks' => ['playlist.synced'],
+    ]);
+
+    expect(app(PluginHookDispatcher::class)->dispatch('playlist.synced', ['playlist_id' => 123]))->toBeEmpty();
+
+    Queue::assertNothingPushed();
+});
+
 it('routes scheduled plugin invocations through the dedicated worker', function () {
     Queue::fake();
 
@@ -640,4 +654,24 @@ it('surfaces a friendly error when another resume for the same run holds the loc
     expect($run->fresh()->status)->toBe('stale')
         ->and($run->fresh()->progress_message)->toBe('Waiting for operator.')
         ->and($run->logs()->count())->toBe(0);
+});
+
+it('focuses the current-run card on a running invocation even when a newer run has completed', function () {
+    $plugin = createPluginForInvocationQueueTests();
+    $runFields = [
+        'extension_plugin_id' => $plugin->id,
+        'invocation_type' => 'action',
+        'action' => 'resume_scan',
+        'trigger' => 'manual',
+        'dry_run' => true,
+        'payload' => [],
+    ];
+
+    $resumedRun = PluginRun::query()->create([...$runFields, 'status' => 'running']);
+    $resumedRun->forceFill(['created_at' => now()->subHour()])->save();
+    PluginRun::query()->create([...$runFields, 'status' => 'completed']);
+
+    $focusRun = (new ReflectionMethod(PluginResource::class, 'focusRun'))->invoke(null, $plugin);
+
+    expect($focusRun->is($resumedRun))->toBeTrue();
 });

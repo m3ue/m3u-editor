@@ -1134,3 +1134,93 @@ it('reshapes movie production companies into studios', function (array $companie
     ], []],
     'no production companies' => [[], []],
 ]);
+
+it('does not accept a year-only match whose title is unrelated to the search', function () {
+    // Neither candidate is a confident title match, and there's more than one
+    // result, so searchMovie must fall through its fallback strategies instead
+    // of blindly accepting whichever one happens to share the search year
+    // (issue #1590 - a shared year alone used to be enough to match).
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                ['id' => 200, 'title' => 'Completely Different Name', 'release_date' => '2019-01-01', 'popularity' => 5.0],
+                ['id' => 300, 'title' => 'Another Random Thing', 'release_date' => '2020-01-01', 'popularity' => 5.0],
+            ],
+        ], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMovie('Totally Unrelated Picture', 2020);
+
+    expect($result)->toBeNull();
+});
+
+it('still accepts a year-only match when the title is at least loosely similar', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/search/movie*' => Http::response([
+            'results' => [
+                ['id' => 400, 'title' => 'The Great Escape', 'release_date' => '2020-01-01', 'popularity' => 5.0],
+                ['id' => 500, 'title' => 'The Great Escape Part Two', 'release_date' => '2020-06-01', 'popularity' => 5.0],
+            ],
+        ], 200),
+        'https://api.themoviedb.org/3/movie/*/external_ids*' => Http::response([], 200),
+    ]);
+
+    $service = new TmdbService($this->settings);
+    $result = $service->searchMovie('The Great Escape Part Two', 2020);
+
+    expect($result)->not->toBeNull()
+        ->and($result['tmdb_id'])->toBe(500);
+});
+
+it('falls back to the TV endpoint when a VOD tmdb_id turns out to be a TV series', function () {
+    // Movie and TV series have separate id numbering on TMDB - a tmdb_id that
+    // was actually matched as a TV series returns nothing from /movie/{id}.
+    // getMovieDetailsWithTvFallback() must then try /tv/{id} instead of
+    // silently giving up (issue #1590).
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/334430*' => Http::response([], 404),
+        'https://api.themoviedb.org/3/tv/334430*' => Http::response([
+            'id' => 334430,
+            'name' => 'Toxic',
+            'overview' => 'A toxic situation unfolds.',
+            'first_air_date' => '2026-01-01',
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+            'external_ids' => [],
+            'content_ratings' => ['results' => []],
+            'networks' => [],
+            'recommendations' => ['results' => []],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetailsWithTvFallback(334430);
+
+    expect($details)->not->toBeNull()
+        ->and($details['title'])->toBe('Toxic')
+        ->and($details['overview'])->toBe('A toxic situation unfolds.')
+        ->and($details['release_date'])->toBe('2026-01-01')
+        ->and($details['media_type'])->toBe('tv');
+});
+
+it('skips straight to the TV endpoint when the media type is already known', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/334430*' => Http::response([], 404),
+        'https://api.themoviedb.org/3/tv/334430*' => Http::response([
+            'id' => 334430,
+            'name' => 'Toxic',
+            'overview' => 'A toxic situation unfolds.',
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+            'external_ids' => [],
+            'content_ratings' => ['results' => []],
+            'networks' => [],
+            'recommendations' => ['results' => []],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetailsWithTvFallback(334430, 'tv');
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/movie/334430'));
+    expect($details['media_type'])->toBe('tv');
+});

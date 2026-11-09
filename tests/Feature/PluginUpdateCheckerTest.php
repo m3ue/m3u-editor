@@ -396,6 +396,46 @@ it('the command handles a missing plugin gracefully', function () {
         ->assertFailed();
 });
 
+it('does not report all plugins up to date when the release lookup failed (issue #1729)', function () {
+    $plugin = createPluginForUpdateTests('Lookup Failure', [
+        'repository' => 'test-owner/lookup-failure',
+        'version' => '1.0.0',
+    ]);
+
+    Http::fake([
+        'api.github.com/repos/test-owner/lookup-failure/releases/latest' => Http::response(null, 503),
+    ]);
+
+    $this->artisan('plugins:check-updates', ['--plugin' => $plugin->plugin_id])
+        ->expectsOutputToContain('could not be checked')
+        ->doesntExpectOutputToContain('All plugins are up to date.')
+        ->assertSuccessful();
+});
+
+it('reports errors alongside available updates for mixed results', function () {
+    $failing = createPluginForUpdateTests('Mixed Failing', [
+        'repository' => 'test-owner/mixed-failing',
+        'version' => '1.0.0',
+    ]);
+    $updatable = createPluginForUpdateTests('Mixed Updatable', [
+        'repository' => 'test-owner/mixed-updatable',
+        'version' => '1.0.0',
+    ]);
+
+    Http::fake([
+        'api.github.com/repos/test-owner/mixed-failing/releases/latest' => Http::response(null, 429),
+        'api.github.com/repos/test-owner/mixed-updatable/releases/latest' => Http::response(
+            fakeGitHubRelease('v2.0.0'),
+            200,
+        ),
+    ]);
+
+    $this->artisan('plugins:check-updates')
+        ->expectsOutputToContain('1 plugin(s) have updates available.')
+        ->expectsOutputToContain('could not be checked')
+        ->assertSuccessful();
+});
+
 // -- Manifest repository validation tests --
 
 it('normalizes github URLs to owner/repo format', function () {

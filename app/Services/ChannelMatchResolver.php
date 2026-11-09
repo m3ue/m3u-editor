@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Str;
+
 /**
  * Shared channel matching for cross-playlist operations (Copy Changes and Provider Migration).
  *
@@ -42,7 +44,7 @@ class ChannelMatchResolver
             return null;
         }
 
-        $normalized = strtolower(trim((string) $value));
+        $normalized = Str::lower(trim((string) $value));
         $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
 
         return $normalized === '' ? null : $normalized;

@@ -46,6 +46,7 @@ class CheckSeriesImportProgress implements ShouldQueue
         public ?bool $sync_stream_files = true,
         public ?float $startedAt = null,
         public ?int $syncRunId = null,
+        public ?int $lastSeriesId = null,
     ) {
         // Track start time on first checker
         if ($this->startedAt === null) {
@@ -76,7 +77,19 @@ class CheckSeriesImportProgress implements ShouldQueue
             }
         }
 
-        if ($seriesRemaining <= 0) {
+        // Empty once nothing past the cursor is still eligible, even if the planned
+        // count says otherwise (e.g. a series was disabled or deleted mid-run).
+        $plannedBatches = $seriesRemaining > 0
+            ? ProcessM3uImportSeriesEpisodes::planBatches(
+                $this->user_id,
+                $this->playlist_id,
+                $this->overwrite_existing,
+                $this->lastSeriesId ?? 0,
+                min(self::JOBS_PER_CHAIN, (int) ceil($seriesRemaining / $batchSize)),
+            )
+            : collect();
+
+        if ($plannedBatches->isEmpty()) {
             // All done! Trigger TMDB fetch and/or STRM sync if needed
             Log::info('Series Import: All metadata batches complete', [
                 'total_series' => $this->totalSeries,
@@ -153,9 +166,10 @@ class CheckSeriesImportProgress implements ShouldQueue
 
         // More series to process - dispatch next chain
         $jobs = [];
-        $jobsInThisChain = min(self::JOBS_PER_CHAIN, (int) ceil($seriesRemaining / $batchSize));
+        $jobsInThisChain = $plannedBatches->count();
+        $afterId = $this->lastSeriesId ?? 0;
 
-        for ($i = 0; $i < $jobsInThisChain; $i++) {
+        foreach ($plannedBatches as $i => $batchIds) {
             $offset = $seriesProcessed + ($i * $batchSize);
             $batchNumber = (int) floor($offset / $batchSize) + 1;
             $totalBatches = (int) ceil($this->totalSeries / $batchSize);
@@ -172,7 +186,10 @@ class CheckSeriesImportProgress implements ShouldQueue
                 totalBatches: $totalBatches,
                 currentBatch: $batchNumber,
                 syncRunId: $this->syncRunId, // so a failed batch can fail the pipeline phase
+                batchAfterId: $afterId,
             );
+
+            $afterId = $batchIds->last();
         }
 
         // Add checker as last job in chain
@@ -188,6 +205,7 @@ class CheckSeriesImportProgress implements ShouldQueue
             sync_stream_files: $this->sync_stream_files,
             startedAt: $this->startedAt,
             syncRunId: $this->syncRunId,
+            lastSeriesId: $afterId,
         );
 
         Log::info('Series Import: Dispatching next chain', [

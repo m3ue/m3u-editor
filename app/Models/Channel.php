@@ -61,6 +61,7 @@ class Channel extends Model
         'is_custom' => 'boolean',
         'is_vod' => 'boolean',
         'enable_proxy' => 'boolean',
+        'proxy_options' => 'array',
         'tmdb_id' => 'integer',
         'tvdb_id' => 'integer',
         'imdb_id' => 'string',
@@ -567,13 +568,14 @@ class Channel extends Model
      *
      * Returns a flat list of entries, each with one of two shapes:
      *   - Stream entry:  ['stream' => ['codec_type' => string, 'codec_name' => string, ...]]
-     *   - Format entry:  ['format' => ['bit_rate' => string]]  (appended once when available)
+     *   - Format entry:  ['format' => ['format_name' => ?string, 'bit_rate' => ?string]]  (appended once when available)
      *
-     * The format entry carries the container-level bit_rate from `-show_format`. It is used
-     * as a fallback video bitrate for live MPEG-TS streams where ffprobe cannot determine
-     * a per-stream bit_rate. See getEmbyStreamStats() for the derivation logic.
+     * The format entry carries the container-level format_name and bit_rate from `-show_format`.
+     * The bit_rate is used as a fallback video bitrate for live MPEG-TS streams where ffprobe
+     * cannot determine a per-stream bit_rate (see getEmbyStreamStats()); format_name is used by
+     * adaptive stream profile rules (see StreamProfileRuleEvaluator).
      *
-     * @return list<array{stream: array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string, refs: ?int, tags: array<string, string>}}|array{format: array{bit_rate: string}}>
+     * @return list<array{stream: array{codec_type: string, codec_name: string, codec_long_name: ?string, profile: ?string, width: ?int, height: ?int, bit_rate: ?string, avg_frame_rate: ?string, display_aspect_ratio: ?string, sample_rate: ?string, channels: ?int, channel_layout: ?string, level: ?int, bits_per_raw_sample: ?string, refs: ?int, tags: array<string, string>}}|array{format: array{format_name: ?string, bit_rate: ?string}}>
      */
     public function probeStreamStats(int $timeout = 15): array
     {
@@ -631,9 +633,13 @@ class Channel extends Model
                 // bit_rate (no CBR container, unknown duration). Capture the
                 // container-level bit_rate from -show_format so we can derive a
                 // sensible video bitrate fallback in getEmbyStreamStats().
+                $formatName = $json['format']['format_name'] ?? null;
                 $formatBitRate = $json['format']['bit_rate'] ?? null;
-                if ($formatBitRate !== null) {
-                    $streamStats[] = ['format' => ['bit_rate' => $formatBitRate]];
+                if ($formatName !== null || $formatBitRate !== null) {
+                    $streamStats[] = ['format' => [
+                        'format_name' => $formatName,
+                        'bit_rate' => $formatBitRate,
+                    ]];
                 }
 
                 return $streamStats;
@@ -878,6 +884,20 @@ class Channel extends Model
                 }
 
                 $movieData = $xtream->getVodInfo($this->source_id, timeout: 60);
+
+                // XtreamService::call() swallows HTTP/transport failures and returns
+                // null (surfaced here as an empty array) rather than throwing, so a
+                // failed provider request must be checked for explicitly. Without this,
+                // a failed fetch would still persist last_metadata_fetch and report
+                // success, hiding the failure from the caller. A real answer without
+                // extended info ("info": [], common on XUI panels) still carries
+                // movie_data, so it is kept and the TMDB lookup below can fill the gaps.
+                if (empty($movieData['info'] ?? null) && empty($movieData['movie_data'] ?? null)) {
+                    Log::warning("VOD metadata fetch returned no data for channel {$this->id} (source_id: {$this->source_id})");
+
+                    return false;
+                }
+
                 $releaseDate = $movieData['info']['release_date'] ?? null;
                 $releaseDateAlt = $movieData['info']['releasedate'] ?? null;
                 $year = $this->year;
@@ -1031,14 +1051,17 @@ class Channel extends Model
                 ->orWhereNotNull('imdb_id');
 
             if ($isPgsql) {
-                $q->orWhereRaw("info::jsonb ?? 'tmdb_id'")
-                    ->orWhereRaw("info::jsonb ?? 'tmdb'")
-                    ->orWhereRaw("movie_data::jsonb ?? 'tmdb_id'")
-                    ->orWhereRaw("movie_data::jsonb ?? 'tmdb'")
-                    ->orWhereRaw("info::jsonb ?? 'imdb_id'")
-                    ->orWhereRaw("info::jsonb ?? 'imdb'")
-                    ->orWhereRaw("movie_data::jsonb ?? 'imdb_id'")
-                    ->orWhereRaw("movie_data::jsonb ?? 'imdb'");
+                // ->>'key' (value), not ?? 'key' (key existence): a key can be present with a
+                // null/empty value (e.g. a prior failed enrichment), which should still count
+                // as "no ID" - the ?? operator would wrongly call that "has an ID" (issue #1645).
+                $q->orWhereRaw("info::jsonb->>'tmdb_id' IS NOT NULL AND info::jsonb->>'tmdb_id' != ''")
+                    ->orWhereRaw("info::jsonb->>'tmdb' IS NOT NULL AND info::jsonb->>'tmdb' != ''")
+                    ->orWhereRaw("movie_data::jsonb->>'tmdb_id' IS NOT NULL AND movie_data::jsonb->>'tmdb_id' != ''")
+                    ->orWhereRaw("movie_data::jsonb->>'tmdb' IS NOT NULL AND movie_data::jsonb->>'tmdb' != ''")
+                    ->orWhereRaw("info::jsonb->>'imdb_id' IS NOT NULL AND info::jsonb->>'imdb_id' != ''")
+                    ->orWhereRaw("info::jsonb->>'imdb' IS NOT NULL AND info::jsonb->>'imdb' != ''")
+                    ->orWhereRaw("movie_data::jsonb->>'imdb_id' IS NOT NULL AND movie_data::jsonb->>'imdb_id' != ''")
+                    ->orWhereRaw("movie_data::jsonb->>'imdb' IS NOT NULL AND movie_data::jsonb->>'imdb' != ''");
             }
         });
     }
@@ -1051,22 +1074,26 @@ class Channel extends Model
             return $query;
         }
 
+        // ->>'key' (value), not ?? 'key' (key existence): a key can be present with a
+        // null/empty value (e.g. a prior failed enrichment), which should still count as
+        // "no ID" here too, so this stays the exact negation of scopeHasMovieId() above
+        // instead of excluding rows that ought to match (issue #1645).
         return $query->where(function (Builder $q) {
             $q->where(function (Builder $inner) {
                 $inner->whereNull('info')
                     ->orWhere(function (Builder $i) {
-                        $i->whereRaw("NOT (info::jsonb ?? 'tmdb_id')")
-                            ->whereRaw("NOT (info::jsonb ?? 'tmdb')")
-                            ->whereRaw("NOT (info::jsonb ?? 'imdb_id')")
-                            ->whereRaw("NOT (info::jsonb ?? 'imdb')");
+                        $i->whereRaw("(info::jsonb->>'tmdb_id' IS NULL OR info::jsonb->>'tmdb_id' = '')")
+                            ->whereRaw("(info::jsonb->>'tmdb' IS NULL OR info::jsonb->>'tmdb' = '')")
+                            ->whereRaw("(info::jsonb->>'imdb_id' IS NULL OR info::jsonb->>'imdb_id' = '')")
+                            ->whereRaw("(info::jsonb->>'imdb' IS NULL OR info::jsonb->>'imdb' = '')");
                     });
             })->where(function (Builder $inner) {
                 $inner->whereNull('movie_data')
                     ->orWhere(function (Builder $i) {
-                        $i->whereRaw("NOT (movie_data::jsonb ?? 'tmdb_id')")
-                            ->whereRaw("NOT (movie_data::jsonb ?? 'tmdb')")
-                            ->whereRaw("NOT (movie_data::jsonb ?? 'imdb_id')")
-                            ->whereRaw("NOT (movie_data::jsonb ?? 'imdb')");
+                        $i->whereRaw("(movie_data::jsonb->>'tmdb_id' IS NULL OR movie_data::jsonb->>'tmdb_id' = '')")
+                            ->whereRaw("(movie_data::jsonb->>'tmdb' IS NULL OR movie_data::jsonb->>'tmdb' = '')")
+                            ->whereRaw("(movie_data::jsonb->>'imdb_id' IS NULL OR movie_data::jsonb->>'imdb_id' = '')")
+                            ->whereRaw("(movie_data::jsonb->>'imdb' IS NULL OR movie_data::jsonb->>'imdb' = '')");
                     });
             });
         });

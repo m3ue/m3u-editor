@@ -106,7 +106,7 @@ it('search is case-insensitive', function () {
         ->assertCanNotSeeTableRecords([$this->doc, $this->sport]);
 });
 
-it('displays the imported custom name when one exists', function () {
+it('displays the imported custom name with the provider name when one exists', function () {
     Group::factory()->for($this->playlist)->for($this->user)->create([
         'name' => 'UK Sports HD',
         'name_internal' => 'Sports',
@@ -115,7 +115,19 @@ it('displays the imported custom name when one exists', function () {
 
     searchGroups($this->playlist, 'Sports')
         ->assertCanSeeTableRecords([$this->sport])
-        ->assertSee('UK Sports HD');
+        ->assertSee('UK Sports HD (provider: Sports)');
+});
+
+it('shows just the provider name when a group has not been renamed', function () {
+    Group::factory()->for($this->playlist)->for($this->user)->create([
+        'name' => 'Sports',
+        'name_internal' => 'Sports',
+        'type' => 'live',
+    ]);
+
+    searchGroups($this->playlist, 'Sports')
+        ->assertCanSeeTableRecords([$this->sport])
+        ->assertDontSee('(provider:');
 });
 
 it('falls back to the source name when no group has been imported', function () {

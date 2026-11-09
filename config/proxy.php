@@ -24,6 +24,7 @@ return [
     'm3u_proxy_host' => env('M3U_PROXY_HOST', 'localhost'), // Host for proxy (embedded and external)
     'm3u_proxy_port' => env('M3U_PROXY_PORT', 8085), // Port for proxy (embedded and external)
     'm3u_proxy_token' => env('M3U_PROXY_TOKEN'), // API token for authenticating with the proxy service
+    'normalize_live_output' => filter_var(env('M3U_PROXY_NORMALIZE_LIVE_OUTPUT', false), FILTER_VALIDATE_BOOLEAN),
     'm3u_proxy_public_url' => env('M3U_PROXY_PUBLIC_URL'), // Public URL for the proxy (auto-set in start-container)
     'm3u_resolver_url' => env('M3U_PROXY_FAILOVER_RESOLVER_URL', null), // Base URL for the editor that the proxy can use to resolve URLs if needed (for smart failover with capacity checks)
 
@@ -33,6 +34,16 @@ return [
     // single-machine/local-network deployment where the proxy container isn't reachable
     // from outside — it re-enables the old accept-all behavior for those routes.
     'allow_unauthenticated_callbacks' => env('M3U_PROXY_ALLOW_UNAUTHENTICATED_CALLBACKS', false),
+
+    // Opt in to separate per-route/IP callback buckets. False keeps the existing
+    // shared throttle:120,1 policy. Invalid per-minute values fall back to 120.
+    'isolated_callback_rate_limits' => filter_var(env('M3U_PROXY_ISOLATED_CALLBACK_RATE_LIMITS', false), FILTER_VALIDATE_BOOLEAN),
+    'callback_rate_limits' => [
+        'resolver' => env('M3U_PROXY_CALLBACK_RESOLVER_PER_MINUTE', 120),
+        'webhook' => env('M3U_PROXY_CALLBACK_WEBHOOK_PER_MINUTE', 120),
+        'broadcast' => env('M3U_PROXY_CALLBACK_BROADCAST_PER_MINUTE', 120),
+        'dvr' => env('M3U_PROXY_CALLBACK_DVR_PER_MINUTE', 120),
+    ],
 
     // Logo Proxy Configuration
     'url_override' => env('PROXY_URL_OVERRIDE', null),

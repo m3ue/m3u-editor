@@ -5,6 +5,7 @@ use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Settings\GeneralSettings;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
@@ -114,6 +115,35 @@ it('returns empty data when personId is invalid', function () {
 
     expect($page->person)->toBeNull()
         ->and($page->filmography)->toBe([]);
+});
+
+it('redirects to the local VOD detail when openFilmographyItem is called after hydration (issue #1715)', function () {
+    Filament::setCurrentPanel(Filament::getPanel('playlist'));
+
+    setGuestSession($this->playlist->uuid);
+
+    $vod = Channel::factory()->for($this->owner)->for($this->playlist, 'playlist')->create([
+        'is_vod' => true,
+        'tmdb_id' => 100,
+    ]);
+
+    $page = new GuestActorFilmography;
+    $page->personId = 456;
+    $page->name = 'Guest Actor';
+    $page->mount();
+
+    expect($page->filmography)->toHaveCount(1);
+
+    // Simulate a fresh Livewire hydration on the follow-up click request: only the
+    // public properties (playlistUuid, filmography) survive the snapshot, while the
+    // protected $resolvedFilmographyPlaylistId cache resets to its default null.
+    $hydrated = new GuestActorFilmography;
+    $hydrated->playlistUuid = $page->playlistUuid;
+    $hydrated->filmography = $page->filmography;
+
+    $hydrated->openFilmographyItem(100, 'movie');
+
+    expect(\Livewire\store($hydrated)->get('redirect'))->toContain((string) $vod->id);
 });
 
 it('uses the title from the person name when available', function () {

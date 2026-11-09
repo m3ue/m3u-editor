@@ -49,6 +49,29 @@ it('disables a live group\'s channels without touching channel numbers', functio
         ->and((int) $channel->fresh()->channel)->toBe(12);
 });
 
+it('enables and disables a merged group\'s descendant channels (issue #1703)', function () {
+    $merged = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'live', 'is_merged' => true]);
+    $childA = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'live', 'parent_id' => $merged->id]);
+    $childB = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'live', 'parent_id' => $merged->id]);
+
+    $channelA = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'group_id' => $childA->id, 'is_vod' => false, 'enabled' => true,
+    ]);
+    $channelB = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'group_id' => $childB->id, 'is_vod' => false, 'enabled' => true,
+    ]);
+
+    $this->service->disable($merged);
+
+    expect($channelA->fresh()->enabled)->toBeFalse()
+        ->and($channelB->fresh()->enabled)->toBeFalse();
+
+    $this->service->enable($merged);
+
+    expect($channelA->fresh()->enabled)->toBeTrue()
+        ->and($channelB->fresh()->enabled)->toBeTrue();
+});
+
 it('enables a vod group\'s channels without renumbering', function () {
     $group = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod']);
     $channel = Channel::factory()->for($this->user)->for($this->playlist)->create([

@@ -5,6 +5,7 @@ namespace App\Filament\Clusters\Settings\Pages;
 use App\Enums\ImageProfile;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Filament\Resources\Assets\AssetResource;
+use App\Services\AssetInventoryService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
@@ -149,12 +150,16 @@ class ManageAssetSettings extends BaseSettingsPage
                     ->schema([
                         FileUpload::make('logo_placeholder_url')
                             ->label(__('Logo placeholder'))
-                            ->image()
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')
                             ->openable()
                             ->downloadable()
+                            ->acceptedFileTypes(AssetInventoryService::SAFE_IMAGE_MIME_TYPES)
+                            ->rules([
+                                'mimes:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                                'extensions:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                            ])
                             ->hintIcon(
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('Used when a channel logo is missing. Clear to use the default placeholder.')
@@ -162,12 +167,16 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 300x300px for best results.<br/>Default image: <img src="'.url('/placeholder.png').'" alt="Default Logo Placeholder" style="width:80px; height:80px; margin-top:5px;">')),
                         FileUpload::make('episode_placeholder_url')
                             ->label(__('Episode preview placeholder'))
-                            ->image()
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')
                             ->openable()
                             ->downloadable()
+                            ->acceptedFileTypes(AssetInventoryService::SAFE_IMAGE_MIME_TYPES)
+                            ->rules([
+                                'mimes:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                                'extensions:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                            ])
                             ->hintIcon(
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('Used when an episode preview image is missing. Clear to use the default placeholder.')
@@ -175,12 +184,16 @@ class ManageAssetSettings extends BaseSettingsPage
                             ->helperText(new HtmlString('<strong>Recommended size:</strong> 600x400px for best results.<br/>Default image: <img src="'.url('/episode-placeholder.png').'" alt="Default Episode Placeholder" style="width:120px; height:80px; margin-top:5px;">')),
                         FileUpload::make('vod_series_poster_placeholder_url')
                             ->label(__('VOD/Series poster placeholder'))
-                            ->image()
                             ->disk('public')
                             ->directory('assets/placeholders')
                             ->visibility('public')
                             ->openable()
                             ->downloadable()
+                            ->acceptedFileTypes(AssetInventoryService::SAFE_IMAGE_MIME_TYPES)
+                            ->rules([
+                                'mimes:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                                'extensions:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                            ])
                             ->hintIcon(
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('Used when VOD/Series poster or cover images are missing. Clear to use the default placeholder.')

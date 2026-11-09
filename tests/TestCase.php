@@ -25,6 +25,20 @@ abstract class TestCase extends BaseTestCase
         // each process needs its own staging root.
         if ($token = ParallelTesting::token()) {
             config()->set('plugins.staging_directory', storage_path("app/plugin-staging-{$token}"));
+
+            // Unlike the sqlite_testing connection, Redis isn't split per process -
+            // every parallel worker shares the same physical instance, database and
+            // key prefix. Real (non-faked) queue/job tests that look at Redis state
+            // directly (e.g. RestartQueueCommandTest) can otherwise observe another
+            // worker's jobs landing on the same named queue mid-test. Give each
+            // worker its own prefix. Both the 'redis' and 'queue' singletons were
+            // already resolved (with the old prefix baked into their cached config/
+            // connections) before this ran, so forget them outright rather than try
+            // to mutate them - the next resolution rebuilds from fresh config.
+            config()->set('database.redis.options.prefix', "m3u_editor_test_{$token}_");
+            $this->app->forgetInstance('redis');
+            $this->app->forgetInstance('redis.connection');
+            $this->app->forgetInstance('queue');
         }
     }
 }

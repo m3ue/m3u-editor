@@ -43,6 +43,14 @@ class RestartQueue extends Command
             '--queue' => 'file_sync',
             '--force' => true,
         ]);
+        $this->call('queue:clear', [
+            '--queue' => 'schedules-direct',
+            '--force' => true,
+        ]);
+        $this->call('queue:clear', [
+            '--queue' => 'plugin-invocations',
+            '--force' => true,
+        ]);
 
         // Truncate the jobs table to remove any remaining job records (optional, but helps keep the database clean)
         Job::truncate();

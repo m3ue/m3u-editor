@@ -50,6 +50,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Group as SchemaGroup;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
@@ -809,8 +810,13 @@ class ChannelResource extends Resource implements CopilotResource
                                 $affectedPlaylists->push($custom);
                             }
                         }
+                        // clearPlaylistEpgCacheFile() returns false when there was nothing to
+                        // clear; Collection::each() stops on the first false return, so the
+                        // callback must not forward it or later playlists get silently skipped.
                         $affectedPlaylists->unique(fn ($p) => $p->getTable().'-'.$p->id)
-                            ->each(fn ($p) => EpgCacheService::clearPlaylistEpgCacheFile($p));
+                            ->each(function ($p) {
+                                EpgCacheService::clearPlaylistEpgCacheFile($p);
+                            });
                     })->after(function () {
                         Notification::make()
                             ->success()
@@ -877,7 +883,10 @@ class ChannelResource extends Resource implements CopilotResource
                     ])
                     ->action(function (Collection $records, array $data): void {
                         foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => $data['aed_profile_id']]);
+                            $ids = $chunk->pluck('id')->all();
+                            Channel::whereIn('id', $ids)->update(['aed_profile_id' => $data['aed_profile_id']]);
+                            // A query update skips the Channel::updated cache clear.
+                            EpgCacheService::clearForChannelIds($ids);
                         }
                     })->after(function () {
                         Notification::make()
@@ -897,7 +906,10 @@ class ChannelResource extends Resource implements CopilotResource
                     ->color('warning')
                     ->action(function (Collection $records): void {
                         foreach ($records->chunk(100) as $chunk) {
-                            Channel::whereIn('id', $chunk->pluck('id'))->update(['aed_profile_id' => null]);
+                            $ids = $chunk->pluck('id')->all();
+                            Channel::whereIn('id', $ids)->update(['aed_profile_id' => null]);
+                            // A query update skips the Channel::updated cache clear.
+                            EpgCacheService::clearForChannelIds($ids);
                         }
                     })->after(function () {
                         Notification::make()
@@ -1804,7 +1816,13 @@ class ChannelResource extends Resource implements CopilotResource
                             Select::make('group_id')
                                 ->label(__('Group'))
                                 ->hint(__('group-title'))
-                                ->options(fn (Get $get) => Group::query()->assignableTarget()->where('playlist_id', $get('playlist_id'))->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get) => Group::query()->assignableTarget()
+                                    ->where('playlist_id', $get('playlist_id'))
+                                    // A group's type is set explicitly on creation ('live'/'vod'); a null
+                                    // type only occurs on legacy/unmigrated rows, which predate the VOD
+                                    // group split and are therefore live groups too.
+                                    ->where(fn ($query) => $query->where('type', 'live')->orWhereNull('type'))
+                                    ->whereNotNull('name')->get(['name', 'id'])->pluck('name', 'id'))
                                 ->columnSpanFull()
                                 ->placeholder(__('Select a group'))
                                 ->searchable()
@@ -1957,6 +1975,26 @@ class ChannelResource extends Resource implements CopilotResource
                         ->dehydrated()
                         ->inline(false)
                         ->default(false),
+                    SchemaGroup::make()
+                        ->statePath('proxy_options')
+                        ->columnSpanFull()
+                        ->dehydrateStateUsing(fn ($state, $record): array => array_replace($record?->proxy_options ?? [], $state ?? []))
+                        ->schema([
+                            Select::make('normalize_live_output')
+                                ->label(__('Normalize live MPEG-TS output'))
+                                ->columnSpanFull()
+                                ->options(['1' => __('Enabled'), '0' => __('Disabled')])
+                                ->placeholder(__('Inherit global setting'))
+                                ->nullable()
+                                ->native(false)
+                                ->in(['0', '1'])
+                                ->afterStateHydrated(fn (Select $component, $record) => $component->state(
+                                    ($record?->proxy_options['normalize_live_output'] ?? null) === null
+                                        ? null : ($record->proxy_options['normalize_live_output'] ? '1' : '0')
+                                ))
+                                ->dehydrateStateUsing(fn ($state): ?bool => $state === null || $state === '' ? null : in_array($state, [true, 1, '1'], true))
+                                ->helperText(__('Inherit Settings → Proxy → Failover & Recovery, or explicitly enable/disable normalization for this channel. Uses the global CPU/VAAPI/QSV encoder. Only compatible live MPEG-TS inputs; ignored for VOD, HLS, DASH, catchup and Stream Profiles.')),
+                        ]),
                     Select::make('stream_profile_id')
                         ->label(__('Stream Profile'))
                         ->options(fn () => StreamProfile::where('user_id', auth()->id())->pluck('name', 'id'))

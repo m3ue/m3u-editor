@@ -25,6 +25,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\User;
 use App\Services\EpgCacheService;
+use App\Services\XtreamCategoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -188,8 +189,12 @@ it('keeps the full listing numbers for a custom playlist Xtream category', funct
     $url = '/player_api.php?username='.urlencode($this->user->name).'&password='.urlencode($customPlaylist->uuid).'&action=get_live_streams';
     $numbers = fn (string $query = '') => collect($this->getJson($url.$query)->assertStatus(200)->json())->pluck('num', 'name')->all();
 
+    // Since #1670, a Custom Playlist's fallback (untagged) category_id is offset into a
+    // reserved range to avoid colliding with a custom tag's own id - the raw group id is
+    // no longer the id a real client would have received from get_live_categories.
     expect($numbers())->toBe(['A30' => 1, 'B20' => 50, 'A-none' => 100, 'B-zero' => 101])
-        ->and($numbers('&category_id='.$this->groupB->id))->toBe(['B20' => 50, 'B-zero' => 101]);
+        ->and($numbers('&category_id='.XtreamCategoryService::customPlaylistFallbackCategoryId($this->groupB->id)))
+        ->toBe(['B20' => 50, 'B-zero' => 101]);
 });
 
 it('applies forced numbering to the EPG channel ids', function () {

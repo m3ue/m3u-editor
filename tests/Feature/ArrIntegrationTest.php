@@ -96,3 +96,48 @@ it('scopeEnabled and scopeGuestEnabled filter correctly', function () {
     expect(ArrIntegration::guestEnabled()->count())->toBe(2);
     expect(ArrIntegration::enabled()->guestEnabled()->count())->toBe(1);
 });
+
+it('keeps at most one default cache target per user per type (issue #1669)', function () {
+    $radarrA = ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'is_default_cache_target' => true,
+    ]);
+    $radarrB = ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'is_default_cache_target' => false,
+    ]);
+
+    $radarrB->update(['is_default_cache_target' => true]);
+
+    expect($radarrA->fresh()->is_default_cache_target)->toBeFalse()
+        ->and($radarrB->fresh()->is_default_cache_target)->toBeTrue();
+});
+
+it('does not clear another user\'s default cache target of the same type', function () {
+    $otherUser = User::factory()->create();
+    $otherRadarr = ArrIntegration::factory()->radarr()->create([
+        'user_id' => $otherUser->id,
+        'is_default_cache_target' => true,
+    ]);
+
+    ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'is_default_cache_target' => true,
+    ]);
+
+    expect($otherRadarr->fresh()->is_default_cache_target)->toBeTrue();
+});
+
+it('does not clear a different integration type\'s default cache target', function () {
+    $sonarr = ArrIntegration::factory()->sonarr()->create([
+        'user_id' => $this->user->id,
+        'is_default_cache_target' => true,
+    ]);
+
+    ArrIntegration::factory()->radarr()->create([
+        'user_id' => $this->user->id,
+        'is_default_cache_target' => true,
+    ]);
+
+    expect($sonarr->fresh()->is_default_cache_target)->toBeTrue();
+});

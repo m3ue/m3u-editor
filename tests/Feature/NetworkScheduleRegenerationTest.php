@@ -275,6 +275,47 @@ it('preserves currently airing programme when regenerating mid-broadcast', funct
         ->and($airingProgramme->start_time->format('Y-m-d H:i:s'))->toBe('2026-01-21 11:00:00');
 });
 
+it('does not throw when Continue is invoked during the last item of a non-looping rotation (issue #1686)', function () {
+    // Single rotation item, Loop Content off, currently airing (started 15 min ago, ends in 45 min)
+    Carbon::setTestNow($now = Carbon::parse('2026-01-21 11:15:00'));
+
+    $network = Network::factory()->create([
+        'loop_content' => false,
+        'auto_regenerate_schedule' => false,
+    ]);
+
+    $c1 = Channel::factory()->create();
+
+    NetworkContent::create([
+        'network_id' => $network->id,
+        'contentable_type' => get_class($c1),
+        'contentable_id' => $c1->id,
+        'sort_order' => 1,
+        'weight' => 1,
+    ]);
+
+    $airingProgramme = NetworkProgramme::create([
+        'network_id' => $network->id,
+        'title' => 'Only Item',
+        'start_time' => $now->copy()->subMinutes(15),
+        'end_time' => $now->copy()->addMinutes(45),
+        'duration_seconds' => 3600,
+        'contentable_type' => get_class($c1),
+        'contentable_id' => $c1->id,
+    ]);
+
+    $service = app(NetworkScheduleService::class);
+
+    // "Continue from current position" dispatches generateSchedule with forceReset=false
+    expect(fn () => $service->generateSchedule($network, forceReset: false))->not->toThrow(Throwable::class);
+
+    // The currently airing programme must be preserved, and no further rotation
+    // items created since the list (1 item) is exhausted and not looping.
+    $airingProgramme->refresh();
+    expect($airingProgramme->exists)->toBeTrue()
+        ->and($network->programmes()->count())->toBe(1);
+});
+
 it('continues content sequence correctly after boundary programme', function () {
     Carbon::setTestNow($now = Carbon::parse('2026-01-21 11:00:00'));
 

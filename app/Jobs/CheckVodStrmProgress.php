@@ -48,7 +48,11 @@ class CheckVodStrmProgress implements ShouldQueue
             'processed' => $channelsProcessed,
             'total' => $this->totalChannels,
             'remaining' => $channelsRemaining,
-            'progress_pct' => round(($channelsProcessed / $this->totalChannels) * 100, 1),
+            // totalChannels is legitimately 0 when a sync run starts with zero
+            // enabled channels but still needs its cleanup chain to fire (#1745).
+            'progress_pct' => $this->totalChannels > 0
+                ? round(($channelsProcessed / $this->totalChannels) * 100, 1)
+                : 100.0,
         ]);
 
         if ($channelsRemaining <= 0) {

@@ -1,9 +1,11 @@
 <?php
 
 use App\Http\Controllers\LogoProxyController;
+use App\Models\AedProfile;
 use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
@@ -579,4 +581,100 @@ it('adds role-specific artwork to get_short_epg and get_simple_data_table throug
             'backdrop_url' => LogoProxyController::generateProxyUrl('https://images.example/backdrop.jpg'),
         ]);
     }
+});
+
+/** An AED profile reading "Channel 1: Big Game @ 14:00" as Big Game at 14:00 UTC. */
+function makeBatchAedProfile(User $user, array $attributes = []): AedProfile
+{
+    return AedProfile::factory()->for($user)->create([
+        'title_regex' => ':\s*(.+?)\s*@',
+        'time_regex' => '@\s*(\d{2}:\d{2})',
+        'time_format' => 'H:i',
+        'event_duration_minutes' => 120,
+        'pre_event_format' => null,
+        'post_event_format' => null,
+        ...$attributes,
+    ]);
+}
+
+/** @return list<array<string, mixed>> */
+function decodedBatchListings(array $listings): array
+{
+    return array_map(fn (array $listing): array => [...$listing, 'title' => base64_decode($listing['title'])], $listings);
+}
+
+it('serves the AED event instead of the mapped guide when the group profile overrides', function () {
+    $profile = makeBatchAedProfile($this->user, ['override' => true]);
+    $group = Group::factory()->for($this->user)->for($this->playlist)->create(['aed_profile_id' => $profile->id]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.aed', [
+        'title' => 'Channel 1: Big Game @ 14:00',
+        'group_id' => $group->id,
+    ]);
+    putProgramme($ctx['epg'], '2026-08-13', 'channel.aed', [
+        'title' => 'Provider Filler',
+        'start' => '2026-08-13 13:00:00',
+        'stop' => '2026-08-13 15:00:00',
+    ]);
+
+    $listings = decodedBatchListings($this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => (string) $ctx['channel']->id,
+        'date' => '2026-08-13',
+    ]))->assertOk()->json((string) $ctx['channel']->id.'.epg_listings'));
+
+    $event = collect($listings)->firstWhere('title', 'Big Game');
+    expect($event)->not->toBeNull()
+        ->and($event['start'])->toBe('2026-08-13 14:00:00')
+        ->and($event['end'])->toBe('2026-08-13 16:00:00')
+        ->and($event['epg_id'])->toBe('aed-'.$profile->id)
+        ->and(collect($listings)->pluck('title'))->not->toContain('Provider Filler');
+});
+
+it('keeps the mapped guide for a profile without override, but uses AED on unmapped channels', function () {
+    $profile = makeBatchAedProfile($this->user, ['override' => false]);
+    $mapped = makeBatchChannel($this->user, $this->playlist, 'channel.mapped', [
+        'title' => 'Channel 1: Big Game @ 14:00',
+        'aed_profile_id' => $profile->id,
+    ]);
+    putProgramme($mapped['epg'], '2026-08-13', 'channel.mapped', [
+        'title' => 'Provider Show',
+        'start' => '2026-08-13 13:00:00',
+        'stop' => '2026-08-13 15:00:00',
+    ]);
+    $unmapped = Channel::factory()->for($this->user)->for($this->playlist)->create([
+        'enabled' => true,
+        'epg_channel_id' => null,
+        'group_id' => null,
+        'title' => 'Channel 2: Other Game @ 18:00',
+        'aed_profile_id' => $profile->id,
+    ]);
+
+    $response = $this->getJson(batchUrl($this->username, $this->password, [
+        'stream_ids' => $mapped['channel']->id.','.$unmapped->id,
+        'date' => '2026-08-13',
+    ]))->assertOk();
+
+    expect(collect(decodedBatchListings($response->json($mapped['channel']->id.'.epg_listings')))->pluck('title'))
+        ->toContain('Provider Show')->not->toContain('Big Game')
+        ->and(collect(decodedBatchListings($response->json($unmapped->id.'.epg_listings')))->firstWhere('title', 'Other Game')['start'])
+        ->toBe('2026-08-13 18:00:00');
+});
+
+it('serves the AED event on get_short_epg', function () {
+    $profile = makeBatchAedProfile($this->user, ['override' => true]);
+    $ctx = makeBatchChannel($this->user, $this->playlist, 'channel.short-aed', [
+        'title' => 'Channel 1: Big Game @ 14:00',
+        'aed_profile_id' => $profile->id,
+    ]);
+
+    $listings = $this->getJson(batchUrl($this->username, $this->password, [
+        'action' => 'get_short_epg',
+        'stream_id' => (string) $ctx['channel']->id,
+    ]))->assertOk()->json('epg_listings');
+
+    expect($listings)->toHaveCount(1)
+        ->and($listings[0])->toMatchArray([
+            'title' => 'Big Game',
+            'start' => '2026-08-13 14:00:00',
+            'epg_id' => 'aed-'.$profile->id,
+        ]);
 });

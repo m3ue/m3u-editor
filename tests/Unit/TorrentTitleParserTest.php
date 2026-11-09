@@ -164,6 +164,13 @@ it('preserves decimal points in titles like Formula 1', function () {
     expect($result['title'])->toBe('Formula 1 Drive to Survive');
 });
 
+it('does not corrupt an untagged multibyte Unicode movie title into invalid UTF-8', function () {
+    $result = $this->parser->parse('雪山旅行.mkv');
+
+    expect($result['title'])->toBe('雪山旅行')
+        ->and(mb_check_encoding($result['title'], 'UTF-8'))->toBeTrue();
+});
+
 it('returns null year when no year is present', function () {
     $result = $this->parser->parse('SomeMovie.BluRay.mkv');
 

@@ -210,3 +210,33 @@ it('keeps each rule\'s stored cache options when the playlist form is saved whil
     expect($saved)->toMatchArray(array_diff_key($rule, ['tmdb_params' => true]))
         ->and($saved)->not->toHaveKey('cache_enabled_locked');
 });
+
+it('rejects two enabled rules with the same type, source and name (issue #1690)', function () {
+    $this->playlist->updateQuietly(['dynamic_groups_config' => []]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $this->playlist->id])
+        ->fillForm([
+            'user_agent' => 'Test Agent',
+            'dynamic_groups_config' => [
+                [
+                    'enabled' => true,
+                    'type' => 'vod',
+                    'source' => 'top_genre',
+                    'name' => 'Top Picks',
+                    'tmdb_params' => ['genre_id' => 28],
+                ],
+                [
+                    'enabled' => true,
+                    'type' => 'vod',
+                    'source' => 'top_genre',
+                    'name' => 'Top Picks',
+                    'tmdb_params' => ['genre_id' => 35],
+                ],
+            ],
+        ])
+        ->call('save')
+        ->assertHasFormErrors(['dynamic_groups_config.1.name']);
+
+    // The conflicting save must not have persisted either rule.
+    expect($this->playlist->fresh()->dynamic_groups_config)->toEqual([]);
+});

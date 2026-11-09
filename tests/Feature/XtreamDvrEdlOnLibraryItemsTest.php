@@ -22,6 +22,7 @@
  */
 
 use App\Enums\DvrRecordingStatus;
+use App\Facades\ProxyFacade;
 use App\Models\Channel;
 use App\Models\DvrRecording;
 use App\Models\DvrRecordingRule;
@@ -133,7 +134,7 @@ it('emits edl_url and dvr_uuid on get_vod_info for a DVR-backed movie', function
 
     $response = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id]))->assertOk();
 
-    $expected = config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl";
+    $expected = ProxyFacade::getBaseUrl()."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl";
 
     expect($response->json('info.edl_url'))->toBe($expected)
         ->and($response->json('info.dvr_uuid'))->toBe($this->recording->uuid)
@@ -176,7 +177,7 @@ it('emits edl_url and dvr_uuid per episode on get_series_info', function () {
 
     $payload = $response->json('episodes.1.0');
 
-    expect($payload['edl_url'])->toBe(config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl")
+    expect($payload['edl_url'])->toBe(ProxyFacade::getBaseUrl()."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl")
         ->and($payload['dvr_uuid'])->toBe($this->recording->uuid);
 });
 
@@ -190,7 +191,7 @@ it('emits edl_url for a DVR episode attached to a non-DVR series', function () {
     $response = $this->getJson(dvrEdlApiUrl('get_series_info', ['series_id' => $episode->series_id]))->assertOk();
 
     expect($response->json('episodes.1.0.edl_url'))
-        ->toBe(config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
+        ->toBe(ProxyFacade::getBaseUrl()."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
 });
 
 it('omits the edl keys on get_series_info for an ordinary episode', function () {
@@ -236,7 +237,7 @@ it('honours a per-rule comskip override that disagrees with the setting', functi
     $response = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id]))->assertOk();
 
     expect($response->json('info.edl_url'))
-        ->toBe(config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
+        ->toBe(ProxyFacade::getBaseUrl()."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
 });
 
 it('withholds the edl url from a credential without DVR access', function () {
@@ -316,5 +317,5 @@ it('still emits the edl url on get_vod_info for the owning credential when other
     $response = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id]))->assertOk();
 
     expect($response->json('info.edl_url'))
-        ->toBe(config('app.url')."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
+        ->toBe(ProxyFacade::getBaseUrl()."/dvr/edl-user/edl-pass/{$this->recording->uuid}/edl");
 });

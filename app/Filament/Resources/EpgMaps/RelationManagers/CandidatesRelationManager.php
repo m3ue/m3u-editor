@@ -489,7 +489,10 @@ class CandidatesRelationManager extends RelationManager
         $candidateIds = array_values(array_unique(array_map('intval', $choices)));
         $validCandidateIds = EpgChannel::query()
             ->where('user_id', $map->user_id)
-            ->where('epg_id', $map->epg_id)
+            // A Merged EPG map matches against its source EPGs' channel rows (see
+            // Epg::matchableEpgIds()), so a legitimately offered candidate's epg_id is one of
+            // those sources, not the merged EPG's own id.
+            ->whereIn('epg_id', $map->epg->matchableEpgIds())
             ->whereIn('id', $candidateIds)
             ->pluck('id')
             ->flip();

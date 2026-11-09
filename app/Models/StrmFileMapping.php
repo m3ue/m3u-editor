@@ -73,6 +73,39 @@ class StrmFileMapping extends Model
     }
 
     /**
+     * Bulk load existing mappings for a batch of syncables that can each resolve to a
+     * *different* sync location (e.g. a per-channel Location Override), in one query.
+     *
+     * A single sync_location-scoped cache (bulkLoadForSyncables()) misses every item
+     * whose effective location differs from the one location it was built for, and
+     * callers that treat a cache miss as "no mapping exists" rather than falling back
+     * to the database wrongly create a second, duplicate mapping for that item.
+     *
+     * @param  string  $syncableType  The model class name (e.g., Channel::class)
+     * @param  array  $syncableIds  Array of syncable IDs to load
+     * @param  array  $syncLocations  Every distinct sync location in play for this batch
+     * @return array<string, Collection<int, self>> Keyed by sync_location, each a
+     *                                              collection keyed by syncable_id
+     */
+    public static function bulkLoadForSyncablesAcrossLocations(
+        string $syncableType,
+        array $syncableIds,
+        array $syncLocations
+    ): array {
+        if (empty($syncableIds) || empty($syncLocations)) {
+            return [];
+        }
+
+        return self::where('syncable_type', $syncableType)
+            ->whereIn('syncable_id', $syncableIds)
+            ->whereIn('sync_location', $syncLocations)
+            ->get()
+            ->groupBy('sync_location')
+            ->map(fn (Collection $mappings): Collection => $mappings->keyBy('syncable_id'))
+            ->all();
+    }
+
+    /**
      * Sync the .strm file with a pre-loaded mapping cache.
      * Use this when processing many items to avoid N+1 queries.
      *
@@ -673,9 +706,16 @@ class StrmFileMapping extends Model
             ->leftJoin($table, function ($join) use ($table) {
                 $join->on('strm_file_mappings.syncable_id', '=', "{$table}.id");
             })
-            ->where(function ($query) use ($table) {
+            // Disabling a series leaves its episodes enabled, so an episode's
+            // files are also orphaned once its series is disabled or gone.
+            ->when($syncableType === Episode::class, fn ($query) => $query
+                ->leftJoin('series', 'series.id', '=', 'episodes.series_id'))
+            ->where(function ($query) use ($table, $syncableType) {
                 $query->whereNull("{$table}.id")
-                    ->orWhere("{$table}.enabled", false);
+                    ->orWhere("{$table}.enabled", false)
+                    ->when($syncableType === Episode::class, fn ($query) => $query
+                        ->orWhereNull('series.id')
+                        ->orWhere('series.enabled', false));
             })
             ->select('strm_file_mappings.id', 'strm_file_mappings.current_path');
 

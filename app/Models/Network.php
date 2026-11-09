@@ -156,13 +156,26 @@ class Network extends Model
             return true;
         }
 
-        // Regenerate if last programme ends within 24 hours
-        $lastProgramme = $this->programmes()->latest('end_time')->first();
+        // Regenerate if last programme ends within 24 hours. reorder() is required here:
+        // the programmes() relation already carries its own orderBy('start_time'), and
+        // chaining latest('end_time') onto it only appends a second order-by rather than
+        // replacing it - silently selecting the earliest-starting programme instead of
+        // the actual last-ending one.
+        $lastProgramme = $this->programmes()->reorder('end_time', 'desc')->first();
         if (! $lastProgramme) {
             return true;
         }
 
-        return $lastProgramme->end_time->diffInHours(now()) < 24;
+        // A past end_time means coverage has already run out - always regenerate.
+        // For a future end_time, diffInHours() must be computed from "now" to "end_time"
+        // (not the other way around) to get a reliable sign: calling it the other way
+        // has returned a negative hour count for this exact comparison, which is always
+        // < 24 and would wrongly treat a healthy multi-day-future schedule as expiring.
+        if ($lastProgramme->end_time->isPast()) {
+            return true;
+        }
+
+        return now()->diffInHours($lastProgramme->end_time) < 24;
     }
 
     /**

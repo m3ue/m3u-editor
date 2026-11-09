@@ -539,18 +539,16 @@ class PluginValidator
         return $namespace !== '' ? $namespace.'\\'.$name : $name;
     }
 
-    private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
+    private function validateFieldDefinition(array $field, array $fieldTypes, string $group, bool $insideConditionalSection = false): array
     {
-        $errors = [];
         $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
+        // Sections may omit an ID, so use their label in diagnostic paths.
+        $qualifiedGroup = $group.'.'.($fieldId ?? ($field['label'] ?? 'section'));
+        $errors = $this->validateVisibilityDefinition($field, $qualifiedGroup);
+        $conditional = $insideConditionalSection || filled($field['visible_when'] ?? null) || filled($field['visibility_provider'] ?? null);
 
         if ($type === 'section') {
-            // Sections do not require an [id]; fall back to the label for readable error paths.
-            // Nested sections (sections within sections) are supported via recursive validation.
-            $qualifier = $fieldId ?? ($field['label'] ?? 'section');
-            $qualifiedGroup = "{$group}.{$qualifier}";
-
             if (blank($field['label'] ?? null)) {
                 $errors[] = "{$qualifiedGroup} section fields require [label]";
             }
@@ -570,7 +568,7 @@ class PluginValidator
 
                 $errors = [
                     ...$errors,
-                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup),
+                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup, $conditional),
                 ];
             }
 
@@ -579,6 +577,11 @@ class PluginValidator
 
         if (blank($fieldId)) {
             return ["{$group} field is missing [id]"];
+        }
+
+        // Hidden fields are still dehydrated and validated, so a required field that can be hidden would block saving.
+        if ($conditional && (bool) ($field['required'] ?? false)) {
+            $errors[] = __('Plugin field :group cannot be required while visible_when or visibility_provider can hide it', ['group' => $qualifiedGroup]);
         }
 
         if (! in_array($type, $fieldTypes, true)) {
@@ -604,6 +607,36 @@ class PluginValidator
 
         if ($type === 'table_select' && blank($field['table'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} table_select fields require [table]";
+        }
+
+        return $errors;
+    }
+
+    private function validateVisibilityDefinition(array $field, string $group): array
+    {
+        $errors = [];
+        if (array_key_exists('visible_when', $field)) {
+            if (! is_array($field['visible_when']) || array_is_list($field['visible_when'])) {
+                $errors[] = __('Plugin field :group visible_when must map field names to allowed values', ['group' => $group]);
+            } else {
+                foreach ($field['visible_when'] as $dependency => $values) {
+                    if (! is_string($dependency) || blank($dependency) || ! is_array($values) || ! array_is_list($values) || $values === []
+                        || collect($values)->contains(fn (mixed $value): bool => ! is_scalar($value) && $value !== null)) {
+                        $errors[] = __('Plugin field :group visible_when requires non-empty field names and lists of scalar or null values', ['group' => $group]);
+                    }
+                }
+            }
+        }
+
+        if (array_key_exists('visibility_provider', $field) && (! is_string($field['visibility_provider']) || blank($field['visibility_provider']))) {
+            $errors[] = __('Plugin field :group visibility_provider must be a non-empty string', ['group' => $group]);
+        }
+
+        if (array_key_exists('visibility_depends_on', $field)) {
+            if (blank($field['visibility_provider'] ?? null) || ! is_array($field['visibility_depends_on']) || ! array_is_list($field['visibility_depends_on'])
+                || collect($field['visibility_depends_on'])->contains(fn (mixed $value): bool => ! is_string($value) || blank($value))) {
+                $errors[] = __('Plugin field :group visibility_depends_on requires a visibility_provider and a list of non-empty field names', ['group' => $group]);
+            }
         }
 
         return $errors;

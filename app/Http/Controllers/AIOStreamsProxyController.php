@@ -236,6 +236,10 @@ class AIOStreamsProxyController extends Controller
      */
     private function resolveIntegration(string $username, string $password, int $integrationId, &$playlist = null): ?MediaServerIntegration
     {
+        if (! config('services.aiostreams.enabled', true)) {
+            return null;
+        }
+
         $auth = PlaylistFacade::authenticate($username, $password);
 
         if (! $auth || $auth[0] === null || $auth[1] === 'none') {

@@ -100,8 +100,30 @@ it('stores the media server DateCreated as the source added date', function () {
 
     $channel = Channel::where('source_id', "media-server-{$this->integration->id}-m1")->firstOrFail();
 
-    expect($channel->source_added_at?->toDateTimeString())->toBe('2021-03-04 05:06:07');
+    expect($channel->source_added_at?->timestamp)->toBe(1614834367);
 });
+
+it('stores the media server DateCreated as the same instant in any timezone', function (string $timezone) {
+    $originalTimezone = date_default_timezone_get();
+    date_default_timezone_set($timezone);
+    config(['app.timezone' => $timezone]);
+
+    try {
+        (new ReflectionMethod($this->job, 'syncMovie'))->invoke(
+            $this->job,
+            $this->integration,
+            $this->playlist,
+            fakeMediaServerForMovieIds(),
+            ['Id' => 'm1', 'Name' => 'The Matrix', 'DateCreated' => '2021-03-04T05:06:07.0000000Z', 'People' => []],
+        );
+
+        $channel = Channel::where('source_id', "media-server-{$this->integration->id}-m1")->firstOrFail();
+
+        expect($channel->source_added_at?->timestamp)->toBe(1614834367);
+    } finally {
+        date_default_timezone_set($originalTimezone);
+    }
+})->with(['America/Denver', 'Asia/Tokyo']);
 
 it('ignores the .NET placeholder DateCreated and keeps an existing added date', function () {
     Channel::factory()->for($this->playlist)->create([

@@ -401,7 +401,10 @@
                                                     @click.stop="
                                                         if (! modalLoading) {
                                                             modalLoading = true;
-                                                            $wire.openChannelEdit(item.channel.database_id);
+                                                            $wire.openChannelEdit(
+                                                                item.channel.database_id,
+                                                                currentDate,
+                                                            );
                                                             setTimeout(() => {
                                                                 modalLoading = false;
                                                             }, 1000);

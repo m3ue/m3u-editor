@@ -98,12 +98,37 @@ class QueueIndicatorService
         return $fromWorkload > 0 ? $fromWorkload : $upcoming->count();
     }
 
+    /**
+     * Newer completed/cancelled batches must not consume the window before
+     * active ones are selected: page back through batch history (newest
+     * first) until $limit active batches are found or history is exhausted,
+     * rather than filtering only the first page.
+     */
     private function activeBatches(int $limit, CarbonImmutable $asOf): array
     {
-        $batches = $this->batchRepository->get($limit, null);
+        $active = collect();
+        $before = null;
+        $pageSize = max($limit, 50);
+        $scanned = 0;
+        $maxScanned = 1000; // safety bound against unbounded history scans
 
-        return collect($batches)
-            ->filter(fn (Batch $batch): bool => ! $batch->finished() && ! $batch->cancelled())
+        do {
+            $page = collect($this->batchRepository->get($pageSize, $before));
+
+            if ($page->isEmpty()) {
+                break;
+            }
+
+            $scanned += $page->count();
+            $before = $page->last()->id;
+
+            $active = $active->merge(
+                $page->filter(fn (Batch $batch): bool => ! $batch->finished() && ! $batch->cancelled())
+            );
+        } while ($active->count() < $limit && $scanned < $maxScanned);
+
+        return $active
+            ->take($limit)
             ->map(fn (Batch $batch): array => $this->normalizeBatch($batch, $asOf))
             ->values()
             ->all();

@@ -74,6 +74,62 @@ it('restores the default layout, clearing any stored customization', function ()
         ->and($settings->admin_nav_active_preset)->toBe('default');
 });
 
+it('preserves a hidden Cached Downloads preference across a save made while caching is disabled', function () {
+    $settings = app(GeneralSettings::class);
+    $settings->enable_cache = true;
+    $settings->save();
+
+    // Hide Cached Downloads while caching is enabled, so it's offered in the form.
+    Livewire::test(ManageNavigationSettings::class)
+        ->fillForm(function (array $data) {
+            foreach ($data['groups'] as $i => $group) {
+                if ($group['key'] === 'playlist') {
+                    foreach ($group['items'] as $j => $item) {
+                        if ($item['key'] === 'cached_downloads') {
+                            $data['groups'][$i]['items'][$j]['visible'] = false;
+                        }
+                    }
+                }
+            }
+
+            return $data;
+        })
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(app(GeneralSettings::class)->refresh()->admin_nav_layout['items']['playlist']['hidden'])
+        ->toContain('cached_downloads');
+
+    // Disable caching, so Cached Downloads is no longer offered, then save an
+    // unrelated change (hiding the Tools group).
+    $settings = app(GeneralSettings::class);
+    $settings->enable_cache = false;
+    $settings->save();
+
+    Livewire::test(ManageNavigationSettings::class)
+        ->fillForm(function (array $data) {
+            foreach ($data['groups'] as $i => $group) {
+                if ($group['key'] === 'tools') {
+                    $data['groups'][$i]['visible'] = false;
+                }
+            }
+
+            return $data;
+        })
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    // Re-enable caching and confirm the hidden preference for Cached Downloads survived.
+    $settings = app(GeneralSettings::class);
+    $settings->enable_cache = true;
+    $settings->save();
+
+    expect(app(GeneralSettings::class)->refresh()->admin_nav_layout['items']['playlist']['hidden'])
+        ->toContain('cached_downloads')
+        ->and(app(GeneralSettings::class)->admin_nav_layout['groups']['hidden'])
+        ->toContain('tools');
+});
+
 it('applies the shipped simplified default layout via the Use Simplified Default action', function () {
     Livewire::test(ManageNavigationSettings::class)
         ->callAction('restore_simplified_default')

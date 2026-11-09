@@ -29,6 +29,7 @@ function scheduleBuilder(config) {
 
         // Now-playing status
         nowPlaying: null,
+        _nowPlayingTimer: null,
 
         // Drag from pool
         poolDragItem: null,
@@ -56,7 +57,7 @@ function scheduleBuilder(config) {
             this.loadMediaPool();
             this.loadNowPlaying();
 
-            setInterval(() => this.loadNowPlaying(), 60000);
+            this._nowPlayingTimer = setInterval(() => this.loadNowPlaying(), 60000);
 
             window.addEventListener('resize', () => {
                 if (window.innerWidth >= 1024) {
@@ -71,6 +72,11 @@ function scheduleBuilder(config) {
                 clearTimeout(this._mediaSearchTimer);
                 this._mediaSearchTimer = setTimeout(() => this.loadMediaPool(), 300);
             });
+        },
+
+        // SPA navigation removes the page without a reload, so stop the now-playing poll.
+        destroy() {
+            clearInterval(this._nowPlayingTimer);
         },
 
         toggleMediaPool() {

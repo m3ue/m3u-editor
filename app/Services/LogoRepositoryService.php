@@ -43,14 +43,20 @@ class LogoRepositoryService
     public function findByFilename(string $filename): ?array
     {
         $normalized = $this->normalizeSlug(pathinfo($filename, PATHINFO_FILENAME));
+        $index = $this->getIndex();
 
-        foreach ($this->getIndex() as $entry) {
+        // An entry's own canonical filename must always resolve to itself: check every
+        // entry's exact filename before considering any entry's aliases, so an earlier
+        // entry's alias can never shadow a later entry's canonical file.
+        foreach ($index as $entry) {
             $entryBase = $this->normalizeSlug(pathinfo((string) $entry['filename'], PATHINFO_FILENAME));
 
             if ($entryBase === $normalized) {
                 return $entry;
             }
+        }
 
+        foreach ($index as $entry) {
             $aliases = $entry['aliases'] ?? [];
             if (in_array($normalized, $aliases, true)) {
                 return $entry;
@@ -90,13 +96,19 @@ class LogoRepositoryService
                 }
             }
 
+            // A channel named (or with a stream/epg id of) the literal string "0" is a
+            // valid slug candidate - the default filter() callback treats "0" as falsy
+            // and would drop it both before and after normalization.
             $slugCandidates = collect([
                 $channel->name_custom,
                 $channel->name,
                 $channel->title,
                 (string) ($channel->stream_id ?? ''),
                 (string) ($channel->epg_id ?? ''),
-            ])->filter()->map(fn (string $value): string => $this->normalizeSlug($value))->filter()->unique()->values()->all();
+            ])->filter(fn ($value): bool => $value !== null && $value !== '')
+                ->map(fn (string $value): string => $this->normalizeSlug($value))
+                ->filter(fn (string $value): bool => $value !== '')
+                ->unique()->values()->all();
 
             if (empty($slugCandidates)) {
                 continue;

@@ -11,54 +11,66 @@ class PluginSchemaManager
 {
     public function apply(array $schema): void
     {
-        foreach ($schema['tables'] ?? [] as $table) {
-            $tableName = (string) ($table['name'] ?? '');
-            if ($tableName === '') {
-                continue;
-            }
+        try {
+            foreach ($schema['tables'] ?? [] as $table) {
+                $tableName = (string) ($table['name'] ?? '');
+                if ($tableName === '') {
+                    continue;
+                }
 
-            if (! Schema::hasTable($tableName)) {
-                Schema::create($tableName, function (Blueprint $blueprint) use ($table): void {
-                    $this->applyColumns($blueprint, $table['columns'] ?? []);
-                    $this->applyIndexes($blueprint, $table['indexes'] ?? []);
+                if (! Schema::hasTable($tableName)) {
+                    Schema::create($tableName, function (Blueprint $blueprint) use ($table): void {
+                        $this->applyColumns($blueprint, $table['columns'] ?? []);
+                        $this->applyIndexes($blueprint, $table['indexes'] ?? []);
+                    });
+
+                    continue;
+                }
+
+                $existingColumns = Schema::getColumnListing($tableName);
+                $missingColumns = collect($table['columns'] ?? [])
+                    ->filter(function (array $column) use ($existingColumns): bool {
+                        $type = $column['type'] ?? null;
+                        if ($type === 'timestamps') {
+                            return ! in_array('created_at', $existingColumns, true) || ! in_array('updated_at', $existingColumns, true);
+                        }
+
+                        $name = $column['name'] ?? null;
+
+                        return is_string($name) && ! in_array($name, $existingColumns, true);
+                    })
+                    ->values()
+                    ->all();
+
+                if ($missingColumns === []) {
+                    continue;
+                }
+
+                Schema::table($tableName, function (Blueprint $blueprint) use ($missingColumns): void {
+                    $this->applyColumns($blueprint, $missingColumns);
                 });
-
-                continue;
             }
-
-            $existingColumns = Schema::getColumnListing($tableName);
-            $missingColumns = collect($table['columns'] ?? [])
-                ->filter(function (array $column) use ($existingColumns): bool {
-                    $type = $column['type'] ?? null;
-                    if ($type === 'timestamps') {
-                        return ! in_array('created_at', $existingColumns, true) || ! in_array('updated_at', $existingColumns, true);
-                    }
-
-                    $name = $column['name'] ?? null;
-
-                    return is_string($name) && ! in_array($name, $existingColumns, true);
-                })
-                ->values()
-                ->all();
-
-            if ($missingColumns === []) {
-                continue;
-            }
-
-            Schema::table($tableName, function (Blueprint $blueprint) use ($missingColumns): void {
-                $this->applyColumns($blueprint, $missingColumns);
-            });
+        } finally {
+            $cache = app(PluginUiRequestCache::class);
+            $cache->forget('columns');
+            $cache->forgetData();
         }
     }
 
     public function purge(array $schema): void
     {
-        foreach (array_reverse($schema['tables'] ?? []) as $table) {
-            $tableName = (string) ($table['name'] ?? '');
+        try {
+            foreach (array_reverse($schema['tables'] ?? []) as $table) {
+                $tableName = (string) ($table['name'] ?? '');
 
-            if ($tableName !== '') {
-                Schema::dropIfExists($tableName);
+                if ($tableName !== '') {
+                    Schema::dropIfExists($tableName);
+                }
             }
+        } finally {
+            $cache = app(PluginUiRequestCache::class);
+            $cache->forget('columns');
+            $cache->forgetData();
         }
     }
 

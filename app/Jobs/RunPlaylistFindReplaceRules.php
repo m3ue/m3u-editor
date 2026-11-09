@@ -49,8 +49,10 @@ class RunPlaylistFindReplaceRules implements ShouldQueue
         foreach ($rules as $rule) {
             $target = $rule['target'] ?? 'channels';
 
-            // Skip if no find & replace value is set
-            if (empty($rule['find_replace'])) {
+            // Skip if no find & replace value is set. The literal string "0" is a
+            // valid Find value, so this must check for an empty string rather than
+            // PHP truthiness.
+            if (($rule['find_replace'] ?? '') === '') {
                 continue;
             }
             if ($target === 'channels') {

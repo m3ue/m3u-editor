@@ -64,7 +64,7 @@ class DvrSetting extends Model
     public function getStorageUsedBytesAttribute(): int
     {
         return (int) $this->recordings()
-            ->whereNotNull('file_size_bytes')
+            ->countedForStorage()
             ->sum('file_size_bytes');
     }
 

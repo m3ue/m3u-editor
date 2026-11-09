@@ -128,6 +128,68 @@ it('keeps only the most recent N recordings for a rule with keep_last', function
     expect(DvrRecording::find($recordings->get(3)->id)?->status)->toBe(DvrRecordingStatus::Purged); // oldest — Purged
 });
 
+it('does not prune a keep_last=0 (unlimited) rule when a sibling rule for the same series has a positive keep_last', function () {
+    $ruleFinite = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['keep_last' => 1, 'series_title' => 'Test Show']);
+
+    $ruleUnlimited = DvrRecordingRule::factory()
+        ->series()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->create(['keep_last' => 0, 'series_title' => 'Test Show']);
+
+    expect($ruleFinite->series_key)->toBe($ruleUnlimited->series_key);
+
+    // Rule A (finite, keep_last=1): two completed recordings, newest overall.
+    $finiteRecordings = collect(range(1, 2))->map(fn ($i) => DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($ruleFinite, 'recordingRule')
+        ->create([
+            'title' => 'Test Show',
+            'series_key' => $ruleFinite->series_key,
+            'scheduled_start' => now()->subHours($i),
+            'file_path' => "recordings/finite{$i}.ts",
+            'file_size_bytes' => 100_000_000,
+        ])
+    );
+
+    // Rule B (unlimited, keep_last=0): two completed recordings, older than Rule A's.
+    $unlimitedRecordings = collect(range(3, 4))->map(fn ($i) => DvrRecording::factory()
+        ->completed()
+        ->for($this->setting, 'dvrSetting')
+        ->for($this->user)
+        ->for($ruleUnlimited, 'recordingRule')
+        ->create([
+            'title' => 'Test Show',
+            'series_key' => $ruleUnlimited->series_key,
+            'scheduled_start' => now()->subHours($i),
+            'file_path' => "recordings/unlimited{$i}.ts",
+            'file_size_bytes' => 100_000_000,
+        ])
+    );
+
+    foreach ($finiteRecordings->merge($unlimitedRecordings) as $recording) {
+        Storage::disk('dvr')->put($recording->file_path, 'fake-content');
+    }
+
+    $this->service->runAll();
+
+    // Rule B's unlimited recordings must survive, despite Rule A's finite keep_last=1
+    // sharing the same series_key.
+    expect(
+        DvrRecording::where('dvr_recording_rule_id', $ruleUnlimited->id)
+            ->where('status', DvrRecordingStatus::Completed)
+            ->count()
+    )->toBe(2);
+    expect(Storage::disk('dvr')->exists('recordings/unlimited3.ts'))->toBeTrue();
+    expect(Storage::disk('dvr')->exists('recordings/unlimited4.ts'))->toBeTrue();
+});
+
 // --- Retention days ---
 
 it('deletes completed recordings older than retention_days', function () {
@@ -196,8 +258,13 @@ it('deletes oldest recordings when disk quota is exceeded', function () {
             'file_size_bytes' => 800_000_000,
         ]);
 
-    Storage::disk('dvr')->put($old->file_path, 'data');
-    Storage::disk('dvr')->put($newer->file_path, 'data');
+    // The quota measures files on disk: make them 800 MB (sparse, so no space is used).
+    foreach ([$old, $newer] as $recording) {
+        Storage::disk('dvr')->put($recording->file_path, '');
+        $handle = fopen(Storage::disk('dvr')->path($recording->file_path), 'r+');
+        ftruncate($handle, 800_000_000);
+        fclose($handle);
+    }
 
     $this->service->runAll();
 

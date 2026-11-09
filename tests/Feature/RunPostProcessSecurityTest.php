@@ -8,6 +8,7 @@
  *    written without form validation (e.g. Copilot create/edit tools).
  *  - Webhook redirects are held to the same private network guard as the
  *    webhook URL itself.
+ *  - A local script's exit status, not its stderr, decides success.
  */
 
 use App\Enums\Status;
@@ -124,6 +125,31 @@ it('fails without running anything when the script path is not an existing file'
     expect($log->status)->toBe('error')
         ->and($log->message)->toContain('was not found')
         ->and($log->message)->not->toContain('uid=');
+});
+
+it('logs an error when a local script exits nonzero without writing to stderr', function () {
+    $script = writePostProcessScript($this->scriptDir, 'hook.sh', 'exit 7');
+
+    $log = runPostProcessFor(User::factory()->admin()->create(), [
+        'local' => 'path',
+        'path' => $script,
+    ]);
+
+    expect($log->status)->toBe('error')
+        ->and($log->message)->toContain('exited with status 7');
+});
+
+it('logs success and keeps the diagnostics when a local script exits zero but writes to stderr', function () {
+    $script = writePostProcessScript($this->scriptDir, 'hook.sh', "printf 'diagnostic only' >&2\necho 'done'");
+
+    $log = runPostProcessFor(User::factory()->admin()->create(), [
+        'local' => 'path',
+        'path' => $script,
+    ]);
+
+    expect($log->status)->toBe('success')
+        ->and($log->message)->toStartWith('done')
+        ->and($log->message)->toContain('diagnostic only');
 });
 
 it('does not let a non-admin save a Local file post process from the form', function () {

@@ -2,10 +2,14 @@
 
 use App\Http\Middleware\DispatcharrAuthMiddleware;
 use App\Models\Channel;
+use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Spatie\Tags\Tag;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -164,6 +168,107 @@ it('excludes disabled channels and VOD from profiles', function () {
 it('rejects unauthenticated profile requests', function () {
     $this->getJson('/api/channels/profiles/')
         ->assertStatus(401);
+});
+
+it('returns profiles for a Custom Playlist with a custom group tag', function () {
+    // CustomPlaylist groups are Spatie tags, not Group models (see #1713):
+    // the enabled live channel is added to the playlist and tagged with a
+    // custom group name through the same taggables mechanism the real
+    // AddItemsToCustomPlaylist flow uses.
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $customUsername = 'dispatcharr_custom_'.fake()->word();
+    $customPassword = fake()->password();
+    $playlistAuth = PlaylistAuth::create([
+        'name' => 'Custom Playlist Dispatcharr Auth',
+        'username' => $customUsername,
+        'password' => $customPassword,
+        'enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $playlistAuth->assignTo($customPlaylist);
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'enabled' => true,
+        'is_vod' => false,
+    ]);
+    $customPlaylist->channels()->attach($channel->id);
+
+    $tag = Tag::findOrCreate('My News', $customPlaylist->uuid);
+    $customPlaylist->attachTag($tag);
+    DB::table('taggables')->insert([
+        'tag_id' => $tag->id,
+        'taggable_id' => $channel->id,
+        'taggable_type' => Channel::class,
+    ]);
+
+    $accessToken = test()->postJson('/api/accounts/token/', [
+        'username' => $customUsername,
+        'password' => $customPassword,
+    ])->json('access');
+
+    $response = $this->getJson('/api/channels/profiles/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $response->assertOk()->assertJsonCount(1);
+
+    $profiles = $response->json();
+    expect($profiles[0]['name'])->toBe('My News')
+        ->and($profiles[0]['channels'])->toBe([$channel->id]);
+});
+
+it('returns profiles for an alias of a Custom Playlist with a custom group tag', function () {
+    // #1740: a PlaylistAlias wrapping a CustomPlaylist fell through to the Group-model
+    // branch (its own channels()/groupTags() already delegate to the effective
+    // CustomPlaylist, same as the direct-access case above), calling whereHas('channels')
+    // on a Spatie Tag, which has no such relation.
+    $customPlaylist = CustomPlaylist::factory()->for($this->user)->create();
+    $alias = PlaylistAlias::create([
+        'name' => 'Custom Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'custom_playlist_id' => $customPlaylist->id,
+    ]);
+
+    $aliasUsername = 'dispatcharr_alias_'.fake()->word();
+    $aliasPassword = fake()->password();
+    $playlistAuth = PlaylistAuth::create([
+        'name' => 'Custom Playlist Alias Dispatcharr Auth',
+        'username' => $aliasUsername,
+        'password' => $aliasPassword,
+        'enabled' => true,
+        'user_id' => $this->user->id,
+    ]);
+    $playlistAuth->assignTo($alias);
+
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'enabled' => true,
+        'is_vod' => false,
+    ]);
+    $customPlaylist->channels()->attach($channel->id);
+
+    $tag = Tag::findOrCreate('My News', $customPlaylist->uuid);
+    $customPlaylist->attachTag($tag);
+    DB::table('taggables')->insert([
+        'tag_id' => $tag->id,
+        'taggable_id' => $channel->id,
+        'taggable_type' => Channel::class,
+    ]);
+
+    $accessToken = test()->postJson('/api/accounts/token/', [
+        'username' => $aliasUsername,
+        'password' => $aliasPassword,
+    ])->json('access');
+
+    $response = $this->getJson('/api/channels/profiles/', [
+        'Authorization' => "Bearer {$accessToken}",
+    ]);
+
+    $response->assertOk()->assertJsonCount(1);
+
+    $profiles = $response->json();
+    expect($profiles[0]['name'])->toBe('My News')
+        ->and($profiles[0]['channels'])->toBe([$channel->id]);
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -427,6 +532,39 @@ it('returns VOD movie detail with uuid', function () {
     $response->assertOk()
         ->assertJsonPath('id', $channel->id)
         ->assertJsonPath('uuid', $channel->uuid);
+});
+
+it('resolves by internal id instead of a colliding provider source_id', function () {
+    // Movie Alpha's internal id equals Movie Beta's provider source_id -
+    // requesting Beta's own stream_id must resolve Beta, not Alpha (#1714).
+    $group = Group::factory()->for($this->playlist)->for($this->user)->create();
+
+    $alpha = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => true,
+        'source_id' => '2',
+        'name' => 'Movie Alpha',
+    ]);
+    $beta = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'group_id' => $group->id,
+        'enabled' => true,
+        'is_vod' => true,
+        'source_id' => '90002',
+        'name' => 'Movie Beta',
+    ]);
+
+    expect($beta->id)->toBe($alpha->id + 1);
+
+    $accessToken = getAccessToken();
+
+    $this->getJson("/api/vod/movies/{$beta->id}/", [
+        'Authorization' => "Bearer {$accessToken}",
+    ])->assertOk()->assertJsonPath('id', $beta->id)->assertJsonPath('uuid', $beta->uuid);
+
+    $this->getJson("/api/vod/movies/{$beta->id}/providers/", [
+        'Authorization' => "Bearer {$accessToken}",
+    ])->assertOk()->assertJsonPath('0.stream_id', 90002)->assertJsonPath('0.name', 'Movie Beta');
 });
 
 it('returns 404 for non-existent VOD movie', function () {

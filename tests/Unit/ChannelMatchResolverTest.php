@@ -29,6 +29,19 @@ it('normalizes case, surrounding and internal whitespace', function () {
         ->and($this->resolver->normalize(null))->toBeNull();
 });
 
+it('normalizes non-ASCII case the same way as ASCII case', function () {
+    expect($this->resolver->normalize('Äther Kanal'))->toBe($this->resolver->normalize('äther kanal'));
+});
+
+it('matches on name when the only difference is non-ASCII case', function () {
+    $source = [row(1, ['name' => 'Äther Kanal'])];
+    $target = [row(10, ['name' => 'äther kanal'])];
+
+    $result = $this->resolver->resolve($source, $target, [ChannelMatchResolver::PASS_NAME]);
+
+    expect($result['matched'][1]['target_id'])->toBe(10);
+});
+
 it('matches on a unique shared tvg id', function () {
     $source = [row(1, ['stream_id' => '945', 'name' => 'Zee TV'])];
     $target = [row(10, ['stream_id' => '945', 'name' => 'Zee Television'])];

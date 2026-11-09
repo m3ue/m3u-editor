@@ -25,8 +25,8 @@ class GroupResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            /** The group name, including any custom rename. */
-            'name' => $this->name_internal ?? $this->name,
+            /** The group's effective display name: the custom rename when set, otherwise the provider/default name. */
+            'name' => $this->name ?? $this->name_internal,
             /**
              * Sort position. A decimal column, so some database drivers return it as a string.
              *

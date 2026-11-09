@@ -126,66 +126,85 @@ describe('Series::scopeMissingSeriesId — dedicated columns', function () {
 // without needing an actual PostgreSQL connection. toSql() builds the SQL string
 // only — no query is executed against the database.
 
-it('Channel::scopeHasMovieId adds info::jsonb operators when driver is pgsql', function () {
+it('Channel::scopeHasMovieId adds info::jsonb value checks when driver is pgsql', function () {
     config(['database.connections.sqlite_testing.driver' => 'pgsql']);
     $sql = Channel::query()->hasMovieId()->toSql();
     config(['database.connections.sqlite_testing.driver' => 'sqlite']);
 
     expect($sql)
-        ->toContain("info::jsonb ?? 'tmdb_id'")
-        ->toContain("info::jsonb ?? 'tmdb'")
-        ->toContain("info::jsonb ?? 'imdb_id'")
-        ->toContain("info::jsonb ?? 'imdb'");
+        ->toContain("info::jsonb->>'tmdb_id' IS NOT NULL")
+        ->toContain("info::jsonb->>'tmdb' IS NOT NULL")
+        ->toContain("info::jsonb->>'imdb_id' IS NOT NULL")
+        ->toContain("info::jsonb->>'imdb' IS NOT NULL")
+        ->not->toContain('??');
 });
 
-it('Channel::scopeHasMovieId adds movie_data::jsonb operators when driver is pgsql', function () {
+it('Channel::scopeHasMovieId adds movie_data::jsonb value checks when driver is pgsql', function () {
     config(['database.connections.sqlite_testing.driver' => 'pgsql']);
     $sql = Channel::query()->hasMovieId()->toSql();
     config(['database.connections.sqlite_testing.driver' => 'sqlite']);
 
     expect($sql)
-        ->toContain("movie_data::jsonb ?? 'tmdb_id'")
-        ->toContain("movie_data::jsonb ?? 'tmdb'")
-        ->toContain("movie_data::jsonb ?? 'imdb_id'")
-        ->toContain("movie_data::jsonb ?? 'imdb'");
+        ->toContain("movie_data::jsonb->>'tmdb_id' IS NOT NULL")
+        ->toContain("movie_data::jsonb->>'tmdb' IS NOT NULL")
+        ->toContain("movie_data::jsonb->>'imdb_id' IS NOT NULL")
+        ->toContain("movie_data::jsonb->>'imdb' IS NOT NULL");
 });
 
-it('Channel::scopeMissingMovieId negates JSON key checks for info and movie_data when driver is pgsql', function () {
+it('Channel::scopeMissingMovieId negates JSON value checks for info and movie_data when driver is pgsql', function () {
     config(['database.connections.sqlite_testing.driver' => 'pgsql']);
     $sql = Channel::query()->missingMovieId()->toSql();
     config(['database.connections.sqlite_testing.driver' => 'sqlite']);
 
     expect($sql)
-        ->toContain("NOT (info::jsonb ?? 'tmdb_id')")
-        ->toContain("NOT (info::jsonb ?? 'imdb_id')")
-        ->toContain("NOT (movie_data::jsonb ?? 'tmdb_id')")
-        ->toContain("NOT (movie_data::jsonb ?? 'imdb_id')");
+        ->toContain("info::jsonb->>'tmdb_id' IS NULL")
+        ->toContain("info::jsonb->>'imdb_id' IS NULL")
+        ->toContain("movie_data::jsonb->>'tmdb_id' IS NULL")
+        ->toContain("movie_data::jsonb->>'imdb_id' IS NULL")
+        ->not->toContain('??');
 });
 
-it('Series::scopeHasSeriesId adds metadata::jsonb operators for tmdb, tvdb, and imdb when driver is pgsql', function () {
+it('Channel::scopeHasMovieId and scopeMissingMovieId agree a key present with an empty value means no ID (issue #1645)', function () {
+    config(['database.connections.sqlite_testing.driver' => 'pgsql']);
+
+    $hasSql = Channel::query()->hasMovieId()->toSql();
+    $missingSql = Channel::query()->missingMovieId()->toSql();
+
+    config(['database.connections.sqlite_testing.driver' => 'sqlite']);
+
+    // Both scopes check the JSON *value*, not merely whether the key exists - a channel
+    // with info->tmdb_id = "" or null must count as "no ID" in both directions, not just
+    // excluded from "has" while also being excluded from "missing".
+    expect($hasSql)->toContain("!= ''")
+        ->and($missingSql)->toContain("= ''");
+});
+
+it('Series::scopeHasSeriesId adds metadata::jsonb value checks for tmdb, tvdb, and imdb when driver is pgsql', function () {
     config(['database.connections.sqlite_testing.driver' => 'pgsql']);
     $sql = Series::query()->hasSeriesId()->toSql();
     config(['database.connections.sqlite_testing.driver' => 'sqlite']);
 
     expect($sql)
-        ->toContain("metadata::jsonb ?? 'tmdb_id'")
-        ->toContain("metadata::jsonb ?? 'tmdb'")
-        ->toContain("metadata::jsonb ?? 'tvdb_id'")
-        ->toContain("metadata::jsonb ?? 'tvdb'")
-        ->toContain("metadata::jsonb ?? 'imdb_id'")
-        ->toContain("metadata::jsonb ?? 'imdb'");
+        ->toContain("metadata::jsonb->>'tmdb_id' IS NOT NULL")
+        ->toContain("metadata::jsonb->>'tmdb' IS NOT NULL")
+        ->toContain("metadata::jsonb->>'tvdb_id' IS NOT NULL")
+        ->toContain("metadata::jsonb->>'tvdb' IS NOT NULL")
+        ->toContain("metadata::jsonb->>'imdb_id' IS NOT NULL")
+        ->toContain("metadata::jsonb->>'imdb' IS NOT NULL")
+        ->not->toContain('??');
 });
 
-it('Series::scopeMissingSeriesId negates JSON key checks for metadata when driver is pgsql', function () {
+it('Series::scopeMissingSeriesId negates JSON value checks for metadata when driver is pgsql', function () {
     config(['database.connections.sqlite_testing.driver' => 'pgsql']);
     $sql = Series::query()->missingSeriesId()->toSql();
     config(['database.connections.sqlite_testing.driver' => 'sqlite']);
 
     expect($sql)
-        ->toContain("NOT (metadata::jsonb ?? 'tmdb_id')")
-        ->toContain("NOT (metadata::jsonb ?? 'tmdb')")
-        ->toContain("NOT (metadata::jsonb ?? 'tvdb_id')")
-        ->toContain("NOT (metadata::jsonb ?? 'tvdb')")
-        ->toContain("NOT (metadata::jsonb ?? 'imdb_id')")
-        ->toContain("NOT (metadata::jsonb ?? 'imdb')");
+        ->toContain("metadata::jsonb->>'tmdb_id' IS NULL")
+        ->toContain("metadata::jsonb->>'tmdb' IS NULL")
+        ->toContain("metadata::jsonb->>'tvdb_id' IS NULL")
+        ->toContain("metadata::jsonb->>'tvdb' IS NULL")
+        ->toContain("metadata::jsonb->>'imdb_id' IS NULL")
+        ->toContain("metadata::jsonb->>'imdb' IS NULL")
+        ->not->toContain('??');
 });

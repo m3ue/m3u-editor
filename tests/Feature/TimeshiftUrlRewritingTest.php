@@ -101,6 +101,41 @@ it('converts unix timestamp date parameter and produces correct timeshift URL', 
     expect($response->headers->get('Location'))->toContain('/timeshift/');
 });
 
+it('converts a numeric timeshift date to the correct provider window when the app timezone is not UTC', function () {
+    // Melbourne is UTC+11 in December; the provider is UTC. The absolute instant must survive
+    // the numeric-to-text round trip regardless of the configured app timezone.
+    config(['app.timezone' => 'Australia/Melbourne']);
+    app('config')->set('app.timezone', 'Australia/Melbourne');
+    date_default_timezone_set('Australia/Melbourne');
+
+    $this->playlist->update(['server_timezone' => 'UTC']);
+
+    // 2024-12-01 15:30:00 UTC as a unix timestamp
+    $unixTimestamp = Carbon::create(2024, 12, 1, 15, 30, 0, 'UTC')->timestamp;
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider.domain/live/user/pass/464938.ts',
+        'catchup' => '1',
+    ]);
+
+    $response = $this->get(route('xtream.stream.timeshift.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'duration' => 30,
+        'date' => (string) $unixTimestamp,
+        'streamId' => $channel->id,
+        'format' => 'ts',
+    ]));
+
+    $response->assertRedirect();
+    expect($response->headers->get('Location'))->toContain('2024-12-01:15-30');
+
+    date_default_timezone_set('UTC');
+});
+
 it('rewrites TiviMate utc timeshift URL from /live/ to /timeshift/', function () {
     // m3u-proxy only treats a URL as catchup (Range/416 handling, no live failover) when it
     // has a /timeshift/ path, so utc requests must not use /streaming/timeshift.php
@@ -197,6 +232,57 @@ it('uses failover channel URL when primary channel has no catchup support', func
     expect($redirectUrl)
         ->toContain('sd-stream')
         ->not->toContain('hd-stream');
+});
+
+it('uses the failover channel own provider timezone, not the credentials playlist timezone', function () {
+    // App timezone UTC. Primary standard playlist A (credentials) is UTC; failover playlist B is New York.
+    config(['app.timezone' => 'UTC']);
+    app('config')->set('app.timezone', 'UTC');
+    date_default_timezone_set('UTC');
+
+    $playlistB = Playlist::factory()->for($this->user)->create(['server_timezone' => 'America/New_York']);
+    $this->playlist->update(['server_timezone' => 'UTC']);
+
+    $primaryChannel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider-a.domain/live/user/pass/hd-stream.ts',
+        'catchup' => null,
+    ]);
+
+    $failoverChannel = Channel::factory()->create([
+        'playlist_id' => $playlistB->id,
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'url' => 'https://provider-b.domain/live/user/pass/sd-stream.ts',
+        'catchup' => '1',
+    ]);
+
+    ChannelFailover::create([
+        'user_id' => $this->user->id,
+        'channel_id' => $primaryChannel->id,
+        'channel_failover_id' => $failoverChannel->id,
+        'sort' => 1,
+        'metadata' => '{}',
+    ]);
+
+    $response = $this->get(route('xtream.stream.timeshift.root', [
+        'username' => $this->username,
+        'password' => $this->password,
+        'duration' => 30,
+        'date' => '2024-12-01:15-30-00',
+        'streamId' => $primaryChannel->id,
+        'format' => 'ts',
+    ]));
+
+    $response->assertRedirect();
+    $redirectUrl = $response->headers->get('Location');
+
+    // 15:30 UTC converted to New York (UTC-5 in December) is 10:30.
+    expect($redirectUrl)
+        ->toContain('sd-stream')
+        ->toContain('2024-12-01:10-30');
 });
 
 it('uses the failover channel with catchup for utc catchup requests on the live route', function () {

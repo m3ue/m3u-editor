@@ -10,6 +10,7 @@ use Filament\Notifications\Notification;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessVodChannelsChunk implements ShouldQueue
@@ -23,6 +24,23 @@ class ProcessVodChannelsChunk implements ShouldQueue
 
     // Giving a timeout of 10 minutes per chunk (100 channels)
     public $timeout = 60 * 10;
+
+    /**
+     * Cache keys tracking per-channel metadata outcomes across every chunk of one
+     * run, so the batch-finally callback can tell "every channel failed" apart
+     * from "every chunk job ran" (Channel::fetchMetadata() swallows provider
+     * failures and returns false instead of throwing, so the chunk job itself
+     * never fails and Bus::batch()'s own failedJobs count stays at zero).
+     */
+    public static function attemptedCacheKey(int $playlistId): string
+    {
+        return "vod_metadata_sync:{$playlistId}:attempted";
+    }
+
+    public static function failedCacheKey(int $playlistId): string
+    {
+        return "vod_metadata_sync:{$playlistId}:failed";
+    }
 
     /**
      * Create a new job instance.
@@ -77,7 +95,12 @@ class ProcessVodChannelsChunk implements ShouldQueue
             try {
                 // Use provider throttling to limit concurrent requests and apply delay
                 // skipTmdb=true: TMDB IDs are fetched in bulk from ProcessVodChannelsComplete
-                $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream, skipTmdb: true));
+                $fetched = $this->withProviderThrottling(fn () => $channel->fetchMetadata($xtream, skipTmdb: true));
+
+                Cache::increment(self::attemptedCacheKey($playlist->id));
+                if (! $fetched) {
+                    Cache::increment(self::failedCacheKey($playlist->id));
+                }
             } catch (XtreamRateLimitedException $e) {
                 // Account-wide cooldown: every remaining channel in this chunk (and
                 // every later chunk in the batch) would fail the same way. Cancel the
@@ -95,6 +118,9 @@ class ProcessVodChannelsChunk implements ShouldQueue
             } catch (\Exception $e) {
                 // Log the error and continue processing other channels
                 Log::error('Failed to process VOD data for channel ID '.$channel->id.' in chunk '.$this->chunkIndex.': '.$e->getMessage());
+
+                Cache::increment(self::attemptedCacheKey($playlist->id));
+                Cache::increment(self::failedCacheKey($playlist->id));
 
                 // Notify user about the specific error but continue processing
                 Notification::make()

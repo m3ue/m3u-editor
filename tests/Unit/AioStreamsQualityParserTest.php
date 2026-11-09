@@ -98,3 +98,34 @@ it('ignores live-stream extensions (ts/m3u8) as a container guess since VOD cont
 
     expect($parsed['container'])->toBeNull();
 });
+
+it('parses a zero emoji seeder count instead of crashing on an undefined array key', function () {
+    $streams = [
+        ['name' => 'Movie.1080p', 'title' => '👤 0'],
+    ];
+
+    $ranked = $this->parser->rank($streams);
+
+    expect($ranked[0]['parsed']['seeders'])->toBe(0);
+});
+
+it('parses a positive emoji seeder count', function () {
+    $streams = [
+        ['name' => 'Movie.1080p', 'title' => '👤 1'],
+    ];
+
+    $ranked = $this->parser->rank($streams);
+
+    expect($ranked[0]['parsed']['seeders'])->toBe(1);
+});
+
+it('still ranks a mixed batch when one stream has a zero emoji seeder count', function () {
+    $streams = [
+        ['name' => 'Movie.1080p', 'title' => '👤 0'],
+        ['name' => 'Movie.720p', 'title' => 'seeders: 5'],
+    ];
+
+    $ranked = $this->parser->rank($streams);
+
+    expect($ranked)->toHaveCount(2);
+});

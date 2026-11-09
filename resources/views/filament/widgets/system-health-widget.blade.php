@@ -1,5 +1,19 @@
 <x-filament-widgets::widget>
     <x-filament::section icon="heroicon-o-heart" icon-color="gray" :heading="__('System health')">
+        @if ($detailsUrl)
+            <x-slot name="afterHeader">
+                <x-filament::button
+                    tag="a"
+                    :href="$detailsUrl"
+                    color="gray"
+                    size="sm"
+                    icon="heroicon-m-arrow-top-right-on-square"
+                >
+                    {{ __('View details') }}
+                </x-filament::button>
+            </x-slot>
+        @endif
+
         <ul role="list" class="divide-y divide-gray-100 dark:divide-white/5">
             @foreach ($checks as $check)
                 <li class="flex items-center justify-between gap-3 py-1.5">

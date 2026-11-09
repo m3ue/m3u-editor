@@ -658,10 +658,15 @@ class ManualScheduleBuilder extends Page
         $templateStart = Carbon::now()->startOfDay();
         $templateEnd = $templateStart->copy()->addDays(7);
 
+        // Order chronologically by start_time, not sort_order - sort_order resets
+        // for each day, so ordering by it alone does not reflect the actual
+        // day-to-day sequence across the full first week and can place a later
+        // day's early-sort-order entry before an earlier day's later one.
         $templateProgrammes = $network->programmes()
             ->where('start_time', '>=', $templateStart)
             ->where('start_time', '<', $templateEnd)
             ->reorder()
+            ->orderBy('start_time')
             ->orderBy('sort_order')
             ->get();
 

@@ -9,7 +9,6 @@ use App\Livewire\ArrQueueMonitor;
 use App\Models\CachedContentFile;
 use App\Services\ArrCacheFailbackService;
 use App\Services\CachedContentDispatchService;
-use App\Settings\GeneralSettings;
 use App\Tables\Columns\ProgressColumn;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -71,7 +70,7 @@ class CachedContentFileResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->check() && (bool) (app(GeneralSettings::class)->enable_cache ?? false);
+        return auth()->check() && app(CachedContentDispatchService::class)->isEnabled();
     }
 
     public static function canCreate(): bool
@@ -267,7 +266,7 @@ class CachedContentFileResource extends Resource
             ->poll(
                 fn (): string => static::getEloquentQuery()
                     ->whereIn('status', [CachedContentFileStatus::Pending, CachedContentFileStatus::Downloading])
-                    ->where('source', '!=', 'arr')
+                    ->notArrTracked()
                     ->exists() ? '5s' : '60s',
             )
             ->columns([

@@ -6,6 +6,7 @@ use App\Filament\Resources\Plugins\PluginResource;
 use App\Models\Plugin;
 use App\Models\PluginTableRecord;
 use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUiRequestCache;
 use App\Plugins\PluginUiTableRegistry;
 use App\Services\DateFormatService;
 use Filament\Actions\Action;
@@ -24,7 +25,6 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class ManagePluginTable extends Page implements HasTable
@@ -55,7 +55,7 @@ class ManagePluginTable extends Page implements HasTable
         $definition = app(PluginUiTableRegistry::class)->tableFor($plugin, $table);
 
         abort_unless($definition !== null, 404);
-        abort_unless(Schema::hasTable((string) $definition['table']), 404);
+        abort_unless(app(PluginUiRequestCache::class)->hasTable((string) $definition['table']), 404);
 
         $this->tableId = $table;
         $this->tableDefinition = $definition;
@@ -81,9 +81,9 @@ class ManagePluginTable extends Page implements HasTable
             ->headerActions($this->tableHeaderActions())
             ->recordActions($this->tableRecordActions(), position: RecordActionsPosition::BeforeCells);
 
-        if (Schema::hasColumn($this->tableName(), 'updated_at')) {
+        if (app(PluginUiRequestCache::class)->hasColumn($this->tableName(), 'updated_at')) {
             $table->defaultSort('updated_at', 'desc');
-        } elseif (Schema::hasColumn($this->tableName(), 'id')) {
+        } elseif (app(PluginUiRequestCache::class)->hasColumn($this->tableName(), 'id')) {
             $table->defaultSort('id', 'desc');
         }
 
@@ -107,7 +107,7 @@ class ManagePluginTable extends Page implements HasTable
 
         return $this->newModel()
             ->newQuery()
-            ->when(Schema::hasColumn($tableName, 'extension_plugin_id'), fn (Builder $query) => $query->where('extension_plugin_id', $this->getRecord()->id));
+            ->when(app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_id'), fn (Builder $query) => $query->where('extension_plugin_id', $this->getRecord()->id));
     }
 
     /**
@@ -272,11 +272,11 @@ class ManagePluginTable extends Page implements HasTable
     {
         $tableName = $this->tableName();
 
-        if (Schema::hasColumn($tableName, 'extension_plugin_id')) {
+        if (app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_id')) {
             $data['extension_plugin_id'] = $this->getRecord()->id;
         }
 
-        if ($creating && Schema::hasColumn($tableName, 'user_id') && blank($data['user_id'] ?? null)) {
+        if ($creating && app(PluginUiRequestCache::class)->hasColumn($tableName, 'user_id') && blank($data['user_id'] ?? null)) {
             $data['user_id'] = auth()->id();
         }
 

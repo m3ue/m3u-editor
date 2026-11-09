@@ -360,3 +360,71 @@ PHP;
         File::deleteDirectory($sourcePath);
     }
 });
+
+it('rejects malformed visibility declarations including nested sections', function (array $declaration) {
+    $validator = app(PluginValidator::class);
+    $field = ['type' => 'section', 'label' => 'Nested', 'fields' => [
+        ['id' => 'value', 'type' => 'text', ...$declaration],
+    ]];
+    $errors = (new ReflectionMethod($validator, 'validateFieldDefinition'))->invoke($validator, $field, config('plugins.field_types'), 'settings');
+    expect($errors)->not->toBeEmpty();
+})->with([
+    'scalar condition' => [['visible_when' => 'mode']],
+    'empty condition' => [['visible_when' => []]],
+    'scalar allowed value' => [['visible_when' => ['mode' => 'native']]],
+    'nested allowed value' => [['visible_when' => ['mode' => [['native']]]]],
+    'empty provider' => [['visibility_provider' => '']],
+    'missing provider' => [['visibility_depends_on' => ['mode']]],
+    'invalid dependency' => [['visibility_provider' => 'fixture', 'visibility_depends_on' => [1]]],
+]);
+
+it('accepts visibility declarations on nested sections and makes controlling fields live', function () {
+    $fields = [
+        ['id' => 'mode', 'type' => 'select', 'label' => 'Mode', 'options' => ['native' => 'Native']],
+        ['type' => 'section', 'label' => 'Native options', 'visible_when' => ['mode' => ['native']], 'fields' => [
+            ['id' => 'key', 'type' => 'text', 'visibility_provider' => 'fixture', 'visibility_depends_on' => ['mode']],
+        ]],
+    ];
+    foreach ($fields as $field) {
+        $errors = (new ReflectionMethod(app(PluginValidator::class), 'validateFieldDefinition'))->invoke(app(PluginValidator::class), $field, config('plugins.field_types'), 'settings');
+        expect($errors)->toBe([]);
+    }
+    $components = app(PluginSchemaMapper::class)->componentsForFieldDefinitions($fields, 'settings.');
+    expect($components[0]->isLive())->toBeTrue();
+    expect($components[1]->isDehydratedWhenHidden())->toBeTrue();
+});
+
+it('identifies the exact field or section in visibility validation errors', function () {
+    $field = ['type' => 'section', 'label' => 'Advanced', 'visibility_provider' => '', 'fields' => [
+        ['id' => 'api_key', 'type' => 'text', 'visibility_provider' => ''],
+    ]];
+    $validator = app(PluginValidator::class);
+    $errors = (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, $field, config('plugins.field_types'), 'settings');
+
+    expect($errors)->toBe([
+        'Plugin field settings.Advanced visibility_provider must be a non-empty string',
+        'Plugin field settings.Advanced.api_key visibility_provider must be a non-empty string',
+    ]);
+});
+
+it('rejects required fields that visibility rules or conditional sections can hide', function () {
+    $validator = app(PluginValidator::class);
+    $validate = fn (array $field): array => (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, $field, config('plugins.field_types'), 'settings');
+
+    expect($validate(['id' => 'api_key', 'type' => 'text', 'required' => true, 'visible_when' => ['mode' => ['api']]]))
+        ->toBe(['Plugin field settings.api_key cannot be required while visible_when or visibility_provider can hide it']);
+    expect($validate(['id' => 'api_key', 'type' => 'text', 'required' => true, 'visibility_provider' => 'fixture']))
+        ->toBe(['Plugin field settings.api_key cannot be required while visible_when or visibility_provider can hide it']);
+    expect($validate(['type' => 'section', 'label' => 'API', 'visible_when' => ['mode' => ['api']], 'fields' => [
+        ['type' => 'section', 'label' => 'Credentials', 'fields' => [
+            ['id' => 'api_key', 'type' => 'text', 'required' => true],
+        ]],
+    ]]))->toBe(['Plugin field settings.API.Credentials.api_key cannot be required while visible_when or visibility_provider can hide it']);
+
+    expect($validate(['type' => 'section', 'label' => 'API', 'fields' => [
+        ['id' => 'mode', 'type' => 'text', 'required' => true],
+        ['id' => 'api_key', 'type' => 'text', 'visible_when' => ['mode' => ['api']]],
+    ]]))->toBe([]);
+});

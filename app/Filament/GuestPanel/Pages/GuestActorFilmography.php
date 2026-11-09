@@ -128,13 +128,25 @@ class GuestActorFilmography extends Page
     }
 
     /**
-     * Trait accessor: returns the cached playlist_id resolved from $this->playlistUuid,
-     * or 0 if no scope is set. HasGuestAuth has already validated the guest authenticated
-     * against this playlist, so no extra ownership check is needed here.
+     * Trait accessor: returns the playlist_id resolved from $this->playlistUuid.
+     * HasGuestAuth has already validated the guest authenticated against this
+     * playlist, so no extra ownership check is needed here.
+     *
+     * $resolvedFilmographyPlaylistId is cached by mount() on the initial request,
+     * but as a protected property it is not part of the Livewire snapshot, so it
+     * reverts to null on follow-up requests (e.g. openFilmographyItem's click).
+     * Re-resolve from the public $playlistUuid, which Livewire does persist, so
+     * subsequent requests keep the correct scope instead of falling back to 0.
      */
     protected function filmographyPlaylistId(): int
     {
-        return $this->resolvedFilmographyPlaylistId ?? 0;
+        if ($this->resolvedFilmographyPlaylistId === null) {
+            $this->resolvedFilmographyPlaylistId = ! empty($this->playlistUuid)
+                ? $this->resolvePlaylistIdFromUuid($this->playlistUuid) ?? 0
+                : 0;
+        }
+
+        return $this->resolvedFilmographyPlaylistId;
     }
 
     protected function filmographySeriesResource(): string

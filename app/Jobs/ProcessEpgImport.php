@@ -5,18 +5,23 @@ namespace App\Jobs;
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
+use App\Exceptions\SchedulesDirectAuthBlockedException;
 use App\Exceptions\SchedulesDirectRateLimitException;
+use App\Jobs\Middleware\SkipIfSyncReset;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Job;
 use App\Services\SchedulesDirectService;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Exception;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -49,6 +54,9 @@ class ProcessEpgImport implements ShouldQueue
     // Giving a timeout of 60 minutes to the Job to process the file
     public $timeout = 60 * 60;
 
+    // When the import was queued (microtime); null for jobs queued before this was tracked
+    public ?float $queuedAt = null;
+
     /**
      * Sanitize UTF-8 string to remove invalid sequences
      */
@@ -74,15 +82,39 @@ class ProcessEpgImport implements ShouldQueue
         public Epg $epg,
         public ?bool $force = false,
     ) {
+        $this->queuedAt = microtime(true);
+
         // SchedulesDirect syncs share a single external account/API per user, and
         // running more than one at a time for the same account gets it rate-limited
         // or blocked by SD. Route them onto a dedicated queue that Horizon runs with
         // maxProcesses = 1 (see config/horizon.php) so concurrency is enforced by the
         // queue itself rather than app-level locking. M3U/XML imports are unaffected
         // and continue to run on the default/import queues with full concurrency.
-        if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT) {
+        // With SchedulesDirect disabled its supervisor isn't running, so the job stays
+        // on the default queue where handle() drops it instead of waiting forever.
+        if ($epg->source_type === EpgSourceType::SCHEDULES_DIRECT && ! $epg->isSchedulesDirectDisabled()) {
             $this->onQueue('schedules-direct');
         }
+    }
+
+    /**
+     * Skip the import, and the chain it starts, once the user resets the EPG
+     * after it was queued.
+     *
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return $this->queuedAt !== null ? [$this->syncResetGuard()] : [];
+    }
+
+    /**
+     * Guard for this import's jobs. Imports queued before queuedAt was tracked
+     * only guard the chain they start, from now on.
+     */
+    private function syncResetGuard(): SkipIfSyncReset
+    {
+        return new SkipIfSyncReset(Epg::class, $this->epg->id, $this->queuedAt ?? microtime(true));
     }
 
     /**
@@ -90,6 +122,15 @@ class ProcessEpgImport implements ShouldQueue
      */
     public function handle(SchedulesDirectService $service): void
     {
+        if ($this->epg->isSchedulesDirectDisabled()) {
+            Log::info('ProcessEpgImport: SchedulesDirect is disabled, skipping sync', [
+                'epg_id' => $this->epg->id,
+                'name' => $this->epg->name,
+            ]);
+
+            return;
+        }
+
         if (! $this->force) {
             // Don't update if currently processing
             if ($this->epg->processing) {
@@ -336,8 +377,10 @@ class ProcessEpgImport implements ShouldQueue
                             // Close the inner XMLReader
                             $innerReader->close();
 
-                            // Only return valid channels
-                            if ($elementData['channel_id']) {
+                            // Only return valid channels. The XMLTV DTD allows any nonempty
+                            // string as a channel id, including "0", so this must check for an
+                            // empty string rather than PHP truthiness.
+                            if ($elementData['channel_id'] !== '' && $elementData['channel_id'] !== null) {
                                 // Collision-relative hashing: first occurrence gets the base md5;
                                 // duplicates in the same feed get a :dup:N suffix so all survive
                                 // as distinct records. epg_id/user_id are included in the hash for
@@ -415,7 +458,7 @@ class ProcessEpgImport implements ShouldQueue
 
                 // Run completion after channels imported
                 $jobs[] = new ProcessEpgImportComplete($userId, $epgId, $batchNo, $start);
-                Bus::chain($jobs)
+                Bus::chain($this->syncResetGuard()->guard($jobs))
                     ->onConnection('redis') // force to use redis connection
                     ->onQueue('import')
                     ->catch(function (Throwable $e) use ($epg) {
@@ -446,37 +489,32 @@ class ProcessEpgImport implements ShouldQueue
                 $this->failImport('Invalid EPG file. Unable to read or download your EPG file. Please check the URL or uploaded file and try again.');
             }
         } catch (SchedulesDirectRateLimitException $e) {
-            // Schedules Direct login limit (4009). A bounded cooldown is already
-            // recorded on the EPG. Do NOT schedule the 60/120/180s resync and do
-            // NOT retry: that is exactly what exhausts the provider's 24h limit.
+            // Schedules Direct login limit (4009/4010) or server-error backoff.
+            // The cooldown is already recorded on the EPG, so do NOT run the
+            // 60/120/180s resync ladder: that is exactly what exhausts the
+            // provider's daily limit. A server-error backoff instead retries once
+            // the backoff ends, when the EPG allows automatic resyncs.
             // Show one actionable notification with the next eligible retry time.
             $retryAt = $e->retryAt;
-            $error = "SchedulesDirect login limit reached. Automatic retries are paused until {$retryAt->toDayDateTimeString()} UTC.";
 
-            logger()->warning("SchedulesDirect login limit for \"{$this->epg->name}\"; cooldown until {$retryAt->toIso8601String()}");
+            logger()->warning("SchedulesDirect paused for \"{$this->epg->name}\" ({$e->reason}); cooldown until {$retryAt->toIso8601String()}");
 
-            Notification::make()
-                ->warning()
-                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
-                ->body($error)
-                ->broadcast($this->epg->user);
-            Notification::make()
-                ->warning()
-                ->title("SchedulesDirect login limit reached for \"{$this->epg->name}\"")
-                ->body($error)
-                ->sendToDatabase($this->epg->user);
+            // Server and unrecognised errors are real failures, so they keep the
+            // danger notification and the opt-in resync; limits are a warning.
+            $isFailure = in_array($e->reason, [SchedulesDirectRateLimitException::REASON_SERVER_ERROR, SchedulesDirectRateLimitException::REASON_LOGIN_FAILED], true);
 
-            $this->epg->update([
-                'status' => Status::Failed,
-                'synced' => now(),
-                'errors' => $error,
-                'progress' => 100,
-                'processing' => false,
-                'processing_started_at' => null,
-                'processing_phase' => null,
-            ]);
+            $this->failSchedulesDirectSync($e->userTitle($this->epg->name), $e->userMessage(), danger: $isFailure);
 
-            event(new SyncCompleted($this->epg));
+            if ($isFailure) {
+                static::scheduleResyncIfNeeded($this->epg, $retryAt);
+            }
+        } catch (SchedulesDirectAuthBlockedException $e) {
+            // Schedules Direct permanently rejected the login (expired, invalid
+            // user, disabled or inactive). Retrying cannot succeed, so scheduled
+            // syncs stop until the user updates the credentials or retries.
+            logger()->warning("SchedulesDirect login rejected for \"{$this->epg->name}\" (code {$e->getCode()}); scheduled syncs stopped");
+
+            $this->failSchedulesDirectSync("SchedulesDirect login rejected for \"{$this->epg->name}\"", $e->getMessage());
         } catch (Exception $e) {
             $this->failImport($e->getMessage(), $batchNo);
         } finally {
@@ -486,6 +524,37 @@ class ProcessEpgImport implements ShouldQueue
             }
         }
 
+    }
+
+    /**
+     * Mark a Schedules Direct sync as failed with one notification (a warning,
+     * or danger for real failures) and no resync. The caller decides whether a
+     * retry is allowed.
+     */
+    private function failSchedulesDirectSync(string $title, string $error, bool $danger = false): void
+    {
+        Notification::make()
+            ->status($danger ? 'danger' : 'warning')
+            ->title($title)
+            ->body($error)
+            ->broadcast($this->epg->user);
+        Notification::make()
+            ->status($danger ? 'danger' : 'warning')
+            ->title($title)
+            ->body($error)
+            ->sendToDatabase($this->epg->user);
+
+        $this->epg->update([
+            'status' => Status::Failed,
+            'synced' => now(),
+            'errors' => $error,
+            'progress' => 100,
+            'processing' => false,
+            'processing_started_at' => null,
+            'processing_phase' => null,
+        ]);
+
+        event(new SyncCompleted($this->epg));
     }
 
     /**
@@ -529,8 +598,10 @@ class ProcessEpgImport implements ShouldQueue
     /**
      * Schedule an automatic resync with linear backoff if the EPG is configured for it.
      * Returns true if a retry was dispatched (caller should skip further processing).
+     *
+     * @param  CarbonInterface|null  $at  run the retry at this time instead of the linear backoff delay
      */
-    public static function scheduleResyncIfNeeded(Epg $epg): bool
+    public static function scheduleResyncIfNeeded(Epg $epg, ?CarbonInterface $at = null): bool
     {
         $epg->refresh();
 
@@ -539,7 +610,7 @@ class ProcessEpgImport implements ShouldQueue
         }
 
         $newAttempt = $epg->resync_attempt + 1;
-        $delaySeconds = $newAttempt * 60;
+        $delaySeconds = $at ? max(1, (int) ceil(now()->diffInSeconds($at, false))) : $newAttempt * 60;
 
         $epg->update(['resync_attempt' => $newAttempt]);
 
@@ -578,10 +649,18 @@ class ProcessEpgImport implements ShouldQueue
 
     private function processMergedEpg(Epg $epg, Carbon $start): void
     {
-        $merged = $this->buildMergedEpgFile($epg);
+        $sourceEpgs = $epg->sourceEpgs()
+            ->where('epgs.id', '!=', $epg->id)
+            ->where('epgs.is_merged', false)
+            ->orderBy('merged_epg_epg.sort_order')
+            ->get();
+
+        $merged = $sourceEpgs->isNotEmpty() ? $this->buildMergedEpgFile($epg, $sourceEpgs) : null;
 
         if (! $merged) {
-            $error = 'Invalid merged EPG configuration. Please ensure you selected at least 2 valid source EPGs and try again.';
+            $error = $sourceEpgs->isEmpty()
+                ? 'Invalid merged EPG configuration. Please ensure you selected at least 2 valid source EPGs and try again.'
+                : 'Unable to build merged EPG. Ensure the selected sources have readable, valid XMLTV files and try again. The existing merged guide was kept.';
 
             Notification::make()
                 ->danger()
@@ -646,90 +725,119 @@ class ProcessEpgImport implements ShouldQueue
         event(new SyncCompleted($epg));
     }
 
-    private function buildMergedEpgFile(Epg $epg): ?array
+    /**
+     * @param  Collection<int, Epg>  $sourceEpgs
+     */
+    private function buildMergedEpgFile(Epg $epg, Collection $sourceEpgs): ?array
     {
-        $sourceEpgs = $epg->sourceEpgs()
-            ->where('epgs.id', '!=', $epg->id)
-            ->where('epgs.is_merged', false)
-            ->orderBy('merged_epg_epg.sort_order')
-            ->get();
-
-        if ($sourceEpgs->isEmpty()) {
-            return null;
-        }
-
         Storage::disk('local')->makeDirectory($epg->folder_path);
 
-        if (Storage::disk('local')->exists($epg->file_path)) {
-            Storage::disk('local')->delete($epg->file_path);
-        }
-
+        // Build beside the current guide so failed imports never replace a working download.
+        $temporaryPath = $epg->file_path.'.'.Str::uuid7().'.tmp';
         $mergedFilePath = Storage::disk('local')->path($epg->file_path);
         $writer = new XMLWriter;
-        $writer->openURI($mergedFilePath);
-        $writer->startDocument('1.0', 'utf-8');
-        $writer->writeDTD('tv', null, 'xmltv.dtd');
-        $writer->startElement('tv');
-        $writer->writeAttribute('generator-info-name', 'Generated by m3u editor');
-        $writer->writeAttribute('generator-info-url', url(''));
+        $reader = null;
 
-        $seenChannelIds = [];
-        $channelCount = 0;
-        $programmeCount = 0;
-
-        foreach ($sourceEpgs as $sourceEpg) {
-            $sourcePath = $this->resolveEpgSourceFilePath($sourceEpg);
-            if (! $sourcePath) {
-                continue;
+        try {
+            if (! $writer->openURI(Storage::disk('local')->path($temporaryPath))) {
+                return null;
             }
+            $writer->startDocument('1.0', 'utf-8');
+            $writer->writeDTD('tv', null, 'xmltv.dtd');
+            $writer->startElement('tv');
+            $writer->writeAttribute('generator-info-name', 'Generated by m3u editor');
+            $writer->writeAttribute('generator-info-url', url(''));
 
-            $reader = new XMLReader;
-            if (! $reader->open('compress.zlib://'.$sourcePath)) {
-                continue;
-            }
+            $seenChannelIds = [];
+            $channelCount = 0;
+            $programmeCount = 0;
+            $sourceCount = 0;
 
-            while (@$reader->read()) {
-                if ($reader->nodeType !== XMLReader::ELEMENT) {
+            foreach ($sourceEpgs as $sourceEpg) {
+                $sourcePath = $this->resolveEpgSourceFilePath($sourceEpg);
+                if (! $sourcePath) {
                     continue;
                 }
 
-                if ($reader->name === 'channel') {
-                    $channelId = trim((string) $reader->getAttribute('id'));
-                    if ($channelId && array_key_exists($channelId, $seenChannelIds)) {
-                        $reader->readOuterXml();
+                $reader = new XMLReader;
+                if (! $reader->open('compress.zlib://'.$sourcePath)) {
+                    $reader = null;
+
+                    continue;
+                }
+                $readToEnd = false;
+
+                while (@$reader->read()) {
+                    if ($reader->depth === 0 && $reader->name === 'tv'
+                        && ($reader->nodeType === XMLReader::END_ELEMENT
+                            || ($reader->nodeType === XMLReader::ELEMENT && $reader->isEmptyElement))) {
+                        $readToEnd = true;
+                    }
+
+                    if ($reader->nodeType !== XMLReader::ELEMENT) {
+                        continue;
+                    }
+
+                    if ($reader->name === 'channel') {
+                        $channelId = trim((string) $reader->getAttribute('id'));
+                        // "0" is a valid nonempty XMLTV channel id, so this must check for an
+                        // empty string rather than PHP truthiness, or it would be deduplicated
+                        // and counted incorrectly.
+                        if ($channelId !== '' && array_key_exists($channelId, $seenChannelIds)) {
+                            $reader->readOuterXml();
+
+                            continue;
+                        }
+
+                        if ($channelId !== '') {
+                            $seenChannelIds[$channelId] = true;
+                            $channelCount++;
+                        }
+
+                        $writer->writeRaw($reader->readOuterXml());
 
                         continue;
                     }
 
-                    if ($channelId) {
-                        $seenChannelIds[$channelId] = true;
-                        $channelCount++;
+                    if ($reader->name === 'programme') {
+                        $programmeCount++;
+                        $writer->writeRaw($reader->readOuterXml());
                     }
-
-                    $writer->writeRaw($reader->readOuterXml());
-
-                    continue;
                 }
 
-                if ($reader->name === 'programme') {
-                    $programmeCount++;
-                    $writer->writeRaw($reader->readOuterXml());
+                $reader->close();
+                $reader = null;
+
+                // Like a missing source, one that isn't complete XMLTV (an empty file or an HTML
+                // error page) doesn't stop the merge, but only complete sources count towards
+                // replacing the guide.
+                if ($readToEnd) {
+                    $sourceCount++;
                 }
             }
 
-            $reader->close();
-        }
+            if ($sourceCount === 0) {
+                return null;
+            }
 
-        $writer->endElement();
-        $writer->endDocument();
-        $writer->flush();
+            $writer->endElement();
+            $writer->endDocument();
+            $writer->flush();
+            $writer = null;
 
-        return file_exists($mergedFilePath)
-            ? [
+            if (! File::move(Storage::disk('local')->path($temporaryPath), $mergedFilePath)) {
+                return null;
+            }
+
+            return [
                 'path' => $mergedFilePath,
                 'channel_count' => $channelCount,
                 'programme_count' => $programmeCount,
-            ]
-            : null;
+            ];
+        } finally {
+            $reader?->close();
+            $writer = null;
+            Storage::disk('local')->delete($temporaryPath);
+        }
     }
 }

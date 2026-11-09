@@ -78,7 +78,7 @@ class RequestArrEpisode implements ShouldQueue
         Notification::make()
             ->danger()
             ->title(__('Episode Request Failed'))
-            ->body(__('Could not queue ":show" S:s E:e after multiple attempts. Sonarr may still be indexing — try again in a moment.', [
+            ->body(__('Could not queue ":show" S:s E:e after multiple attempts. Sonarr may still be indexing, try again in a moment.', [
                 'show' => $this->showTitle,
                 's' => str_pad((string) $this->seasonNumber, 2, '0', STR_PAD_LEFT),
                 'e' => str_pad((string) $this->episodeNumber, 2, '0', STR_PAD_LEFT),

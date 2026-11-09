@@ -454,6 +454,104 @@ it('creates an Emby library through the official virtual folders endpoint', func
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'DELETE');
 });
 
+it('creates an Emby library with the server-default metadata and image downloaders', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Libraries/AvailableOptions*' => Http::response([
+            'MetadataReaders' => [['Name' => 'Nfo', 'DefaultEnabled' => true]],
+            'TypeOptions' => [[
+                'Type' => 'Movie',
+                'MetadataFetchers' => [
+                    ['Name' => 'TheMovieDb', 'DefaultEnabled' => true],
+                    ['Name' => 'The Open Movie Database', 'DefaultEnabled' => false],
+                ],
+                'ImageFetchers' => [
+                    ['Name' => 'TheMovieDb', 'DefaultEnabled' => true],
+                    ['Name' => 'FanArt', 'DefaultEnabled' => true],
+                    ['Name' => 'The Open Movie Database', 'DefaultEnabled' => false],
+                ],
+            ]],
+            'DefaultLibraryOptions' => ['EnableRealtimeMonitor' => true, 'PathInfos' => [], 'DisabledLocalMetadataReaders' => []],
+        ]),
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 204)
+            ->push([[
+                'ItemId' => 'library-1',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => ['/srv/emby/managed/movies'],
+            ]], 200),
+    ]);
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        refreshLibrary: false,
+    );
+
+    expect($result['success'])->toBeTrue()->and($result['created'])->toBeTrue();
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'GET'
+        && str_starts_with($request->url(), 'https://emby.test:8096/Libraries/AvailableOptions')
+        && $request['LibraryContentType'] === 'movies'
+        && $request['IsNewLibrary'] === 'true');
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://emby.test:8096/Library/VirtualFolders'
+        && $request->data() === [
+            'Name' => 'Managed Movies',
+            'CollectionType' => 'movies',
+            'Paths' => ['/srv/emby/managed/movies'],
+            'RefreshLibrary' => false,
+            'LibraryOptions' => [
+                'EnableRealtimeMonitor' => true,
+                'PathInfos' => [['Path' => '/srv/emby/managed/movies']],
+                'DisabledLocalMetadataReaders' => [],
+                'TypeOptions' => [[
+                    'Type' => 'Movie',
+                    'MetadataFetchers' => ['TheMovieDb'],
+                    'MetadataFetcherOrder' => [],
+                    'ImageFetchers' => ['TheMovieDb', 'FanArt'],
+                    'ImageFetcherOrder' => [],
+                    'ImageOptions' => [],
+                ]],
+            ],
+        ]);
+});
+
+it('still creates an Emby library without options when downloader discovery fails', function (int $status, mixed $body) {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://emby.test:8096/Libraries/AvailableOptions*' => Http::response($body, $status),
+        'https://emby.test:8096/Library/VirtualFolders' => Http::sequence()
+            ->push([], 200)
+            ->push([], 204)
+            ->push([[
+                'ItemId' => 'library-1',
+                'Name' => 'Managed Movies',
+                'CollectionType' => 'movies',
+                'Locations' => ['/srv/emby/managed/movies'],
+            ]], 200),
+    ]);
+
+    $result = MediaServerService::make($this->integration)->createLibrary(
+        name: 'Managed Movies',
+        collectionType: 'movies',
+        paths: ['/srv/emby/managed/movies'],
+        refreshLibrary: false,
+    );
+
+    expect($result['success'])->toBeTrue()->and($result['created'])->toBeTrue();
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://emby.test:8096/Library/VirtualFolders'
+        && ! array_key_exists('LibraryOptions', $request->data()));
+})->with([
+    'server error' => [500, []],
+    'no type options' => [200, ['MetadataReaders' => []]],
+    'no enabled type' => [200, ['TypeOptions' => ['not-an-object']]],
+]);
+
 it('reconciles inventory after a create connection timeout and reports an ambiguous outcome', function () {
     Http::preventStrayRequests();
     $inventoryRequests = 0;

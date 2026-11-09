@@ -6,6 +6,7 @@ use App\Facades\PlaylistFacade;
 use App\Filament\Actions\GeneratePasswordAction;
 use App\Filament\Clusters\PlaylistAliases\PlaylistAliasesCluster;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Forms\Components\SourceGroupModalSelect;
 use App\Filament\Resources\CustomPlaylists\CustomPlaylistResource;
 use App\Filament\Resources\MergedPlaylists\MergedPlaylistResource;
 use App\Filament\Resources\Playlists\PlaylistResource;
@@ -767,7 +768,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             $record->unsetRelation('bouquets');
                                                         })
                                                         ->columnSpanFull()
-                                                        ->helperText(__('Channels are allowed if their group is in ANY assigned bouquet OR in the manual selections below. Bouquets and manual picks combine - assigning a bouquet never removes anything the manual pickers allow.'))
+                                                        ->helperText(__('Channels are allowed if their group is in ANY assigned allow bouquet OR in the manual selections below. Groups in a block bouquet are always hidden, even when something else allows them.'))
                                                         ->createOptionForm([
                                                             Forms\Components\TextInput::make('name')->required(),
                                                             Forms\Components\Textarea::make('description'),
@@ -793,11 +794,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                     Schemas\Components\Callout::make(__('Bouquet contributions'))
                                                         ->columnSpanFull()
                                                         ->visible(fn (Get $get): bool => ! empty($get('bouquets')))
-                                                        ->description(fn (Get $get): string => __('Assigned bouquets contribute :live live groups, :vod VOD groups, and :series series categories in addition to your manual selections.', [
-                                                            'live' => count(self::bouquetContributedNames($get, 'live')),
-                                                            'vod' => count(self::bouquetContributedNames($get, 'vod')),
-                                                            'series' => count(self::bouquetContributedNames($get, 'categories')),
-                                                        ])),
+                                                        ->description(fn (Get $get): string => self::bouquetContributionSummary($get)),
                                                 ]),
 
                                             Schemas\Components\Callout::make(__('What you can select'))
@@ -868,18 +865,20 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             ));
                                                         })
                                                         ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                                            if (! is_array($state) || empty($state)) {
-                                                                return $state;
-                                                            }
+                                                            $selection = (! is_array($state) || empty($state))
+                                                                ? $state
+                                                                : self::sourceIdsToSelection(
+                                                                    SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'live', $record))->where('type', 'live'),
+                                                                    $state,
+                                                                    merged: self::isMergedAliasForm($get, $record),
+                                                                );
 
-                                                            return self::sourceIdsToSelection(
-                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'live', $record))->where('type', 'live'),
-                                                                $state,
-                                                                merged: self::isMergedAliasForm($get, $record),
-                                                            );
+                                                            return self::withCustomPicks($selection, $get, 'selected_groups');
                                                         })
                                                         ->live()
                                                         ->afterStateUpdated(fn ($state, Get $get, Set $set) => self::syncLiveGroupSortItems($get, $set, is_array($state) ? $state : [])),
+
+                                                    self::customPicker('selected_groups', 'live'),
 
                                                     // Custom playlist equivalent. Its records are keyed by name, which is
                                                     // exactly what group_filter stores, so no id/name translation is needed.
@@ -1040,16 +1039,18 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             ));
                                                         })
                                                         ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                                            if (! is_array($state) || empty($state)) {
-                                                                return $state;
-                                                            }
+                                                            $selection = (! is_array($state) || empty($state))
+                                                                ? $state
+                                                                : self::sourceIdsToSelection(
+                                                                    SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'vod', $record))->where('type', 'vod'),
+                                                                    $state,
+                                                                    merged: self::isMergedAliasForm($get, $record),
+                                                                );
 
-                                                            return self::sourceIdsToSelection(
-                                                                SourceGroup::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'vod', $record))->where('type', 'vod'),
-                                                                $state,
-                                                                merged: self::isMergedAliasForm($get, $record),
-                                                            );
+                                                            return self::withCustomPicks($selection, $get, 'selected_vod_groups');
                                                         }),
+
+                                                    self::customPicker('selected_vod_groups', 'vod'),
 
                                                     ModalTableSelect::make('group_filter.selected_vod_groups')
                                                         ->tableConfiguration(CustomPlaylistGroupsTable::class)
@@ -1136,16 +1137,18 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                                                             ));
                                                         })
                                                         ->dehydrateStateUsing(function ($state, ?PlaylistAlias $record, Get $get) {
-                                                            if (! is_array($state) || empty($state)) {
-                                                                return $state;
-                                                            }
+                                                            $selection = (! is_array($state) || empty($state))
+                                                                ? $state
+                                                                : self::sourceIdsToSelection(
+                                                                    SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'series', $record)),
+                                                                    $state,
+                                                                    merged: self::isMergedAliasForm($get, $record),
+                                                                );
 
-                                                            return self::sourceIdsToSelection(
-                                                                SourceCategory::query()->whereIn('playlist_id', self::sourcePlaylistIds($get, 'series', $record)),
-                                                                $state,
-                                                                merged: self::isMergedAliasForm($get, $record),
-                                                            );
+                                                            return self::withCustomPicks($selection, $get, 'selected_categories');
                                                         }),
+
+                                                    self::customPicker('selected_categories', 'categories'),
 
                                                     ModalTableSelect::make('group_filter.selected_categories')
                                                         ->tableConfiguration(CustomPlaylistCategoriesTable::class)
@@ -1525,6 +1528,74 @@ class PlaylistAliasResource extends Resource implements CopilotResource
     }
 
     /**
+     * The virtual picker for the playlist's own groups (or categories the provider did
+     * not supply). Standard playlists only. Its picks are saved into the same selection
+     * key as the provider picks, see withCustomPicks().
+     */
+    protected static function customPicker(string $key, string $type): Forms\Components\Select
+    {
+        return Forms\Components\Select::make(SourceGroupModalSelect::customPicksPath('group_filter.'.$key))
+            ->label($type === 'categories' ? __('Custom categories') : __('Custom groups'))
+            ->multiple()
+            ->searchable()
+            ->dehydrated(false)
+            ->live()
+            ->columnSpanFull()
+            ->visible(fn (Get $get): bool => (bool) $get('playlist_id') && SourceGroupModalSelect::customGroupOptions((int) $get('playlist_id'), $type) !== [])
+            ->options(fn (Get $get): array => SourceGroupModalSelect::customGroupOptions((int) $get('playlist_id'), $type))
+            ->afterStateHydrated(function (Forms\Components\Select $component, ?PlaylistAlias $record) use ($key, $type): void {
+                if (! $record?->playlist_id) {
+                    return;
+                }
+                $component->state(array_values(array_intersect(
+                    array_keys(SourceGroupModalSelect::customGroupOptions($record->playlist_id, $type)),
+                    (array) ($record->group_filter[$key] ?? []),
+                )));
+            })
+            ->afterStateUpdated(function (Get $get, Set $set) use ($type): void {
+                if ($type === 'live') {
+                    self::syncLiveGroupSortItems($get, $set);
+                }
+            })
+            ->helperText($type === 'categories'
+                ? __('Categories the provider did not supply. Series sitting in them are matched, wherever they came from.')
+                : __('Groups you created yourself. Channels sitting in them are matched, wherever they came from.'));
+    }
+
+    /**
+     * Add the custom picks to the provider selection saved under the same key.
+     *
+     * @param  array<int, string>|null  $selection
+     * @return array<int, string>|null
+     */
+    protected static function withCustomPicks(?array $selection, Get $get, string $key): ?array
+    {
+        $picks = array_values((array) $get(SourceGroupModalSelect::customPicksPath('group_filter.'.$key)));
+        if ($picks === [] || ! $get('playlist_id')) {
+            return $selection;
+        }
+
+        return array_values(array_unique(array_merge($selection ?? [], $picks)));
+    }
+
+    /**
+     * What the assigned bouquets contribute, split into allow and block bouquets.
+     */
+    protected static function bouquetContributionSummary(Get $get): string
+    {
+        $counts = ['live' => 0, 'vod' => 0, 'series' => 0, 'block_live' => 0, 'block_vod' => 0, 'block_series' => 0];
+
+        foreach (self::assignedBouquets($get) as $bouquet) {
+            $prefix = $bouquet->isBlock() ? 'block_' : '';
+            foreach (PlaylistAlias::CONTENT_FILTER_KEYS as $type => $key) {
+                $counts[$prefix.$type] += count(PlaylistAlias::selectionNames($bouquet->group_selections[$key] ?? []));
+            }
+        }
+
+        return __('Allow bouquets add :live live groups, :vod VOD groups and :series series categories. Block bouquets hide :block_live live groups, :block_vod VOD groups and :block_series series categories.', $counts);
+    }
+
+    /**
      * Names contributed by the alias's currently selected bouquets, used by the
      * picker tables to badge rows already covered by a bouquet.
      *
@@ -1539,6 +1610,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         };
 
         return self::assignedBouquets($get)
+            ->reject(fn (Bouquet $bouquet): bool => $bouquet->isBlock())
             ->flatMap(fn (Bouquet $bouquet): array => $bouquet->{$method}())
             ->unique()
             ->values()
@@ -1606,7 +1678,8 @@ class PlaylistAliasResource extends Resource implements CopilotResource
         $playlistIds = self::sourcePlaylistIds($get, 'live');
         $selectedNames = self::liveGroupSortSelectedNames($selection ?? (array) $get('group_filter.selected_groups'), $playlistIds);
         $bouquetSources = self::bouquetLiveGroupSources(self::assignedBouquets($get));
-        $names = array_values(array_unique(array_merge($selectedNames, array_keys($bouquetSources))));
+        $customNames = $get('playlist_id') ? array_values((array) $get(SourceGroupModalSelect::customPicksPath('group_filter.selected_groups'))) : [];
+        $names = array_values(array_unique(array_merge($selectedNames, $customNames, array_keys($bouquetSources))));
         $currentOrder = self::liveGroupSortNames($get('group_filter.live_group_order'));
 
         $set('group_filter.live_group_order', self::buildLiveGroupSortItems($currentOrder, $names, $playlistIds, $bouquetSources));
@@ -1747,10 +1820,10 @@ class PlaylistAliasResource extends Resource implements CopilotResource
                 ->whereIn('name_internal', array_merge($kept, $appended))
                 ->orderBy('sort_order')
                 ->orderBy('name')
-                ->get(['name', 'name_internal', 'playlist_id', 'sort_order']);
+                ->get(['name', 'name_internal', 'playlist_id', 'sort_order', 'custom']);
 
             foreach ($groups as $group) {
-                $labels[$group->name_internal] ??= $group->name;
+                $labels[$group->name_internal] ??= $group->custom ? $group->name.' '.__('(custom)') : $group->name;
                 // Merged aliases: source playlists in their merged order, then the group's own position.
                 $positions[$group->name_internal] ??= [$playlistRank[$group->playlist_id] ?? PHP_INT_MAX, (float) $group->sort_order];
             }

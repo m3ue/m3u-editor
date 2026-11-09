@@ -9,8 +9,8 @@ use App\Models\CachedContentActivityLease;
 use App\Models\CachedContentFile;
 use App\Models\Playlist;
 use App\Services\CachedContentActivityService;
+use App\Services\CachedContentDispatchService;
 use App\Services\PlaylistCredentialResolver;
-use App\Settings\GeneralSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -44,7 +44,7 @@ class CachedContentStreamController extends Controller
             abort(401, 'Invalid credentials');
         }
 
-        if (! (app(GeneralSettings::class)->enable_cache ?? false) || ! $playlist instanceof Playlist) {
+        if (! app(CachedContentDispatchService::class)->isEnabled() || ! $playlist instanceof Playlist) {
             abort(404, 'Cached file not found');
         }
 

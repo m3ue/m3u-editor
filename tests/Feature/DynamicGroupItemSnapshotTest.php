@@ -218,3 +218,86 @@ it('prunable() only targets rows older than 30 days', function () {
     expect($prunableIds)->toContain($stale->id)
         ->and($prunableIds)->not->toContain($fresh->id);
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Issue #1691 - a successful pipeline run with zero local matches must still
+// get a snapshot marker row, so it's discoverable as the latest run and the
+// next nonempty run diffs against it (not against an older nonempty run).
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('writes a snapshot marker row for a successful run with zero local matches', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/trending/movie/week*' => Http::response([
+            'results' => [
+                ['id' => 999, 'title' => 'Not Local', 'media_type' => 'movie', 'release_date' => '2024-01-01'],
+            ],
+        ], 200),
+    ]);
+
+    $this->playlist->update(['dynamic_groups_config' => [[
+        'enabled' => true, 'type' => 'vod', 'source' => 'trending',
+        'name' => 'Trending Now', 'tmdb_params' => [],
+    ]]]);
+
+    $run = SyncRun::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'phases' => [SyncRunPhase::DynamicGroups->value],
+        'status' => SyncRunStatus::Running->value,
+    ]);
+
+    // No local channel matches tmdb_id 999, so this run has zero local matches.
+    (new SyncDynamicGroups(playlistId: $this->playlist->id, syncRunId: $run->id))->handle();
+
+    $group = DynamicGroup::where('playlist_id', $this->playlist->id)->first();
+
+    expect(DynamicGroupItemSnapshot::where('dynamic_group_id', $group->id)
+        ->where('sync_run_id', $run->id)
+        ->count())->toBe(1);
+
+    // That run is now discoverable as the group's latest snapshotted run.
+    $latestRunId = DynamicGroupItemSnapshot::where('dynamic_group_id', $group->id)
+        ->whereNotNull('sync_run_id')
+        ->max('sync_run_id');
+    expect($latestRunId)->toBe($run->id);
+});
+
+it('diffForRun does not leak the empty-run marker into added/removed and compares the next run against the empty run', function () {
+    $group = DynamicGroup::create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'type' => 'vod',
+        'source' => 'trending',
+        'name' => 'Marker Diff Test',
+    ]);
+
+    // R1: {A}
+    $run1 = SyncRun::factory()->create(['playlist_id' => $this->playlist->id, 'user_id' => $this->user->id]);
+    DynamicGroupItemSnapshot::insert([
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run1->id, 'item_type' => Channel::class, 'item_id' => 1, 'captured_at' => now()],
+    ]);
+
+    // R2: zero local matches - marker row only (item_id 0).
+    $run2 = SyncRun::factory()->create(['playlist_id' => $this->playlist->id, 'user_id' => $this->user->id]);
+    DynamicGroupItemSnapshot::insert([
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run2->id, 'item_type' => Channel::class, 'item_id' => 0, 'captured_at' => now()],
+    ]);
+
+    // R2 must show A as removed, not an empty baseline, and the marker
+    // itself must never appear as an "added" item.
+    $diffR2 = DynamicGroupItemSnapshot::diffForRun($group->id, $run2->id);
+    expect($diffR2['has_previous'])->toBeTrue()
+        ->and($diffR2['added']->all())->toBe([])
+        ->and($diffR2['removed']->sort()->values()->all())->toBe([1]);
+
+    // R3: {A} again - must diff against R2 (empty), not R1, so A is "added".
+    $run3 = SyncRun::factory()->create(['playlist_id' => $this->playlist->id, 'user_id' => $this->user->id]);
+    DynamicGroupItemSnapshot::insert([
+        ['dynamic_group_id' => $group->id, 'sync_run_id' => $run3->id, 'item_type' => Channel::class, 'item_id' => 1, 'captured_at' => now()],
+    ]);
+
+    $diffR3 = DynamicGroupItemSnapshot::diffForRun($group->id, $run3->id);
+    expect($diffR3['has_previous'])->toBeTrue()
+        ->and($diffR3['added']->sort()->values()->all())->toBe([1])
+        ->and($diffR3['removed']->all())->toBe([]);
+});

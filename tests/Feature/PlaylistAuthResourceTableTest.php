@@ -57,7 +57,9 @@ it('shows storage used with quota when quota is set', function () {
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $auth->id,
             'file_size_bytes' => 1073741824, // 1.0 GB
         ]);
@@ -78,7 +80,9 @@ it('shows unlimited storage when no quota is set', function () {
     DvrRecording::factory()
         ->for($this->user)
         ->for($this->dvrSetting)
+        ->completed()
         ->create([
+            'file_path' => fake()->uuid().'.mkv',
             'playlist_auth_id' => $auth->id,
             'file_size_bytes' => 524288000, // 500 MB
         ]);

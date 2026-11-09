@@ -792,26 +792,87 @@ class PluginManager
      */
     public function selectOptions(Plugin $plugin, string $provider, array $state = [], array $field = []): array
     {
-        $plugin = $this->validate($plugin);
-        $this->assertPluginLoadable($plugin, requireEnabled: false);
-        $this->assertPluginTrustedForUi($plugin);
+        $plugin = $this->validatedUiPlugin($plugin);
+        $cache = app(PluginUiRequestCache::class);
 
-        $instance = $this->resolvePluginInstance($plugin);
+        return $cache->remember('options', $this->uiProviderKey($plugin, $provider, $state, $field), function () use ($plugin, $provider, $state, $field): array {
+            $instance = $this->resolvePluginInstance($plugin);
 
-        if (! $instance instanceof PluginSelectOptionsProviderInterface) {
-            throw new RuntimeException("Plugin [{$plugin->plugin_id}] does not provide dynamic select options.");
-        }
+            if (! $instance instanceof PluginSelectOptionsProviderInterface) {
+                throw new RuntimeException("Plugin [{$plugin->plugin_id}] does not provide dynamic select options.");
+            }
 
-        return $this->normalizeSelectOptions($instance->selectOptions(
+            return $this->normalizeSelectOptions($instance->selectOptions(
+                $provider,
+                $this->uiProviderContext($plugin, $state, $field),
+            ));
+        });
+    }
+
+    public function fieldVisible(Plugin $plugin, string $provider, array $state = [], array $field = []): bool
+    {
+        $plugin = $this->validatedUiPlugin($plugin);
+
+        return app(PluginUiRequestCache::class)->remember('visibility', $this->uiProviderKey($plugin, $provider, $state, $field), function () use ($plugin, $provider, $state, $field): bool {
+            $instance = $this->resolvePluginInstance($plugin);
+
+            if (! is_callable([$instance, 'isFieldVisible'])) {
+                throw new RuntimeException(__('Plugin [:plugin] does not provide field visibility.', ['plugin' => $plugin->plugin_id]));
+            }
+
+            $visible = $instance->isFieldVisible($provider, $this->uiProviderContext($plugin, $state, $field));
+            if (! is_bool($visible)) {
+                throw new RuntimeException(__('Plugin field visibility must return a boolean.'));
+            }
+
+            return $visible;
+        });
+    }
+
+    private function validatedUiPlugin(Plugin $plugin): Plugin
+    {
+        // Recheck registry state even on cache hits so blocking or uninstalling takes effect immediately.
+        $plugin = $plugin->fresh() ?? throw new RuntimeException(__('Plugin is no longer available.'));
+        $cache = app(PluginUiRequestCache::class);
+        $key = [spl_object_id($plugin->getConnection()), $plugin->getKey(), $plugin->getAttributes()];
+        $validated = $cache->remember('validation', $key, function () use ($plugin, $cache): Plugin {
+            $validated = $this->validate($plugin);
+
+            // Validation updates registry metadata; reuse the result under both before and after keys.
+            return $cache->remember('validation', [
+                spl_object_id($validated->getConnection()),
+                $validated->getKey(),
+                $validated->getAttributes(),
+            ], fn (): Plugin => $validated);
+        });
+        $this->assertPluginLoadable($validated, requireEnabled: false);
+        $this->assertPluginTrustedForUi($validated);
+
+        return $validated;
+    }
+
+    private function uiProviderKey(Plugin $plugin, string $provider, array $state, array $field): array
+    {
+        return [
+            spl_object_id($plugin->getConnection()),
+            $plugin->getKey(),
+            $plugin->getAttributes(),
+            auth()->user()?->getAttributes(),
             $provider,
-            new PluginSelectOptionsContext(
-                plugin: $plugin->fresh() ?? $plugin,
-                user: auth()->user(),
-                settings: $this->resolvedSettings($plugin),
-                state: $state,
-                field: $field,
-            ),
-        ));
+            $state,
+            $field,
+        ];
+    }
+
+    private function uiProviderContext(Plugin $plugin, array $state, array $field): PluginSelectOptionsContext
+    {
+        return new PluginSelectOptionsContext(
+            plugin: $plugin,
+            user: auth()->user(),
+            settings: $this->resolvedSettings($plugin),
+            state: $state,
+            field: $field,
+        );
     }
 
     public function instantiate(Plugin $plugin): PluginInterface

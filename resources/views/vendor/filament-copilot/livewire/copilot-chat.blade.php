@@ -61,8 +61,23 @@
         this._cleanups.push(
             Livewire.on('copilot-conversation-changed', (data) => {
                 const params = data[0] || data;
-                this.conversationId = params?.conversationId ?? null;
+                const nextConversationId = params?.conversationId ?? null;
+                // A stream belongs to the conversation it started in. Reloading that same
+                // conversation keeps it going; anything else makes its output obsolete.
+                if (this._abortController && (nextConversationId === null || nextConversationId !== this.conversationId)) {
+                    this.cancelStream();
+                }
+                this.conversationId = nextConversationId;
                 this.pendingApprovals = [];
+            })
+        );
+
+        this._cleanups.push(
+            Livewire.on('copilot-approvals-restored', (data) => {
+                const params = data[0] || data;
+                if (params.conversationId === this.conversationId) {
+                    this.pendingApprovals = params.approvals || [];
+                }
             })
         );
 
@@ -114,12 +129,25 @@
             setTimeout(() => { this.sidebarLoading = false; }, 600);
         }
     },
+    cancelStream() {
+        this._abortController.abort();
+        this._abortController = null;
+        this.isStreaming = false;
+        this.streamedContent = '';
+        this.toolCalls = [];
+        this.pendingComplete = false;
+        this._needsStepBreak = false;
+        this._pendingNavigateUrl = null;
+    },
     async startStreaming(params) {
         // Abort any previous in-flight stream
         if (this._abortController) {
             this._abortController.abort();
         }
-        this._abortController = new AbortController();
+        // Compared after every await: once this stops being the current controller, this
+        // request no longer owns the shared stream state and must not touch it.
+        const controller = new AbortController();
+        this._abortController = controller;
 
         this.isStreaming = true;
         this.streamedContent = '';
@@ -143,7 +171,7 @@
                     panel_id: params.panelId,
                     decisions: params.decisions || undefined,
                 }),
-                signal: this._abortController.signal,
+                signal: controller.signal,
             });
 
             if (!response.ok) {
@@ -155,16 +183,20 @@
             let buffer = '';
             let newConversationId = null;
             let assistantMessageId = null;
+            // Persists across reader.read() calls: an `event:` line and its `data:` line
+            // can land in separate browser reads (transport chunk boundaries are not SSE
+            // event boundaries), and resetting this per-read would silently drop the data
+            // line that arrives without its event line in the same chunk.
+            let currentEvent = null;
 
             while (true) {
                 const { done, value } = await reader.read();
+                if (this._abortController !== controller) return;
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
-
-                let currentEvent = null;
 
                 for (const line of lines) {
                     if (line.startsWith('event: ')) {
@@ -294,6 +326,8 @@
                 this.toolCalls = [];
             }
         } catch (error) {
+            if (this._abortController !== controller) return;
+
             this._abortController = null;
 
             // Silently handle intentional aborts (navigation, new stream, destroy)

@@ -135,6 +135,27 @@ it('excludes genres from results', function () {
         ->not->toContain('Scary Night');
 });
 
+it('keeps a groupless VOD when excluding a genre it does not match', function () {
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+
+    makeVodChannel($user, $playlist, ['name' => 'Groupless Comedy', 'group' => null, 'info' => ['genre' => 'Comedy']]);
+    makeVodChannel($user, $playlist, ['name' => 'No Genre At All', 'group' => null, 'info' => []]);
+    makeVodChannel($user, $playlist, ['name' => 'Grouped Comedy', 'group' => 'Comedy', 'info' => ['genre' => 'Comedy']]);
+    makeVodChannel($user, $playlist, ['name' => 'Grouped Horror', 'group' => 'Horror', 'info' => ['genre' => 'Horror']]);
+
+    $this->actingAs($user);
+
+    $result = (string) makeVodTool()->handle(new Request([
+        'exclude_genres' => ['Horror'],
+    ]));
+
+    expect($result)->toContain('Groupless Comedy')
+        ->toContain('No Genre At All')
+        ->toContain('Grouped Comedy')
+        ->not->toContain('Grouped Horror');
+});
+
 it('scopes results to the authenticated user', function () {
     $userA = User::factory()->create();
     $userB = User::factory()->create();

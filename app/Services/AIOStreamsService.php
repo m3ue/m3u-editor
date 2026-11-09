@@ -7,6 +7,7 @@ use App\Interfaces\MediaServer;
 use App\Models\MediaServerIntegration;
 use App\Settings\GeneralSettings;
 use App\Traits\DoesNotSupportLibraryCreation;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -82,9 +83,14 @@ class AIOStreamsService implements MediaServer
 
         $this->waitForRateLimit();
 
-        $response = Http::timeout(15)
-            ->retry(2, 1000)
-            ->get($this->integration->manifest_url);
+        try {
+            $response = Http::timeout(15)
+                ->retry(2, 1000, throw: false)
+                ->get($this->integration->manifest_url);
+        } catch (ConnectionException) {
+            // The transport message quotes the manifest URL, which embeds the addon's credentials.
+            throw new MediaServerException('Could not connect to the manifest URL.');
+        }
 
         if (! $response->successful()) {
             throw new MediaServerException("Failed to fetch manifest: HTTP {$response->status()}");
@@ -114,9 +120,12 @@ class AIOStreamsService implements MediaServer
 
         // Prune any selected catalog IDs that no longer exist in the manifest.
         if (! $this->integration->aiostreams_enable_all_catalogs) {
-            $validIds = collect($catalogs)->pluck('id')->flip()->all();
+            $validKeys = collect($catalogs)
+                ->map(MediaServerIntegration::aiostreamsCatalogKey(...))
+                ->flip()
+                ->all();
             $pruned = collect($this->integration->aiostreams_selected_catalog_ids ?? [])
-                ->filter(fn (string $id) => isset($validIds[$id]))
+                ->filter(fn (string $key) => isset($validKeys[$key]))
                 ->values()
                 ->all();
             $this->integration->aiostreams_selected_catalog_ids = $pruned;

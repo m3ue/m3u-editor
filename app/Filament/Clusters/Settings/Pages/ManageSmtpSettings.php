@@ -53,8 +53,10 @@ class ManageSmtpSettings extends BaseSettingsPage
                         // Get SMTP settings from the form state
                         $formState = $this->form->getState();
 
-                        // Make sure all required fields are present
-                        if (empty($formState['smtp_host']) || empty($formState['smtp_port']) || empty($formState['smtp_username']) || empty($formState['smtp_password'])) {
+                        // Username/password are only required if the provider needs
+                        // authentication (requiredWith in the form below pairs them),
+                        // so the test action must accept the same no-auth configuration.
+                        if (empty($formState['smtp_host']) || empty($formState['smtp_port'])) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Missing SMTP Fields'))
@@ -69,8 +71,8 @@ class ManageSmtpSettings extends BaseSettingsPage
                         Config::set('mail.from.address', $formState['smtp_from_address'] ?? 'no-reply@m3u-editor.dev');
                         Config::set('mail.from.name', 'm3u editor');
                         Config::set('mail.mailers.smtp.host', $formState['smtp_host']);
-                        Config::set('mail.mailers.smtp.username', $formState['smtp_username']);
-                        Config::set('mail.mailers.smtp.password', $formState['smtp_password']);
+                        Config::set('mail.mailers.smtp.username', $formState['smtp_username'] ?? null);
+                        Config::set('mail.mailers.smtp.password', $formState['smtp_password'] ?? null);
                         Config::set('mail.mailers.smtp.port', $formState['smtp_port']);
                         Config::set('mail.mailers.smtp.encryption', $formState['smtp_encryption']);
 

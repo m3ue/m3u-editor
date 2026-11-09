@@ -61,6 +61,14 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
     private const MEMBERSHIP_CHUNK_SIZE = 1000;
 
     /**
+     * Sentinel `item_id` written by writeSnapshot() to mark a pipeline run that
+     * finished with zero local matches, so the run still gets a snapshot row.
+     * Real Channel/Series ids are positive auto-increment values, so 0 never
+     * collides with an actual item.
+     */
+    private const EMPTY_RUN_MARKER_ITEM_ID = 0;
+
+    /**
      * @param  bool  $refreshMembership  False when a form saves the rules
      *                                   (EditPlaylist): rows are updated from the rules without calling
      *                                   TMDB, and the refresh from queueRefresh() fills in the members.
@@ -387,6 +395,24 @@ class SyncDynamicGroups implements ShouldBeUniqueUntilProcessing, ShouldQueue
     private function writeSnapshot(int $groupId, string $itemType, array $itemIds, int $syncRunId): void
     {
         $now = now();
+
+        // A run with zero local matches still needs a row so this run is
+        // discoverable as the group's latest snapshotted run (the View page's
+        // run selector and diffForRun() both key off existing rows) - without
+        // it, an empty-but-successful run is invisible and the next nonempty
+        // run wrongly diffs against the last nonempty run instead.
+        if ($itemIds === []) {
+            DynamicGroupItemSnapshot::insert([[
+                'dynamic_group_id' => $groupId,
+                'sync_run_id' => $syncRunId,
+                'item_type' => $itemType,
+                'item_id' => self::EMPTY_RUN_MARKER_ITEM_ID,
+                'captured_at' => $now,
+            ]]);
+
+            return;
+        }
+
         foreach (array_chunk($itemIds, self::MEMBERSHIP_CHUNK_SIZE) as $chunk) {
             DynamicGroupItemSnapshot::insert(
                 array_map(fn (int $id): array => [

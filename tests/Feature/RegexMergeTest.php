@@ -93,6 +93,52 @@ it('merges channels matching a playlist-level regex pattern as failovers', funct
     ]);
 });
 
+it('does not merge existing channels via regex when "Merge only new channels" is enabled (issue #1698)', function () {
+    $this->playlist->update([
+        'auto_merge_config' => ['regex_patterns' => ['/^Synthetic[-]?1$/i']],
+    ]);
+
+    $primary = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'title' => 'Synthetic-1',
+        'name' => 'Synthetic-1',
+        'stream_id' => 'audit-primary',
+        'can_merge' => true,
+        'enabled' => true,
+        'new' => false,
+    ]);
+
+    $backup = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'group_id' => $this->group->id,
+        'title' => 'Synthetic1',
+        'name' => 'Synthetic1',
+        'stream_id' => 'audit-backup',
+        'can_merge' => true,
+        'enabled' => true,
+        'new' => false,
+    ]);
+
+    $playlists = collect([['playlist_failover_id' => $this->playlist->id]]);
+
+    MergeChannels::dispatchSync(
+        $this->user,
+        $playlists,
+        $this->playlist->id,
+        deactivateFailoverChannels: true,
+        forceCompleteRemerge: false,
+        newChannelsOnly: true,
+        regexPatterns: $this->playlist->fresh()->auto_merge_config['regex_patterns'] ?? null,
+    );
+
+    expect(ChannelFailover::count())->toBe(0);
+    expect($primary->fresh()->enabled)->toBeTrue();
+    expect($backup->fresh()->enabled)->toBeTrue();
+});
+
 it('skips channels with invalid regex patterns without crashing', function () {
     $this->playlist->update([
         'auto_merge_config' => ['regex_patterns' => ['/[invalid']],

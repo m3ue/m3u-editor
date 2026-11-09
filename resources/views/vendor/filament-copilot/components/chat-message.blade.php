@@ -26,6 +26,19 @@
         $isSuccess = $msg['success'] ?? true;
         $hasResult = !empty($msg['result']);
         $hasError = !empty($msg['error']);
+        // A pending/undecided approval has success=true (it hasn't failed), but
+        // nothing has actually run yet - it must not render as a completed call.
+        $isPending = ($msg['status'] ?? null) === 'pending';
+        $headerClasses = $isPending
+            ? 'bg-gray-50 dark:bg-gray-800/40 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800/60'
+            : ($hasError
+                ? 'bg-danger-50 dark:bg-danger-900/10 border-danger-200 dark:border-danger-800 hover:bg-danger-100 dark:hover:bg-danger-900/20'
+                : 'bg-success-50 dark:bg-success-900/10 border-success-200 dark:border-success-800 hover:bg-success-100 dark:hover:bg-success-900/20');
+        $bodyClasses = $isPending
+            ? 'bg-gray-50/50 dark:bg-gray-800/20 border-gray-200 dark:border-gray-700'
+            : ($hasError
+                ? 'bg-danger-50/50 dark:bg-danger-900/5 border-danger-200 dark:border-danger-800'
+                : 'bg-success-50/50 dark:bg-success-900/5 border-success-200 dark:border-success-800');
     @endphp
     <div class="flex items-start gap-2.5">
         <div class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0 mt-0.5">
@@ -33,21 +46,26 @@
         </div>
         <div class="min-w-0 max-w-[85%] w-full" x-data="{ open: false }">
             <button @click="open = !open" type="button"
-                class="flex items-center gap-2 px-3 py-2 w-full rounded-t-xl border transition-colors {{ $hasError ? 'bg-danger-50 dark:bg-danger-900/10 border-danger-200 dark:border-danger-800 hover:bg-danger-100 dark:hover:bg-danger-900/20' : 'bg-success-50 dark:bg-success-900/10 border-success-200 dark:border-success-800 hover:bg-success-100 dark:hover:bg-success-900/20' }}"
+                class="flex items-center gap-2 px-3 py-2 w-full rounded-t-xl border transition-colors {{ $headerClasses }}"
                 :class="{ 'rounded-b-xl': !open }">
                 <svg class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200" :class="{ 'rotate-90': open }"
                     fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                 </svg>
-                @if ($hasError)
+                @if ($isPending)
+                    <x-filament::icon icon="heroicon-o-clock" class="w-3.5 h-3.5 text-gray-400" />
+                @elseif ($hasError)
                     <x-filament::icon icon="heroicon-o-x-circle" class="w-3.5 h-3.5 text-danger-500" />
                 @else
                     <x-filament::icon icon="heroicon-o-check-circle" class="w-3.5 h-3.5 text-success-500" />
                 @endif
                 <span class="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{{ $toolName }}</span>
+                @if ($isPending)
+                    <span class="text-xs text-gray-400 dark:text-gray-500 shrink-0">{{ __('Waiting for approval') }}</span>
+                @endif
             </button>
             <div x-show="open" x-collapse
-                class="px-3 py-2 border border-t-0 rounded-b-xl {{ $hasError ? 'bg-danger-50/50 dark:bg-danger-900/5 border-danger-200 dark:border-danger-800' : 'bg-success-50/50 dark:bg-success-900/5 border-success-200 dark:border-success-800' }}">
+                class="px-3 py-2 border border-t-0 rounded-b-xl {{ $bodyClasses }}">
                 @if (!empty($msg['arguments']))
                     <div class="mb-1">
                         <span

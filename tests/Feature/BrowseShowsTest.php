@@ -329,6 +329,39 @@ it('resolves the once rule channel by tvg-id when the channel has no EPG mapping
     expect(DvrRecordingRule::where('programme_id', $programme->id)->value('channel_id'))->toBe($channel->id);
 });
 
+it('restricts search to the selected channel using tvg-id when there is no explicit EPG mapping', function () {
+    $channelA = Channel::factory()->for($this->setting->playlist)->create([
+        'stream_id' => 'r07.a',
+        'epg_channel_id' => null,
+        'enabled' => true,
+    ]);
+    Channel::factory()->for($this->setting->playlist)->create([
+        'stream_id' => 'r07.b',
+        'epg_channel_id' => null,
+        'enabled' => true,
+    ]);
+
+    EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'R07 Programme A',
+        'epg_channel_id' => 'r07.a',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+    EpgProgramme::factory()->for($this->epg)->create([
+        'title' => 'R07 Programme B',
+        'epg_channel_id' => 'r07.b',
+        'start_time' => now()->addHours(2),
+        'end_time' => now()->addHours(3),
+    ]);
+
+    Livewire::test(BrowseShows::class)
+        ->set('dvr_setting_id', $this->setting->id)
+        ->set('channel_id', $channelA->id)
+        ->call('search')
+        ->assertSet('shows', fn (array $shows) => count($shows) === 1
+            && $shows[0]['title'] === 'R07 Programme A');
+});
+
 it('does not create a once rule for a programme from another user\'s EPG', function () {
     $programme = EpgProgramme::factory()
         ->for(Epg::factory()->for(User::factory()))

@@ -444,6 +444,31 @@ it('returns vod info successfully', function () {
         ->assertJsonPath('movie_data.name', 'Test Movie');
 });
 
+it('uses the custom title over the provider title on get vod info', function () {
+    // Issue #1648: get_vod_info built its name/title straight from provider
+    // data, ignoring title_custom - unlike get_vod_streams, which already
+    // preferred it. A Find & Replace / manual rename never showed up here.
+    $group = Group::factory()->for($this->user)->create();
+    $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Provider Movie',
+        'title' => 'Provider Movie',
+        'title_custom' => 'Renamed Movie',
+        'last_metadata_fetch' => now(),
+        'info' => [],
+    ]);
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $vodChannel->id]));
+
+    $response->assertOk()
+        ->assertJsonPath('info.name', 'Renamed Movie')
+        ->assertJsonPath('movie_data.name', 'Renamed Movie')
+        ->assertJsonPath('movie_data.title', 'Renamed Movie')
+        // o_name intentionally stays the original, untouched provider name.
+        ->assertJsonPath('info.o_name', 'Provider Movie');
+});
+
 it('falls back to VOD metadata when the channel year is missing for get vod info', function () {
     $group = Group::factory()->for($this->user)->create();
     $vodChannel = Channel::factory()->for($this->playlist)->for($group)->create([

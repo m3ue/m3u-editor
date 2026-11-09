@@ -11,7 +11,6 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -61,7 +60,7 @@ class PluginUiTableRegistry
             return $tableIdOrName;
         }
 
-        return $allowHostTable && Schema::hasTable($tableIdOrName) ? $tableIdOrName : null;
+        return $allowHostTable && app(PluginUiRequestCache::class)->hasTable($tableIdOrName) ? $tableIdOrName : null;
     }
 
     public function newModel(Plugin $plugin, string $tableName): PluginTableRecord
@@ -82,15 +81,15 @@ class PluginUiTableRegistry
     ): EloquentBuilder|QueryBuilder {
         return $query
             ->when(
-                $tableName !== '' && Schema::hasColumn($tableName, 'extension_plugin_id'),
+                $tableName !== '' && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_id'),
                 fn (EloquentBuilder|QueryBuilder $query) => $query->where('extension_plugin_id', $plugin->id),
             )
             ->when(
-                $runId !== null && $tableName !== '' && Schema::hasColumn($tableName, 'extension_plugin_run_id'),
+                $runId !== null && $tableName !== '' && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_run_id'),
                 fn (EloquentBuilder|QueryBuilder $query) => $query->where('extension_plugin_run_id', $runId),
             )
             ->when(
-                $playlistId !== null && $tableName !== '' && Schema::hasColumn($tableName, 'playlist_id'),
+                $playlistId !== null && $tableName !== '' && app(PluginUiRequestCache::class)->hasColumn($tableName, 'playlist_id'),
                 fn (EloquentBuilder|QueryBuilder $query) => $query->where('playlist_id', $playlistId),
             );
     }
@@ -126,9 +125,15 @@ class PluginUiTableRegistry
             return null;
         }
 
-        return $this->lookupQuery($plugin, $lookup)
-            ?->where((string) ($lookup['key_column'] ?? 'id'), $value)
-            ->value((string) ($lookup['label_column'] ?? 'name'));
+        $query = $this->lookupQuery($plugin, $lookup);
+        if (! $query) {
+            return null;
+        }
+
+        $labelColumn = (string) ($lookup['label_column'] ?? 'name');
+        $query->where((string) ($lookup['key_column'] ?? 'id'), $value)->select($labelColumn)->limit(1);
+
+        return app(PluginUiRequestCache::class)->queryValue($query, fn () => $query->value($labelColumn));
     }
 
     /**
@@ -144,12 +149,12 @@ class PluginUiTableRegistry
         $labelColumn = (string) ($lookup['label_column'] ?? 'name');
         $keyColumn = (string) ($lookup['key_column'] ?? 'id');
 
-        return $query
-            ->orderBy($labelColumn)
-            ->limit(min((int) ($lookup['limit'] ?? 500), 500))
+        $query->orderBy($labelColumn)->limit(min((int) ($lookup['limit'] ?? 500), 500))->select([$labelColumn, $keyColumn]);
+
+        return app(PluginUiRequestCache::class)->queryOptions($query, fn (): array => $query
             ->pluck($labelColumn, $keyColumn)
             ->mapWithKeys(fn (mixed $label, mixed $value): array => [(string) $value => (string) $label])
-            ->all();
+            ->all());
     }
 
     public function clearsRecordOnDelete(array $definition): bool
@@ -187,16 +192,27 @@ class PluginUiTableRegistry
 
     public function columnDisplayState(Plugin $plugin, PluginTableRecord $record, array $column): mixed
     {
+        $valuePath = (string) ($column['lookup']['source_column'] ?? $column['name']);
+        $attributes = array_map(
+            fn (string $path): string => Str::before($path, '.'),
+            [$valuePath, ...$this->dependsOn($column)],
+        );
+        if ($record->getVisible() !== []) {
+            $attributes = array_intersect($attributes, $record->getVisible());
+        }
+
+        // Keep Eloquent's date/enum serialization without decoding unrelated JSON payloads.
+        $state = $attributes === [] ? [] : (clone $record)->setVisible($attributes)->toArray();
         if (! empty($column['lookup']) && is_array($column['lookup'])) {
-            $value = data_get($record->toArray(), (string) ($column['lookup']['source_column'] ?? $column['name']));
+            $value = data_get($state, $valuePath);
 
             return $this->lookupLabel($plugin, $column['lookup'], $value);
         }
 
-        $value = data_get($record->toArray(), (string) $column['name']);
+        $value = data_get($state, $valuePath);
 
         if (is_scalar($value)) {
-            $options = $this->columnOptions($plugin, $column, $record->toArray());
+            $options = $this->columnOptions($plugin, $column, $state);
 
             if ($options !== []) {
                 return $options[(string) $value] ?? $value;
@@ -270,16 +286,20 @@ class PluginUiTableRegistry
             return;
         }
 
+        $sourceValues = $sourceRows->pluck($sourceKey);
         $existing = DB::table($targetTable)
-            ->when(Schema::hasColumn($targetTable, 'extension_plugin_id'), fn ($query) => $query->where('extension_plugin_id', $plugin->id))
+            ->when(app(PluginUiRequestCache::class)->hasColumn($targetTable, 'extension_plugin_id'), fn ($query) => $query->where('extension_plugin_id', $plugin->id))
+            ->where(fn (QueryBuilder $query) => $query
+                ->whereIn($targetColumn, $sourceValues)
+                ->when($sourceValues->containsStrict(null), fn (QueryBuilder $query) => $query->orWhereNull($targetColumn)))
             ->pluck($targetColumn)
-            ->map(fn (mixed $value): string => (string) $value)
+            ->mapWithKeys(fn (mixed $value): array => [(string) $value => true])
             ->all();
 
         $defaults = is_array($prefill['defaults'] ?? null) ? $prefill['defaults'] : [];
         foreach ($sourceRows as $sourceRow) {
             $sourceValue = $sourceRow->{$sourceKey};
-            if (in_array((string) $sourceValue, $existing, true)) {
+            if (isset($existing[(string) $sourceValue])) {
                 continue;
             }
 
@@ -287,7 +307,7 @@ class PluginUiTableRegistry
                 $this->prefillPayload($plugin, $targetTable, $targetColumn, $sourceValue, $sourceRow, $source, $defaults)
             );
 
-            $existing[] = (string) $sourceValue;
+            $existing[(string) $sourceValue] = true;
         }
     }
 
@@ -306,7 +326,7 @@ class PluginUiTableRegistry
     public function usesTimestamps(Plugin $plugin, string $tableName): bool
     {
         return $this->columnsFor($plugin, $tableName)->contains(fn (array $column): bool => ($column['type'] ?? null) === 'timestamps')
-            || (Schema::hasColumn($tableName, 'created_at') && Schema::hasColumn($tableName, 'updated_at'));
+            || (app(PluginUiRequestCache::class)->hasColumn($tableName, 'created_at') && app(PluginUiRequestCache::class)->hasColumn($tableName, 'updated_at'));
     }
 
     /**
@@ -334,11 +354,11 @@ class PluginUiTableRegistry
 
         return DB::table($tableName)
             ->when(
-                (bool) ($lookup['scope_plugin'] ?? false) && Schema::hasColumn($tableName, 'extension_plugin_id'),
+                (bool) ($lookup['scope_plugin'] ?? false) && app(PluginUiRequestCache::class)->hasColumn($tableName, 'extension_plugin_id'),
                 fn (QueryBuilder $query) => $query->where('extension_plugin_id', $plugin->id),
             )
             ->when(
-                (bool) ($lookup['enabled_only'] ?? false) && Schema::hasColumn($tableName, 'enabled'),
+                (bool) ($lookup['enabled_only'] ?? false) && app(PluginUiRequestCache::class)->hasColumn($tableName, 'enabled'),
                 fn (QueryBuilder $query) => $query->where('enabled', true),
             );
     }
@@ -437,22 +457,21 @@ class PluginUiTableRegistry
     private function hasColumns(string $tableName, array $columns): bool
     {
         return $tableName !== ''
-            && Schema::hasTable($tableName)
-            && collect($columns)->every(fn (string $column): bool => $column !== '' && Schema::hasColumn($tableName, $column));
+            && collect($columns)->every(fn (string $column): bool => $column !== '' && app(PluginUiRequestCache::class)->hasColumn($tableName, $column));
     }
 
     private function prefillSourceRows(string $sourceTable, string $sourceKey, array $source): Collection
     {
         $userColumn = (string) ($source['user_column'] ?? 'user_id');
-        $sourceColumns = [$sourceKey, ...(Schema::hasColumn($sourceTable, $userColumn) ? [$userColumn] : [])];
+        $sourceColumns = [$sourceKey, ...(app(PluginUiRequestCache::class)->hasColumn($sourceTable, $userColumn) ? [$userColumn] : [])];
         $query = DB::table($sourceTable)->select(array_values(array_unique($sourceColumns)));
 
-        if (($source['scope'] ?? null) === 'owned' && auth()->check() && Schema::hasColumn($sourceTable, $userColumn)) {
+        if (($source['scope'] ?? null) === 'owned' && auth()->check() && app(PluginUiRequestCache::class)->hasColumn($sourceTable, $userColumn)) {
             $query->where($userColumn, auth()->id());
         }
 
         $orderColumn = (string) ($source['order_column'] ?? $sourceKey);
-        if (Schema::hasColumn($sourceTable, $orderColumn)) {
+        if (app(PluginUiRequestCache::class)->hasColumn($sourceTable, $orderColumn)) {
             $query->orderBy($orderColumn);
         }
 
@@ -466,11 +485,11 @@ class PluginUiTableRegistry
         $payload = [$targetColumn => $sourceValue];
         $userColumn = (string) ($source['user_column'] ?? 'user_id');
 
-        if (Schema::hasColumn($targetTable, 'extension_plugin_id')) {
+        if (app(PluginUiRequestCache::class)->hasColumn($targetTable, 'extension_plugin_id')) {
             $payload['extension_plugin_id'] = $plugin->id;
         }
 
-        if (Schema::hasColumn($targetTable, 'user_id')) {
+        if (app(PluginUiRequestCache::class)->hasColumn($targetTable, 'user_id')) {
             $payload['user_id'] = $sourceRow->{$userColumn} ?? auth()->id();
         }
 

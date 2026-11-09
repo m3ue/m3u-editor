@@ -180,7 +180,7 @@ class MigrateProvider extends Page implements HasTable
             ->color('primary')
             ->visible(fn (): bool => filled($this->sessionKey))
             ->requiresConfirmation()
-            ->modalDescription(fn (): string => __('Only the rows marked "Include" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider.').' '.(
+            ->modalDescription(fn (): string => __('Only the rows marked "Include" that point at a replacement channel are migrated. Their settings are copied onto the replacement playlist and the source playlist is left unchanged, so existing clients must be switched to the replacement playlist\'s URLs to use the new provider.').' '.(
                 ($this->data['migrate_custom_playlists'] ?? true)
                     ? __('Custom Playlists that curated channels from this playlist will be repointed at their replacement, keeping per-custom-playlist channel numbers, sort order and custom groups. Source-only rows with no replacement match are left in place.')
                     : __('Custom Playlist membership is not part of this migration; playlists that curated channels from this source will keep pointing at the old channels.')
@@ -640,13 +640,37 @@ class MigrateProvider extends Page implements HasTable
             }
         }
 
+        // The initial plan only computes an EPG proposal for automatically matched pairs (see
+        // ProviderMigrationPlanner::plan()), so a row resolved here - manually, after starting
+        // out unmatched or ambiguous - never got one. Recompute it the same way, or clear it
+        // when the row is being unmatched instead.
+        $epgFields = ['epg_channel_id' => null, 'epg_status' => 'none', 'epg_confirmed' => false];
+        if ($channel && (bool) ($this->data['preserve_epg'] ?? false)) {
+            $sourceChannel = Channel::find($record->source_channel_id);
+            if ($sourceChannel) {
+                $epg = app(ProviderMigrationPlanner::class)->epgProposalForPair(
+                    $this->record,
+                    $this->resolveTarget(),
+                    $sourceChannel,
+                    $channel,
+                );
+                $epgFields = [
+                    'epg_channel_id' => in_array($epg['status'] ?? '', ['ok', 'conflict'], true)
+                        ? ($epg['proposed_epg_channel_id'] ?? null)
+                        : null,
+                    'epg_status' => $epg['status'] ?? 'none',
+                    'epg_confirmed' => false,
+                ];
+            }
+        }
+
         $record->update([
             'matched_target_channel_id' => $channel?->id,
             'matched_target_name' => $channel ? $this->channelDisplayName($channel) : null,
             'matched_target_stream_id' => $channel?->stream_id,
             'bucket' => $channel ? 'matched' : ($record->bucket === 'matched' ? 'unmatched' : $record->bucket),
             'include' => $channel ? true : $record->include,
-        ]);
+        ] + $epgFields);
     }
 
     /**

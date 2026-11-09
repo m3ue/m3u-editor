@@ -466,6 +466,8 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
     $untrustedSchedulesDirectImage = "{$baseUrl}/schedules-direct/{$untrustedSchedulesDirectEpg->uuid}/image/untrusted-artwork";
     $queryIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/query-icon?untrusted=value";
     $queryImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/query-image?untrusted=value";
+    $versionedIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/versioned-icon?v=1528231680";
+    $badVersionIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/bad-version-icon?v=1&untrusted=value";
     $fragmentIcon = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/fragment-icon#untrusted";
     $fragmentImage = "{$baseUrl}/schedules-direct/{$epg->uuid}/image/fragment-image#untrusted";
     $userinfoBaseUrl = str_replace('://', '://untrusted@', $baseUrl);
@@ -496,6 +498,16 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
             'images' => [
                 ['url' => $queryImage, 'type' => 'poster', 'width' => 1000, 'height' => 1500, 'orient' => 'P', 'size' => 3],
             ],
+        ],
+        [
+            'title' => 'Versioned artwork',
+            'icon' => $versionedIcon,
+            'images' => [],
+        ],
+        [
+            'title' => 'Bad version artwork',
+            'icon' => $badVersionIcon,
+            'images' => [],
         ],
         [
             'title' => 'Fragment artwork',
@@ -547,6 +559,8 @@ test('cached Schedules Direct programme artwork bypasses only the redundant logo
         ->and($xpath->query('//programme[title="Dot-segment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($dotDotSegmentImage).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Query artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($queryIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Query artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($queryImage).'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Versioned artwork"]/icon[@src="'.$versionedIcon.'"]'))->toHaveCount(1)
+        ->and($xpath->query('//programme[title="Bad version artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($badVersionIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Fragment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($fragmentIcon).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Fragment artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($fragmentImage).'"]'))->toHaveCount(1)
         ->and($xpath->query('//programme[title="Userinfo artwork"]/icon[@src="'.LogoProxyController::generateProxyUrl($userinfoIcon).'"]'))->toHaveCount(1)

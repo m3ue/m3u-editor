@@ -13,6 +13,7 @@ use App\Models\MergedPlaylist;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Services\ChannelNumberSequence;
 use App\Services\PlaylistUrlService;
 use Illuminate\Http\Request;
@@ -141,7 +142,7 @@ class PlaylistGenerateController extends Controller
                     // A group folded into a merged group reports the parent's name for
                     // all standard (non-custom) output. Custom playlists key their
                     // grouping off tags, handled just below, so leave those untouched.
-                    if (! $isCustomContext && ! empty($channel->merged_group_name)) {
+                    if (! $isCustomContext && $channel->merged_group_name !== null && $channel->merged_group_name !== '') {
                         $group = $channel->merged_group_name;
                     }
                     $channelNo = $numberSequence->next($channelNo);
@@ -298,25 +299,40 @@ class PlaylistGenerateController extends Controller
 
                 // If the playlist includes series in M3U, include the series episodes
                 if ($playlist->include_series_in_m3u) {
+                    // A Custom Playlist (or an alias of one) categorizes a series by its
+                    // own category tag when one is saved, rather than the series' original
+                    // provider category - the same distinction get_series_categories/
+                    // get_series already make for the Xtream output.
+                    $seriesCategoryTagType = ($playlist instanceof CustomPlaylist)
+                        ? $playlist->uuid.'-category'
+                        : (($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id)
+                            ? $playlist->customPlaylist->uuid.'-category'
+                            : null);
+
                     // Get the seasons
                     $seriesQuery = $playlist->series()
                         ->where('series.enabled', true)
-                        ->with([
+                        ->with(array_filter([
                             'category.parent',
+                            $seriesCategoryTagType !== null ? 'tags' : null,
                             'episodes' => function ($q) {
                                 $q->where('episodes.enabled', true);
                             },
-                        ]);
+                        ]));
                     foreach (self::seriesKeysetLazy($seriesQuery, 50) as $s) {
                         // Get series movie DB ID's as fallbacks for episode
                         $movieDbIds = $s->getMovieDbIds() ?? [];
                         $seriesTmdbId = $movieDbIds['tmdb'] ?? $movieDbIds['tvdb'] ?? $movieDbIds['imdb'] ?? null;
 
+                        $customCategory = $seriesCategoryTagType !== null
+                            ? $s->tags->where('type', $seriesCategoryTagType)->first()
+                            : null;
+
                         // Append the episodes
                         foreach ($s->episodes as $episode) {
                             // Set channel variables
                             $channelNo = $numberSequence->advance();
-                            $group = $s->category->effective_name ?? 'Seasons';
+                            $group = $customCategory?->name ?? $s->category->effective_name ?? 'Seasons';
                             $name = $s->name;
                             $url = PlaylistUrlService::getEpisodeUrl($episode, $playlist);
                             $title = $episode->title;
@@ -625,10 +641,11 @@ class PlaylistGenerateController extends Controller
     }
 
     /**
-     * Check the credentials sent to an M3U/HDHR output. Playlist Auths (or an alias'
-     * own credentials) always work. Otherwise the playlist's default login decides:
-     * UUID login keeps the output public while no auths are assigned, Custom Password
-     * requires the owner's name and custom password, and Disabled requires an auth.
+     * Check the credentials sent to an M3U/HDHR output. Unexpired Playlist Auths (or an
+     * unexpired alias' own credentials) always work. Otherwise the playlist's default login
+     * decides: UUID login keeps the output public while no auths are assigned (an expired
+     * auth still counts as assigned), Custom Password requires the owner's name and custom
+     * password, and Disabled requires an auth.
      *
      * Returns whether access is allowed, and the matched credentials (null for the
      * public UUID login).
@@ -639,12 +656,14 @@ class PlaylistGenerateController extends Controller
     private function resolveOutputAuth($playlist, mixed $username, mixed $password): array
     {
         $auths = $playlist->playlistAuths()->where('enabled', true)->get();
+        $usableAuths = $auths->reject(fn (PlaylistAuth $auth): bool => $auth->isExpired());
         // For PlaylistAlias, also check direct alias credentials as fallback
         if ($auths->isEmpty() && $playlist instanceof PlaylistAlias && $playlist->authObject) {
             $auths = collect([$playlist->authObject]);
+            $usableAuths = $playlist->isExpired() ? collect() : $auths;
         }
 
-        $matchedAuth = $auths->first(fn ($auth) => $username === $auth->username && $password === $auth->password);
+        $matchedAuth = $usableAuths->first(fn ($auth) => $username === $auth->username && $password === $auth->password);
         if ($matchedAuth) {
             return [true, $matchedAuth];
         }

@@ -660,6 +660,22 @@ it('creates newly-required VOD genre groups with enabled = true', function () {
     expect((int) $actionGroup->getAttributes()['enabled'])->toBe(1);
 });
 
+it('creates newly-required VOD genre groups as custom so the next sync does not remove them', function () {
+    mockTmdbForGenreTest();
+
+    $src = Group::factory()->for($this->user)->for($this->playlist)->create(['type' => 'vod', 'name' => 'Whatever']);
+    enabledChannel($this->playlist, $src, $this->user, [
+        'is_vod' => true,
+        'info' => ['genre' => 'Action'],
+    ]);
+
+    GenreGroupReclassifyService::reclassifyVodGroups($this->playlist);
+
+    // ProcessM3uImportComplete removes non-custom groups the provider no longer lists
+    $actionGroup = Group::where('name', 'Action')->where('type', 'vod')->where('playlist_id', $this->playlist->id)->first();
+    expect((bool) $actionGroup->custom)->toBeTrue();
+});
+
 it('creates newly-required Series categories with enabled = true', function () {
     mockTmdbForGenreTest();
 

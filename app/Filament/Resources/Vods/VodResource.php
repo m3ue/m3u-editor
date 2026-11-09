@@ -1731,7 +1731,10 @@ class VodResource extends Resource implements CopilotResource
                             Select::make('group_id')
                                 ->label(__('Group'))
                                 ->hint(__('group-title'))
-                                ->options(fn (Get $get) => Group::query()->assignableTarget()->where('playlist_id', $get('playlist_id'))->get(['name', 'id'])->pluck('name', 'id'))
+                                ->options(fn (Get $get) => Group::query()->assignableTarget()->where([
+                                    'type' => 'vod',
+                                    'playlist_id' => $get('playlist_id'),
+                                ])->get(['name', 'id'])->pluck('name', 'id'))
                                 ->columnSpanFull()
                                 ->placeholder(__('Select a group'))
                                 ->searchable()

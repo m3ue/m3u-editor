@@ -63,6 +63,7 @@ class CheckPluginUpdates extends Command
     {
         $rows = [];
         $updatesAvailable = 0;
+        $errors = 0;
 
         foreach ($results as $result) {
             $status = match (true) {
@@ -73,6 +74,10 @@ class CheckPluginUpdates extends Command
 
             if ($result['update_available']) {
                 $updatesAvailable++;
+            }
+
+            if ($result['error'] !== null) {
+                $errors++;
             }
 
             $rows[] = [
@@ -91,7 +96,11 @@ class CheckPluginUpdates extends Command
 
         if ($updatesAvailable > 0) {
             $this->info("{$updatesAvailable} plugin(s) have updates available.");
-        } else {
+        }
+
+        if ($errors > 0) {
+            $this->warn("{$errors} plugin(s) could not be checked; their update status is unknown.");
+        } elseif ($updatesAvailable === 0) {
             $this->info('All plugins are up to date.');
         }
     }

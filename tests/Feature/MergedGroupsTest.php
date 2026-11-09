@@ -92,6 +92,41 @@ it('emits the merged group name as group-title in M3U output', function () {
         ->and($content)->not->toContain('group-title="Norway"');
 });
 
+it('emits a merged group literally named "0" as group-title in M3U output (issue #1694)', function () {
+    $merged = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => '0',
+        'name_internal' => '0',
+        'type' => 'live',
+        'custom' => true,
+        'is_merged' => true,
+        'sort_order' => 1,
+    ]);
+    $denmark = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Denmark', 'name_internal' => 'Denmark', 'type' => 'live', 'sort_order' => 10, 'parent_id' => $merged->id,
+    ]);
+    $norway = Group::factory()->for($this->user)->for($this->playlist)->create([
+        'name' => 'Norway', 'name_internal' => 'Norway', 'type' => 'live', 'sort_order' => 11, 'parent_id' => $merged->id,
+    ]);
+    Channel::factory()->for($this->playlist)->for($denmark)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'title_custom' => 'DR1', 'group' => 'Denmark', 'group_internal' => 'Denmark',
+    ]);
+    Channel::factory()->for($this->playlist)->for($norway)->create([
+        'user_id' => $this->user->id, 'enabled' => true, 'is_vod' => false, 'title_custom' => 'NRK1', 'group' => 'Norway', 'group_internal' => 'Norway',
+    ]);
+
+    $response = $this->get(route('playlist.generate', [
+        'uuid' => $this->playlist->uuid,
+        'username' => $this->username,
+        'password' => $this->password,
+    ]));
+    $response->assertSuccessful();
+    $content = $response->streamedContent();
+
+    expect($content)->toContain('group-title="0"')
+        ->and($content)->not->toContain('group-title="Denmark"')
+        ->and($content)->not->toContain('group-title="Norway"');
+});
+
 it('orders folded channels by each child group sort_order within the merged group', function () {
     ['denmark' => $denmark, 'norway' => $norway] = makeNordicsMerge($this->user, $this->playlist);
 

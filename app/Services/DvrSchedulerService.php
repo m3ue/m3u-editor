@@ -222,10 +222,16 @@ class DvrSchedulerService
         // XMLTV channel ids are only unique per EPG, so restrict matching to the
         // DVR owner's own EPGs - another user's EPG can reuse the same ids.
         // Ordered so the earliest airing of a sports event wins the same-day dedup.
+        //
+        // Matches on end_time (not start_time) so a programme that has already
+        // started but is still airing stays in scope. Without this, a failed
+        // recording's same-airing retry branch in createScheduledRecordingFromProgramme
+        // could never be reached once the programme's start_time passed, even
+        // though its scheduled_end was still in the future and retry budget remained.
         $query = EpgProgramme::query()
             ->whereIn('epg_channel_id', $epgChannelStringIds)
             ->whereIn('epg_id', Epg::where('user_id', $rule->dvrSetting->user_id)->select('id'))
-            ->where('start_time', '>=', $now)
+            ->where('end_time', '>', $now)
             ->where('start_time', '<=', $lookahead)
             ->orderBy('start_time');
 
