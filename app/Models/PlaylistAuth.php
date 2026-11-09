@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\DvrRecordingStatus;
 use App\Pivots\PlaylistAuthPivot;
+use App\Services\TvClientConfigService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -24,6 +25,12 @@ class PlaylistAuth extends Model
         static::deleting(function (PlaylistAuth $playlistAuth): void {
             TvNotification::where('playlist_auth_id', $playlistAuth->id)->delete();
             PushDeviceToken::where('playlist_auth_id', $playlistAuth->id)->delete();
+        });
+
+        static::saved(function (PlaylistAuth $playlistAuth): void {
+            if ($playlistAuth->wasChanged('tv_client_profile_id')) {
+                app(TvClientConfigService::class)->notifyPlaylistAuthChanged($playlistAuth);
+            }
         });
     }
 
@@ -48,11 +55,17 @@ class PlaylistAuth extends Model
         'aiostreams_enabled' => 'boolean',
         'proxy_enabled' => 'boolean',
         'proxy_stream_profile_ids' => 'array',
+        'tv_client_profile_id' => 'integer',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function tvClientProfile(): BelongsTo
+    {
+        return $this->belongsTo(TvClientProfile::class);
     }
 
     public function viewer(): HasOne

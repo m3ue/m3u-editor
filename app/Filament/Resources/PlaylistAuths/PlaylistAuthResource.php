@@ -8,6 +8,7 @@ use App\Filament\Resources\DvrRecordings\DvrRecordingResource;
 use App\Filament\Resources\PlaylistAuthResource\Pages;
 use App\Filament\Resources\PlaylistAuthResource\RelationManagers;
 use App\Filament\Resources\PlaylistAuths\Pages\ListPlaylistAuths;
+use App\Filament\Resources\TvClientProfiles\TvClientProfileResource;
 use App\Models\CustomPlaylist;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
@@ -15,6 +16,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
+use App\Models\TvClientProfile;
 use App\Pivots\PlaylistAuthPivot;
 use App\Rules\UrlSafeCredential;
 use App\Services\DateFormatService;
@@ -317,6 +319,26 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->collapsible()
             ->collapsed(fn ($record) => ! ($record?->library_publishing_enabled));
 
+        $tvClientSection = Section::make(__('M3U TV'))
+            ->description(__('Manage the M3U TV app settings for this user with an M3U TV Profile.'))
+            ->compact()
+            ->hidden(fn () => ! TvClientProfileResource::isEnabled())
+            ->schema([
+                Select::make('tv_client_profile_id')
+                    ->label(__('M3U TV Profile'))
+                    ->options(fn () => TvClientProfile::where('user_id', auth()->id())
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->toArray())
+                    ->placeholder(__('Use the default profile'))
+                    ->helperText(__('Leave empty to use your default M3U TV Profile, if you have one.'))
+                    ->nullable()
+                    ->columnSpan(2),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn ($record) => ! ($record?->tv_client_profile_id));
+
         return [
             Grid::make()
                 ->schema([
@@ -493,6 +515,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             $dvrSection,
             $aiostreamsSection,
             $libraryPublishingSection,
+            $tvClientSection,
         ];
     }
 }

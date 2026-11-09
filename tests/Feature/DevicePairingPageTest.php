@@ -169,13 +169,14 @@ it('keeps the pairing page available when only push relay is disabled', function
         ->and(DevicesCluster::canAccess())->toBeTrue();
 });
 
-it('denies cluster access and hides the nav item when both push relay and device pairing are disabled', function () {
+it('denies cluster access and hides the nav item when push relay, device pairing and enhanced output are all disabled', function () {
     $this->actingAs(User::factory()->admin()->create());
 
+    // Enhanced output on would keep the cluster up for M3U TV Profiles.
     $settings = Mockery::mock(GeneralSettings::class);
     $settings->push_relay_enabled = false;
     $settings->device_pairing_enabled = false;
-    $settings->app_output_enabled = true;
+    $settings->app_output_enabled = false;
     app()->instance(GeneralSettings::class, $settings);
 
     expect(DevicesCluster::canAccess())->toBeFalse()

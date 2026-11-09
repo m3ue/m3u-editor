@@ -44,6 +44,7 @@ use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
 use App\Filament\Resources\StreamProfiles\StreamProfileResource;
 use App\Filament\Resources\StreamWatchSessions\StreamWatchSessionResource;
+use App\Filament\Resources\TvClientProfiles\TvClientProfileResource;
 use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
@@ -97,7 +98,9 @@ final class AdminNavigationSchema
                         'resolve' => fn () => UserResource::getNavigationItems(),
                     ],
                     'devices' => [
-                        'available' => fn () => $settings['push_relay_enabled'] || $settings['device_pairing_enabled'],
+                        'available' => fn () => $settings['push_relay_enabled']
+                            || $settings['device_pairing_enabled']
+                            || TvClientProfileResource::isEnabled(),
                         'resolve' => fn () => DevicesCluster::getNavigationItems(),
                     ],
                     'settings' => [

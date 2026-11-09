@@ -56,6 +56,7 @@ use App\Services\M3uProxyService;
 use App\Services\Sports\SportsChannelMatcher;
 use App\Services\Sports\SportsService;
 use App\Services\TmdbService;
+use App\Services\TvClientConfigService;
 use App\Services\VodFileNameService;
 use App\Services\WatchHistory\WatchHistoryScrobbler;
 use App\Services\WatchProgressLinker;
@@ -611,6 +612,13 @@ class XtreamApiController extends Controller
                         ])
                         ->all();
                 }
+
+                // TV Client Profile (settings managed from the editor). Always
+                // advertised so an app whose profile was removed drops it too.
+                $tvClientConfig = app(TvClientConfigService::class);
+                $m3uEditorPayload['client_config'] = $tvClientConfig->capability(
+                    $tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth)
+                );
 
                 $payload['m3u_editor'] = $m3uEditorPayload;
             }
@@ -2279,6 +2287,12 @@ class XtreamApiController extends Controller
             return $this->requestStatus($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'request_dismiss') {
             return $this->dismissRequest($request, $playlist, $authMethod, $playlistAuth);
+        } elseif ($action === TvClientConfigService::ACTION) {
+            $tvClientConfig = app(TvClientConfigService::class);
+
+            return response()->json(
+                $tvClientConfig->payload($tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth))
+            );
         } elseif ($action === 'm3u_editor_register_publisher') {
             return $this->registerManagedLibraryPublisher($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'm3u_editor_catalog') {
