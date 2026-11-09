@@ -4448,7 +4448,7 @@ class XtreamApiController extends Controller
 
         $seriesByTmdbId = collect();
         if (! empty($seriesTmdbIds)) {
-            // Table-qualified: for an alias, series() joins playlists, which also has id/enabled.
+            // Table-qualified: for an alias, series() joins playlists, which also has id.
             $seriesByTmdbId = $playlist->series()
                 ->where('series.enabled', true)
                 ->whereIn('series.tmdb_id', array_keys($seriesTmdbIds))
@@ -4535,10 +4535,11 @@ class XtreamApiController extends Controller
 
         $seriesIdsByTmdbId = collect();
         if (! empty($seriesTmdbIds)) {
+            // Table-qualified: for an alias, series() joins playlists, which also has id.
             $seriesIdsByTmdbId = $playlist->series()
-                ->where('enabled', true)
+                ->where('series.enabled', true)
                 ->whereIn('series.tmdb_id', array_keys($seriesTmdbIds))
-                ->get(['id', 'tmdb_id'])
+                ->get(['series.id', 'series.tmdb_id'])
                 ->keyBy('tmdb_id');
         }
 
