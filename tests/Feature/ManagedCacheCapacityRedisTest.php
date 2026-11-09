@@ -5,6 +5,45 @@ use App\Services\ManagedCacheCapacitySnapshot;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
+
+it('grants only one account reservation across independent Redis workers', function (): void {
+    $group = 'synthetic-concurrent-'.Str::uuid();
+    $code = <<<'PHP'
+require 'vendor/autoload.php';
+$app = require 'bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+config(['cache.default' => 'redis', 'cache.prefix' => $argv[2]]);
+$app->forgetInstance('cache.store');
+$result = app(App\Services\ManagedCacheCapacityService::class)->reserve(new App\Services\ManagedCacheCapacitySnapshot($argv[1], limit: 3, live: 1, background: 0));
+echo json_encode($result, JSON_THROW_ON_ERROR);
+PHP;
+    $workers = [];
+    try {
+        foreach (range(1, 4) as $worker) {
+            $process = new Process([PHP_BINARY, '-r', $code, $group, config('cache.prefix')], base_path());
+            $process->setTimeout(15);
+            $process->start();
+            $workers[] = $process;
+        }
+        $reservations = [];
+        foreach ($workers as $process) {
+            $process->wait();
+            expect($process->getErrorOutput())->toBe('')
+                ->and($process->isSuccessful())->toBeTrue();
+            $reservations[] = json_decode($process->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+        }
+        $active = array_values(array_filter($reservations));
+        expect($active)->toHaveCount(1)
+            ->and(app(ManagedCacheCapacityService::class)->canUseReservation($active[0], new ManagedCacheCapacitySnapshot($group, 3, 1, 0)))->toBeTrue();
+    } finally {
+        foreach ($workers as $process) {
+            if ($process->isRunning()) {
+                $process->stop();
+            }
+        }
+    }
+});
 
 beforeEach(function (): void {
     if (env('MANAGED_CACHE_REDIS_INTEGRATION') !== '1') {

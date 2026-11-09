@@ -97,7 +97,6 @@ it('can edit an existing integration', function () {
 it('saves the Use for caching toggle', function () {
     $settings = new GeneralSettings;
     $settings->enable_cache = true;
-    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 
     $integration = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);
@@ -112,7 +111,6 @@ it('saves the Use for caching toggle', function () {
 it('flips Use for caching from the integrations table', function () {
     $settings = new GeneralSettings;
     $settings->enable_cache = true;
-    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 
     $integration = ArrIntegration::factory()->radarr()->create(['user_id' => $this->user->id]);

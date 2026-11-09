@@ -62,6 +62,9 @@ beforeEach(function () {
         ]);
 
     $settings = Mockery::mock(GeneralSettings::class)->makePartial();
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $settings->app_output_enabled = true;
     $settings->enable_cache = true;
     app()->instance(GeneralSettings::class, $settings);
@@ -376,7 +379,7 @@ it('renews an active playback lease when an idempotent heartbeat is retried', fu
 
     $this->postJson('/player_api.php', $heartbeat)->assertOk();
 
-    expect($lease->fresh()->expires_at->equalTo($expiryBeforeRetry))->toBeTrue();
+    expect($lease->fresh()->expires_at->greaterThan($expiryBeforeRetry))->toBeTrue();
 });
 
 it('releases and undoes a watched managed cache interest through the companion form contract', function () {

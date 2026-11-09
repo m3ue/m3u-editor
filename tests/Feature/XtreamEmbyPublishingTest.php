@@ -61,6 +61,9 @@ function embyPublishingActionUrl(string $action, array $parameters = []): string
 }
 
 it('advertises the versioned managed library publishing contract to authenticated clients', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     app(GeneralSettings::class)->enable_cache = true;
     $response = $this->getJson(embyPublishingActionUrl('get_server_info'));
 
@@ -120,6 +123,9 @@ it('requires POST and refuses cache actions while global caching is disabled', f
 });
 
 it('rejects a cache action for a mapping outside the authenticated owner catalog', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $settings = app(GeneralSettings::class);
     $settings->enable_cache = true;
 

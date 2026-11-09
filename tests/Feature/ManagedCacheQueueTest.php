@@ -25,6 +25,9 @@ beforeEach(function () {
     Storage::fake('cache');
     config(['cache.default' => 'array']);
     $settings = Mockery::mock(GeneralSettings::class)->makePartial();
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $settings->enable_cache = true;
     app()->instance(GeneralSettings::class, $settings);
     $user = User::factory()->create();

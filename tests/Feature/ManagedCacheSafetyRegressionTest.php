@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CachedContentManagedBy;
+use App\Enums\CacheDispatchResult;
 use App\Models\CachedContentFile;
 use App\Models\Channel;
 use App\Models\ManagedCacheInterest;
@@ -13,6 +14,7 @@ use App\Services\CachedContentRetentionService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -59,17 +61,20 @@ it('restarts the 15 minute grace after playback stop', function () {
     expect(app(CachedContentRetentionService::class)->deleteManagedFileIfReleasable($this->file))->toBeFalse();
 });
 
-it('does not refresh equal playback sequence', function () {
+it('renews an equal playback sequence without changing its identity', function () {
     $activity = app(CachedContentActivityService::class);
     $session = (string) Str::uuid();
     $lease = $activity->acquirePlayback($this->user, $this->integration, $session, 1, $this->target);
     $before = $lease->expires_at->timestamp;
     $this->travel(60)->seconds();
     $activity->acquirePlayback($this->user, $this->integration, $session, 1, $this->target);
-    expect($lease->fresh()->expires_at->timestamp)->toBe($before);
+    expect($lease->fresh()->expires_at->timestamp)->toBeGreaterThan($before);
 });
 
 it('preserves managed ownership when pending file receives another managed dispatch', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $settings = Mockery::mock(GeneralSettings::class)->makePartial();
     $settings->enable_cache = true;
     app()->instance(GeneralSettings::class, $settings);
@@ -79,8 +84,24 @@ it('preserves managed ownership when pending file receives another managed dispa
     $file = CachedContentFile::factory()->forItem($channel)->createQuietly([
         'status' => 'pending', 'managed_by' => CachedContentManagedBy::ManagedPublishing,
     ]);
-    app(CachedContentDispatchService::class)->dispatchManaged($channel);
+    expect(app(CachedContentDispatchService::class)->dispatchManaged($channel))->toBe(CacheDispatchResult::AlreadyQueued);
     expect($file->fresh()->managed_by)->toBe(CachedContentManagedBy::ManagedPublishing);
+});
+
+it('preserves unsaved legacy settings without database queries', function (): void {
+    $settings = new GeneralSettings;
+    $settings->enable_cache = true;
+    app()->instance(GeneralSettings::class, $settings);
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+    for ($item = 0; $item < 10; $item++) {
+        expect(app(CachedContentDispatchService::class)->isEnabled())->toBeTrue();
+    }
+    config(['cached_content.enabled' => false]);
+    expect(app(CachedContentDispatchService::class)->isEnabled())->toBeFalse()
+        ->and(app(CachedContentDispatchService::class)->isManagedEnabled())->toBeFalse()
+        ->and(DB::getQueryLog())->toHaveCount(0);
+    DB::disableQueryLog();
 });
 
 it('sees current feature off despite an already resolved settings instance', function () {
@@ -91,5 +112,6 @@ it('sees current feature off despite an already resolved settings instance', fun
     $updated = new GeneralSettings;
     $updated->enable_cache = false;
     $updated->save();
-    expect(app(CachedContentDispatchService::class)->isEnabled())->toBeFalse();
+    expect(app(CachedContentDispatchService::class)->isManagedEnabled())->toBeFalse()
+        ->and(app(CachedContentDispatchService::class)->isEnabled())->toBeTrue();
 });

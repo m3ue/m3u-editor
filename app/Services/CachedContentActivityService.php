@@ -9,6 +9,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\User;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CachedContentActivityService
@@ -29,67 +30,79 @@ class CachedContentActivityService
         int $sequence,
         array $target,
     ): CachedContentActivityLease {
-        $lease = CachedContentActivityLease::firstOrNew([
-            'integration_id' => $integration->id,
-            'kind' => 'playback',
-            'lease_id' => $leaseId,
-        ]);
+        return DB::transaction(function () use ($user, $integration, $leaseId, $sequence, $target): CachedContentActivityLease {
+            MediaServerIntegration::query()->whereKey($integration->id)->lockForUpdate()->firstOrFail();
 
-        if ($lease->exists && $lease->terminal_until?->isFuture()) {
+            $lease = CachedContentActivityLease::firstOrNew([
+                'integration_id' => $integration->id,
+                'kind' => 'playback',
+                'lease_id' => $leaseId,
+            ]);
+
+            if ($lease->exists && $lease->terminal_until?->isFuture()) {
+                return $lease;
+            }
+
+            if ($lease->exists && $sequence < $lease->sequence) {
+                return $lease;
+            }
+
+            $now = now();
+            if ($lease->exists) {
+                foreach ($target as $attribute => $value) {
+                    if ($lease->{$attribute} !== $value) {
+                        throw new \InvalidArgumentException('Playback lease target cannot change');
+                    }
+                }
+            }
+            $lease->fill([
+                'user_id' => $user->id,
+                'mapping_uuid' => $target['mapping_uuid'],
+                'revision' => $target['revision'],
+                'canonical_id' => $target['canonical_id'],
+                'variant_key' => $target['variant_key'],
+                'sequence' => $sequence,
+                'expires_at' => $now->copy()->addSeconds(self::PLAYBACK_TTL_SECONDS),
+                'last_activity_at' => $now,
+                'terminal_until' => null,
+            ]);
+            $lease->save();
+
             return $lease;
-        }
-
-        if ($lease->exists && $sequence < $lease->sequence) {
-            return $lease;
-        }
-
-        $now = now();
-        if ($lease->exists && $sequence === $lease->sequence) {
-            return $lease;
-        }
-        $lease->fill([
-            'user_id' => $user->id,
-            'mapping_uuid' => $target['mapping_uuid'],
-            'revision' => $target['revision'],
-            'canonical_id' => $target['canonical_id'],
-            'variant_key' => $target['variant_key'],
-            'sequence' => $sequence,
-            'expires_at' => $now->copy()->addSeconds(self::PLAYBACK_TTL_SECONDS),
-            'last_activity_at' => $now,
-            'terminal_until' => null,
-        ]);
-        $lease->save();
-
-        return $lease;
+        });
     }
 
     public function stopPlayback(MediaServerIntegration $integration, string $leaseId, int $sequence): void
     {
-        $lease = CachedContentActivityLease::query()
-            ->where('integration_id', $integration->id)
-            ->where('kind', 'playback')
-            ->where('lease_id', $leaseId)
-            ->where('sequence', '<', $sequence)
-            ->first();
-        if ($lease === null) {
-            return;
-        }
+        DB::transaction(function () use ($integration, $leaseId, $sequence): void {
+            MediaServerIntegration::query()->whereKey($integration->id)->lockForUpdate()->firstOrFail();
 
-        $now = now();
-        $lease->update([
-            'sequence' => $sequence,
-            'expires_at' => $now,
-            'last_activity_at' => $now,
-            'terminal_until' => $now->copy()->addSeconds(self::PLAYBACK_TTL_SECONDS),
-        ]);
+            $lease = CachedContentActivityLease::query()
+                ->where('integration_id', $integration->id)
+                ->where('kind', 'playback')
+                ->where('lease_id', $leaseId)
+                ->where('sequence', '<', $sequence)
+                ->first();
+            if ($lease === null) {
+                return;
+            }
 
-        ManagedCacheInterest::query()
-            ->where('integration_id', $lease->integration_id)
-            ->where('mapping_uuid', $lease->mapping_uuid)
-            ->where('canonical_id', $lease->canonical_id)
-            ->where('variant_key', $lease->variant_key)
-            ->whereNotNull('watched_at')
-            ->update(['release_after' => $now->copy()->addMinutes(15)]);
+            $now = now();
+            $lease->update([
+                'sequence' => $sequence,
+                'expires_at' => $now,
+                'last_activity_at' => $now,
+                'terminal_until' => $now->copy()->addSeconds(self::PLAYBACK_TTL_SECONDS),
+            ]);
+
+            ManagedCacheInterest::query()
+                ->where('integration_id', $lease->integration_id)
+                ->where('mapping_uuid', $lease->mapping_uuid)
+                ->where('canonical_id', $lease->canonical_id)
+                ->where('variant_key', $lease->variant_key)
+                ->whereNotNull('watched_at')
+                ->update(['release_after' => $now->copy()->addMinutes(15)]);
+        });
     }
 
     /** @param array{mapping_uuid: string, revision: string, canonical_id: string, variant_key: string} $target */
@@ -167,6 +180,10 @@ class CachedContentActivityService
     /** Renew the active reader while bytes are still being streamed. */
     public function renewReader(CachedContentActivityLease $lease): void
     {
+        if ($lease->last_activity_at->gt(now()->subSeconds(30))) {
+            return;
+        }
+
         $lease->update([
             'expires_at' => now()->addSeconds(self::READER_TTL_SECONDS),
             'last_activity_at' => now(),

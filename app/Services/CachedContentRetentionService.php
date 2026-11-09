@@ -107,16 +107,19 @@ class CachedContentRetentionService
         foreach ($ids->chunk(500) as $chunk) {
             CachedContentFile::query()
                 ->whereIn('id', $chunk->all())
-                ->where(function (Builder $query): void {
-                    $query->whereNull('managed_by')
-                        ->orWhere('managed_by', '!=', CachedContentManagedBy::ManagedPublishing->value);
-                })
+
                 ->whereNotIn('status', [
                     CachedContentFileStatus::Pending->value,
                     CachedContentFileStatus::Downloading->value,
                 ])
                 ->get()
                 ->each(function (CachedContentFile $row) use (&$deleted): void {
+                    if ($row->managed_by === CachedContentManagedBy::ManagedPublishing) {
+                        $deleted += (int) $this->deleteManagedFileIfReleasable($row, orphan: true);
+
+                        return;
+                    }
+
                     $row->deleteStoredFile();
                     $row->delete();
                     $deleted++;
@@ -176,9 +179,9 @@ class CachedContentRetentionService
      * true only when the row and storage were both removed. Storage failure
      * leaves the row and interests intact for retry.
      */
-    public function deleteManagedFileIfReleasable(CachedContentFile $file): bool
+    public function deleteManagedFileIfReleasable(CachedContentFile $file, bool $orphan = false): bool
     {
-        return app(CachedContentActivityService::class)->withFileActivityLock($file, function () use ($file): bool {
+        return app(CachedContentActivityService::class)->withFileActivityLock($file, function () use ($file, $orphan): bool {
             $file = $file->fresh();
             if ($file === null || $file->managed_by !== CachedContentManagedBy::ManagedPublishing || $file->source !== 'provider') {
                 return false;
@@ -204,11 +207,11 @@ class CachedContentRetentionService
                 })
                 ->exists();
 
-            if ($hasUnreleasedInterest || ! app(CachedContentActivityService::class)->isSafeToDelete($file)) {
+            if (($orphan ? ! $this->isAutomaticOrphan($file) : $hasUnreleasedInterest) || ! app(CachedContentActivityService::class)->isSafeToDelete($file)) {
                 return false;
             }
 
-            return $this->deleteManagedFileWithDatabaseClaim($file);
+            return $this->deleteManagedFileWithDatabaseClaim($file, $orphan);
         });
     }
 
@@ -217,9 +220,9 @@ class CachedContentRetentionService
      * Ordinary keep/sharing/undo updates must serialize with this claim, even
      * when their caller does not use the cache activity lock.
      */
-    private function deleteManagedFileWithDatabaseClaim(CachedContentFile $file): bool
+    private function deleteManagedFileWithDatabaseClaim(CachedContentFile $file, bool $orphan): bool
     {
-        return DB::transaction(function () use ($file): bool {
+        return DB::transaction(function () use ($file, $orphan): bool {
             if (DB::connection()->getDriverName() === 'sqlite') {
                 // SQLite has no FOR UPDATE. Reserve its writer before taking
                 // the protection snapshot; this does not change metadata.
@@ -244,14 +247,21 @@ class CachedContentRetentionService
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
-            if ($interests->contains(fn (ManagedCacheInterest $interest): bool => $interest->watched_at === null
-                || $interest->release_after === null || $interest->release_after->isFuture())
+            if (($orphan ? ! $this->isAutomaticOrphan($file) : $interests->contains(fn (ManagedCacheInterest $interest): bool => $interest->watched_at === null
+                || $interest->release_after === null || $interest->release_after->isFuture()))
                 || ! app(CachedContentActivityService::class)->isSafeToDelete($file)) {
                 return false;
             }
 
             return $this->deleteStoredFileAndRow($file);
         });
+    }
+
+    /** Recheck source references before reclaiming a never-watched automatic file. */
+    private function isAutomaticOrphan(CachedContentFile $file): bool
+    {
+        return $file->playlist_id === null || ($file->cacheable === null
+            && $this->automaticPlaylistIdsQuery()->whereKey($file->playlist_id)->exists());
     }
 
     /**

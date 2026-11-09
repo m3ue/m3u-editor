@@ -7,6 +7,7 @@ use App\Enums\CachedContentManagedBy;
 use App\Http\Controllers\Concerns\StreamLocalFile;
 use App\Models\CachedContentActivityLease;
 use App\Models\CachedContentFile;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Services\CachedContentActivityService;
 use App\Services\CachedContentDispatchService;
@@ -65,9 +66,12 @@ class CachedContentStreamController extends Controller
         // stat'd or opened so deletion races see the active reader under the
         // same lock. The lease is acquired here and released in onFinish.
         if ($file->managed_by === CachedContentManagedBy::ManagedPublishing) {
+            abort_unless(app(CachedContentDispatchService::class)->isManagedEnabled(), 404, 'Cached file not found');
+            $integration = MediaServerIntegration::query()->where('user_id', $playlist->user_id)->first();
+            abort_if($integration === null, 404, 'Cached file not found');
             $this->readerLease = $this->activity->acquireReaderForFile(
                 $playlist->user,
-                null,
+                $integration,
                 (string) Str::uuid(),
                 $file,
             );

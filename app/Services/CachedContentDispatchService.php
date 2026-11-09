@@ -50,6 +50,12 @@ class CachedContentDispatchService
             && (bool) (app(GeneralSettings::class)->enable_cache ?? false);
     }
 
+    public function isManagedEnabled(): bool
+    {
+        return config('cached_content.enabled', true)
+            && (bool) ((new GeneralSettings)->enable_cache ?? false);
+    }
+
     /**
      * Whether `$item` can be cached at all (ignores the global toggle).
      */
@@ -87,7 +93,7 @@ class CachedContentDispatchService
      */
     public function dispatch(Channel|Episode $item, bool $automatic = false, bool $viaArr = true, ?CachedContentManagedBy $managedBy = null): CacheDispatchResult
     {
-        if (! $this->isEnabled()) {
+        if (! ($managedBy === CachedContentManagedBy::ManagedPublishing ? $this->isManagedEnabled() : $this->isEnabled())) {
             return CacheDispatchResult::Disabled;
         }
 
@@ -127,7 +133,7 @@ class CachedContentDispatchService
             }
 
             // Failed, or Completed with the file missing on disk.
-            return $this->requeue($existing) ? CacheDispatchResult::Queued : CacheDispatchResult::Unavailable;
+            return $this->requeue($existing, managedBy: $managedBy) ? CacheDispatchResult::Queued : CacheDispatchResult::Unavailable;
         }
 
         $shared = CachedContentFile::findServableFor($item);
@@ -156,7 +162,11 @@ class CachedContentDispatchService
             return CacheDispatchResult::AlreadyQueued;
         }
 
-        dispatch(new DownloadCachedContentFile($file->id));
+        $job = new DownloadCachedContentFile($file->id);
+        if ($managedBy !== null) {
+            $job->afterCommit();
+        }
+        dispatch($job);
 
         return CacheDispatchResult::Queued;
     }
@@ -348,9 +358,9 @@ class CachedContentDispatchService
      * again. Returns false when the row's source item no longer exists or
      * can't be cached.
      */
-    public function requeue(CachedContentFile $file): bool
+    public function requeue(CachedContentFile $file, ?CachedContentManagedBy $managedBy = null): bool
     {
-        if (! $this->isEnabled()) {
+        if (! ($managedBy === CachedContentManagedBy::ManagedPublishing ? $this->isManagedEnabled() : $this->isEnabled())) {
             return false;
         }
 
@@ -378,7 +388,11 @@ class CachedContentDispatchService
             'last_progress_at' => null,
         ])->save();
 
-        dispatch(new DownloadCachedContentFile($file->id));
+        $job = new DownloadCachedContentFile($file->id);
+        if ($managedBy !== null) {
+            $job->afterCommit();
+        }
+        dispatch($job);
 
         return true;
     }

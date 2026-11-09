@@ -9,6 +9,7 @@ use App\Models\Episode;
 use App\Models\ManagedCacheInterest;
 use App\Models\MediaServerIntegration;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class ManagedCacheControlService
 {
@@ -25,15 +26,20 @@ class ManagedCacheControlService
         string $variantKey,
         string $consumerId,
     ): ManagedCacheInterest {
-        return ManagedCacheInterest::firstOrCreate([
-            'cached_content_file_id' => $file->id,
-            'integration_id' => $integration->id,
-            'mapping_uuid' => $mappingUuid,
-            'consumer_id' => $consumerId,
-        ], [
-            'canonical_id' => $canonicalId,
-            'variant_key' => $variantKey,
-        ]);
+        return app(CachedContentActivityService::class)->withFileActivityLock($file, function () use ($file, $integration, $mappingUuid, $canonicalId, $variantKey, $consumerId): ManagedCacheInterest {
+            return DB::transaction(function () use ($file, $integration, $mappingUuid, $canonicalId, $variantKey, $consumerId): ManagedCacheInterest {
+                CachedContentFile::query()->whereKey($file->id)->lockForUpdate()->firstOrFail();
+
+                return ManagedCacheInterest::firstOrCreate([
+                    'cached_content_file_id' => $file->id,
+                    'integration_id' => $integration->id,
+                    'mapping_uuid' => $mappingUuid,
+                    'canonical_id' => $canonicalId,
+                    'variant_key' => $variantKey,
+                    'consumer_id' => $consumerId,
+                ]);
+            });
+        });
     }
 
     /**

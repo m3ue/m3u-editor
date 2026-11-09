@@ -103,6 +103,9 @@ it('creates one Pending row keyed to the channel and queues one download', funct
 });
 
 it('marks only a newly dispatched managed publishing file as managed', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
     $channel = makeCacheableChannel();
 
     $result = app(CachedContentDispatchService::class)->dispatchManaged($channel);

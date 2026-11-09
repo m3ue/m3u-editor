@@ -11,6 +11,9 @@ final class XtreamManagedCacheCapacitySnapshotSource implements ManagedCacheCapa
 {
     private const MAX_CONNECTION_LIMIT = 10000;
 
+    /** @var array<string, mixed> Account responses for this batch instance only. */
+    private array $accountResponses = [];
+
     public function __construct(private readonly ManagedCacheAccountGroupIdentity $groups) {}
 
     public function snapshotFor(Channel|Episode $item): ?ManagedCacheCapacitySnapshot
@@ -32,10 +35,16 @@ final class XtreamManagedCacheCapacitySnapshotSource implements ManagedCacheCapa
             return null;
         }
 
-        try {
-            $response = XtreamService::make($playlist, retryLimit: 1)->userInfo(timeout: 5);
-        } catch (Throwable) {
-            return null;
+        $snapshotKey = $this->groups->for($this->accountOrigin(), $username."\n".$password);
+        if (array_key_exists($snapshotKey, $this->accountResponses)) {
+            $response = $this->accountResponses[$snapshotKey];
+        } else {
+            try {
+                $response = XtreamService::make($playlist, retryLimit: 1)->userInfo(timeout: 5);
+            } catch (Throwable) {
+                $response = [];
+            }
+            $this->accountResponses[$snapshotKey] = $response;
         }
 
         $userInfo = $response['user_info'] ?? null;

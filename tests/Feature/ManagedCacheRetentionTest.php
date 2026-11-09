@@ -4,6 +4,7 @@ use App\Enums\CachedContentFileStatus;
 use App\Enums\CachedContentManagedBy;
 use App\Jobs\ReleaseWatchedManagedCache;
 use App\Models\CachedContentFile;
+use App\Models\Channel;
 use App\Models\ManagedCacheInterest;
 use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
@@ -17,6 +18,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
@@ -45,6 +47,30 @@ function makeManagedFile(Playlist $playlist): CachedContentFile
         'content_fingerprint' => 'fixture-fingerprint',
     ]);
 }
+
+it('reclaims never-watched managed orphans through the generic cleanup path', function (bool $withInterest): void {
+    $file = makeManagedFile($this->playlist);
+    $file->update(['cacheable_type' => Channel::class, 'cacheable_id' => 999999999]);
+    Storage::disk('cache')->put($file->file_path, 'owned cache');
+    if ($withInterest) {
+        ManagedCacheInterest::factory()->create(['cached_content_file_id' => $file->id, 'integration_id' => $this->integration->id, 'mapping_uuid' => (string) Str::uuid(), 'canonical_id' => 'episode:orphan', 'variant_key' => '1080p', 'consumer_id' => 'profile-a']);
+    }
+    $retention = app(CachedContentRetentionService::class);
+    $ids = $retention->evaluate();
+    expect($ids->contains($file->id))->toBeTrue()
+        ->and($retention->deleteIds($ids))->toBe(1)
+        ->and($file->fresh())->toBeNull();
+    Storage::disk('cache')->assertMissing($file->file_path);
+})->with([true, false]);
+
+it('does not use orphan cleanup to delete a still-referenced unwatched file', function (): void {
+    $file = makeManagedFile($this->playlist);
+    $channel = Channel::factory()->createQuietly(['playlist_id' => $this->playlist->id, 'user_id' => $this->user->id]);
+    $file->update(['cacheable_type' => $channel->getMorphClass(), 'cacheable_id' => $channel->id]);
+    Storage::disk('cache')->put($file->file_path, 'owned cache');
+    expect(app(CachedContentRetentionService::class)->deleteIds(collect([$file->id])))->toBe(0);
+    Storage::disk('cache')->assertExists($file->file_path);
+});
 
 it('rechecks ownership and sharing inside its storage deletion claim', function (string $protection) {
     $file = makeManagedFile($this->playlist);

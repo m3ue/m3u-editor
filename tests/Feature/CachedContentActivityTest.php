@@ -59,7 +59,7 @@ it('does not revive a terminal playback session from a late heartbeat', function
     expect($service->hasActivePlayback($target))->toBeFalse();
 });
 
-it('does not renew an active playback lease for a duplicate heartbeat sequence', function () {
+it('renews an active playback lease for a duplicate heartbeat sequence', function () {
     $user = User::factory()->create();
     $integration = MediaServerIntegration::factory()->for($user)->create();
     $service = app(CachedContentActivityService::class);
@@ -76,7 +76,7 @@ it('does not renew an active playback lease for a duplicate heartbeat sequence',
 
     $service->acquirePlayback($user, $integration, '11111111-1111-4111-8111-111111111111', 1, $target);
 
-    expect($lease->fresh()->expires_at->equalTo($expiryBeforeRetry))->toBeTrue();
+    expect($lease->fresh()->expires_at->greaterThan($expiryBeforeRetry))->toBeTrue();
 });
 
 it('acquires a reader lease and considers it active for the target', function () {

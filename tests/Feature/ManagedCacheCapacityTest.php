@@ -79,7 +79,8 @@ it('returns a fresh opaque Xtream account snapshot for configured channels and e
 
     $source = app(XtreamManagedCacheCapacitySnapshotSource::class);
     $channelSnapshot = $source->snapshotFor($channel);
-    $episodeSnapshot = $source->snapshotFor($episode);
+    expect($source->snapshotFor($episode)?->group)->toBe($channelSnapshot?->group);
+    $episodeSnapshot = app(XtreamManagedCacheCapacitySnapshotSource::class)->snapshotFor($episode);
 
     expect($channelSnapshot)->not->toBeNull()
         ->and($channelSnapshot->limit)->toBe(3)

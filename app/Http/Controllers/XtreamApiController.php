@@ -603,7 +603,7 @@ class XtreamApiController extends Controller
                             'revision_metadata',
                         ],
                     ];
-                    if (app(CachedContentDispatchService::class)->isEnabled()) {
+                    if (app(CachedContentDispatchService::class)->isManagedEnabled()) {
                         $m3uEditorPayload['library_publishing']['cache_control'] = [
                             'api_version' => 1,
                             'actions' => [
@@ -4334,7 +4334,7 @@ class XtreamApiController extends Controller
             return $this->libraryPublishingUnavailableError();
         }
 
-        if (! app(CachedContentDispatchService::class)->isEnabled()) {
+        if (! app(CachedContentDispatchService::class)->isManagedEnabled()) {
             return $this->requestError('cache_disabled', 'Caching is disabled.', 403);
         }
 
@@ -4525,7 +4525,8 @@ class XtreamApiController extends Controller
         }
 
         try {
-            $event = DB::transaction(function () use ($findEvent, $effectivePlaylist, $validated, $action, $payloadHash, $mapping, $control, $resolvedTargets): ManagedCacheEvent {
+            $snapshotSource = app(ManagedCacheCapacitySnapshotSource::class);
+            $event = DB::transaction(function () use ($findEvent, $effectivePlaylist, $validated, $action, $payloadHash, $mapping, $control, $resolvedTargets, $snapshotSource): ManagedCacheEvent {
                 $existing = $findEvent();
                 if ($existing) {
                     return $existing;
@@ -4555,7 +4556,7 @@ class XtreamApiController extends Controller
 
                 $response = [
                     'request_id' => $validated['request_id'],
-                    'results' => array_map(function (array $resolved) use ($action, $control, $effectivePlaylist, $mapping, $validated): array {
+                    'results' => array_map(function (array $resolved) use ($action, $control, $effectivePlaylist, $mapping, $validated, $snapshotSource): array {
                         $target = $resolved['target'];
                         if ($action === 'm3u_editor_cache_release') {
                             $control->releaseWatched(
@@ -4596,7 +4597,7 @@ class XtreamApiController extends Controller
                             ];
                         }
 
-                        $snapshot = app(ManagedCacheCapacitySnapshotSource::class)->snapshotFor($resolved['cacheable']);
+                        $snapshot = $snapshotSource->snapshotFor($resolved['cacheable']);
                         if ($snapshot === null) {
                             return [
                                 'canonical_id' => $target['canonical_id'],
@@ -4614,16 +4615,11 @@ class XtreamApiController extends Controller
                             ];
                         }
 
-                        // A batch may queue several next episodes, but only one
-                        // may own the account's download slot. Waiting jobs acquire
-                        // their own reservation from fresh counters when they run.
-                        $reservation = $capacity->reserve($snapshot);
+                        // Workers acquire their own reservation from fresh counters
+                        // after commit; a rolled-back batch owns no external locks.
                         $dispatch = app(CachedContentDispatchService::class)->dispatchManaged($resolved['cacheable']);
                         $file = $resolved['cacheable']->cachedContentFile()->first();
                         if ($file && in_array($dispatch, [CacheDispatchResult::Queued, CacheDispatchResult::AlreadyQueued], true)) {
-                            if ($reservation !== null) {
-                                $capacity->attachToFile($file->id, $reservation);
-                            }
                             $control->recordInterest(
                                 $file,
                                 $mapping->integration,
@@ -4639,8 +4635,6 @@ class XtreamApiController extends Controller
                                 'status' => $dispatch->value,
                             ];
                         }
-
-                        $capacity->release($reservation);
 
                         return [
                             'canonical_id' => $target['canonical_id'],

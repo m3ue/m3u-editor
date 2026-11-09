@@ -26,7 +26,7 @@ return new class extends Migration
             $table->timestamp('release_after')->nullable();
             $table->timestamps();
 
-            $table->unique(['cached_content_file_id', 'integration_id', 'mapping_uuid', 'consumer_id'], 'managed_cache_interests_unique_tuple');
+            $table->unique(['cached_content_file_id', 'integration_id', 'mapping_uuid', 'canonical_id', 'variant_key', 'consumer_id'], 'managed_cache_interests_unique_tuple');
             $table->index(['integration_id', 'mapping_uuid', 'canonical_id', 'variant_key']);
             $table->index('release_after');
         });

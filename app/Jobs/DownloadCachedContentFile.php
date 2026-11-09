@@ -151,7 +151,8 @@ class DownloadCachedContentFile implements ShouldQueue
             return;
         }
 
-        if (! app(CachedContentDispatchService::class)->isEnabled()) {
+        $dispatch = app(CachedContentDispatchService::class);
+        if (! ($file->managed_by === CachedContentManagedBy::ManagedPublishing ? $dispatch->isManagedEnabled() : $dispatch->isEnabled())) {
             $this->markFailed($file, 'Caching is disabled.');
 
             return;

@@ -31,7 +31,6 @@ function dgacSettings(bool $enableCache = true): GeneralSettings
     $settings = new GeneralSettings;
     $settings->enable_cache = $enableCache;
     $settings->tmdb_api_key = 'fake-api-key';
-    $settings->save();
     app()->instance(GeneralSettings::class, $settings);
 
     return $settings;
