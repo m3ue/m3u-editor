@@ -47,6 +47,7 @@ use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
 use App\Filament\Resources\Vods\VodResource;
+use App\Filament\Resources\WatchHistoryIntegrations\WatchHistoryIntegrationResource;
 use Filament\Navigation\NavigationItem;
 
 /**
@@ -139,6 +140,7 @@ final class AdminNavigationSchema
                 'available' => fn () => true,
                 'items' => [
                     'media_server_integrations' => self::entry(MediaServersCluster::class),
+                    'watch_history_integrations' => self::entry(WatchHistoryIntegrationResource::class),
                     'networks' => [
                         'available' => fn () => config('proxy.proxy_integration_enabled', true),
                         'resolve' => fn () => NetworkResource::getNavigationItems(),

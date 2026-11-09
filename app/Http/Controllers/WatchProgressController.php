@@ -12,6 +12,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\ViewerWatchProgress;
+use App\Services\WatchHistory\WatchHistoryScrobbler;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -128,6 +129,12 @@ class WatchProgressController extends Controller
         if ($progress->wasRecentlyCreated) {
             $progress->increment('watch_count');
         }
+
+        app(WatchHistoryScrobbler::class)->queue(
+            $progress,
+            $viewer->playlist_auth_id,
+            WatchHistoryScrobbler::parseClientProviders($request->input('client_scrobblers')),
+        );
 
         return response()->json($progress->only(['position_seconds', 'duration_seconds', 'completed', 'watch_count']));
     }

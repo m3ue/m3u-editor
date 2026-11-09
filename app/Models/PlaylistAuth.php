@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -72,6 +73,15 @@ class PlaylistAuth extends Model
     public function tvNotificationReads(): HasMany
     {
         return $this->hasMany(TvNotificationRead::class);
+    }
+
+    /**
+     * Trakt / SIMKL accounts this auth's watch progress is sent to.
+     */
+    public function watchHistoryIntegrations(): BelongsToMany
+    {
+        return $this->belongsToMany(WatchHistoryIntegration::class, 'playlist_auth_watch_history_integration')
+            ->withTimestamps();
     }
 
     /**

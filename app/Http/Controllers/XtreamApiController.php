@@ -41,6 +41,7 @@ use App\Models\Series;
 use App\Models\StreamProfile;
 use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
+use App\Models\WatchHistoryIntegration;
 use App\Providers\VersionServiceProvider;
 use App\Services\AedExtractorService;
 use App\Services\AIOStreamsAuthorizationService;
@@ -56,6 +57,7 @@ use App\Services\Sports\SportsChannelMatcher;
 use App\Services\Sports\SportsService;
 use App\Services\TmdbService;
 use App\Services\VodFileNameService;
+use App\Services\WatchHistory\WatchHistoryScrobbler;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
 use App\Settings\GeneralSettings;
@@ -593,6 +595,21 @@ class XtreamApiController extends Controller
                             'revision_metadata',
                         ],
                     ];
+                }
+
+                // Trakt / SIMKL accounts the server already sends this auth's
+                // progress to. A client that scrobbles to one of these
+                // providers itself sends it in `client_scrobblers` on
+                // update_progress, and the server skips that provider.
+                if ($playlistAuth) {
+                    $m3uEditorPayload['watch_history'] = $playlistAuth->watchHistoryIntegrations()
+                        ->pushing()
+                        ->get(['watch_history_integrations.id', 'provider', 'account_name'])
+                        ->map(fn (WatchHistoryIntegration $integration): array => [
+                            'provider' => $integration->provider->value,
+                            'account' => $integration->account_name,
+                        ])
+                        ->all();
                 }
 
                 $payload['m3u_editor'] = $m3uEditorPayload;
@@ -3444,6 +3461,12 @@ class XtreamApiController extends Controller
             // later goes stale (e.g. a media-server library flush), instead of
             // leaving a fresh row permanently unrecoverable.
             app(WatchProgressLinker::class)->backfillTmdbId($progress);
+
+            app(WatchHistoryScrobbler::class)->queue(
+                $progress,
+                $viewer->playlist_auth_id,
+                WatchHistoryScrobbler::parseClientProviders($request->input('client_scrobblers')),
+            );
         }
 
         return response()->json($progress);

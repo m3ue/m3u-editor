@@ -89,6 +89,28 @@ return [
         'enabled' => env('AIOSTREAMS_ENABLED', true) !== false,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Watch History Trackers (Trakt, SIMKL)
+    |--------------------------------------------------------------------------
+    |
+    | Public client ids for the device sign-in flow, shared with the M3U TV
+    | app. Neither is a secret: Trakt signs in with PKCE and SIMKL's device
+    | flow takes no client secret. Register your own app and set these to
+    | use it instead (Trakt: https://trakt.tv/oauth/applications, SIMKL:
+    | https://simkl.com/settings/developer/ with the "TV, devices & command
+    | line" type). Changing one signs existing connections out on their next
+    | token refresh.
+    |
+    */
+    'trakt' => [
+        'client_id' => env('TRAKT_CLIENT_ID') ?: '1b95226b593a8c4eb9c933c307fe8e7cf9f5e4d5d73d2d743d73dc33c6dbd84f',
+    ],
+
+    'simkl' => [
+        'client_id' => env('SIMKL_CLIENT_ID') ?: 'a3a6b6b8105c1df0ebce03f1c52665c4b664e7fc0368d3b4c81c94ef842f4f13',
+    ],
+
     'stremio' => [
         'meta_addons' => [
             'cinemeta' => env('STREMIO_CINEMETA_URL', 'https://v3-cinemeta.strem.io'),
