@@ -26,6 +26,7 @@ use Exception;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -3984,6 +3985,68 @@ class M3uProxyService
         }
 
         return $this->withCallbackToken(ProxyFacade::getBaseUrl().'/api/dvr/callback');
+    }
+
+    /**
+     * Check that the proxy's webhooks reach M3U Editor: the webhook must be
+     * registered with the proxy (registering it now if it isn't), and the
+     * proxy must deliver a test event to it. Proxy > Watch History needs
+     * this, as it's built from those events.
+     *
+     * @return array{ok: bool, reason: 'ok'|'not_configured'|'proxy_unreachable'|'not_registered'|'delivery_failed'|'test_failed', message: string}
+     */
+    public function checkWebhook(bool $registerIfMissing = true): array
+    {
+        $fail = fn (string $reason, string $message): array => ['ok' => false, 'reason' => $reason, 'message' => $message];
+
+        $webhookUrl = $this->getWebhookUrl();
+        if (! $webhookUrl || empty($this->apiBaseUrl)) {
+            return $fail('not_configured', __('Set the Resolver URL under Settings > Proxy > Failover & Recovery, the address the proxy uses to reach M3U Editor. Webhooks are sent there.'));
+        }
+
+        $request = fn (int $timeout) => Http::timeout($timeout)
+            ->acceptJson()
+            ->withHeaders($this->apiToken ? ['X-API-Token' => $this->apiToken] : []);
+
+        try {
+            $list = $request(5)->get($this->apiBaseUrl.'/webhooks');
+        } catch (ConnectionException) {
+            return $fail('proxy_unreachable', __('M3U Editor could not reach the proxy.'));
+        }
+
+        if (! $list->successful()) {
+            return $fail('proxy_unreachable', __('The proxy answered HTTP :status when listing webhooks.', ['status' => $list->status()]));
+        }
+
+        $registered = collect($list->json('webhooks', []))->contains('url', $webhookUrl);
+        if (! $registered) {
+            if ($registerIfMissing) {
+                Artisan::call('m3u-proxy:register-webhook');
+
+                return $this->checkWebhook(registerIfMissing: false);
+            }
+
+            return $fail('not_registered', __('The webhook isn\'t registered with the proxy, and registering it failed. Check the proxy\'s logs.'));
+        }
+
+        try {
+            $test = $request(20)->post($this->apiBaseUrl.'/webhooks/test?'.http_build_query(['webhook_url' => $webhookUrl]));
+        } catch (ConnectionException) {
+            return $fail('proxy_unreachable', __('M3U Editor could not reach the proxy.'));
+        }
+
+        if ($test->successful()) {
+            return ['ok' => true, 'reason' => 'ok', 'message' => __('The proxy delivered a test event to M3U Editor.')];
+        }
+
+        if ($test->status() !== 502) {
+            return $fail('test_failed', __('The proxy answered HTTP :status when sending a test event.', ['status' => $test->status()]));
+        }
+
+        $port = parse_url($webhookUrl, PHP_URL_PORT);
+        $host = parse_url($webhookUrl, PHP_URL_HOST).($port ? ":{$port}" : '');
+
+        return $fail('delivery_failed', __('The proxy couldn\'t deliver a test event to M3U Editor at :host. Check that the proxy can reach that address, and that both use the same API token.', ['host' => $host]));
     }
 
     /**

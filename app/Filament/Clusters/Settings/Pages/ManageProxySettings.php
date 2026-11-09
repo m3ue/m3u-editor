@@ -2,11 +2,13 @@
 
 namespace App\Filament\Clusters\Settings\Pages;
 
+use App\Filament\Actions\TestProxyWebhooksAction;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
 use App\Models\StreamProfile;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use BackedEnum;
+use Closure;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
@@ -508,6 +510,45 @@ class ManageProxySettings extends BaseSettingsPage
                                 'heroicon-m-question-mark-circle',
                                 tooltip: __('CPU is the default and retains the proxy CPU custom profile configuration. VAAPI requires a compatible GPU; QSV requires a compatible Intel GPU with Quick Sync support. QSV currently supports single-program H.264 input with one AAC or AC-3 audio stream, using software decoding and deinterlacing with hardware encoding. Both GPU modes require a render device available to the proxy worker and use worker-owned presets and hardware probes. Applies only to normalized live streams, not Stream Profiles.')
                             ),
+                    ]),
+
+                Section::make(__('Watch History'))
+                    ->description(__('Keep a history of who watched what through the proxy, under Proxy > Watch History.'))
+                    ->columnSpanFull()
+                    ->columns(2)
+                    ->collapsible()
+                    ->afterHeader([TestProxyWebhooksAction::make()])
+                    ->schema([
+                        Toggle::make('proxy_track_watch_history')
+                            ->label(__('Track watch history'))
+                            ->live()
+                            ->helperText(__('Records each live channel, movie, and episode streamed through the proxy, with the Playlist Auth, player, and how long it was watched. Streams that don\'t go through the proxy aren\'t recorded.'))
+                            ->hintIcon(
+                                'heroicon-m-question-mark-circle',
+                                tooltip: __('Built from the proxy\'s webhooks, so they must reach M3U Editor. It can only be turned on once "Test webhooks" passes.')
+                            )
+                            // Only checked when turning it on, so saving other proxy settings
+                            // never fails on a proxy that's briefly down.
+                            ->rules([fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                if (! $value || app(GeneralSettings::class)->proxy_track_watch_history) {
+                                    return;
+                                }
+
+                                $result = app(M3uProxyService::class)->checkWebhook();
+                                if (! $result['ok']) {
+                                    $fail(__('Watch history needs the proxy\'s webhooks to reach M3U Editor. :reason', ['reason' => $result['message']]));
+                                }
+                            }]),
+                        TextInput::make('proxy_watch_history_retention_days')
+                            ->label(__('Keep history for'))
+                            ->numeric()
+                            ->integer()
+                            ->minValue(0)
+                            ->maxValue(3650)
+                            ->required()
+                            ->suffix(__('days'))
+                            ->visible(fn (Get $get): bool => (bool) $get('proxy_track_watch_history'))
+                            ->helperText(__('Older entries are removed once a day. Enter 0 to never remove.')),
                     ]),
 
                 Section::make(__('In-App Player Transcoding'))

@@ -43,6 +43,7 @@ use App\Filament\Resources\Series\SeriesResource;
 use App\Filament\Resources\SeriesDynamicGroups\SeriesDynamicGroupResource;
 use App\Filament\Resources\StreamFileSettings\StreamFileSettingResource;
 use App\Filament\Resources\StreamProfiles\StreamProfileResource;
+use App\Filament\Resources\StreamWatchSessions\StreamWatchSessionResource;
 use App\Filament\Resources\Users\UserResource;
 use App\Filament\Resources\VodDynamicGroups\VodDynamicGroupResource;
 use App\Filament\Resources\VodGroups\VodGroupResource;
@@ -195,6 +196,7 @@ final class AdminNavigationSchema
                 'items' => [
                     'stream_profiles' => self::entry(StreamProfileResource::class),
                     'stream_monitor' => self::entry(M3uProxyStreamMonitor::class),
+                    'watch_history' => self::entry(StreamWatchSessionResource::class),
                 ],
             ],
             'plugins' => [

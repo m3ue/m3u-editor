@@ -137,6 +137,11 @@ if (config('plugins.enabled', true)) {
 
 // Note: HLS broadcast files are managed by m3u-proxy service
 if (config('proxy.proxy_integration_enabled', true)) {
+    // Proxy > Watch History: end sessions the proxy never reported closed (e.g. after
+    // a proxy restart). A single indexed query; nothing to do while tracking is off.
+    $inProcess('app:close-abandoned-stream-history')
+        ->hourly();
+
     // Regenerate network schedules (hourly check, regenerates when needed)
     Schedule::command('networks:regenerate-schedules')
         ->hourly()

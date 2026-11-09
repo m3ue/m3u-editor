@@ -15,6 +15,7 @@ use App\Services\MediaSourcePreferenceService;
 use App\Services\NetworkBroadcastService;
 use App\Services\PlaylistService;
 use App\Services\ProfileService;
+use App\Services\StreamHistoryRecorder;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Settings\GeneralSettings;
 use Exception;
@@ -369,6 +370,9 @@ class M3uProxyApiController extends Controller
         if (isset($metadata['provider_profile_id'])) {
             $this->handleProfileConnectionTracking($eventType, $streamId, $metadata);
         }
+
+        // Proxy > Watch History (a no-op unless turned on in Settings > Proxy)
+        app(StreamHistoryRecorder::class)->handleWebhook($eventType, $streamId, $data);
 
         // Invalidate caches based on event type
         switch ($eventType) {

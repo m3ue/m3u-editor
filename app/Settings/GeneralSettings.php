@@ -72,6 +72,11 @@ class GeneralSettings extends Settings
 
     public string $proxy_normalization_encoder = 'cpu';
 
+    // Record who watched what through the proxy (Proxy > Watch History).
+    public bool $proxy_track_watch_history = false;
+
+    public int $proxy_watch_history_retention_days = 30;
+
     // Silence detection - detect silent audio streams and trigger failover
     public ?bool $enable_silence_detection = false;
 
