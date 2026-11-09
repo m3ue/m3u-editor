@@ -38,7 +38,11 @@ $app->forgetInstance('cache.store');
 echo app(App\Services\ManagedCacheControlService::class)->recordInterest(App\Models\CachedContentFile::findOrFail($argv[1]), App\Models\MediaServerIntegration::findOrFail($argv[2]), $argv[3], 'episode:concurrent', '1080p', 'profile-a')->id;
 PHP;
         foreach ([1, 2] as $worker) {
-            $process = new Process([PHP_BINARY, '-r', $code, (string) $file->id, (string) $integration->id, $mapping, config('cache.prefix')], base_path(), ['DB_CONNECTION' => config('database.default')]);
+            $process = new Process([PHP_BINARY, '-r', $code, (string) $file->id, (string) $integration->id, $mapping, config('cache.prefix')], base_path(), [
+                'DB_CONNECTION' => config('database.default'),
+                'TEST_DB_DATABASE' => $connection->getDatabaseName(),
+                'DB_DATABASE' => $connection->getDatabaseName(),
+            ]);
             $process->setTimeout(15);
             $process->start();
             $workers[] = $process;

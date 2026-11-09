@@ -43,6 +43,8 @@ PHP;
             $process = new Process([PHP_BINARY, '-r', $code, $payload], base_path(), [
                 'APP_ENV' => 'testing',
                 'DB_CONNECTION' => config('database.default'),
+                'TEST_DB_DATABASE' => $connection->getDatabaseName(),
+                'DB_DATABASE' => $connection->getDatabaseName(),
                 'CACHE_STORE' => 'redis',
             ]);
             $process->setTimeout(15);
