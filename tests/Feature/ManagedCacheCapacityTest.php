@@ -93,6 +93,49 @@ it('returns a fresh opaque Xtream account snapshot for configured channels and e
     Http::assertSentCount(2);
 });
 
+it('memoizes responses only for the same provider account including negative responses', function (array $firstResponse, int $status, ?int $firstLive, int $secondLive): void {
+    $channels = [];
+    foreach (['one.example', 'two.example'] as $host) {
+        $playlist = new Playlist([
+            'xtream' => true,
+            'xtream_config' => ['url' => 'https://'.$host, 'username' => 'shared-user', 'password' => 'synthetic-secret'],
+        ]);
+        $channel = new Channel(['url' => 'https://'.$host.'/movie/shared-user/synthetic-secret/1']);
+        $channel->setRelation('playlist', $playlist);
+        $channels[] = $channel;
+    }
+    Http::fake([
+        'https://one.example/player_api.php*' => Http::response($firstResponse, $status),
+        'https://two.example/player_api.php*' => Http::response([
+            'user_info' => ['auth' => 1, 'max_connections' => 3, 'active_cons' => $secondLive],
+        ]),
+    ]);
+    $source = app(XtreamManagedCacheCapacitySnapshotSource::class);
+    $capacity = app(ManagedCacheCapacityService::class);
+    foreach ([$channels[0], clone $channels[0]] as $channel) {
+        expect($source->snapshotFor($channel)?->live)->toBe($firstLive);
+    }
+    Http::assertSentCount(1);
+    foreach ([$channels[1], clone $channels[1]] as $channel) {
+        $snapshot = $source->snapshotFor($channel);
+        expect($snapshot?->live)->toBe($secondLive)
+            ->and($capacity->availability($snapshot?->limit, $snapshot?->live, $snapshot?->background))
+            ->toBe($secondLive === 0 ? CacheDispatchResult::Queued : CacheDispatchResult::Deferred);
+    }
+    Http::assertSentCount(2);
+
+    $channels[1]->url_custom = 'https://foreign.example/movie/shared-user/synthetic-secret/1';
+    expect($source->snapshotFor($channels[1]))->toBeNull();
+    Http::assertSentCount(2);
+    $channels[1]->url_custom = null;
+    expect(app(XtreamManagedCacheCapacitySnapshotSource::class)->snapshotFor($channels[1])?->live)->toBe($secondLive);
+    Http::assertSentCount(3);
+})->with([
+    'independent positive counters' => [['user_info' => ['auth' => 1, 'max_connections' => 3, 'active_cons' => 0]], 200, 0, 3],
+    'invalid account response' => [['user_info' => ['auth' => 0]], 200, null, 0],
+    'provider failure' => [[], 503, null, 0],
+]);
+
 it('shares an Xtream account group when one playlist adds a fallback URL', function () {
     $config = [
         'url' => 'https://provider.test',

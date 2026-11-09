@@ -35,7 +35,7 @@ final class XtreamManagedCacheCapacitySnapshotSource implements ManagedCacheCapa
             return null;
         }
 
-        $snapshotKey = $this->groups->for($this->accountOrigin(), $username."\n".$password);
+        $snapshotKey = $this->groups->for('xtream-response', json_encode([$server, $username, $password], JSON_THROW_ON_ERROR));
         if (array_key_exists($snapshotKey, $this->accountResponses)) {
             $response = $this->accountResponses[$snapshotKey];
         } else {

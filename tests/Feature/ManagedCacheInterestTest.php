@@ -7,7 +7,6 @@ use App\Services\ManagedCacheControlService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -49,15 +48,14 @@ PHP;
         }
         $deadline = microtime(true) + 8;
         do {
-            $probe = Cache::lock("managed-cache:file:{$file->id}:activity", 10);
-            $held = ! $probe->get();
-            if ($held) {
+            DB::select('select pg_stat_clear_snapshot()');
+            $waiting = (int) DB::selectOne("select count(*) as count from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and wait_event_type = 'Lock' and query like '%cached_content_files%'")->count;
+            if ($waiting === 2) {
                 break;
             }
-            $probe->release();
             usleep(20000);
-        } while (microtime(true) < $deadline && $workers[0]->isRunning());
-        expect($held)->toBeTrue();
+        } while (microtime(true) < $deadline && $workers[0]->isRunning() && $workers[1]->isRunning());
+        expect($waiting)->toBe(2, implode("\n", array_map(fn (Process $process): string => $process->getOutput().$process->getErrorOutput(), $workers)));
         $connection->commit();
         foreach ($workers as $process) {
             $process->wait();
@@ -79,6 +77,84 @@ PHP;
         $connection->beginTransaction();
     }
 });
+
+it('allows repeated batch targets while concurrent interest retries await the outer transaction', function (bool $commit): void {
+    if (DB::getDriverName() !== 'pgsql' || env('MANAGED_CACHE_REDIS_INTEGRATION') !== '1') {
+        $this->markTestSkipped('Requires isolated PostgreSQL and Redis services.');
+    }
+    Http::preventStrayRequests();
+    config(['cache.default' => 'redis', 'cache.prefix' => 'interest-batch-'.Str::uuid().':']);
+    app()->forgetInstance('cache.store');
+    $file = CachedContentFile::factory()->completed()->create();
+    $integration = MediaServerIntegration::factory()->create(['user_id' => $file->user_id]);
+    $mapping = (string) Str::uuid();
+    $connection = DB::connection();
+    $connection->commit();
+    $worker = null;
+
+    try {
+        $connection->beginTransaction();
+        $control = app(ManagedCacheControlService::class);
+        $first = $control->recordInterest($file, $integration, $mapping, 'episode:batch', '1080p', 'profile-a');
+        $code = <<<'PHP'
+require 'vendor/autoload.php';
+$app = require 'bootstrap/app.php';
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+config(['cache.default' => 'redis', 'cache.prefix' => $argv[4]]);
+$app->forgetInstance('cache.store');
+echo app(App\Services\ManagedCacheControlService::class)->recordInterest(App\Models\CachedContentFile::findOrFail($argv[1]), App\Models\MediaServerIntegration::findOrFail($argv[2]), $argv[3], 'episode:batch', '1080p', 'profile-a')->id;
+PHP;
+        $worker = new Process([PHP_BINARY, '-r', $code, (string) $file->id, (string) $integration->id, $mapping, config('cache.prefix')], base_path(), [
+            'APP_ENV' => 'testing',
+            'DB_CONNECTION' => config('database.default'),
+            'TEST_DB_DATABASE' => $connection->getDatabaseName(),
+            'DB_DATABASE' => $connection->getDatabaseName(),
+        ]);
+        $worker->setTimeout(15);
+        $worker->start();
+        $deadline = microtime(true) + 8;
+        do {
+            DB::select('select pg_stat_clear_snapshot()');
+            $waiting = (int) DB::selectOne("select count(*) as count from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and wait_event_type = 'Lock' and query like '%cached_content_files%'")->count;
+            if ($waiting === 1) {
+                break;
+            }
+            usleep(20000);
+        } while (microtime(true) < $deadline && $worker->isRunning());
+        expect($waiting)->toBe(1, $worker->getErrorOutput());
+
+        $retry = $control->recordInterest($file, $integration, $mapping, 'episode:batch', '1080p', 'profile-a');
+        $variant = $control->recordInterest($file, $integration, $mapping, 'episode:batch', '720p', 'profile-a');
+        expect($retry->id)->toBe($first->id)
+            ->and($variant->id)->not->toBe($first->id)
+            ->and($worker->isRunning())->toBeTrue();
+        if ($commit) {
+            $connection->commit();
+        } else {
+            $connection->rollBack();
+        }
+        $worker->wait();
+        expect($worker->getErrorOutput())->toBe('')
+            ->and($worker->isSuccessful())->toBeTrue()
+            ->and(ManagedCacheInterest::where('cached_content_file_id', $file->id)->count())->toBe($commit ? 2 : 1);
+        if ($commit) {
+            expect($worker->getOutput())->toBe((string) $first->id);
+        } else {
+            expect(ManagedCacheInterest::find($first->id))->toBeNull()
+                ->and(ManagedCacheInterest::find($variant->id))->toBeNull();
+        }
+    } finally {
+        while ($connection->transactionLevel() > 0) {
+            $connection->rollBack();
+        }
+        if ($worker?->isRunning()) {
+            $worker->stop();
+        }
+        $file->delete();
+        $integration->user->delete();
+        $connection->beginTransaction();
+    }
+})->with(['commit' => true, 'rollback' => false]);
 
 uses(RefreshDatabase::class);
 

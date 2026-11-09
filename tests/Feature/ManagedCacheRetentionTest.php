@@ -106,7 +106,8 @@ it('does not report a stale deleted file as successfully kept', function () {
     $file = makeManagedFile($this->playlist);
     CachedContentFile::query()->whereKey($file->id)->delete();
 
-    expect($file->keep())->toBeFalse();
+    expect($file->keep())->toBeFalse()
+        ->and(app(CachedContentRetentionService::class)->deleteManagedFileIfReleasable($file))->toBeFalse();
 });
 
 it('sets release_after when cohort is complete and watched', function () {

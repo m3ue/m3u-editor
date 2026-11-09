@@ -295,21 +295,29 @@ class CachedContentActivityService
      */
     private function withActivityLock(array $target, ?CachedContentFile $file, callable $callback): mixed
     {
-        $key = $this->activityLockKey($target, $file);
+        return DB::transaction(function () use ($target, $file, $callback): mixed {
+            // Claim the row before Redis on every file path: outer batches keep
+            // row locks until commit, including between repeated file targets.
+            if ($file !== null && $file->exists) {
+                CachedContentFile::query()->whereKey($file->id)->lockForUpdate()->first();
+            }
 
-        try {
-            $lock = Cache::lock($key, self::LOCK_TIMEOUT_SECONDS);
+            $key = $this->activityLockKey($target, $file);
 
-            return $lock->block(self::LOCK_WAIT_SECONDS, $callback);
-        } catch (LockTimeoutException) {
-            Log::warning('Managed cache activity lock timeout', [
-                'key' => $key,
-                'mapping_uuid' => $target['mapping_uuid'],
-                'canonical_id' => $target['canonical_id'],
-            ]);
+            try {
+                $lock = Cache::lock($key, self::LOCK_TIMEOUT_SECONDS);
 
-            throw new \RuntimeException('Managed cache activity lock unavailable');
-        }
+                return $lock->block(self::LOCK_WAIT_SECONDS, $callback);
+            } catch (LockTimeoutException) {
+                Log::warning('Managed cache activity lock timeout', [
+                    'key' => $key,
+                    'mapping_uuid' => $target['mapping_uuid'],
+                    'canonical_id' => $target['canonical_id'],
+                ]);
+
+                throw new \RuntimeException('Managed cache activity lock unavailable');
+            }
+        });
     }
 
     /**
