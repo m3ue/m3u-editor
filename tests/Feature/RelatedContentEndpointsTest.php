@@ -3,6 +3,7 @@
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Season;
 use App\Models\Series;
@@ -230,6 +231,79 @@ it('emits related in get_series_info for recommendations matching the library', 
         'cover' => 'https://image.tmdb.org/t/p/w500/bcs.jpg',
         'tmdb_id' => 60059,
     ]);
+});
+
+it('emits related in get_series_info and get_vod_info for alias credentials', function () {
+    // An alias resolves series() through the playlists table, so unqualified
+    // id/enabled columns in the related lookup were ambiguous (SQLSTATE 42702).
+    PlaylistAlias::create([
+        'name' => 'Related Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'username' => 'related_alias_user',
+        'password' => 'related_alias_pass',
+    ]);
+
+    $matchedSeries = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'name' => 'Better Call Saul',
+        'tmdb_id' => 60059,
+        'cover' => 'https://image.tmdb.org/t/p/w500/bcs.jpg',
+    ]);
+
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'name' => 'Breaking Bad',
+        'tmdb_id' => 1396,
+        'metadata' => [
+            'related_tmdb' => [
+                ['tmdb_id' => 60059, 'title' => 'Better Call Saul', 'poster_url' => null, 'media_type' => 'tv'],
+            ],
+        ],
+        'last_modified' => now(),
+    ]);
+
+    Season::factory()->create([
+        'series_id' => $series->id,
+        'season_number' => 1,
+        'episode_count' => 7,
+    ]);
+
+    $group = Group::factory()->for($this->user)->create();
+    $matchedMovie = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Pulp Fiction',
+        'title_custom' => 'Pulp Fiction',
+        'tmdb_id' => 680,
+    ]);
+    $movie = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'name' => 'Inception',
+        'last_metadata_fetch' => now(),
+        'info' => [
+            'related_tmdb' => [
+                ['tmdb_id' => 680, 'title' => 'Pulp Fiction', 'poster_url' => null, 'media_type' => 'movie'],
+                ['tmdb_id' => 60059, 'title' => 'Better Call Saul', 'poster_url' => null, 'media_type' => 'tv'],
+            ],
+        ],
+    ]);
+
+    $this->getJson(xtreamRelatedUrl('related_alias_user', 'related_alias_pass', 'get_series_info', ['series_id' => $series->id]))
+        ->assertOk()
+        ->assertJsonCount(1, 'info.related')
+        ->assertJsonPath('info.related.0.id', $matchedSeries->id)
+        ->assertJsonPath('info.related.0.type', 'series');
+
+    $this->getJson(xtreamRelatedUrl('related_alias_user', 'related_alias_pass', 'get_vod_info', ['vod_id' => $movie->id]))
+        ->assertOk()
+        ->assertJsonCount(2, 'info.related')
+        ->assertJsonPath('info.related.0.id', $matchedMovie->id)
+        ->assertJsonPath('info.related.1.id', $matchedSeries->id);
 });
 
 it('omits related in get_series_info when series metadata has no related_tmdb', function () {
