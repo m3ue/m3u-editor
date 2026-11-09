@@ -3,6 +3,7 @@
 use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\Series;
 use App\Models\User;
@@ -165,4 +166,40 @@ it('marks credits present in the caller playlist as in_library with a local_id, 
         ->and($credits[550]['local_id'])->toBe($channel->id)
         ->and($credits[42]['in_library'])->toBeFalse()
         ->and($credits[42]['local_id'])->toBeNull();
+});
+
+it('marks series credits as in_library for alias credentials', function () {
+    // An alias resolves series() through the playlists table, so an unqualified
+    // id column in the library lookup was ambiguous (SQLSTATE 42702).
+    PlaylistAlias::create([
+        'name' => 'Filmography Alias',
+        'uuid' => fake()->uuid(),
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'username' => 'filmography_alias_user',
+        'password' => 'filmography_alias_pass',
+    ]);
+
+    Http::fake([
+        'api.themoviedb.org/3/person/*' => Http::sequence()
+            ->push(['name' => 'Test Actor', 'profile_path' => null, 'biography' => null], 200)
+            ->push(['cast' => [
+                ['id' => 1399, 'media_type' => 'tv', 'name' => 'GoT', 'character' => 'X', 'first_air_date' => '2011-04-17', 'poster_path' => null],
+                ['id' => 550, 'media_type' => 'movie', 'title' => 'Fight Club', 'character' => 'Y', 'release_date' => '1999-10-15', 'poster_path' => null],
+            ]], 200),
+    ]);
+
+    $group = Group::factory()->for($this->user)->create();
+    $series = Series::factory()->for($this->user)->for($this->playlist, 'playlist')->create(['enabled' => true, 'tmdb_id' => 1399]);
+    $channel = Channel::factory()->for($this->playlist)->for($group)->create(['is_vod' => true, 'enabled' => true, 'tmdb_id' => 550]);
+
+    $response = $this->getJson(actorFilmographyUrl('filmography_alias_user', 'filmography_alias_pass', ['person_id' => 123]));
+
+    $response->assertOk();
+    $credits = collect($response->json('credits'))->keyBy('tmdb_id');
+
+    expect($credits[1399]['in_library'])->toBeTrue()
+        ->and($credits[1399]['local_id'])->toBe($series->id)
+        ->and($credits[550]['in_library'])->toBeTrue()
+        ->and($credits[550]['local_id'])->toBe($channel->id);
 });

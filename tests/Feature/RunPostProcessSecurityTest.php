@@ -8,6 +8,9 @@
  *    written without form validation (e.g. Copilot create/edit tools).
  *  - Webhook redirects are held to the same private network guard as the
  *    webhook URL itself.
+ *  - The IP each webhook hop actually connects to is checked too, so a host
+ *    that passes the name check and then resolves elsewhere (DNS rebinding,
+ *    public A + loopback AAAA) can't reach a private address.
  *  - A local script's exit status, not its stderr, decides success.
  */
 
@@ -19,10 +22,13 @@ use App\Models\PostProcess;
 use App\Models\PostProcessLog;
 use App\Models\User;
 use App\Settings\GeneralSettings;
+use App\Support\PrivateNetworkGuard;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -235,6 +241,66 @@ it('follows webhook redirects to private addresses when private webhook URLs are
         'local' => 'url',
         'path' => 'http://198.51.100.1/hook',
         'post' => false,
+    ]);
+
+    expect($log->status)->toBe('success')
+        ->and($log->message)->toBe('lan webhook ok');
+});
+
+it('aborts a webhook connection whose connected peer is a private address', function () {
+    // Stands in for a rebinding host: the name resolves to loopback at
+    // connect time. The socket accepts the TCP connection (backlog), so
+    // only the connect-time guard stands between cURL and the request.
+    $server = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
+    expect($server)->not->toBeFalse();
+    $port = (int) substr(strrchr(stream_socket_get_name($server, false), ':'), 1);
+
+    Log::spy();
+
+    try {
+        expect(fn () => Http::withOptions(PrivateNetworkGuard::connectGuardOptions())
+            ->timeout(5)
+            ->post("http://localhost:{$port}/hook"))
+            ->toThrow(ConnectionException::class, 'pre-request callback');
+    } finally {
+        fclose($server);
+    }
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'PrivateNetworkGuard')
+            && $context['ip'] === '127.0.0.1'
+            && $context['port'] === $port)
+        ->once();
+});
+
+it('rejects private and reserved connected peers and allows public ones', function (string $ip, bool $allowed) {
+    $handle = curl_init();
+
+    expect(PrivateNetworkGuard::connectedPeerGuard($handle, $ip, '192.0.2.10', 443, 50000))
+        ->toBe($allowed ? CURL_PREREQFUNC_OK : CURL_PREREQFUNC_ABORT);
+})->with([
+    'IPv4 loopback' => ['127.0.0.1', false],
+    'cloud metadata' => ['169.254.169.254', false],
+    'RFC1918' => ['10.0.0.5', false],
+    'IPv6 loopback' => ['::1', false],
+    'IPv4-mapped loopback' => ['::ffff:127.0.0.1', false],
+    'IPv6 unique local' => ['fd00::1', false],
+    'public IPv4' => ['104.20.23.154', true],
+    'public IPv6' => ['2606:4700::1', true],
+]);
+
+it('checks the connected peer on webhook requests only while private webhook URLs are blocked', function () {
+    expect(PrivateNetworkGuard::connectGuardOptions()['curl'])->toHaveKey(CURLOPT_PREREQFUNCTION);
+
+    config(['proxy.allow_private_webhook_urls' => true]);
+
+    Http::preventStrayRequests();
+    Http::fake(['http://127.0.0.1/*' => Http::response('lan webhook ok', 200)]);
+
+    $log = runPostProcessFor(User::factory()->create(), [
+        'local' => 'url',
+        'path' => 'http://127.0.0.1/hook',
+        'post' => true,
     ]);
 
     expect($log->status)->toBe('success')

@@ -3,10 +3,12 @@
 namespace App\Support;
 
 use Closure;
+use CurlHandle;
 use GuzzleHttp\Psr7\UriResolver;
 use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -182,15 +184,20 @@ class PrivateNetworkGuard
     }
 
     /**
-     * Guzzle options that keep the HTTP client's own redirect handling
-     * (POST downgraded to GET on 302/303, Authorization dropped on
-     * cross-origin hops) but refuse to follow a hop to a non-http(s) or
-     * private destination. For requests get() can't make (POST, custom
-     * bodies). Later hops are re-checked but not IP-pinned.
+     * Guzzle options for requests get() can't make (POST, custom bodies).
+     * They keep the HTTP client's own redirect handling (POST downgraded
+     * to GET on 302/303, Authorization dropped on cross-origin hops) but:
+     *  - refuse to follow a hop to a non-http(s) or private destination
+     *    (fails fast with a readable error), and
+     *  - check the IP cURL actually connected to, on every hop, before
+     *    the request is sent (CURLOPT_PREREQFUNCTION). This is what
+     *    closes DNS rebinding and dual-stack tricks (public A record,
+     *    loopback AAAA record): a hostname check alone resolves the name
+     *    separately from the connect.
      *
-     * @return array{allow_redirects: array{on_redirect: Closure}}
+     * @return array{allow_redirects: array{on_redirect: Closure}, curl: array<int, Closure>}
      */
-    public static function redirectGuardOptions(): array
+    public static function connectGuardOptions(): array
     {
         return [
             'allow_redirects' => [
@@ -198,6 +205,28 @@ class PrivateNetworkGuard
                     self::assertUrlSafe((string) $uri);
                 },
             ],
+            'curl' => [
+                CURLOPT_PREREQFUNCTION => self::connectedPeerGuard(...),
+            ],
         ];
+    }
+
+    /**
+     * CURLOPT_PREREQFUNCTION callback: runs after the connection is made
+     * and before the request is sent. Aborts (cURL error 42) when the
+     * connected peer is a private/reserved address.
+     */
+    public static function connectedPeerGuard(CurlHandle $handle, string $primaryIp, string $localIp, int $primaryPort, int $localPort): int
+    {
+        if (! self::ipIsPrivate($primaryIp)) {
+            return CURL_PREREQFUNC_OK;
+        }
+
+        Log::warning('PrivateNetworkGuard blocked a connection to a private/reserved address', [
+            'ip' => $primaryIp,
+            'port' => $primaryPort,
+        ]);
+
+        return CURL_PREREQFUNC_ABORT;
     }
 }
