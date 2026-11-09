@@ -2628,7 +2628,7 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
+     * @return array{preserved_primary_url?: string, poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
@@ -2675,7 +2675,7 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int}
+     * @return array{preserved_primary_url?: string, poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int}
      */
     private function epgProgrammeArtwork(array $programme, $playlist): array
     {

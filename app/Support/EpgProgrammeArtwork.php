@@ -29,9 +29,21 @@ class EpgProgrammeArtwork
     public static function preservedPrimaryDimensions(array $programme): array
     {
         $url = self::preservedPrimary($programme);
+
+        return $url === null ? [0, 0] : (self::urlGeometry($programme['images'] ?? null, $url) ?? [0, 0]);
+    }
+
+    /**
+     * The single geometry the images declare for one URL: [0, 0] when none
+     * declares any, null when entries for that URL disagree.
+     *
+     * @return array{0: int, 1: int}|null
+     */
+    public static function urlGeometry(mixed $images, string $url): ?array
+    {
         $dimensions = [0, 0];
-        foreach (self::validImages($programme['images'] ?? null) as $image) {
-            if ($url === null || $image['url'] !== $url) {
+        foreach (is_array($images) ? $images : [] as $image) {
+            if (! is_array($image) || trim((string) ($image['url'] ?? '')) !== $url) {
                 continue;
             }
             $width = (int) ($image['width'] ?? 0);
@@ -40,7 +52,7 @@ class EpgProgrammeArtwork
                 continue;
             }
             if ($dimensions !== [0, 0] && $dimensions !== [$width, $height]) {
-                return [0, 0];
+                return null;
             }
             $dimensions = [$width, $height];
         }

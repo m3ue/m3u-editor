@@ -25,7 +25,7 @@ class EpgArtworkTransportTest extends TestCase
         self::assertSame($url, $payload['preserved_primary_url'] ?? null);
         self::assertArrayNotHasKey('poster_url', $payload);
         self::assertSame($url, $payload['still_url']);
-        self::assertStringContainsString('<?m3ue-preserved-primary?>'.PHP_EOL.'    <icon src="'.$url.'"/>', $this->exportArtwork($programme));
+        self::assertStringContainsString('<?m3ue-preserved-primary?>'.PHP_EOL.'    <icon src="'.$url.'" width="1920" height="1080"/>', $this->exportArtwork($programme));
         self::assertSame(1, substr_count($this->exportArtwork($programme), '<?m3ue-preserved-primary?>'));
         foreach (['', 'https://example.com/other.jpg', 'file:///private/image.jpg'] as $binding) {
             $programme['preserved_primary_url'] = $binding;
@@ -59,13 +59,26 @@ class EpgArtworkTransportTest extends TestCase
         ], $programme['images'][0] ?? null);
 
         $xml = $this->exportArtwork($programme);
-        self::assertStringContainsString('width="500" height="750"', $xml);
+        self::assertStringContainsString('<icon src="https://example.com/poster.jpg" width="500" height="750"/>', $xml);
+        self::assertSame(1, substr_count($xml, '<icon '));
         self::assertStringContainsString('<image type="poster" size="3" orient="P">https://example.com/poster.jpg</image>', $xml);
         $roundtrip = $this->importArtwork('<programme>'.$xml.'</programme>');
         $poster = EpgProgrammeArtwork::poster($roundtrip['images']);
         self::assertSame($programme['icon'], $poster['url']);
         self::assertSame(500, $poster['width']);
         self::assertSame(750, $poster['height']);
+    }
+
+    public function test_primary_icon_keeps_every_entry_when_same_url_geometry_conflicts(): void
+    {
+        $url = 'https://example.com/primary.jpg';
+        $xml = $this->exportArtwork(['icon' => $url, 'images' => [
+            ['url' => $url, 'width' => 1920, 'height' => 1080],
+            ['url' => $url, 'width' => 640, 'height' => 360],
+        ]]);
+
+        self::assertStringContainsString('<icon src="'.$url.'"/>', $xml);
+        self::assertSame(3, substr_count($xml, '<icon '));
     }
 
     public function test_xmltv_keeps_larger_stills_separate_from_the_typed_backdrop(): void

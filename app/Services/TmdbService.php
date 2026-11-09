@@ -83,20 +83,26 @@ class TmdbService
     }
 
     /**
+     * Candidate fields returned for each TMDB search endpoint.
+     *
+     * @var array<string, list<string>>
+     */
+    private const SEARCH_FIELDS = [
+        'movie' => ['title', 'original_title', 'release_date', 'overview'],
+        'tv' => ['name', 'original_name', 'first_air_date', 'overview'],
+    ];
+
+    /** @var array<string, string> */
+    private const SEARCH_YEAR_PARAMS = ['movie' => 'year', 'tv' => 'first_air_date_year'];
+
+    /**
      * Search for bounded movie candidates without loading related resources.
      *
      * @return list<array{tmdb_id: int, title: mixed, original_title: mixed, release_date: mixed, overview: mixed}>
      */
     public function searchMovieCandidates(string $title, ?int $year = null, int $limit = 5): array
     {
-        return $this->searchCandidates(
-            'movie',
-            $title,
-            $year,
-            $limit,
-            ['title', 'original_title', 'release_date', 'overview'],
-            'year',
-        );
+        return $this->searchCandidates('movie', $title, $year, $limit);
     }
 
     /**
@@ -106,28 +112,14 @@ class TmdbService
      */
     public function searchTvSeriesCandidates(string $name, ?int $year = null, int $limit = 5): array
     {
-        return $this->searchCandidates(
-            'tv',
-            $name,
-            $year,
-            $limit,
-            ['name', 'original_name', 'first_air_date', 'overview'],
-            'first_air_date_year',
-        );
+        return $this->searchCandidates('tv', $name, $year, $limit);
     }
 
     /**
-     * @param  list<string>  $fields
      * @return list<array<string, mixed>>
      */
-    private function searchCandidates(
-        string $mediaType,
-        string $query,
-        ?int $year,
-        int $limit,
-        array $fields,
-        string $yearKey,
-    ): array {
+    private function searchCandidates(string $mediaType, string $query, ?int $year, int $limit): array
+    {
         if (! $this->isConfigured()) {
             return [];
         }
@@ -140,41 +132,17 @@ class TmdbService
         $limit = max(1, min(10, $limit));
 
         try {
-            $this->waitForRateLimit();
-
-            $params = [
-                'api_key' => $this->apiKey,
-                'query' => $normalizedQuery,
-                'language' => $this->language,
-                'include_adult' => false,
-            ];
-            if ($year !== null) {
-                $params[$yearKey] = $year;
-            }
-
-            $response = Http::timeout(15)->get(self::BASE_URL."/search/{$mediaType}", $params);
-            if (! $response->successful()) {
-                return [];
-            }
-
-            $results = $response->json('results', []);
+            $payload = $this->requestSearchPage($mediaType, $this->searchParams($mediaType, $normalizedQuery, $year));
+            $results = is_array($payload) ? ($payload['results'] ?? []) : [];
             if (! is_array($results) || ! array_is_list($results)) {
                 return [];
             }
 
             $candidates = [];
             foreach (array_slice($results, 0, $limit) as $result) {
-                if (! is_array($result) || ! is_int($result['id'] ?? null) || $result['id'] < 1) {
+                $candidate = $this->searchCandidate($mediaType, $result);
+                if ($candidate === null) {
                     return [];
-                }
-
-                $candidate = ['tmdb_id' => $result['id']];
-                foreach ($fields as $field) {
-                    if (! array_key_exists($field, $result)
-                        || ($result[$field] !== null && ! is_scalar($result[$field]))) {
-                        return [];
-                    }
-                    $candidate[$field] = $result[$field];
                 }
                 $candidates[] = $candidate;
             }
@@ -194,7 +162,7 @@ class TmdbService
     public function searchIdentityCandidates(string $mediaType, string $title, ?int $year = null, int $maxPages = 4): array
     {
         $error = ['status' => 'error', 'candidates' => []];
-        if (! $this->isConfigured() || ! in_array($mediaType, ['tv', 'movie'], true)) {
+        if (! $this->isConfigured() || ! isset(self::SEARCH_FIELDS[$mediaType])) {
             return $error;
         }
         // Preserve meaningful year tokens and full compound titles. The older
@@ -205,28 +173,15 @@ class TmdbService
             return $error;
         }
         $maxPages = max(1, min(4, $maxPages));
-        $fields = $mediaType === 'tv'
-            ? ['name', 'original_name', 'first_air_date', 'overview']
-            : ['title', 'original_title', 'release_date', 'overview'];
+        [$titleField, $originalTitleField] = self::SEARCH_FIELDS[$mediaType];
         $candidates = [];
         $totalPages = null;
         $totalResults = null;
         try {
             for ($page = 1; $page <= $maxPages; $page++) {
-                $params = ['api_key' => $this->apiKey, 'query' => $query, 'language' => $this->language, 'include_adult' => false, 'page' => $page];
-                if ($year !== null) {
-                    $params[$mediaType === 'tv' ? 'first_air_date_year' : 'year'] = $year;
-                }
+                $params = $this->searchParams($mediaType, $query, $year, $page);
                 $cacheKey = 'tmdb_identity_page_v1_'.hash('sha256', json_encode([$mediaType, $params], JSON_THROW_ON_ERROR));
-                $payload = Cache::get($cacheKey);
-                if ($payload === null) {
-                    $this->waitForRateLimit();
-                    $response = Http::timeout(15)->get(self::BASE_URL."/search/{$mediaType}", $params);
-                    if (! $response->successful()) {
-                        return $error;
-                    }
-                    $payload = $response->json();
-                }
+                $payload = Cache::get($cacheKey) ?? $this->requestSearchPage($mediaType, $params);
                 if (! is_array($payload) || ($payload['page'] ?? null) !== $page
                     || ! is_int($payload['total_pages'] ?? null) || $payload['total_pages'] < 0
                     || ! is_int($payload['total_results'] ?? null) || $payload['total_results'] < 0
@@ -241,20 +196,12 @@ class TmdbService
                 $totalPages = $payload['total_pages'];
                 $totalResults = $payload['total_results'];
                 foreach ($payload['results'] as $result) {
-                    if (! is_array($result) || ! is_int($result['id'] ?? null) || $result['id'] <= 0) {
+                    $candidate = $this->searchCandidate($mediaType, $result);
+                    if ($candidate === null
+                        || (trim((string) $candidate[$titleField]) === '' && trim((string) $candidate[$originalTitleField]) === '')) {
                         return $error;
                     }
-                    $candidate = ['tmdb_id' => $result['id']];
-                    foreach ($fields as $field) {
-                        if (! array_key_exists($field, $result) || ($result[$field] !== null && ! is_string($result[$field]))) {
-                            return $error;
-                        }
-                        $candidate[$field] = $result[$field];
-                    }
-                    if (trim((string) $candidate[$fields[0]]) === '' && trim((string) $candidate[$fields[1]]) === '') {
-                        return $error;
-                    }
-                    $candidates[$result['id']] ??= $candidate;
+                    $candidates[$candidate['tmdb_id']] ??= $candidate;
                 }
                 Cache::put($cacheKey, $payload, 3600);
                 if ($page >= $totalPages) {
@@ -266,6 +213,68 @@ class TmdbService
         }
 
         return ['status' => 'incomplete', 'candidates' => array_values($candidates)];
+    }
+
+    /**
+     * Query parameters for one TMDB search request. The page is only sent
+     * when the caller pages through results.
+     *
+     * @return array<string, mixed>
+     */
+    private function searchParams(string $mediaType, string $query, ?int $year, ?int $page = null): array
+    {
+        $params = [
+            'api_key' => $this->apiKey,
+            'query' => $query,
+            'language' => $this->language,
+            'include_adult' => false,
+        ];
+        if ($page !== null) {
+            $params['page'] = $page;
+        }
+        if ($year !== null) {
+            $params[self::SEARCH_YEAR_PARAMS[$mediaType]] = $year;
+        }
+
+        return $params;
+    }
+
+    /**
+     * One rate-limited TMDB search request: the decoded body, or null when
+     * TMDB did not answer successfully.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function requestSearchPage(string $mediaType, array $params): mixed
+    {
+        $this->waitForRateLimit();
+        $response = Http::timeout(15)->get(self::BASE_URL."/search/{$mediaType}", $params);
+
+        return $response->successful() ? $response->json() : null;
+    }
+
+    /**
+     * One search result reduced to its TMDB id and the endpoint's candidate
+     * fields, or null when the result is malformed.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function searchCandidate(string $mediaType, mixed $result): ?array
+    {
+        if (! is_array($result) || ! is_int($result['id'] ?? null) || $result['id'] < 1) {
+            return null;
+        }
+
+        $candidate = ['tmdb_id' => $result['id']];
+        foreach (self::SEARCH_FIELDS[$mediaType] as $field) {
+            if (! array_key_exists($field, $result)
+                || ($result[$field] !== null && ! is_scalar($result[$field]))) {
+                return null;
+            }
+            $candidate[$field] = $result[$field];
+        }
+
+        return $candidate;
     }
 
     /** @return array{status: string, titles: list<array{title: string, iso_3166_1: string}>} */
@@ -280,11 +289,9 @@ class TmdbService
             return $cached;
         }
         try {
-            $this->waitForRateLimit();
-            $response = Http::timeout(15)->get(self::BASE_URL."/{$mediaType}/{$tmdbId}/alternative_titles", ['api_key' => $this->apiKey]);
-            $payload = $response->json();
+            $payload = $this->requestAlternativeTitles($mediaType, $tmdbId);
             $field = $mediaType === 'tv' ? 'results' : 'titles';
-            if (! $response->successful() || ! is_array($payload) || ($payload['id'] ?? null) !== $tmdbId
+            if (! is_array($payload) || ($payload['id'] ?? null) !== $tmdbId
                 || ! is_array($payload[$field] ?? null) || ! array_is_list($payload[$field]) || count($payload[$field]) > 200) {
                 return $error;
             }
@@ -1522,29 +1529,7 @@ class TmdbService
         $cacheKey = "tmdb_tv_alt_titles_{$tmdbId}";
 
         // Cache alternative titles for 24 hours
-        return Cache::remember($cacheKey, 86400, function () use ($tmdbId) {
-            $this->waitForRateLimit();
-
-            try {
-                $response = Http::timeout(15)->get(
-                    self::BASE_URL."/tv/{$tmdbId}/alternative_titles",
-                    ['api_key' => $this->apiKey]
-                );
-
-                if ($response->successful()) {
-                    $data = $response->json();
-
-                    return $data['results'] ?? [];
-                }
-            } catch (\Exception $e) {
-                Log::error('TMDB get TV alternative titles error', [
-                    'tmdb_id' => $tmdbId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-
-            return [];
-        });
+        return Cache::remember($cacheKey, 86400, fn () => $this->requestAlternativeTitles('tv', $tmdbId)['results'] ?? []);
     }
 
     /**
@@ -1559,29 +1544,32 @@ class TmdbService
         $cacheKey = "tmdb_movie_alt_titles_{$tmdbId}";
 
         // Cache alternative titles for 24 hours
-        return Cache::remember($cacheKey, 86400, function () use ($tmdbId) {
-            $this->waitForRateLimit();
+        return Cache::remember($cacheKey, 86400, fn () => $this->requestAlternativeTitles('movie', $tmdbId)['titles'] ?? []);
+    }
 
-            try {
-                $response = Http::timeout(15)->get(
-                    self::BASE_URL."/movie/{$tmdbId}/alternative_titles",
-                    ['api_key' => $this->apiKey]
-                );
+    /**
+     * One rate-limited, uncached alternative-titles request: the decoded
+     * body, or null when TMDB did not answer successfully.
+     */
+    private function requestAlternativeTitles(string $mediaType, int $tmdbId): mixed
+    {
+        $this->waitForRateLimit();
 
-                if ($response->successful()) {
-                    $data = $response->json();
+        try {
+            $response = Http::timeout(15)->get(
+                self::BASE_URL."/{$mediaType}/{$tmdbId}/alternative_titles",
+                ['api_key' => $this->apiKey]
+            );
 
-                    return $data['titles'] ?? [];
-                }
-            } catch (\Exception $e) {
-                Log::error('TMDB get movie alternative titles error', [
-                    'tmdb_id' => $tmdbId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            return $response->successful() ? $response->json() : null;
+        } catch (\Exception $e) {
+            Log::error($mediaType === 'tv' ? 'TMDB get TV alternative titles error' : 'TMDB get movie alternative titles error', [
+                'tmdb_id' => $tmdbId,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
-            return [];
-        });
+        return null;
     }
 
     /**
