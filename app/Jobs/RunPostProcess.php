@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use InvalidArgumentException;
 use Symfony\Component\Process\Process as SymfonyProcess;
 
 class RunPostProcess implements ShouldQueue
@@ -161,11 +162,13 @@ class RunPostProcess implements ShouldQueue
                     throw new Exception("Webhook URL '{$url}' resolves to a private or reserved address and cannot be used.");
                 }
 
-                // Redirects get the same check as $url, otherwise a public
-                // host could 302 the webhook onto a private address.
+                // The check above fails fast with a readable error, but it
+                // resolves the host separately from the connect. These
+                // options also check the IP each hop actually connects to,
+                // so DNS rebinding or a 302 can't reach a private address.
                 $redirectOptions = config('proxy.allow_private_webhook_urls', false)
                     ? []
-                    : PrivateNetworkGuard::redirectGuardOptions();
+                    : PrivateNetworkGuard::connectGuardOptions();
                 $jsonBody = (bool) ($metadata['json_body'] ?? false);
                 $noBody = (bool) ($metadata['no_body'] ?? false);
                 $queryVars = [];
@@ -376,14 +379,13 @@ class RunPostProcess implements ShouldQueue
             return false;
         }
 
-        $host = parse_url($url, PHP_URL_HOST);
-        if (! $host) {
+        try {
+            PrivateNetworkGuard::assertUrlSafe($url);
+        } catch (InvalidArgumentException) {
             return true;
         }
 
-        $ip = gethostbyname($host);
-
-        return PrivateNetworkGuard::ipIsPrivate($ip);
+        return false;
     }
 
     /**
