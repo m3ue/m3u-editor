@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Prunable;
@@ -18,6 +19,7 @@ class DeviceAuthorization extends Model
         'user_code',
         'status',
         'playlist_auth_id',
+        'playlist_auth_ids',
         'approved_by_user_id',
         'approved_ip',
         'requested_ip',
@@ -30,6 +32,7 @@ class DeviceAuthorization extends Model
 
     protected $casts = [
         'playlist_auth_id' => 'integer',
+        'playlist_auth_ids' => 'array',
         'approved_by_user_id' => 'integer',
         'poll_attempts' => 'integer',
         'interval_seconds' => 'integer',
@@ -53,6 +56,31 @@ class DeviceAuthorization extends Model
     public function playlistAuth(): BelongsTo
     {
         return $this->belongsTo(PlaylistAuth::class);
+    }
+
+    /**
+     * Every credential granted to the device, primary first, in the order the
+     * admin set. Pairings approved before multiple credentials were allowed
+     * only carry the single playlist_auth_id. Credentials deleted since the
+     * approval are skipped.
+     *
+     * @return Collection<int, PlaylistAuth>
+     */
+    public function grantedPlaylistAuths(): Collection
+    {
+        $ids = collect($this->playlist_auth_ids ?: [$this->playlist_auth_id])
+            ->filter()
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return new Collection;
+        }
+
+        $auths = PlaylistAuth::whereIn('id', $ids)->get()->keyBy('id');
+
+        return new Collection($ids->map(fn (int $id): ?PlaylistAuth => $auths->get($id))->filter()->values()->all());
     }
 
     public function approvedBy(): BelongsTo

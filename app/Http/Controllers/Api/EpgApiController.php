@@ -446,7 +446,7 @@ class EpgApiController extends Controller
                         'display_name' => $dummyTitle,
                         'display_title' => $channel->display_title,
                         'title' => $channel->name_custom ?? $channel->name,
-                        'raw_title' => $channel->title,
+                        'raw_title' => $channel->title_custom ?? $channel->title,
                         'aed_profile_id' => $aedProfileId,
                         'icon' => $icon,
                         'channel_number' => $channelNo,

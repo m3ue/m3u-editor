@@ -328,12 +328,55 @@ it('clears a profile\'s cached EPG only when its games change', function () {
 
     Storage::fake('local');
     Storage::disk('local')->put($cachePath, '<tv/>');
-    $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
+    $this->artisan('app:refresh-sports-aed-epg --now')->assertSuccessful();
     expect(Storage::disk('local')->exists($cachePath))->toBeFalse();
 
     Storage::disk('local')->put($cachePath, '<tv/>');
-    $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
+    $this->artisan('app:refresh-sports-aed-epg --now')->assertSuccessful();
     expect(Storage::disk('local')->exists($cachePath))->toBeTrue();
+});
+
+it('only queues the scheduled refresh, so schedule:run never waits on a provider', function () {
+    enableSportsAed();
+    fakeSportsAedEspn();
+    $user = User::factory()->create();
+    $profile = sportsAedProfile($user);
+    AedProfile::factory()->for($user)->create();
+
+    $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
+
+    Http::assertNothingSent();
+    $job = Queue::pushed(RefreshSportsAedProfile::class)->sole();
+    expect($job->profileId)->toBe($profile->id)->and($job->force)->toBeFalse();
+});
+
+it('matches a renamed channel by its custom title in the Xtream guide, as xmltv does', function () {
+    enableSportsAed();
+    fakeSportsAedEspn();
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create();
+    $auth = PlaylistAuth::create(['name' => 'TV', 'username' => 'sports-renamed', 'password' => 'secret', 'enabled' => true, 'user_id' => $user->id]);
+    $playlist->playlistAuths()->attach($auth->id);
+    $profile = sportsAedProfile($user, ['override' => true, 'sports_league_ids' => ['hockey/nhl']]);
+    $channel = Channel::factory()->for($user)->for($playlist)->create([
+        'enabled' => true,
+        'group_id' => null,
+        'title' => 'Provider event 53',
+        'title_custom' => 'ESPN+ 53: Utah Mammoth vs. Toronto Maple Leafs @ Nov 03 7:00PM ET',
+        'aed_profile_id' => $profile->id,
+    ]);
+    warmSportsAed($profile);
+
+    $listings = $this->getJson(route('xtream.api.player').'?'.http_build_query([
+        'username' => 'sports-renamed',
+        'password' => 'secret',
+        'action' => 'get_epg_batch',
+        'stream_ids' => (string) $channel->id,
+        'date' => '2026-11-03',
+    ]))->assertOk()->json("{$channel->id}.epg_listings");
+
+    expect(collect($listings)->map(fn (array $listing): string => base64_decode($listing['title'])))
+        ->toContain('Utah Mammoth at Toronto Maple Leafs');
 });
 
 it('refreshes a profile\'s games from ESPN on demand, at most every couple of minutes', function () {
@@ -353,7 +396,7 @@ it('refreshes a profile\'s games from ESPN on demand, at most every couple of mi
     Storage::fake('local');
 
     // Warm, with nothing changed since: the scheduled refresh keeps the file
-    $this->artisan('app:refresh-sports-aed-epg')->assertSuccessful();
+    $this->artisan('app:refresh-sports-aed-epg --now')->assertSuccessful();
     Storage::disk('local')->put($cachePath, '<tv/>');
     $sent = count(Http::recorded());
 

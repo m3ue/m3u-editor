@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Traits\HasPlaylistScopedDisplayLabels;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\JoinClause;
 
 class SourceCategory extends Model
 {
@@ -18,8 +19,10 @@ class SourceCategory extends Model
 
     /**
      * Resolve display labels for the given source category IDs across one playlist
-     * or a list of them. With $includePlaylistName the source playlist is appended
-     * so same-named categories from different sources can be told apart.
+     * or a list of them, showing the imported category's custom name alongside the
+     * provider's when it has been renamed. With $includePlaylistName the source
+     * playlist is appended so same-named categories from different sources can be
+     * told apart.
      *
      * @param  int|array<int>|null  $playlistIds
      * @param  array<int|string>  $ids
@@ -34,9 +37,13 @@ class SourceCategory extends Model
         }
 
         $rows = static::query()
+            ->leftJoin('categories', function (JoinClause $join): void {
+                $join->on('categories.name_internal', '=', 'source_categories.name')
+                    ->on('categories.playlist_id', '=', 'source_categories.playlist_id');
+            })
             ->whereIn('source_categories.playlist_id', $playlistIds)
             ->whereIn('source_categories.id', $ids)
-            ->selectRaw('source_categories.id as id, source_categories.name as label')
+            ->selectRaw('source_categories.id as id, source_categories.name as provider_name, categories.name as custom_name')
             ->when($includePlaylistName, fn ($query) => self::selectPlaylistName($query, 'source_categories'))
             ->get();
 

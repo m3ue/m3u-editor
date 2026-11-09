@@ -26,23 +26,44 @@
             @if (count($this->gameGroups['live']) > 0)
                 {{-- Scores change while a game is on; nothing else here does --}}
                 <div wire:poll.30s.visible>
-                    <h2 class="mb-3 text-base font-semibold text-gray-950 dark:text-white">{{ __('Live Now') }}</h2>
-                    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        @foreach ($this->gameGroups['live'] as $game)
-                            @include('filament.pages.sports-games.card', ['game' => $game, 'showLeague' => true])
-                        @endforeach
-                    </div>
+                    <x-filament::section :heading="__('Live Now')">
+                        <x-slot name="afterHeader">
+                            <x-filament::badge color="gray">
+                                {{ trans_choice('{1} :count game|[2,*] :count games', count($this->gameGroups['live']), ['count' => count($this->gameGroups['live'])]) }}
+                            </x-filament::badge>
+                        </x-slot>
+
+                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            @foreach ($this->gameGroups['live'] as $game)
+                                @include('filament.pages.sports-games.card', ['game' => $game, 'showLeague' => true])
+                            @endforeach
+                        </div>
+                    </x-filament::section>
                 </div>
             @endif
 
             @foreach ($this->gameGroups['leagues'] as $group)
                 <div wire:key="sports-league-{{ $loop->index }}-{{ $group['name'] }}">
-                    <h2 class="mb-3 text-base font-semibold text-gray-950 dark:text-white">{{ $group['name'] }}</h2>
-                    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        @foreach ($group['games'] as $game)
-                            @include('filament.pages.sports-games.card', ['game' => $game, 'showLeague' => false])
-                        @endforeach
-                    </div>
+                    <x-filament::section>
+                        <x-slot name="heading">
+                            <span class="flex items-center gap-2">
+                                @include('filament.pages.sports-games.league-logo', ['url' => $group['logo'], 'class' => 'h-6 w-6'])
+                                {{ $group['name'] }}
+                            </span>
+                        </x-slot>
+
+                        <x-slot name="afterHeader">
+                            <x-filament::badge color="gray">
+                                {{ trans_choice('{1} :count game|[2,*] :count games', count($group['games']), ['count' => count($group['games'])]) }}
+                            </x-filament::badge>
+                        </x-slot>
+
+                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            @foreach ($group['games'] as $game)
+                                @include('filament.pages.sports-games.card', ['game' => $game, 'showLeague' => false])
+                            @endforeach
+                        </div>
+                    </x-filament::section>
                 </div>
             @endforeach
         @endif

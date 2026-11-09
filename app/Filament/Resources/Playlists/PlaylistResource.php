@@ -1734,17 +1734,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->modalSubmitActionLabel(__('Clear'))
                                 )
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
-                                ->getOptionLabelsUsing(function (array $values, $record): array {
-                                    // Values are IDs, return id => name pairs
-                                    // Need to filter out strings (names) that may exist from previous storage format
-                                    $values = array_filter($values, fn ($value) => is_numeric($value));
-
-                                    return SourceGroup::where('playlist_id', $record?->id)
-                                        ->where('type', 'live')
-                                        ->whereIn('id', $values)
-                                        ->pluck('name', 'id')  // id => name
-                                        ->toArray();
-                                })
+                                ->getOptionLabelsUsing(fn (array $values, $record): array => SourceGroup::displayLabelsForIds($record?->id, 'live', $values))
                                 ->afterStateHydrated(function ($component, $state, $record) {
                                     // Convert names to IDs for display when loading existing data
                                     if (is_array($state) && ! empty($state)) {
@@ -1829,17 +1819,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->modalSubmitActionLabel(__('Clear'))
                                 )
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
-                                ->getOptionLabelsUsing(function (array $values, $record): array {
-                                    // Values are IDs, return id => name pairs
-                                    // Need to filter out strings (names) that may exist from previous storage format
-                                    $values = array_filter($values, fn ($value) => is_numeric($value));
-
-                                    return SourceGroup::where('playlist_id', $record?->id)
-                                        ->where('type', 'vod')
-                                        ->whereIn('id', $values)
-                                        ->pluck('name', 'id')  // id => name
-                                        ->toArray();
-                                })
+                                ->getOptionLabelsUsing(fn (array $values, $record): array => SourceGroup::displayLabelsForIds($record?->id, 'vod', $values))
                                 ->afterStateHydrated(function ($component, $state, $record) {
                                     // Convert names to IDs for display when loading existing data
                                     if (is_array($state) && ! empty($state)) {
@@ -1923,16 +1903,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                         ->modalSubmitActionLabel(__('Clear'))
                                 )
                                 ->getOptionLabelFromRecordUsing(fn ($record) => $record->name)
-                                ->getOptionLabelsUsing(function (array $values, $record): array {
-                                    // Values are IDs, return id => name pairs
-                                    // Need to filter out strings (names) that may exist from previous storage format
-                                    $values = array_filter($values, fn ($value) => is_numeric($value));
-
-                                    return SourceCategory::where('playlist_id', $record?->id)
-                                        ->whereIn('id', $values)
-                                        ->pluck('name', 'id')  // id => name
-                                        ->toArray();
-                                })
+                                ->getOptionLabelsUsing(fn (array $values, $record): array => SourceCategory::displayLabelsForIds($record?->id, $values))
                                 ->afterStateHydrated(function ($component, $state, $record) {
                                     // Convert names to IDs for display when loading existing data
                                     if (is_array($state) && ! empty($state)) {

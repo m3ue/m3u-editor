@@ -8,6 +8,7 @@ use App\Models\Channel;
 use App\Models\Playlist;
 use App\Models\User;
 use App\Services\Sports\SportsGameDisplay;
+use App\Services\Sports\SportsService;
 use App\Settings\GeneralSettings;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\TableSelect\Livewire\TableSelectLivewireComponent;
@@ -303,15 +304,92 @@ it('moves between days from the date field', function () {
         ->assertSet('day', '2026-11-02');
 });
 
-it('says when it is still finding channels', function () {
+it('splits the day by league, each under its logo', function () {
+    sportsPageEnable();
+    sportsPageFakeEspn('pre', 'STATUS_SCHEDULED');
+
+    Livewire::test(SportsGames::class)
+        ->call('loadGames')
+        ->assertDontSee('Live Now')
+        ->assertSeeInOrder(['NHL', '1 game', 'Utah Mammoth'])
+        ->assertSee(SportsService::proxiedLogo('https://a.espncdn.com/i/teamlogos/leagues/500-dark/nhl.png'));
+});
+
+it('names each live game\'s league with its logo', function () {
     sportsPageEnable();
     sportsPageFakeEspn();
 
     Livewire::test(SportsGames::class)
         ->call('loadGames')
+        ->assertSeeInOrder(['Live Now', '1 game', 'NHL', 'Utah Mammoth'])
+        ->assertSee(SportsService::proxiedLogo('https://a.espncdn.com/i/teamlogos/leagues/500-dark/nhl.png'));
+});
+
+it('offers Today only away from today', function () {
+    sportsPageEnable();
+    sportsPageFakeEspn();
+    $today = TestAction::make('today')->schemaComponent('day', schema: 'filtersForm');
+
+    Livewire::test(SportsGames::class)
+        ->assertDontSeeHtml('>Today<')
+        ->call('shiftDay', 1)
+        ->assertActionVisible($today)
+        ->assertSeeHtml('>Today<')
+        ->callAction($today)
+        ->assertSet('day', '2026-11-03')
+        ->assertDontSeeHtml('>Today<');
+});
+
+it('ties the rematch action to channel matching', function () {
+    sportsPageEnable();
+    sportsPageFakeEspn();
+    $second = Playlist::factory()->for($this->user)->create(['name' => 'Beta']);
+    $rematch = TestAction::make('rematchChannels')->schemaComponent('playlistId', schema: 'filtersForm');
+
+    $page = Livewire::test(SportsGames::class)->assertDontSee('Finding channels')->assertDontSee('Rematch channels');
+
+    $page->call('loadGames')
         ->assertSee('Finding channels')
+        ->assertActionDisabled($rematch)
         ->call('loadChannels')
-        ->assertDontSee('Finding channels');
+        ->assertDontSee('Finding channels')
+        ->assertSee('Rematch channels')
+        ->assertActionEnabled($rematch)
+        ->assertSeeHtml('wire:target="loadChannels,playlistId,day,leagueIds"')
+        ->set('playlistId', $second->id)
+        ->assertSet('channelsLoaded', false)
+        ->assertSee('Finding channels')
+        ->assertActionDisabled($rematch);
+});
+
+it('rematches on demand instead of reading the last run', function () {
+    sportsPageEnable();
+    sportsPageFakeEspn();
+    $rematch = TestAction::make('rematchChannels')->schemaComponent('playlistId', schema: 'filtersForm');
+
+    $page = Livewire::test(SportsGames::class)
+        ->call('loadGames')
+        ->call('loadChannels')
+        ->assertSee('No channel');
+
+    // Added since that run, so only a fresh match can find it
+    sportsPageMatchingChannel($this->user, $this->playlist);
+    $page->call('$refresh')->assertSee('No channel');
+
+    $page->callAction($rematch)
+        ->assertSet('channelsLoaded', false)
+        ->call('loadChannels')
+        ->assertSee('1 channel');
+});
+
+it('has nothing to rematch on a day of finished games', function () {
+    sportsPageEnable();
+    sportsPageFakeEspn('post', 'STATUS_FINAL');
+
+    Livewire::test(SportsGames::class)
+        ->call('loadGames')
+        ->call('loadChannels')
+        ->assertDontSee('Rematch channels');
 });
 
 it('stays within the date range', function () {
@@ -366,6 +444,7 @@ it('shows a game\'s details in a slide-over and plays its channel', function () 
         ->mountAction('gameDetails', ['league' => 'hockey/nhl', 'fixture' => '401'])
         ->assertActionMounted('gameDetails')
         ->assertMountedActionModalSee(['Team stats', 'Shots', 'Scotiabank Arena', 'On Your Channels', $channel->title])
+        ->assertMountedActionModalSeeHtml('wire:click="playChannel('.$channel->id.')"')
         ->call('playChannel', $channel->id)
         ->assertDispatched('openFloatingStream');
 });

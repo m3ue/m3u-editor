@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Traits\RestoresProviderNameWhenCleared;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,7 +14,7 @@ use InvalidArgumentException;
 
 class Category extends Model
 {
-    use HasFactory;
+    use HasFactory, RestoresProviderNameWhenCleared;
 
     protected static function booted(): void
     {
@@ -66,6 +67,15 @@ class Category extends Model
     public function isSortOrderLockedToProvider(): bool
     {
         return (bool) $this->playlist?->auto_sort_categories;
+    }
+
+    /**
+     * Categories whose sort order is not locked to the provider (see isSortOrderLockedToProvider()).
+     * Used to limit drag reordering to rows the next sync will not renumber.
+     */
+    public function scopeSortOrderUnlocked(Builder $query): Builder
+    {
+        return $query->whereHas('playlist', fn (Builder $playlistQuery) => $playlistQuery->where('auto_sort_categories', false));
     }
 
     public function playlist(): BelongsTo

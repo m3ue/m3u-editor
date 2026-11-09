@@ -139,6 +139,44 @@ it('hands back the assigned credential once and consumes the code', function () 
     $second->assertOk()->assertJson(['status' => 'pending']);
 });
 
+it('hands back every granted credential in order, primary first', function () {
+    $user = User::factory()->create();
+    $kids = PlaylistAuth::factory()->for($user)->create(['name' => 'Kids', 'username' => 'kids', 'password' => 'k-pass']);
+    $living = PlaylistAuth::factory()->for($user)->create(['name' => 'Living Room', 'username' => 'living', 'password' => 'l-pass']);
+    $deleted = PlaylistAuth::factory()->for($user)->create();
+    $deviceAuth = DeviceAuthorization::factory()->approved()->create([
+        'playlist_auth_id' => $kids->id,
+        'playlist_auth_ids' => [$kids->id, $deleted->id, $living->id],
+    ]);
+    $deleted->delete();
+
+    $response = $this->postJson('/api/device/token', ['device_code' => $deviceAuth->device_code]);
+
+    $response->assertOk()->assertJson([
+        'status' => 'approved',
+        'username' => 'kids',
+        'password' => 'k-pass',
+        'playlists' => [
+            ['name' => 'Kids', 'username' => 'kids', 'password' => 'k-pass'],
+            ['name' => 'Living Room', 'username' => 'living', 'password' => 'l-pass'],
+        ],
+    ]);
+    expect($response->json('playlists'))->toHaveCount(2);
+});
+
+it('lists the single credential of a pairing approved before ordering existed', function () {
+    $user = User::factory()->create();
+    $auth = PlaylistAuth::factory()->for($user)->create(['name' => 'Only', 'username' => 'only', 'password' => 'o-pass']);
+    $deviceAuth = DeviceAuthorization::factory()->approved()->create(['playlist_auth_id' => $auth->id]);
+
+    $this->postJson('/api/device/token', ['device_code' => $deviceAuth->device_code])
+        ->assertOk()
+        ->assertJson([
+            'username' => 'only',
+            'playlists' => [['name' => 'Only', 'username' => 'only', 'password' => 'o-pass']],
+        ]);
+});
+
 it('returns 404 for polling when device pairing is disabled', function () {
     $this->freezeSecond();
     $deviceAuth = DeviceAuthorization::factory()->approved()->create(['last_polled_at' => now()]);

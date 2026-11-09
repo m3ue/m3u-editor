@@ -105,6 +105,12 @@ class XtreamApiController extends Controller
     /** `get_sports_channels` matches against the guide, so it serves about a day at a time. */
     private const int SPORTS_CHANNELS_MAX_RANGE_SECONDS = 2 * 86400;
 
+    /**
+     * Longest `leagues` list, in characters: room for every league of every
+     * provider. Clients send a long one in a POST body, where no URL limit applies.
+     */
+    private const int SPORTS_LEAGUES_MAX_LENGTH = 32000;
+
     /** A team's follow key: "{sport}/{league}:{team id}". */
     private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9._-]+):([A-Za-z0-9-]+)$/';
 
@@ -1264,6 +1270,7 @@ class XtreamApiController extends Controller
                 'backdrop_path' => $backdropPaths,
                 'tmdb' => (string) $tmdb,
                 'tmdb_id' => (int) ($tmdb ?: 0),
+                'imdb_id' => (string) ($seriesItem->getMovieDbIds()['imdb'] ?? ''),
                 'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                 'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
                 'category_id' => (string) ($seriesItem->category?->effective_id ?? $seriesItem->category_id ?? 'all'),
@@ -1777,6 +1784,7 @@ class XtreamApiController extends Controller
             $defaultInfo = [
                 'kinopoisk_url' => $info['kinopoisk_url'] ?? '',
                 'tmdb_id' => $channel->getTmdbId() ?? 0,
+                'imdb_id' => (string) ($channel->getImdbId() ?? ''),
                 // Same title_custom/title precedence get_vod_streams uses, so a renamed
                 // title is reflected here too - o_name intentionally stays untouched,
                 // it's the original provider name.
@@ -2322,7 +2330,7 @@ class XtreamApiController extends Controller
         $sports = app(SportsService::class);
 
         $validator = Validator::make($request->all(), [
-            'leagues' => ['required', 'string', 'max:2000'],
+            'leagues' => ['required', 'string', 'max:'.self::SPORTS_LEAGUES_MAX_LENGTH],
             'from' => ['required', 'integer', 'min:0'],
             'to' => ['required', 'integer', 'gt:from'],
         ]);
@@ -2350,7 +2358,7 @@ class XtreamApiController extends Controller
     private function sportsChannels(Request $request, $playlist): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'leagues' => ['required', 'string', 'max:2000'],
+            'leagues' => ['required', 'string', 'max:'.self::SPORTS_LEAGUES_MAX_LENGTH],
             'from' => ['required', 'integer', 'min:0'],
             'to' => ['required', 'integer', 'gt:from', 'max:'.((int) $request->input('from') + self::SPORTS_CHANNELS_MAX_RANGE_SECONDS)],
         ]);
@@ -2846,7 +2854,7 @@ class XtreamApiController extends Controller
 
             $days = (int) ($profile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5);
             $programmes = [];
-            foreach ($extractor->programmes($profile, (string) $channel->title, $windowStart, $windowEnd, $days) ?? [] as $programme) {
+            foreach ($extractor->programmes($profile, (string) ($channel->title_custom ?? $channel->title), $windowStart, $windowEnd, $days) ?? [] as $programme) {
                 $programmes[] = [
                     'id' => 'aed-'.md5($channel->id.'-'.$programme['start']->timestamp),
                     'start' => $programme['start']->toISOString(),
@@ -3071,7 +3079,7 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{poster_url?: string, backdrop_url?: string, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
+     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
@@ -3112,22 +3120,30 @@ class XtreamApiController extends Controller
 
     /**
      * Role-specific programme artwork for Xtream EPG listings: a portrait
-     * `poster_url` and a landscape `backdrop_url`, each only when the cached
-     * images actually contain one (see {@see EpgProgrammeArtwork}).
+     * poster, landscape backdrop and declared still, each only when the cached
+     * images actually contain one (see {@see EpgProgrammeArtwork}). Dimensions
+     * come from the selected image, never from its role or orientation.
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{poster_url?: string, backdrop_url?: string}
+     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int}
      */
     private function epgProgrammeArtwork(array $programme, $playlist): array
     {
         $artwork = [];
         $images = $programme['images'] ?? null;
-        if ($poster = EpgProgrammeArtwork::poster($images)) {
+        if ($poster = EpgProgrammeArtwork::poster($images, $programme['icon'] ?? null)) {
             $artwork['poster_url'] = $this->epgProgrammeImageUrl(trim($poster['url']), $playlist);
+            $artwork['poster_width'] = (int) ($poster['width'] ?? 0);
+            $artwork['poster_height'] = (int) ($poster['height'] ?? 0);
         }
         if ($backdrop = EpgProgrammeArtwork::backdrop($images)) {
             $artwork['backdrop_url'] = $this->epgProgrammeImageUrl(trim($backdrop['url']), $playlist);
+        }
+        if ($still = EpgProgrammeArtwork::still($images)) {
+            $artwork['still_url'] = $this->epgProgrammeImageUrl(trim($still['url']), $playlist);
+            $artwork['still_width'] = (int) ($still['width'] ?? 0);
+            $artwork['still_height'] = (int) ($still['height'] ?? 0);
         }
 
         return $artwork;
@@ -4703,7 +4719,11 @@ class XtreamApiController extends Controller
         $query = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->with(['channel', 'dvrSetting', 'recordingRule'])
-            ->orderByDesc('scheduled_start');
+            ->orderByDesc('scheduled_start')
+            // Tie-breaker so limit/offset pages stay stable when recordings
+            // share a start time (a series rule can schedule several airings
+            // at once); without it a row can repeat or be skipped across pages.
+            ->orderByDesc('id');
 
         if ($status) {
             $statusEnum = DvrRecordingStatus::tryFrom($status);

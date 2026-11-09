@@ -8,6 +8,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Models\User;
 use App\Services\EpgProgrammeStore;
+use App\Services\EspnSportsService;
 use App\Services\Sports\SportsChannelMatcher;
 use App\Settings\GeneralSettings;
 use Carbon\CarbonImmutable;
@@ -140,6 +141,19 @@ it('stays behind the sports setting and validates its range', function () {
     sportsChannelsRequest($this, ['to' => CarbonImmutable::parse('2026-11-06 07:00:00')->timestamp])
         ->assertStatus(422)
         ->assertJsonPath('fields', ['to']);
+});
+
+it('takes every league at once in a POST body', function () {
+    sportsChannelsEnable();
+    sportsChannelsFakeProvider();
+    $leagues = implode(',', array_column(EspnSportsService::leagues(), 'id'));
+    expect(strlen($leagues))->toBeGreaterThan(2000);
+
+    $this->postJson(route('xtream.api.player', ['action' => 'get_sports_channels', 'username' => 'sports_channels', 'password' => 'secret']), [
+        'leagues' => $leagues,
+        'from' => CarbonImmutable::parse('2026-11-03 07:00:00')->timestamp,
+        'to' => CarbonImmutable::parse('2026-11-04 07:00:00')->timestamp,
+    ])->assertOk();
 });
 
 it('advertises the action with the sports feature', function () {

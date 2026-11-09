@@ -115,7 +115,17 @@ class SportsGames extends Page
                     ->options(fn (): array => $this->userPlaylists()->all())
                     ->selectablePlaceholder(false)
                     ->native(false)
-                    ->hint(fn (): ?string => $this->gamesLoaded && ! $this->channelsLoaded && count($this->games) > 0 ? __('Finding channels') : null)
+                    ->hintAction(
+                        Action::make('rematchChannels')
+                            ->label(fn (): string => $this->channelsLoaded ? __('Rematch channels') : __('Finding channels'))
+                            ->icon('heroicon-m-arrow-path')
+                            ->color('gray')
+                            ->visible(fn (): bool => $this->hasWatchableGames())
+                            ->disabled(fn (): bool => ! $this->channelsLoaded)
+                            // Spins for any matching, not only what this button started
+                            ->livewireTarget('loadChannels,playlistId,day,leagueIds')
+                            ->action(fn () => $this->rematchChannels()),
+                    )
                     ->live(),
                 DatePicker::make('day')
                     ->label(__('Date'))
@@ -132,17 +142,20 @@ class SportsGames extends Page
                             ->action(fn () => $this->shiftDay(-1)),
                     ])
                     ->suffixActions([
-                        Action::make('today')
-                            ->label(__('Today'))
-                            ->icon('heroicon-m-calendar')
-                            ->color('gray')
-                            ->action(fn () => $this->goToToday()),
                         Action::make('nextDay')
                             ->label(__('Next day'))
                             ->icon('heroicon-m-chevron-right')
                             ->color('gray')
                             ->action(fn () => $this->shiftDay(1)),
                     ])
+                    ->hintAction(
+                        Action::make('today')
+                            ->label(__('Today'))
+                            ->icon('heroicon-m-calendar')
+                            ->color('gray')
+                            ->visible(fn (): bool => ! $this->dayStart()->equalTo($this->today()))
+                            ->action(fn () => $this->goToToday()),
+                    )
                     ->live(),
                 ModalTableSelect::make('leagueIds')
                     ->label(__('Leagues'))
@@ -284,7 +297,7 @@ class SportsGames extends Page
     /**
      * Games under way, then the rest under their league, in the catalogue's order.
      *
-     * @return array{live: list<array<string, mixed>>, leagues: list<array{name: string, games: list<array<string, mixed>>}>}
+     * @return array{live: list<array<string, mixed>>, leagues: list<array{name: string, logo: string|null, games: list<array<string, mixed>>}>}
      */
     #[Computed]
     public function gameGroups(): array
@@ -302,7 +315,11 @@ class SportsGames extends Page
         $leagues = [];
         foreach ($this->servedLeagues() as $league) {
             if (isset($byLeague[$league['id']])) {
-                $leagues[] = ['name' => $league['name'], 'games' => $byLeague[$league['id']]];
+                $leagues[] = [
+                    'name' => $league['name'],
+                    'logo' => $byLeague[$league['id']][0]['league_logo'] ?? null,
+                    'games' => $byLeague[$league['id']],
+                ];
             }
         }
 
@@ -323,6 +340,30 @@ class SportsGames extends Page
     public function hasLeagues(): bool
     {
         return $this->requestedLeagueIds() !== [];
+    }
+
+    /**
+     * Finished games show no channels, so a day of only those has nothing to match.
+     */
+    private function hasWatchableGames(): bool
+    {
+        return $this->gamesLoaded && collect($this->games)->contains(fn (array $game): bool => SportsGameDisplay::isWatchable($game));
+    }
+
+    /**
+     * Matches again rather than reading the last run, for channels or guide
+     * data that changed since.
+     */
+    private function rematchChannels(): void
+    {
+        $playlist = $this->playlist();
+        if ($playlist === null) {
+            return;
+        }
+
+        $from = $this->dayStart();
+        app(SportsChannelMatcher::class)->forget($playlist, $this->requestedLeagueIds(), $from->utc(), $from->addDay()->utc());
+        $this->askForChannels();
     }
 
     /**
