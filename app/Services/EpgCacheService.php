@@ -291,21 +291,26 @@ class EpgCacheService
                 if ($reader->depth !== 1) {
                     break;
                 }
-                if (! $programme['icon']) {
-                    $programme['icon'] = trim($reader->getAttribute('src') ?: '');
-                } else {
-                    $imageUrl = trim($reader->getAttribute('src') ?: '');
-                    if ($imageUrl) {
-                        // No role or orientation is assumed when the source omits it.
-                        $programme['images'][] = [
-                            'url' => $imageUrl,
-                            'type' => strtolower(trim($reader->getAttribute('type') ?: '')),
-                            'width' => (int) ($reader->getAttribute('width') ?: 0),
-                            'height' => (int) ($reader->getAttribute('height') ?: 0),
-                            'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
-                            'size' => (int) ($reader->getAttribute('size') ?: 0),
-                        ];
-                    }
+                $imageUrl = trim($reader->getAttribute('src') ?: '');
+                $firstIcon = ! $programme['icon'];
+                if ($firstIcon) {
+                    $programme['icon'] = $imageUrl;
+                }
+                $hasMetadata = $reader->getAttribute('type') !== null
+                    || $reader->getAttribute('orient') !== null
+                    || $reader->getAttribute('width') !== null
+                    || $reader->getAttribute('height') !== null
+                    || $reader->getAttribute('size') !== null;
+                if ($imageUrl && (! $firstIcon || $hasMetadata)) {
+                    // No role, orientation or geometry is assumed when the source omits it.
+                    $programme['images'][] = [
+                        'url' => $imageUrl,
+                        'type' => strtolower(trim($reader->getAttribute('type') ?: '')),
+                        'width' => (int) ($reader->getAttribute('width') ?: 0),
+                        'height' => (int) ($reader->getAttribute('height') ?: 0),
+                        'orient' => strtoupper(trim($reader->getAttribute('orient') ?: '')),
+                        'size' => (int) ($reader->getAttribute('size') ?: 0),
+                    ];
                 }
                 break;
             case 'image':
