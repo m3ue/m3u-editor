@@ -40,7 +40,7 @@ class EpgCacheEnrichmentService
     private const SQLITE_CANTOPEN = 14;
 
     /** @var list<string> */
-    private const STRING_FIELDS = ['title', 'subtitle', 'desc', 'category', 'episode_num', 'rating', 'icon', 'preserved_primary_url'];
+    private const STRING_FIELDS = ['title', 'subtitle', 'desc', 'category', 'episode_num', 'rating', 'icon'];
 
     /** @var list<string> */
     private const BOOLEAN_FIELDS = ['new', 'previously_shown', 'premiere'];
@@ -80,7 +80,6 @@ class EpgCacheEnrichmentService
 
             return [
                 'status' => 'ok',
-                'supported_fields' => ['preserved_primary_url'],
                 'programmes' => $programmes,
                 'next' => $hasMore ? array_key_last($page) : null,
             ];
@@ -210,7 +209,7 @@ class EpgCacheEnrichmentService
         foreach ($fields as $field => $value) {
             $valid = match (true) {
                 in_array($field, self::STRING_FIELDS, true) => $this->isBoundedString($value)
-                    && (! in_array($field, ['icon', 'preserved_primary_url'], true) || $value === '' || $this->isHttpUrl($value)),
+                    && ($field !== 'icon' || $value === '' || $this->isHttpUrl($value)),
                 in_array($field, self::BOOLEAN_FIELDS, true) => is_bool($value),
                 $field === 'production_year' => $value === null || is_int($value),
                 // Only the canonical shape the XMLTV parser itself stores.

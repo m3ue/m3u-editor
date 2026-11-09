@@ -874,9 +874,6 @@ class EpgGenerateController extends Controller
         $primaryUrl = trim((string) ($programme['icon'] ?? ''));
         $primaryGeometry = $primaryUrl !== '' ? EpgProgrammeArtwork::urlGeometry($images, $primaryUrl) : null;
         if ($programme['icon']) {
-            if (EpgProgrammeArtwork::preservedPrimary($programme) !== null) {
-                $icons .= '    <?m3ue-preserved-primary?>'.PHP_EOL;
-            }
             $primaryDimensions = $primaryGeometry !== null && $primaryGeometry !== [0, 0]
                 ? ' width="'.$primaryGeometry[0].'" height="'.$primaryGeometry[1].'"'
                 : '';

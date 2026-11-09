@@ -15,24 +15,6 @@ class EpgProgrammeArtwork
     /** Image roles allowed by the XMLTV DTD's <image type> attribute. */
     public const ROLES = ['poster', 'backdrop', 'still', 'person', 'character'];
 
-    /** The preservation decision applies only to the unchanged canonical scalar. */
-    public static function preservedPrimary(array $programme): ?string
-    {
-        $url = $programme['preserved_primary_url'] ?? null;
-
-        return is_string($url) && $url !== '' && $url === ($programme['icon'] ?? null)
-            && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
-            && filter_var($url, FILTER_VALIDATE_URL) !== false ? $url : null;
-    }
-
-    /** @return array{0: int, 1: int} */
-    public static function preservedPrimaryDimensions(array $programme): array
-    {
-        $url = self::preservedPrimary($programme);
-
-        return $url === null ? [0, 0] : (self::urlGeometry($programme['images'] ?? null, $url) ?? [0, 0]);
-    }
-
     /**
      * The single geometry the images declare for one URL: [0, 0] when none
      * declares any, null when entries for that URL disagree.

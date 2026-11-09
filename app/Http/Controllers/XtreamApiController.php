@@ -3079,7 +3079,7 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{preserved_primary_url?: string, poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
+     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int, icon?: string, category?: string, rating?: string, season?: int, episode?: int, is_new?: int, premiere?: int, previously_shown?: int, year?: int}
      */
     private function epgProgrammeDetails(array $programme, $playlist): array
     {
@@ -3126,14 +3126,11 @@ class XtreamApiController extends Controller
      *
      * @param  array<string, mixed>  $programme
      * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
-     * @return array{preserved_primary_url?: string, poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int}
+     * @return array{poster_url?: string, poster_width?: int, poster_height?: int, backdrop_url?: string, still_url?: string, still_width?: int, still_height?: int}
      */
     private function epgProgrammeArtwork(array $programme, $playlist): array
     {
         $artwork = [];
-        if ($preserved = EpgProgrammeArtwork::preservedPrimary($programme)) {
-            $artwork['preserved_primary_url'] = $this->epgProgrammeImageUrl($preserved, $playlist);
-        }
         $images = $programme['images'] ?? null;
         if ($poster = EpgProgrammeArtwork::poster($images, $programme['icon'] ?? null)) {
             $artwork['poster_url'] = $this->epgProgrammeImageUrl(trim($poster['url']), $playlist);
@@ -3147,14 +3144,6 @@ class XtreamApiController extends Controller
             $artwork['still_url'] = $this->epgProgrammeImageUrl(trim($still['url']), $playlist);
             $artwork['still_width'] = (int) ($still['width'] ?? 0);
             $artwork['still_height'] = (int) ($still['height'] ?? 0);
-        }
-
-        if (isset($artwork['preserved_primary_url'])) {
-            foreach (['poster', 'still'] as $role) {
-                if (($artwork[$role.'_url'] ?? null) === $artwork['preserved_primary_url']) {
-                    [$artwork[$role.'_width'], $artwork[$role.'_height']] = EpgProgrammeArtwork::preservedPrimaryDimensions($programme);
-                }
-            }
         }
 
         return $artwork;
