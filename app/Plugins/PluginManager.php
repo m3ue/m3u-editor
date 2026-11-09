@@ -3,6 +3,11 @@
 namespace App\Plugins;
 
 use App\Jobs\ExecutePluginInvocation;
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
+use App\Models\Playlist;
+use App\Models\PlaylistAlias;
+use App\Models\PlaylistAuth;
 use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Models\PluginRun;
@@ -14,6 +19,7 @@ use App\Plugins\Contracts\PluginSelectOptionsProviderInterface;
 use App\Plugins\Contracts\ScheduledPluginInterface;
 use App\Plugins\Support\PluginActionResult;
 use App\Plugins\Support\PluginExecutionContext;
+use App\Plugins\Support\PluginPlaylistQueryContext;
 use App\Plugins\Support\PluginSelectOptionsContext;
 use App\Plugins\Support\PluginUninstallContext;
 use App\Plugins\Support\PluginValidationResult;
@@ -30,6 +36,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use PharData;
 use RuntimeException;
@@ -660,6 +667,58 @@ class PluginManager
         }
 
         return $metadata['owner'].'/'.$metadata['repo'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public function queryForPlaylist(
+        string $pluginId,
+        string $query,
+        array $payload,
+        Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist,
+        ?PlaylistAuth $playlistAuth = null,
+    ): array {
+        abort_unless(config('plugins.enabled', true), 404);
+        $plugin = $this->findPluginById($pluginId);
+        abort_unless($plugin && $plugin->isInstalled() && $plugin->available, 404);
+
+        $plugin = $this->validate($plugin);
+        abort_unless($plugin->available, 404);
+        try {
+            $this->assertPluginLoadable($plugin, requireEnabled: true);
+            $this->assertPluginRunnable($plugin);
+        } catch (RuntimeException) {
+            abort(403);
+        }
+
+        try {
+            $instance = $this->resolvePluginInstance($plugin);
+            $supported = method_exists($instance, 'playlistQueryNames')
+                && is_callable([$instance, 'playlistQueryNames'])
+                && method_exists($instance, 'queryForPlaylist')
+                && is_callable([$instance, 'queryForPlaylist']);
+            $names = $supported ? $instance->playlistQueryNames() : [];
+        } catch (Throwable) {
+            throw new RuntimeException('Plugin query failed.');
+        }
+        abort_unless(is_array($names) && in_array($query, $names, true), 404);
+
+        try {
+            $result = $instance->queryForPlaylist($query, $payload, new PluginPlaylistQueryContext(
+                $playlist, $playlistAuth, $this->resolvedSettings($plugin),
+            ));
+            if (! is_array($result)) {
+                throw new RuntimeException('Invalid plugin query result.');
+            }
+
+            return $result;
+        } catch (ValidationException) {
+            abort(422);
+        } catch (Throwable) {
+            throw new RuntimeException('Plugin query failed.');
+        }
     }
 
     public function executeAction(

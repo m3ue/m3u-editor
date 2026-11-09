@@ -41,6 +41,7 @@ use App\Models\Series;
 use App\Models\StreamProfile;
 use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
+use App\Plugins\PluginManager;
 use App\Providers\VersionServiceProvider;
 use App\Services\AedExtractorService;
 use App\Services\AIOStreamsAuthorizationService;
@@ -80,6 +81,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 #[ApiGroup('Xtream API', 'Xtream Codes compatible player API, for IPTV players that speak the Xtream protocol.', weight: 90)]
 class XtreamApiController extends Controller
@@ -321,6 +323,22 @@ class XtreamApiController extends Controller
     public function handle(Request $request)
     {
         $action = (string) $request->input('action', 'panel');
+        if ($action === 'plugin_query') {
+            if (! $request->isMethod('post')) {
+                return response()->json(['error' => 'method_not_allowed'], 405)->header('Allow', 'POST');
+            }
+            $body = $request->getContent();
+            $bodySize = strlen($body !== '' ? $body : http_build_query($request->request->all()));
+            if ($bodySize > 131072 || (int) $request->header('Content-Length', '0') > 131072) {
+                return response()->json(['error' => 'query_too_large'], 413);
+            }
+            if (Validator::make($request->request->all(), [
+                'username' => ['required', 'string'],
+                'password' => ['required', 'string'],
+            ])->fails()) {
+                return response()->json(['error' => 'Unauthorized'], 401);
+            }
+        }
         if (in_array($action, self::REQUEST_ACTIONS, true)) {
             $credentialValidator = Validator::make($request->all(), [
                 'username' => ['required', 'string'],
@@ -357,6 +375,10 @@ class XtreamApiController extends Controller
                 })
                 ->first()
             : null;
+
+        if ($action === 'plugin_query') {
+            return $this->pluginQuery($request, $playlist, $playlistAuth);
+        }
 
         $urlSafePass = urlencode($password);
         $urlSafeUser = urlencode($username);
@@ -5771,6 +5793,52 @@ class XtreamApiController extends Controller
                 'fields' => $fields,
             ],
         ], 422);
+    }
+
+    private function pluginQuery(
+        Request $request,
+        Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist,
+        ?PlaylistAuth $playlistAuth,
+    ): JsonResponse {
+        $validator = Validator::make($request->request->all(), [
+            'plugin_id' => ['required', 'string', 'max:100', 'regex:/\\A[a-z0-9][a-z0-9-]*\\z/'],
+            'query' => ['required', 'string', 'max:100', 'regex:/\\A[A-Za-z0-9_][A-Za-z0-9_.-]*\\z/'],
+            'payload' => ['required', 'string', 'json'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'invalid_query'], 422);
+        }
+        $input = $validator->validated();
+        $payload = json_decode($input['payload'], true);
+        if (! is_array($payload)) {
+            return response()->json(['error' => 'invalid_query'], 422);
+        }
+
+        try {
+            $data = app(PluginManager::class)->queryForPlaylist(
+                $input['plugin_id'], $input['query'], $payload, $playlist, $playlistAuth,
+            );
+        } catch (HttpExceptionInterface $exception) {
+            return response()->json(['error' => 'plugin_query_rejected'], $exception->getStatusCode());
+        } catch (\Throwable) {
+            return response()->json(['error' => 'plugin_query_failed'], 500);
+        }
+
+        try {
+            $response = response()->json([
+                'api_version' => 1,
+                'plugin_id' => $input['plugin_id'],
+                'query' => $input['query'],
+                'data' => $data,
+            ], options: JSON_THROW_ON_ERROR);
+            if (strlen($response->getContent()) > 524288) {
+                return response()->json(['error' => 'query_too_large'], 413);
+            }
+
+            return $response;
+        } catch (\Throwable) {
+            return response()->json(['error' => 'plugin_query_failed'], 500);
+        }
     }
 
     private function requestRateLimit(
