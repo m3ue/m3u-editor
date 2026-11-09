@@ -31,7 +31,7 @@ class CreateMediaServerIntegration extends CreateRecord
             $data['ssl'] = $data['ssl'] ?? false;
         }
 
-        return $data;
+        return MediaServerIntegrationResource::applyAuthMethod($data);
     }
 
     protected function getRedirectUrl(): string

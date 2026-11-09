@@ -75,7 +75,9 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
     {
         $user = auth()->user();
 
+        // Managed libraries create Emby libraries, which needs an admin API key.
         return $ownerRecord->isEmby()
+            && ! $ownerRecord->usesUserLogin()
             && $user?->canUseIntegrations()
             && ($user->isAdmin() || $ownerRecord->user_id === $user->id);
     }

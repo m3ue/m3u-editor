@@ -1057,7 +1057,7 @@ it('excludes managed Emby libraries from default movie imports', function () {
         || ($request->method() === 'GET' && ($request->data()['ParentId'] ?? null) === null));
 });
 
-it('preserves unfiltered imports for media types without selected libraries', function () {
+it('imports no media of a type that has no selected library', function () {
     $this->integration->update([
         'available_libraries' => [
             ['id' => 'movie-library', 'name' => 'Movies', 'type' => 'movies'],
@@ -1066,6 +1066,6 @@ it('preserves unfiltered imports for media types without selected libraries', fu
         'selected_library_ids' => ['series-library'],
     ]);
 
-    expect($this->integration->getImportLibraryIdsForType('movies'))->toBeNull()
+    expect($this->integration->getImportLibraryIdsForType('movies'))->toBe([])
         ->and($this->integration->getImportLibraryIdsForType('tvshows'))->toBe(['series-library']);
 });

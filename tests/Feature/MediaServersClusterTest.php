@@ -97,7 +97,7 @@ it('filters media servers by every type, including WebDAV and AIOStreams', funct
     Livewire::test(ListMediaServerIntegrations::class)
         ->assertTableFilterExists('type', fn (SelectFilter $filter): bool => $filter->getOptions() === [
             'emby' => 'Emby',
-            'jellyfin' => 'Jellyfin',
+            'jellyfin' => 'Jellyfin (and compatible APIs)',
             'plex' => 'Plex',
             'local' => 'Local Media',
             'webdav' => 'WebDAV',

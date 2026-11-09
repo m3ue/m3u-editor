@@ -24,6 +24,7 @@ use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
 use App\Services\AIOStreamsService;
+use App\Services\EmbyJellyfinService;
 use App\Services\MediaServerService;
 use App\Services\PlexManagementService;
 use App\Services\TmdbService;
@@ -46,6 +47,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Actions;
@@ -58,6 +60,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Filament\Support\Exceptions\Halt;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -355,14 +358,48 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->visible(fn (callable $get) => $get('type') === 'webdav')
                             ->fullWidth(),
 
+                        ToggleButtons::make('auth_method')
+                            ->label(__('Authentication'))
+                            ->grouped()
+                            ->options([
+                                'api_key' => __('API Key'),
+                                'user' => __('Username & Password'),
+                            ])
+                            ->default('api_key')
+                            ->inline()
+                            ->live()
+                            ->helperText(fn (callable $get) => $get('auth_method') === 'user'
+                                ? __('Sign in as a regular server user. No admin access needed, but library refresh and Managed Libraries require an admin API key.')
+                                : __('Use an API key created by a server administrator.'))
+                            ->visible(fn (callable $get) => in_array($get('type'), ['emby', 'jellyfin'], true)),
+
+                        Grid::make(2)->schema([
+                            TextInput::make('server_username')
+                                ->label(__('Username'))
+                                ->required()
+                                ->maxLength(255)
+                                ->autocomplete('off'),
+
+                            TextInput::make('server_password')
+                                ->label(__('Password'))
+                                ->password()
+                                ->revealable()
+                                ->autocomplete('new-password')
+                                ->required(fn (callable $get, ?MediaServerIntegration $record): bool => self::requiresServerPassword($get('server_username'), $record))
+                                ->helperText(fn (?MediaServerIntegration $record) => $record?->usesUserLogin()
+                                    ? __('Leave blank to keep the current session. The password is only used to sign in and is never stored.')
+                                    : __('Only used to sign in. The password is never stored.')),
+                        ])->visible(fn (callable $get) => self::isUserLoginSelected($get)),
+
                         TextInput::make('api_key')
                             ->label(__('API Key/Token'))
                             ->password()
                             ->revealable()
-                            ->required(fn (string $operation, callable $get): bool => $operation === 'create' && ! in_array($get('type'), ['local', 'webdav', 'aiostreams']))
+                            ->required(fn (string $operation, callable $get, ?MediaServerIntegration $record): bool => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])
+                                && ($operation === 'create' || (bool) $record?->usesUserLogin()))
                             ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->api_key)
-                            ->helperText(function (string $operation, callable $get) {
-                                if ($operation === 'edit') {
+                            ->helperText(function (string $operation, callable $get, ?MediaServerIntegration $record) {
+                                if ($operation === 'edit' && ! $record?->usesUserLogin()) {
                                     return 'Leave blank to keep existing API key';
                                 }
 
@@ -371,7 +408,8 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                                     'local', 'webdav' => 'Not required for local media or WebDAV',
                                     default => 'Generate an API key in your media server\'s dashboard under Settings → API Keys',
                                 };
-                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])),
+                            })->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams'])
+                                && ! self::isUserLoginSelected($get)),
 
                         Actions::make(self::getServerActions())
                             ->visible(fn (callable $get) => ! in_array($get('type'), ['local', 'webdav', 'aiostreams']))
@@ -568,7 +606,11 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                                 $options = [];
                                 foreach ($libraries as $library) {
-                                    $typeLabel = $library['type'] === 'movies' ? 'Movies' : 'TV Shows';
+                                    $typeLabel = match ($library['type'] ?? null) {
+                                        'movies' => __('Movies'),
+                                        'tvshows' => __('TV Shows'),
+                                        default => __('Mixed'),
+                                    };
                                     $itemCount = $library['item_count'] > 0 ? " ({$library['item_count']} items)" : '';
                                     $options[$library['id']] = "{$library['name']} [{$typeLabel}]{$itemCount}";
                                 }
@@ -1270,7 +1312,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
     {
         return array_filter([
             'emby' => 'Emby',
-            'jellyfin' => 'Jellyfin',
+            'jellyfin' => __('Jellyfin (and compatible APIs)'),
             'plex' => 'Plex',
             'local' => 'Local Media',
             'webdav' => 'WebDAV',
@@ -2005,6 +2047,23 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         'api_key' => $isWebDav ? null : ($get('api_key') ?: $livewire->record?->api_key),
                     ];
 
+                    if (self::isUserLoginSelected($get)) {
+                        $login = self::resolveUserLogin(
+                            $values,
+                            $get('server_username'),
+                            $get('server_password'),
+                            $livewire->record instanceof MediaServerIntegration ? $livewire->record : null,
+                        );
+
+                        if (! $login['success']) {
+                            self::notifySignInFailed($login['message']);
+
+                            return;
+                        }
+
+                        $values = array_merge($values, $login['attributes']);
+                    }
+
                     if (! $isWebDav && array_filter($values, fn ($value) => empty($value) && ! is_bool($value))) {
                         Notification::make()
                             ->danger()
@@ -2071,6 +2130,137 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         ->send();
                 }),
         ];
+    }
+
+    /**
+     * Whether the form has an Emby/Jellyfin integration set to sign in with
+     * a username and password.
+     */
+    private static function isUserLoginSelected(callable $get): bool
+    {
+        return in_array($get('type'), ['emby', 'jellyfin'], true) && $get('auth_method') === 'user';
+    }
+
+    private static function notifySignInFailed(string $message): void
+    {
+        Notification::make()
+            ->danger()
+            ->title(__('Sign In Failed'))
+            ->body($message)
+            ->send();
+    }
+
+    /**
+     * Whether a password must be entered to save an Emby/Jellyfin user
+     * login: always for a new login, and again when the username changes or
+     * the stored session token is missing.
+     */
+    public static function requiresServerPassword(?string $username, ?MediaServerIntegration $record): bool
+    {
+        return ! $record?->usesUserLogin()
+            || blank($record->api_key)
+            || mb_strtolower((string) $username) !== mb_strtolower((string) $record->server_username);
+    }
+
+    /**
+     * Sign in to Emby/Jellyfin as a server user, or reuse the record's
+     * existing session when no new password is needed. Returns the model
+     * attributes to store; the password itself is never included.
+     *
+     * @param  array{type: string, host: mixed, port: mixed, ssl: mixed}  $connection
+     * @return array{success: bool, message: string, attributes: array<string, string>}
+     */
+    public static function resolveUserLogin(array $connection, ?string $username, ?string $password, ?MediaServerIntegration $record): array
+    {
+        if (blank($username)) {
+            return ['success' => false, 'message' => __('Enter the server username.'), 'attributes' => []];
+        }
+
+        if (blank($password)) {
+            if (self::requiresServerPassword($username, $record)) {
+                return ['success' => false, 'message' => __('Enter the password to sign in.'), 'attributes' => []];
+            }
+
+            return [
+                'success' => true,
+                'message' => '',
+                'attributes' => [
+                    'api_key' => (string) $record->api_key,
+                    'auth_method' => 'user',
+                    'server_username' => (string) $record->server_username,
+                    'server_user_id' => (string) $record->server_user_id,
+                ],
+            ];
+        }
+
+        $connectionIntegration = (new MediaServerIntegration)->forceFill(array_merge($connection, ['id' => $record?->id]));
+        $login = EmbyJellyfinService::authenticateByName($connectionIntegration, $username, $password);
+
+        if (! $login['success']) {
+            return ['success' => false, 'message' => $login['message'], 'attributes' => []];
+        }
+
+        return [
+            'success' => true,
+            'message' => $login['message'],
+            'attributes' => [
+                'api_key' => $login['access_token'],
+                'auth_method' => 'user',
+                'server_username' => $username,
+                'server_user_id' => $login['user_id'],
+            ],
+        ];
+    }
+
+    /**
+     * Normalize the authentication fields before an integration is saved.
+     * API-key integrations clear any user-login state. User-login
+     * integrations exchange the entered password for a session token, and
+     * the save is halted with a notification if sign-in fails.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     *
+     * @throws Halt
+     */
+    public static function applyAuthMethod(array $data, ?MediaServerIntegration $record = null): array
+    {
+        $password = $data['server_password'] ?? null;
+        unset($data['server_password']);
+
+        $type = $data['type'] ?? $record?->type;
+
+        if (! in_array($type, ['emby', 'jellyfin'], true)) {
+            return $data;
+        }
+
+        if (($data['auth_method'] ?? 'api_key') !== 'user') {
+            $data['auth_method'] = 'api_key';
+            $data['server_username'] = null;
+            $data['server_user_id'] = null;
+
+            return $data;
+        }
+
+        $login = self::resolveUserLogin(
+            [
+                'type' => $type,
+                'host' => $data['host'] ?? $record?->host,
+                'port' => $data['port'] ?? $record?->port,
+                'ssl' => $data['ssl'] ?? $record?->ssl ?? false,
+            ],
+            $data['server_username'] ?? null,
+            $password,
+            $record,
+        );
+
+        if (! $login['success']) {
+            self::notifySignInFailed($login['message']);
+
+            throw new Halt;
+        }
+
+        return array_merge($data, $login['attributes']);
     }
 
     private static function getAIOStreamsTestAction(string $label = 'Test Connection & Fetch Catalogs'): array

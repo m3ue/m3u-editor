@@ -210,7 +210,10 @@ class EditMediaServerIntegration extends EditRecord
             }
         }
 
-        return $data;
+        /** @var MediaServerIntegration $record */
+        $record = $this->getRecord();
+
+        return MediaServerIntegrationResource::applyAuthMethod($data, $record);
     }
 
     protected function afterSave(): void

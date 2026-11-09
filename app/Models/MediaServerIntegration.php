@@ -41,6 +41,7 @@ class MediaServerIntegration extends Model
         'skip_ssl_verify' => false,
         'use_torrent_parser' => false,
         'plex_management_enabled' => false,
+        'auth_method' => 'api_key',
     ];
 
     /**
@@ -405,6 +406,19 @@ class MediaServerIntegration extends Model
     }
 
     /**
+     * Whether this Emby/Jellyfin integration authenticates as a regular
+     * (possibly non-admin) server user via username and password, rather
+     * than with an admin-generated API key. Admin-only endpoints (library
+     * management, library refresh) are unavailable in this mode, and
+     * library/item queries are scoped to server_user_id.
+     */
+    public function usesUserLogin(): bool
+    {
+        return ($this->isEmby() || $this->isJellyfin())
+            && $this->auth_method === 'user';
+    }
+
+    /**
      * Check if this is a Plex server.
      */
     public function isPlex(): bool
@@ -551,23 +565,46 @@ class MediaServerIntegration extends Model
 
     /**
      * Get selected library IDs for a specific type (movies or tvshows).
+     * Mixed Content libraries hold both, so they count for either type.
      *
      * @param  string  $type  'movies' or 'tvshows'
      * @return array<string>
      */
     public function getSelectedLibraryIdsForType(string $type): array
     {
-        $selectedIds = $this->selected_library_ids ?? [];
-        $availableLibraries = $this->available_libraries ?? [];
-
-        if (empty($selectedIds) || empty($availableLibraries)) {
+        if (! $this->hasLibrarySelection()) {
             return [];
         }
 
-        return collect($availableLibraries)
-            ->filter(fn ($lib) => $lib['type'] === $type && in_array($lib['id'], $selectedIds))
+        $selectedIds = $this->selected_library_ids;
+
+        return collect($this->available_libraries)
+            ->filter(fn ($lib) => in_array($lib['type'] ?? null, [$type, 'mixed'], true) && in_array($lib['id'], $selectedIds))
             ->pluck('id')
+            ->values()
             ->toArray();
+    }
+
+    /**
+     * Whether the user has picked specific libraries to import. Integrations
+     * without a selection (created before library selection existed) import
+     * every library; with a selection, a content type that has no selected
+     * library imports nothing.
+     *
+     * A selection only counts when at least one selected id is still a known
+     * library. Otherwise (libraries recreated on the server, stale cache) the
+     * sync would import nothing and its stale cleanup would wipe the playlist.
+     */
+    public function hasLibrarySelection(): bool
+    {
+        $selectedIds = $this->selected_library_ids ?? [];
+
+        if (empty($selectedIds) || empty($this->available_libraries)) {
+            return false;
+        }
+
+        return collect($this->available_libraries)
+            ->contains(fn ($library) => in_array($library['id'] ?? null, $selectedIds));
     }
 
     /**
@@ -596,9 +633,10 @@ class MediaServerIntegration extends Model
             }
         }
 
-        $selectedLibraryIds = $this->getSelectedLibraryIdsForType($type);
-        if ($selectedLibraryIds !== []) {
-            return array_values(array_diff($selectedLibraryIds, $managedLibraryIds));
+        // With a library selection, only the selected libraries of this type are
+        // imported, and none at all when the user picked no library of this type.
+        if ($this->hasLibrarySelection()) {
+            return array_values(array_diff($this->getSelectedLibraryIdsForType($type), $managedLibraryIds));
         }
 
         if (! $requiresFilteredImport) {

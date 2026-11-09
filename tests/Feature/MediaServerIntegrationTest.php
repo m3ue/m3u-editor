@@ -5,8 +5,10 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\PlexService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
@@ -653,4 +655,93 @@ it('returns empty series collection when no playlist is assigned', function () {
     ]);
 
     expect($integration->series)->toBeEmpty();
+});
+
+it('imports nothing of a type when the library selection has no library of that type', function () {
+    // Regression: selecting only a TV library used to import every movie, because
+    // "no selected movie library" fell through to the unfiltered import.
+    $integration = MediaServerIntegration::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => 'jellyfin',
+        'available_libraries' => [
+            ['id' => 'movies-lib', 'name' => 'Movies', 'type' => 'movies'],
+            ['id' => 'tv-lib', 'name' => 'TV', 'type' => 'tvshows'],
+        ],
+        'selected_library_ids' => ['tv-lib'],
+    ]);
+
+    expect($integration->getImportLibraryIdsForType('movies'))->toBe([])
+        ->and($integration->getImportLibraryIdsForType('tvshows'))->toBe(['tv-lib']);
+});
+
+it('keeps importing every library when no library selection was ever made', function () {
+    $integration = MediaServerIntegration::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => 'emby',
+        'available_libraries' => null,
+        'selected_library_ids' => null,
+    ]);
+
+    expect($integration->getImportLibraryIdsForType('movies'))->toBeNull()
+        ->and($integration->getImportLibraryIdsForType('tvshows'))->toBeNull();
+});
+
+it('counts a selected mixed content library for both movies and series', function () {
+    $integration = MediaServerIntegration::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => 'emby',
+        'available_libraries' => [
+            ['id' => 'mixed-lib', 'name' => 'Everything', 'type' => 'mixed'],
+            ['id' => 'tv-lib', 'name' => 'TV', 'type' => 'tvshows'],
+        ],
+        'selected_library_ids' => ['mixed-lib'],
+    ]);
+
+    expect($integration->getImportLibraryIdsForType('movies'))->toBe(['mixed-lib'])
+        ->and($integration->getImportLibraryIdsForType('tvshows'))->toBe(['mixed-lib']);
+});
+
+it('skips Plex movie sections when only a TV section is selected', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'http://plex.local:32400/library/sections' => Http::response(['MediaContainer' => ['Directory' => [
+            ['key' => '1', 'title' => 'Movies', 'type' => 'movie'],
+            ['key' => '2', 'title' => 'TV', 'type' => 'show'],
+        ]]]),
+        'http://plex.local:32400/library/sections/2/*' => Http::response(['MediaContainer' => ['Metadata' => []]]),
+    ]);
+
+    $integration = MediaServerIntegration::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => 'plex',
+        'host' => 'plex.local',
+        'port' => 32400,
+        'ssl' => false,
+        'api_key' => 'plex-token',
+        'available_libraries' => [
+            ['id' => '1', 'name' => 'Movies', 'type' => 'movies'],
+            ['id' => '2', 'name' => 'TV', 'type' => 'tvshows'],
+        ],
+        'selected_library_ids' => ['2'],
+    ]);
+
+    expect(PlexService::make($integration)->fetchMovies())->toBeEmpty();
+
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/library/sections/1/'));
+});
+
+it('falls back to importing everything when no selected library is known anymore', function () {
+    // A stale selection must not turn into "import nothing", or the sync's
+    // stale cleanup would delete the whole playlist.
+    $integration = MediaServerIntegration::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => 'jellyfin',
+        'available_libraries' => [
+            ['id' => 'movies-lib', 'name' => 'Movies', 'type' => 'movies'],
+        ],
+        'selected_library_ids' => ['deleted-lib'],
+    ]);
+
+    expect($integration->hasLibrarySelection())->toBeFalse()
+        ->and($integration->getImportLibraryIdsForType('movies'))->toBeNull();
 });

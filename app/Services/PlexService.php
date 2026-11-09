@@ -243,8 +243,9 @@ class PlexService implements MediaServer
                 $normalizedType = $type === 'movie' ? 'movies' : 'tvshows';
                 $selectedLibraryIds = $this->integration->getSelectedLibraryIdsForType($normalizedType);
 
-                if (! empty($selectedLibraryIds)) {
-                    // Filter to only include selected libraries
+                // With a library selection, only selected libraries are imported
+                // (none of this type when the user picked none of this type).
+                if ($this->integration->hasLibrarySelection()) {
                     $libraries = $libraries->filter(function ($library) use ($selectedLibraryIds) {
                         return in_array($library['key'], $selectedLibraryIds);
                     });

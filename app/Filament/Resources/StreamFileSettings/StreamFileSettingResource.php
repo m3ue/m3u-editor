@@ -570,6 +570,8 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             ->options(fn () => MediaServerIntegration::query()
                                 ->where('user_id', auth()->id())
                                 ->whereIn('type', ['jellyfin', 'emby', 'plex'])
+                                // User-login integrations cannot trigger the admin-only library refresh
+                                ->where('auth_method', 'api_key')
                                 ->pluck('name', 'id')
                             )
                             ->searchable()
