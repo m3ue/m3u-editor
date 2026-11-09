@@ -13,11 +13,13 @@
 
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
+use App\Filament\Resources\Groups\Pages\ListGroups;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Jobs\ProcessM3uImportComplete;
 use App\Jobs\ProcessM3uVodImportChunk;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
@@ -49,6 +51,8 @@ beforeEach(function () {
         'live_streams' => [],
         'vod_categories' => [],
         'vod_streams' => [],
+        'series_categories' => [],
+        'series' => [],
     ]);
     $feed = $this->feed;
     Http::fake([
@@ -60,6 +64,8 @@ beforeEach(function () {
                 'get_live_streams' => Http::response(json_encode($feed['live_streams']), 200),
                 'get_vod_categories' => Http::response(json_encode($feed['vod_categories']), 200),
                 'get_vod_streams' => Http::response(json_encode($feed['vod_streams']), 200),
+                'get_series_categories' => Http::response(json_encode($feed['series_categories']), 200),
+                'get_series' => Http::response(json_encode($feed['series']), 200),
                 default => Http::response(json_encode(['user_info' => ['status' => 'Active']]), 200),
             };
         },
@@ -569,5 +575,315 @@ describe('invalidated syncs', function () {
         expect($playlist->fresh()->status)->toBe(Status::Failed)
             ->and($sportsUk->trashed())->toBeFalse()
             ->and(providerGroupMoveChannel($playlist, 100)->group_id)->toBe($sportsUk->id);
+    });
+});
+
+/**
+ * Some Xtream panels number live streams and movies from one sequence, so a live stream and a
+ * movie can share a stream_id. Both keep their own row instead of overwriting each other.
+ */
+describe('live streams and movies sharing a stream_id', function () {
+    function providerGroupMoveTypedChannel(Playlist $playlist, int $streamId, bool $isVod): ?Channel
+    {
+        return Channel::where('playlist_id', $playlist->id)
+            ->where('source_id', (string) $streamId)
+            ->where('is_vod', $isVod)
+            ->first();
+    }
+
+    it('keeps the live stream and the movie as separate channels', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        $catalog = [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 100, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, $catalog, isNew: true);
+        providerGroupMoveSync($playlist, $this->feed, $catalog);
+
+        $live = providerGroupMoveTypedChannel($playlist, 100, false);
+        $movie = providerGroupMoveTypedChannel($playlist, 100, true);
+
+        expect(Channel::where('playlist_id', $playlist->id)->count())->toBe(2)
+            ->and($live->title)->toBe('Sky Sports')
+            ->and($live->group_id)->toBe(providerGroupMoveGroup($playlist, 'Sports')->id)
+            ->and($movie->title)->toBe('Movie A')
+            ->and($movie->group_id)->toBe(providerGroupMoveGroup($playlist, 'Action', 'vod')->id);
+    });
+
+    it('imports a returning live stream as its own disabled channel and leaves the movie alone', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 200, 'name' => 'BT Sport', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 100, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ], isNew: true);
+
+        $action = providerGroupMoveGroup($playlist, 'Action', 'vod');
+        $action->update(['enabled' => true]);
+        $action->channels()->update(['enabled' => true]);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'US Sports'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 200, 'name' => 'BT Sport', 'category_id' => '1'],
+                ['stream_id' => 100, 'name' => 'ESPN', 'category_id' => '2'],
+            ],
+        ]);
+
+        $live = providerGroupMoveTypedChannel($playlist, 100, false);
+        $movie = providerGroupMoveTypedChannel($playlist, 100, true);
+
+        expect($live->enabled)->toBeFalse()
+            ->and($live->title)->toBe('ESPN')
+            ->and($live->group_id)->toBe(providerGroupMoveGroup($playlist, 'US Sports')->id)
+            ->and($movie->enabled)->toBeTrue()
+            ->and($movie->title)->toBe('Movie A')
+            ->and($movie->group_id)->toBe($action->id);
+    });
+
+    it('moves a live channel an earlier sync left in a movie group back to its category', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        $catalog = [
+            'live_categories' => [['category_id' => '1', 'category_name' => 'Sports']],
+            'live_streams' => [['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1']],
+            'vod_categories' => [['category_id' => '10', 'category_name' => 'Action']],
+            'vod_streams' => [['stream_id' => 500, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv']],
+        ];
+        providerGroupMoveSync($playlist, $this->feed, $catalog, isNew: true);
+
+        // Before the fix, a live stream could take over a movie's row and stay in its group
+        $action = providerGroupMoveGroup($playlist, 'Action', 'vod');
+        providerGroupMoveTypedChannel($playlist, 100, false)->update(['group_id' => $action->id, 'group' => 'Action']);
+
+        providerGroupMoveSync($playlist, $this->feed, $catalog);
+
+        expect(providerGroupMoveTypedChannel($playlist, 100, false)->group_id)->toBe(providerGroupMoveGroup($playlist, 'Sports')->id)
+            ->and(providerGroupMoveTypedChannel($playlist, 500, true)->group_id)->toBe($action->id);
+    });
+});
+
+describe('group auto sort follows the provider category order', function () {
+    it('orders live and VOD groups by provider category position, not stream order', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['live', 'vod']);
+        $playlist->update(['auto_sort_groups' => true]);
+
+        // Streams are listed News first, but the provider lists Sports before News
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'News'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 200, 'name' => 'BBC News', 'category_id' => '2'],
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+            ],
+            'vod_categories' => [
+                ['category_id' => '10', 'category_name' => 'Action'],
+                ['category_id' => '11', 'category_name' => 'Drama'],
+            ],
+            'vod_streams' => [
+                ['stream_id' => 501, 'name' => 'Movie B', 'category_id' => '11', 'container_extension' => 'mkv'],
+                ['stream_id' => 500, 'name' => 'Movie A', 'category_id' => '10', 'container_extension' => 'mkv'],
+            ],
+        ], isNew: true);
+
+        expect((float) providerGroupMoveGroup($playlist, 'Sports')->sort_order)->toBe(1.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'News')->sort_order)->toBe(2.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'Action', 'vod')->sort_order)->toBe(3.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'Drama', 'vod')->sort_order)->toBe(4.0);
+    });
+
+    it('places a new group at its provider position and follows provider reordering', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $playlist->update(['auto_sort_groups' => true]);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'News'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+                ['stream_id' => 200, 'name' => 'BBC News', 'category_id' => '2'],
+            ],
+        ], isNew: true);
+
+        // Provider adds Movies between Sports and News and swaps nothing else
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '3', 'category_name' => 'Movies'],
+                ['category_id' => '2', 'category_name' => 'News'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+                ['stream_id' => 200, 'name' => 'BBC News', 'category_id' => '2'],
+                ['stream_id' => 300, 'name' => 'Film 4', 'category_id' => '3'],
+            ],
+        ]);
+
+        expect((float) providerGroupMoveGroup($playlist, 'Sports')->sort_order)->toBe(1.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'Movies')->sort_order)->toBe(2.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'News')->sort_order)->toBe(3.0);
+    });
+
+    it('leaves custom groups and every sort order alone when group auto sort is off', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $playlist->update(['auto_sort_groups' => false]);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'News'],
+            ],
+            'live_streams' => [
+                ['stream_id' => 100, 'name' => 'Sky Sports', 'category_id' => '1'],
+                ['stream_id' => 200, 'name' => 'BBC News', 'category_id' => '2'],
+            ],
+        ], isNew: true);
+
+        $custom = Group::create([
+            'name' => 'Mine',
+            'name_internal' => 'Mine',
+            'playlist_id' => $playlist->id,
+            'user_id' => $this->user->id,
+            'custom' => true,
+            'type' => 'live',
+            'sort_order' => 7,
+        ]);
+        providerGroupMoveGroup($playlist, 'News')->update(['sort_order' => 5]);
+
+        providerGroupMoveSync($playlist, $this->feed, [
+            'live_categories' => [
+                ['category_id' => '1', 'category_name' => 'Sports'],
+                ['category_id' => '2', 'category_name' => 'News'],
+            ],
+        ]);
+
+        expect((float) providerGroupMoveGroup($playlist, 'News')->sort_order)->toBe(5.0)
+            ->and((float) providerGroupMoveGroup($playlist, 'Sports')->sort_order)->toBe(9999.0)
+            ->and((float) $custom->fresh()->sort_order)->toBe(7.0);
+    });
+
+    it('locks the sort order of provider groups, but not custom groups, while group auto sort is on', function () {
+        $playlist = providerGroupMovePlaylist($this->user);
+        $makeGroup = fn (bool $custom) => Group::create([
+            'name' => $custom ? 'Mine' : 'Provider',
+            'name_internal' => $custom ? 'Mine' : 'Provider',
+            'playlist_id' => $playlist->id,
+            'user_id' => $this->user->id,
+            'custom' => $custom,
+            'type' => 'live',
+        ]);
+        $providerGroup = $makeGroup(false);
+        $customGroup = $makeGroup(true);
+
+        $playlist->update(['auto_sort_groups' => false]);
+        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeFalse();
+
+        $playlist->update(['auto_sort_groups' => true]);
+        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeTrue()
+            ->and($customGroup->fresh()->isSortOrderLockedToProvider())->toBeFalse();
+
+        // Plain M3U playlists follow Group Auto Sort too, not Channel Auto Sort (issue #1821)
+        $playlist->update(['xtream' => false, 'auto_sort_groups' => false, 'auto_sort' => true]);
+        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeFalse();
+
+        $playlist->update(['auto_sort_groups' => true, 'auto_sort' => false]);
+        expect($providerGroup->fresh()->isSortOrderLockedToProvider())->toBeTrue();
+    });
+
+    it('only lists groups the next sync will not renumber in sort mode', function () {
+        $locked = providerGroupMovePlaylist($this->user);
+        $locked->update(['auto_sort_groups' => true]);
+        $unlocked = providerGroupMovePlaylist($this->user);
+        $unlocked->update(['auto_sort_groups' => false]);
+
+        $makeGroup = fn (Playlist $playlist, string $name, bool $custom) => Group::create([
+            'name' => $name,
+            'name_internal' => $name,
+            'playlist_id' => $playlist->id,
+            'user_id' => $this->user->id,
+            'custom' => $custom,
+            'type' => 'live',
+        ]);
+        $lockedProvider = $makeGroup($locked, 'Locked Provider', false);
+        $lockedCustom = $makeGroup($locked, 'Locked Custom', true);
+        $unlockedProvider = $makeGroup($unlocked, 'Unlocked Provider', false);
+
+        expect(Group::sortOrderUnlocked()->pluck('id')->all())
+            ->toEqualCanonicalizing([$lockedCustom->id, $unlockedProvider->id]);
+
+        $this->actingAs($this->user);
+        Livewire\Livewire::test(ListGroups::class, ['activeTab' => (string) $locked->id])
+            ->assertCanSeeTableRecords([$lockedProvider, $lockedCustom])
+            ->call('toggleTableReordering')
+            ->assertCanSeeTableRecords([$lockedCustom])
+            ->assertCanNotSeeTableRecords([$lockedProvider]);
+    });
+});
+
+describe('category auto sort follows the provider series category order', function () {
+    $syncSeriesCategories = function (Playlist $playlist, ArrayObject $feed, array $categories): void {
+        $feed['series_categories'] = $categories;
+        Bus::fake();
+        (new ProcessM3uImport($playlist->fresh(), force: true, isNew: true))->handle();
+    };
+
+    it('orders series categories by provider position, including existing ones, when enabled', function () use ($syncSeriesCategories) {
+        $playlist = providerGroupMovePlaylist($this->user, ['series']);
+        $playlist->update(['auto_sort_categories' => true]);
+
+        $syncSeriesCategories($playlist, $this->feed, [
+            ['category_id' => '20', 'category_name' => 'Drama'],
+            ['category_id' => '21', 'category_name' => 'Comedy'],
+        ]);
+        $order = fn () => Category::where('playlist_id', $playlist->id)->orderBy('sort_order')->pluck('name_internal')->all();
+        expect($order())->toBe(['Drama', 'Comedy']);
+
+        // Provider adds a category up front and reorders
+        $syncSeriesCategories($playlist, $this->feed, [
+            ['category_id' => '22', 'category_name' => 'Docs'],
+            ['category_id' => '21', 'category_name' => 'Comedy'],
+            ['category_id' => '20', 'category_name' => 'Drama'],
+        ]);
+        expect($order())->toBe(['Docs', 'Comedy', 'Drama']);
+    });
+
+    it('leaves series category sort orders alone when disabled', function () use ($syncSeriesCategories) {
+        $playlist = providerGroupMovePlaylist($this->user, ['series']);
+
+        $syncSeriesCategories($playlist, $this->feed, [
+            ['category_id' => '20', 'category_name' => 'Drama'],
+            ['category_id' => '21', 'category_name' => 'Comedy'],
+        ]);
+        Category::where('playlist_id', $playlist->id)->where('name_internal', 'Comedy')->update(['sort_order' => 3]);
+        $syncSeriesCategories($playlist, $this->feed, [
+            ['category_id' => '20', 'category_name' => 'Drama'],
+            ['category_id' => '21', 'category_name' => 'Comedy'],
+        ]);
+
+        expect(Category::where('playlist_id', $playlist->id)->where('name_internal', 'Drama')->value('sort_order'))->toEqual(9999)
+            ->and(Category::where('playlist_id', $playlist->id)->where('name_internal', 'Comedy')->value('sort_order'))->toEqual(3);
+    });
+
+    it('locks the sort order of series categories only while category auto sort is on', function () {
+        $playlist = providerGroupMovePlaylist($this->user, ['series']);
+        $category = Category::create([
+            'name' => 'Drama',
+            'name_internal' => 'Drama',
+            'playlist_id' => $playlist->id,
+            'user_id' => $this->user->id,
+        ]);
+
+        expect($category->fresh()->isSortOrderLockedToProvider())->toBeFalse();
+        $playlist->update(['auto_sort_categories' => true]);
+        expect($category->fresh()->isSortOrderLockedToProvider())->toBeTrue();
     });
 });

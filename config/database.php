@@ -238,4 +238,38 @@ return [
 
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | PostgreSQL Backup/Restore Client Version
+    |--------------------------------------------------------------------------
+    |
+    | The image bundles PostgreSQL 17 and 18 client tools. Set PG_CLIENT_VERSION
+    | to the major version backup/restore should use when it differs from the
+    | bundled default (17) - never auto-detected. start-container sets this
+    | automatically to match the active embedded Postgres major; it only
+    | needs to be set by hand when connecting to an external server. See
+    | App\Services\PostgresDumpBinaryResolver.
+    |
+    */
+
+    'pg_client_version' => env('PG_CLIENT_VERSION'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Embedded PostgreSQL Status File
+    |--------------------------------------------------------------------------
+    |
+    | Written by docker/8.4/pg-cluster.sh on every boot when embedded Postgres
+    | is enabled: which major is active, the result of the last upgrade
+    | attempt, and any warning. See App\Services\EmbeddedPostgresStatus.
+    |
+    | Not configurable via env(): pg-cluster.sh always writes this next to
+    | PG_MOUNT, which is itself a fixed path (not an env var) in
+    | start-container. An env override here would silently do nothing, since
+    | the shell writer would never read it.
+    |
+    */
+
+    'embedded_postgres_status_path' => '/var/lib/postgresql/data/.m3ue-postgres-status.json',
+
 ];

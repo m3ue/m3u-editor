@@ -458,8 +458,11 @@ class EpgGenerateController extends Controller
                 if ($aedProfileId && $aedExtractor && $aedProfiles->has($aedProfileId)) {
                     $aedProfile = $aedProfiles->get($aedProfileId);
                     $rawTitle = $dummyEpgChannel['raw_title'];
-                    $aedEvent = $aedExtractor->extract($aedProfile, $rawTitle)
-                        ?? $aedExtractor->fallback($aedProfile, $rawTitle);
+                    $aedEvent = $aedExtractor->resolve(
+                        $aedProfile,
+                        $rawTitle,
+                        (int) ($aedProfile->dummy_epg_days ?? $playlist->dummy_epg_days ?? 5),
+                    );
 
                     // No event found and no-event fallback is disabled: emit nothing for this channel
                     // ($buffer is still empty here, so there is nothing to flush)
@@ -467,11 +470,11 @@ class EpgGenerateController extends Controller
                         continue;
                     }
 
-                    $aedIcon = $aedProfile->logo_url
-                        ? $this->escapeXml($aedProfile->logo_url)
-                        : null;
-                    $aedCategory = $aedProfile->category
-                        ? $this->escapeXml($aedProfile->category)
+                    $aedIconUrl = $aedEvent->icon ?? $aedProfile->logo_url;
+                    $aedIcon = $aedIconUrl ? $this->escapeXml($aedIconUrl) : null;
+                    $aedCategoryName = $aedEvent->category ?? $aedProfile->category;
+                    $aedCategory = $aedCategoryName
+                        ? $this->escapeXml($aedCategoryName)
                         : ($includeCategory ? $group : null);
 
                     if ($aedEvent->hasTime()) {
@@ -833,9 +836,12 @@ class EpgGenerateController extends Controller
 
         $parts = parse_url($url);
 
+        // The only query allowed is the image version (`?v=lastUpdate`) that
+        // SchedulesDirectService::buildImageUrl() appends.
         if ($parts === false
             || isset($parts['user']) || isset($parts['pass'])
-            || isset($parts['query']) || isset($parts['fragment'])
+            || (isset($parts['query']) && preg_match('/^v=\d+$/D', $parts['query']) !== 1)
+            || isset($parts['fragment'])
             || ! isset($parts['path'])) {
             return false;
         }

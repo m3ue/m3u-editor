@@ -87,11 +87,19 @@ return [
             'guzzlehttp/promises',
             // ── Core Laravel ecosystem — trusted first-party packages ────────
             'laravel/framework',
+            // v4.4.8 was the security patch for GHSA-mhf7-xp6r-6qrc (Authorize
+            // bypass via reordered parameter keys and #[Json] execution order)
+            'livewire/livewire',
             // transitive deps of laravel/framework, bumped alongside it
             'nesbot/carbon',
             'symfony/http-foundation',
             'symfony/http-kernel',
             'symfony/mime',
+            // v8.1.11 was the security patch for CVE-2026-118517, CVE-2026-118516
+            // and GHSA-hwfg-qwvh-2wfx (sanitizer host bypass, route host matching, YAML DoS)
+            'symfony/html-sanitizer',
+            'symfony/routing',
+            'symfony/yaml',
             // ── Well-known, widely-audited ecosystem packages ────────────────
             'league/flysystem',
             'vlucas/phpdotenv',
@@ -374,7 +382,7 @@ return [
         // input $genre is bound via the ? placeholder.
         '3489035c968f',
         // Same call, now wrapped in a closure to fix a NULL-group exclusion bug
-        // (issue #1733) — finding text changed enough to produce a new hash.
+        // (issue #1733) - finding text changed enough to produce a new hash.
         '498c2c960be3',
 
         // ChannelController: $sortOrder was unsanitized — now validated to

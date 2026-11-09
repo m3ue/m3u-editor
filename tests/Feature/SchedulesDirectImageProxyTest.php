@@ -217,3 +217,62 @@ it('stops all image downloads for a day when the address is blocked (5004)', fun
     'coded body' => [403, ['code' => 5004, 'message' => 'Too many not-found requests.']],
     'plain load balancer 403' => [403, []],
 ]);
+
+describe('image versions', function () {
+    beforeEach(function () {
+        $this->fetches = 0;
+        $this->imageWidth = 300;
+        $this->imageFails = false;
+        Http::fake([
+            'json.schedulesdirect.org/20141201/image/*' => function () {
+                $this->fetches++;
+
+                return $this->imageFails
+                    ? Http::response('Bad Gateway', 502)
+                    : Http::response(sdImageProxyJpeg($this->imageWidth, 200), 200, ['Content-Type' => 'image/jpeg']);
+            },
+        ]);
+        $this->imageUrl = fn (int $version) => "/schedules-direct/{$this->epg->uuid}/image/versioned.jpg?v={$version}";
+        $this->servedWidth = fn ($response) => getimagesizefromstring($response->streamedContent())[0];
+    });
+
+    it('serves the cached copy while the image lastUpdate is unchanged', function () {
+        $this->get(($this->imageUrl)(1000))->assertOk();
+        $this->get(($this->imageUrl)(1000))->assertOk();
+
+        expect($this->fetches)->toBe(1);
+    });
+
+    it('downloads the image again when its lastUpdate is newer than the cached copy', function () {
+        $this->get(($this->imageUrl)(1000))->assertOk();
+
+        $this->imageWidth = 320;
+        $response = $this->get(($this->imageUrl)(2000));
+
+        expect($this->fetches)->toBe(2)
+            ->and(($this->servedWidth)($response))->toBe(320);
+        // And the refreshed copy is now current
+        $this->get(($this->imageUrl)(2000))->assertOk();
+        expect($this->fetches)->toBe(2);
+    });
+
+    it('keeps serving the out-of-date copy when the refresh fails', function () {
+        $this->get(($this->imageUrl)(1000))->assertOk();
+
+        $this->imageFails = true;
+        $response = $this->get(($this->imageUrl)(2000));
+
+        $response->assertOk();
+        expect(($this->servedWidth)($response))->toBe(300);
+    });
+
+    it('treats a copy cached before versions existed as current until the image changes after it was cached', function () {
+        $this->get("/schedules-direct/{$this->epg->uuid}/image/versioned.jpg")->assertOk();
+
+        $this->get(($this->imageUrl)(now()->subDay()->timestamp))->assertOk();
+        expect($this->fetches)->toBe(1);
+
+        $this->get(($this->imageUrl)(now()->addMinute()->timestamp))->assertOk();
+        expect($this->fetches)->toBe(2);
+    });
+});

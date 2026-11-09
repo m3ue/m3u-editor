@@ -45,7 +45,7 @@ class RunScheduledBackups extends Command
                 // job was delayed or failed.
                 Bus::chain([
                     new CreateBackup,
-                    new PruneOldBackups($max, $deleteAfterDays),
+                    new PruneOldBackups($max, $deleteAfterDays, requireBackupSince: now()),
                 ])->dispatch();
             }
         }

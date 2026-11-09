@@ -339,7 +339,7 @@ class MergeChannels implements ShouldQueue
             ->mapWithKeys(function ($channel) use ($matcher, $config) {
                 $key = $matcher->fallbackKeyFor($channel, $config);
 
-                return $key ? [$channel->id => ['key' => $key, 'channel' => $channel]] : [];
+                return $key !== null ? [$channel->id => ['key' => $key, 'channel' => $channel]] : [];
             })
             ->groupBy('key')
             ->map(fn ($items) => $items->pluck('channel'));

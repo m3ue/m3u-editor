@@ -118,6 +118,72 @@ describe('M3U reimport', function () {
     });
 });
 
+describe('M3U group auto sort', function () {
+    beforeEach(function () {
+        $this->user = User::factory()->create();
+        $this->tempM3uPath = sys_get_temp_dir().'/playlist_group_sort_'.uniqid().'.m3u';
+        file_put_contents($this->tempM3uPath, implode("\n", [
+            '#EXTM3U',
+            '#EXTINF:-1 tvg-name="Ch One" group-title="Sports",Ch One',
+            'http://example.test/stream/1',
+            '#EXTINF:-1 tvg-name="Ch Two" group-title="News",Ch Two',
+            'http://example.test/stream/2',
+        ]));
+    });
+
+    $makePlaylist = fn (User $user, string $path, array $attributes) => Playlist::withoutEvents(fn () => Playlist::factory()->for($user)->create([
+        'url' => $path,
+        'xtream' => false,
+        'import_prefs' => [],
+        ...$attributes,
+    ]));
+
+    it('keeps manual group order when Group Auto Sort is off, even with Channel Auto Sort on', function () use ($makePlaylist) {
+        $playlist = $makePlaylist($this->user, $this->tempM3uPath, ['auto_sort' => true, 'auto_sort_groups' => false]);
+        $sports = Group::factory()->for($playlist)->for($this->user)->create([
+            'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'live', 'custom' => false, 'sort_order' => 5,
+        ]);
+        $news = Group::factory()->for($playlist)->for($this->user)->create([
+            'name' => 'News', 'name_internal' => 'News', 'type' => 'live', 'custom' => false, 'sort_order' => 1,
+        ]);
+
+        Bus::fake();
+        (new ProcessM3uImport($playlist, force: true, isNew: false))->handle();
+
+        expect((float) $sports->fresh()->sort_order)->toBe(5.0)
+            ->and((float) $news->fresh()->sort_order)->toBe(1.0);
+    });
+
+    it('numbers groups in playlist order when Group Auto Sort is on, even with Channel Auto Sort off', function () use ($makePlaylist) {
+        $playlist = $makePlaylist($this->user, $this->tempM3uPath, ['auto_sort' => false, 'auto_sort_groups' => true]);
+        $sports = Group::factory()->for($playlist)->for($this->user)->create([
+            'name' => 'Sports', 'name_internal' => 'Sports', 'type' => 'live', 'custom' => false, 'sort_order' => 5,
+        ]);
+        $news = Group::factory()->for($playlist)->for($this->user)->create([
+            'name' => 'News', 'name_internal' => 'News', 'type' => 'live', 'custom' => false, 'sort_order' => 1,
+        ]);
+
+        Bus::fake();
+        (new ProcessM3uImport($playlist, force: true, isNew: false))->handle();
+
+        expect((float) $sports->fresh()->sort_order)->toBe(1.0)
+            ->and((float) $news->fresh()->sort_order)->toBe(2.0);
+    });
+
+    it('backfills Group Auto Sort from Channel Auto Sort on M3U playlists only', function () use ($makePlaylist) {
+        $m3uOn = $makePlaylist($this->user, $this->tempM3uPath, ['auto_sort' => true, 'auto_sort_groups' => false]);
+        $m3uOff = $makePlaylist($this->user, $this->tempM3uPath, ['auto_sort' => false, 'auto_sort_groups' => true]);
+        $xtream = $makePlaylist($this->user, $this->tempM3uPath, ['xtream' => true, 'auto_sort' => true, 'auto_sort_groups' => false]);
+
+        $migration = require database_path('migrations/2026_11_08_073909_backfill_auto_sort_groups_for_m3u_playlists.php');
+        $migration->up();
+
+        expect((bool) $m3uOn->fresh()->auto_sort_groups)->toBeTrue()
+            ->and((bool) $m3uOff->fresh()->auto_sort_groups)->toBeFalse()
+            ->and((bool) $xtream->fresh()->auto_sort_groups)->toBeFalse();
+    });
+});
+
 // ── Xtream API path ──────────────────────────────────────────────────────────
 
 describe('Xtream reimport', function () {

@@ -106,7 +106,7 @@ class PlaylistAuth extends Model
         }
 
         $usedBytes = $this->dvrRecordings()
-            ->whereNotNull('file_size_bytes')
+            ->countedForStorage()
             ->sum('file_size_bytes');
 
         $quotaBytes = $this->dvr_storage_quota_gb * 1024 * 1024 * 1024;
@@ -120,7 +120,7 @@ class PlaylistAuth extends Model
     public function getStorageUsedBytesAttribute(): int
     {
         return (int) $this->dvrRecordings()
-            ->whereNotNull('file_size_bytes')
+            ->countedForStorage()
             ->sum('file_size_bytes');
     }
 
@@ -153,6 +153,17 @@ class PlaylistAuth extends Model
         }
 
         return now()->greaterThanOrEqualTo($this->expires_at);
+    }
+
+    /**
+     * Limit to credentials that have not expired, the query form of isExpired().
+     */
+    public function scopeNotExpired(Builder $query): Builder
+    {
+        return $query->where(function (Builder $query): void {
+            $query->whereNull('expires_at')
+                ->orWhere('expires_at', '>', now());
+        });
     }
 
     /**
@@ -209,10 +220,7 @@ class PlaylistAuth extends Model
 
         return $query
             ->where('enabled', true)
-            ->where(function (Builder $query): void {
-                $query->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
-            })
+            ->notExpired()
             ->whereHas('assignedPlaylist', function (Builder $query) use ($notifiableType, $notifiableId, $aliasIds): void {
                 $query->where(function (Builder $query) use ($notifiableType, $notifiableId): void {
                     $query->where('authenticatable_type', $notifiableType)

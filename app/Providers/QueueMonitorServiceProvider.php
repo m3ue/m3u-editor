@@ -62,6 +62,7 @@ class QueueMonitorServiceProvider extends ServiceProvider
         try {
             $monitor = QueueMonitor::where('job_id', QueueMonitor::getJobId($job))
                 ->where('attempt', $job->attempts())
+                ->whereNull('finished_at')
                 ->orderByDesc('started_at')
                 ->first();
 

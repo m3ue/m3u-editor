@@ -59,7 +59,7 @@ class MapEpgToChannels implements ShouldQueue
             // Deduplicate the channels ("|" keeps e.g. 1|23 and 12|3 apart)
             $bulk = $imported
                 ->map(fn (array $item): array => Arr::except($item, ['id']))
-                ->unique(fn (array $item): string => $item['source_id'].'|'.$item['playlist_id'])
+                ->unique(fn (array $item): string => $item['source_id'].'|'.$item['playlist_id'].'|'.(int) ($item['is_vod'] ?? false))
                 ->values()
                 ->all();
 
@@ -68,7 +68,7 @@ class MapEpgToChannels implements ShouldQueue
             }
 
             // Upsert the channels
-            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id'], update: [
+            Channel::upsert($bulk, uniqueBy: ['source_id', 'playlist_id', 'is_vod'], update: [
                 'epg_channel_id',
                 'logo_type',
             ]);

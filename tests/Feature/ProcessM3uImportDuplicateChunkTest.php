@@ -12,6 +12,7 @@
 use App\Jobs\ProcessM3uImport;
 use App\Jobs\ProcessM3uImportChunk;
 use App\Models\Channel;
+use App\Models\Group;
 use App\Models\Job;
 use App\Models\Playlist;
 use App\Models\User;
@@ -193,4 +194,58 @@ it('does not swap which existing row a duplicate-named entry\'s URL/config lands
         ->and(Channel::find($bId)->url)->toBe('http://provider.example.test/live/b.ts')
         ->and(Channel::find($bId)->source_id)->toBe($bSourceId)
         ->and(Channel::find($bId)->enabled)->toBeFalse();
+});
+
+it('keeps duplicate-named rows created by the previous hashing on the first reimport', function () {
+    $user = User::factory()->create();
+    $this->tempM3uPath = sys_get_temp_dir().'/playlist_upgrade_dupes_'.uniqid().'.m3u';
+    file_put_contents($this->tempM3uPath, implode("\n", [
+        '#EXTM3U',
+        '#EXTINF:-1 tvg-id="synthetic-b" tvg-name="News" group-title="News",News',
+        'http://provider.example.test/live/b.ts',
+        '#EXTINF:-1 tvg-id="synthetic-a" tvg-name="News" group-title="News",News',
+        'http://provider.example.test/live/a.ts',
+    ]));
+
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($user)->create([
+        'url' => $this->tempM3uPath,
+        'xtream' => false,
+        'import_prefs' => [],
+        'auto_sort' => false,
+    ]));
+    $group = Group::factory()->for($playlist)->for($user)->create([
+        'name' => 'News',
+        'name_internal' => 'News',
+        'type' => 'live',
+        'custom' => false,
+    ]);
+
+    // Rows as the previous encounter-order hashing left them (a first, then b)
+    $sourceKey = 'NewsNewsNews';
+    $existing = collect([
+        ['id' => 'synthetic-a', 'url' => 'http://provider.example.test/live/a.ts', 'source_id' => md5($sourceKey), 'enabled' => true],
+        ['id' => 'synthetic-b', 'url' => 'http://provider.example.test/live/b.ts', 'source_id' => md5($sourceKey.':dup:1'), 'enabled' => false],
+    ])->map(fn (array $row) => Channel::factory()->for($playlist)->for($user)->for($group)->create([
+        'title' => 'News',
+        'name' => 'News',
+        'group' => 'News',
+        'group_internal' => 'News',
+        'stream_id' => $row['id'],
+        'url' => $row['url'],
+        'source_id' => $row['source_id'],
+        'enabled' => $row['enabled'],
+        'is_vod' => false,
+        'is_custom' => false,
+    ]));
+
+    Bus::fake();
+    Job::query()->delete();
+    (new ProcessM3uImport($playlist->fresh(), force: true, isNew: false))->handle();
+    (new ProcessM3uImportChunk(Job::pluck('id')->all(), batchCount: 1))->handle();
+
+    expect($playlist->channels()->count())->toBe(2)
+        ->and(Channel::find($existing[0]->id)->url)->toBe('http://provider.example.test/live/a.ts')
+        ->and(Channel::find($existing[0]->id)->enabled)->toBeTrue()
+        ->and(Channel::find($existing[1]->id)->url)->toBe('http://provider.example.test/live/b.ts')
+        ->and(Channel::find($existing[1]->id)->enabled)->toBeFalse();
 });

@@ -1,4 +1,18 @@
 // EPG Viewer Alpine.js Component
+
+// Provider-controlled programme fields (title/desc/category) are plain text, but the
+// tooltip is built as an HTML string (x-tooltip.html) rather than bound as a text node,
+// so they need escaping before being concatenated into it - otherwise a programme value
+// containing markup becomes active tooltip content instead of visible text.
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function epgViewer(config) {
     return {
         apiUrl: config.apiUrl,
@@ -503,7 +517,7 @@ function epgViewer(config) {
         },
 
         getTooltipContent(programme) {
-            let content = '<p><strong>' + programme.title + '</strong></p>';
+            let content = '<p><strong>' + escapeHtml(programme.title) + '</strong></p>';
             content += '<small>' + this.formatProgrammeTime(programme) + '</small><br/>';
             if (programme.new) {
                 content += '<small>New Episode</small><br/>';
@@ -527,10 +541,10 @@ function epgViewer(config) {
                 }
             }
             if (programme.desc && programme.desc.trim()) {
-                content += '<p>' + programme.desc + '</p>';
+                content += '<p>' + escapeHtml(programme.desc) + '</p>';
             }
             if (programme.category && programme.category.trim()) {
-                content += '<small>Category: ' + programme.category + '</small>';
+                content += '<small>Category: ' + escapeHtml(programme.category) + '</small>';
             }
             return content;
         },

@@ -100,6 +100,50 @@ it('prefers oidc_id match over email match', function () {
     expect(auth()->id())->toBe($oidcUser->id);
 });
 
+it('rejects login when an email match belongs to an account already linked to a different identity', function () {
+    // Already linked to a different OIDC identity entirely.
+    $victim = User::factory()->create(['oidc_id' => 'oidc-attacker-999', 'email' => 'oidc-test@example.com']);
+
+    // Attacker's own IdP identity (id oidc-123, per mockOidcUser's default) happens to claim
+    // the victim's email - e.g. an unverified or self-service IdP field.
+    Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser());
+
+    $this->get('/auth/oidc/callback')
+        ->assertRedirect(route('filament.admin.auth.login'))
+        ->assertSessionHas('oidc_error');
+
+    expect(auth()->check())->toBeFalse()
+        ->and($victim->fresh()->oidc_id)->toBe('oidc-attacker-999');
+});
+
+it('rejects login when a username match belongs to an account already linked to a different identity', function () {
+    $victim = User::factory()->create([
+        'oidc_id' => 'oidc-attacker-999',
+        'name' => 'Test User',
+        'email' => 'different@example.com',
+    ]);
+
+    Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser());
+
+    $this->get('/auth/oidc/callback')
+        ->assertRedirect(route('filament.admin.auth.login'))
+        ->assertSessionHas('oidc_error');
+
+    expect(auth()->check())->toBeFalse()
+        ->and($victim->fresh()->oidc_id)->toBe('oidc-attacker-999');
+});
+
+it('still logs in normally when the matched oidc_id is this same identity', function () {
+    $user = User::factory()->create(['oidc_id' => 'oidc-123', 'email' => 'oidc-test@example.com']);
+
+    Socialite::shouldReceive('driver->user')->andReturn(mockOidcUser());
+
+    $this->get('/auth/oidc/callback')
+        ->assertRedirect();
+
+    expect(auth()->id())->toBe($user->id);
+});
+
 // --- Auto-create ---
 
 it('creates a new user when no match and auto-create is enabled', function () {

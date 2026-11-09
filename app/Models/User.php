@@ -261,7 +261,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
      */
     public function canManagePlugins(): bool
     {
-        return $this->isAdmin();
+        return config('plugins.enabled', true) && $this->isAdmin();
     }
 
     /**

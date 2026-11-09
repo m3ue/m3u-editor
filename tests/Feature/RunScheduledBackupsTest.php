@@ -87,3 +87,24 @@ it('preserves the sole existing archive with max backups of 1 until a replacemen
     Storage::disk('local')->assertMissing($existing);
     Storage::disk('local')->assertExists($replacement);
 });
+
+it('prunes nothing when the scheduled backup it follows was not created', function () {
+    $expired = putFakeBackup(10);
+    $older = putFakeBackup(20);
+
+    (new PruneOldBackups(max: 1, deleteAfterDays: 5, requireBackupSince: now()))->handle();
+
+    Storage::disk('local')->assertExists($expired);
+    Storage::disk('local')->assertExists($older);
+});
+
+it('prunes once the scheduled backup it follows exists', function () {
+    $since = now()->subSecond();
+    $expired = putFakeBackup(10);
+    $replacement = putFakeBackup(0);
+
+    (new PruneOldBackups(max: 0, deleteAfterDays: 5, requireBackupSince: $since))->handle();
+
+    Storage::disk('local')->assertMissing($expired);
+    Storage::disk('local')->assertExists($replacement);
+});

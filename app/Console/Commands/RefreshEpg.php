@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Jobs\ProcessEpgImport;
 use App\Models\Epg;
@@ -11,6 +12,12 @@ use Illuminate\Console\Command;
 
 class RefreshEpg extends Command
 {
+    /**
+     * Shortest gap between scheduled Schedules Direct syncs. SD asks clients not to
+     * sync more often than hourly; with MD5 change detection more gains nothing.
+     */
+    public const SCHEDULES_DIRECT_MIN_SYNC_MINUTES = 60;
+
     /**
      * The name and signature of the console command.
      *
@@ -86,6 +93,11 @@ class RefreshEpg extends Command
                 $interval = $epg->sync_interval === '24hr' ? '0 0 * * *' : $epg->sync_interval;
                 $cronExpression = new CronExpression($interval);
 
+                // Skip Schedules Direct EPGs while SchedulesDirect is disabled.
+                if ($epg->isSchedulesDirectDisabled()) {
+                    return;
+                }
+
                 // Skip Schedules Direct EPGs that are in a provider login-limit
                 // (4009/4010) cooldown or server-error backoff: dispatching would
                 // just re-trigger a /token request and keep the account
@@ -105,6 +117,15 @@ class RefreshEpg extends Command
                 // Gate failed retries behind a cooldown to prevent CPU runaway
                 $isFailed = $epg->status === Status::Failed;
                 $cooldownPassed = $epg->updated_at->diffInMinutes(now()) >= $failedRetryCooldown;
+
+                // Enforce Schedules Direct's minimum sync gap whatever the cron says.
+                // Failed syncs also stamp `synced`, so only a successful one starts
+                // the wait: retries keep the failed-retry cooldown and SD's backoff.
+                if (! $isFailed
+                    && $epg->source_type === EpgSourceType::SCHEDULES_DIRECT
+                    && $epg->synced?->isAfter(now()->subMinutes(self::SCHEDULES_DIRECT_MIN_SYNC_MINUTES))) {
+                    return;
+                }
 
                 if ($isFailed && ! $cooldownPassed) {
                     return;

@@ -13,6 +13,7 @@ use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
+
+beforeEach(fn () => fakeSchedulesDirectChangeDetection());
 
 function sdEpg(array $overrides = []): Epg
 {
@@ -91,6 +94,35 @@ it('falls back to a 24 hour lifetime when tokenExpires is absent', function () {
         ->toBeGreaterThan(now()->addHours(23)->timestamp)
         ->toBeLessThanOrEqual(now()->addDay()->timestamp);
 });
+
+it('keeps the 24 hour fallback lifetime in elapsed time across a DST change', function (string $issuedAt) {
+    $originalTimezone = date_default_timezone_get();
+    config(['app.timezone' => 'Europe/Berlin']);
+    date_default_timezone_set('Europe/Berlin');
+
+    try {
+        $this->travelTo(Carbon::parse($issuedAt));
+        Http::fake([
+            'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'fresh-token']),
+        ]);
+
+        $epg = sdEpg();
+        (new SchedulesDirectService)->authenticateFromEpg($epg);
+
+        expect($epg->fresh()->sd_token_expires_at->timestamp - now()->timestamp)->toBe(86340);
+
+        // Past 24 elapsed hours the stored token must not be reused.
+        $this->travel(87000)->seconds();
+        (new SchedulesDirectService)->authenticateFromEpg($epg->fresh());
+
+        Http::assertSentCount(2);
+    } finally {
+        date_default_timezone_set($originalTimezone);
+    }
+})->with([
+    'spring forward' => '2026-03-28 12:00:00',
+    'fall back' => '2026-10-24 12:00:00',
+]);
 
 it('reuses a valid stored token and issues zero /token requests during a sync', function () {
     Storage::fake('local');
@@ -536,6 +568,44 @@ it('skips blocked EPGs in the scheduled refresh', function () {
     Queue::assertNotPushed(ProcessEpgImport::class);
 });
 
+it('waits at least an hour between scheduled Schedules Direct syncs whatever the cron says', function (int $minutesSinceSync, bool $dispatched) {
+    sdEpg(['auto_sync' => true, 'sync_interval' => '* * * * *', 'status' => 'completed', 'synced' => now()->subMinutes($minutesSinceSync)]);
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    $dispatched ? Queue::assertPushed(ProcessEpgImport::class) : Queue::assertNotPushed(ProcessEpgImport::class);
+})->with([
+    'synced 10 minutes ago' => [10, false],
+    'synced 61 minutes ago' => [61, true],
+]);
+
+it('does not make a failed Schedules Direct sync wait an hour to retry', function () {
+    $epg = sdEpg(['auto_sync' => true, 'sync_interval' => '0 */6 * * *', 'status' => 'failed', 'synced' => now()->subMinutes(10)]);
+    // Past the failed-retry cooldown, which is measured from updated_at
+    $epg->forceFill(['updated_at' => now()->subDay()])->saveQuietly();
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    Queue::assertPushed(ProcessEpgImport::class);
+});
+
+it('keeps the configured schedule for EPGs that are not Schedules Direct', function () {
+    Epg::factory()->create([
+        'user_id' => User::factory()->create()->id,
+        'auto_sync' => true,
+        'sync_interval' => '* * * * *',
+        'status' => 'completed',
+        'synced' => now()->subMinutes(10),
+    ]);
+
+    Queue::fake();
+    Artisan::call('app:refresh-epg');
+
+    Queue::assertPushed(ProcessEpgImport::class);
+});
+
 it('lifts the block when the credentials change', function () {
     $epg = sdEpg(['sd_auth_blocked_code' => 4003, 'sd_auth_blocked_message' => 'bad password', 'sd_backoff_attempts' => 2]);
 
@@ -971,11 +1041,12 @@ it('measures the token lifetime on the Schedules Direct clock', function () {
 
     (new SchedulesDirectService)->authenticateFromEpg($epg);
 
-    // Absolute tokenExpires would give now + 24h05m; the real lifetime is 24h.
-    expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addDay()->subSeconds(60)->timestamp);
+    // Absolute tokenExpires would give now + 24h05m; the real lifetime is 24h. Seconds,
+    // not addDay(): a calendar day is 23h or 25h across a DST change.
+    expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addSeconds(86400 - 60)->timestamp);
 });
 
-it('replaces a leftover from an interrupted sync and leaves only the guide file', function () {
+it('replaces a leftover from an interrupted sync and leaves only the guide file and SD cache', function () {
     Storage::fake('local');
     Bus::fake();
 
@@ -990,7 +1061,7 @@ it('replaces a leftover from an interrupted sync and leaves only the guide file'
 
     (new SchedulesDirectService)->syncEpgData($epg);
 
-    expect(Storage::disk('local')->files($epg->folder_path))->toBe([$epg->file_path]);
+    expect(Storage::disk('local')->files($epg->folder_path))->toBe([$epg->file_path, "{$epg->folder_path}/".SchedulesDirectService::CACHE_FILE]);
     expect(Storage::disk('local')->get($epg->file_path))
         ->toContain('Synthetic EP0000000001')
         ->not->toContain('half-written');

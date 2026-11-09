@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 /**
  * Scans Filament PHP files for hardcoded string literals and:
- *  1. Wraps them with __('English string') — using Laravel JSON translations.
+ *  1. Wraps them with __('English string'), using Laravel JSON translations.
  *  2. Writes lang/en.json as the source-of-truth (key = English string).
  *  3. Converts static $navigationLabel / $modelLabel / $pluralModelLabel
  *     to method overrides (required because static props can't call functions).

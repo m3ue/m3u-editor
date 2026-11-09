@@ -66,7 +66,7 @@ class PluginResource extends Resource implements CopilotResource
 
     public static function canAccess(): bool
     {
-        return auth()->check() && auth()->user()->canUseTools();
+        return config('plugins.enabled', true) && auth()->check() && auth()->user()->canUseTools();
     }
 
     public static function getNavigationLabel(): string
@@ -818,7 +818,10 @@ class PluginResource extends Resource implements CopilotResource
 
     protected static function focusRun(?Plugin $record): ?PluginRun
     {
+        // reorder() drops the relation's own newest-first order, which would
+        // otherwise outrank the running-first priority.
         return $record?->runs()
+            ->reorder()
             ->orderByRaw("case when status = 'running' then 0 else 1 end")
             ->latest('created_at')
             ->first();

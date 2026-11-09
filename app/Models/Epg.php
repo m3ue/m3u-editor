@@ -113,6 +113,15 @@ class Epg extends Model
     }
 
     /**
+     * A SchedulesDirect EPG while SCHEDULES_DIRECT_ENABLED is off: it can't sync,
+     * but the guide data it already imported keeps being served.
+     */
+    public function isSchedulesDirectDisabled(): bool
+    {
+        return $this->isSchedulesDirect() && ! config('services.schedules_direct.enabled', true);
+    }
+
+    /**
      * A stored Schedules Direct token is usable when it exists and still has a
      * safety margin left before its real expiry. Schedules Direct tokens are
      * valid for 24 hours; the small margin absorbs clock skew and keeps a

@@ -8,6 +8,7 @@ use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
 use App\Models\Episode;
 use App\Services\CachedContentDispatchService;
+use App\Services\LogoCacheService;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -67,7 +68,7 @@ class EpisodesRelationManager extends RelationManager
 
                         return $info['movie_image'] ?? $info['cover_big'] ?? null;
                     })
-                    ->defaultImageUrl('/images/placeholder-episode.png'),
+                    ->defaultImageUrl(fn (): string => LogoCacheService::getPlaceholderUrl('episode')),
 
                 TextColumn::make('title')
                     ->limit(50)

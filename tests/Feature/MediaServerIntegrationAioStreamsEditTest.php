@@ -157,6 +157,28 @@ it('renders the edit page for an aiostreams integration without error', function
         ->assertOk();
 });
 
+it('selects every catalog, including several of the same type, when Enable All Catalogs is turned off', function () {
+    $integration = MediaServerIntegration::create([
+        'user_id' => $this->user->id,
+        'name' => 'Test AIOStreams',
+        'type' => 'aiostreams',
+        'enabled' => true,
+        'manifest_url' => 'https://aiostreams.test/manifest.json',
+        'aiostreams_enable_all_catalogs' => true,
+        'aiostreams_catalogs' => [
+            ['id' => 'popular', 'type' => 'movie', 'name' => 'Popular'],
+            ['id' => 'recent', 'type' => 'movie', 'name' => 'Recent'],
+            ['id' => 'popular', 'type' => 'series', 'name' => 'Popular'],
+        ],
+    ]);
+
+    Livewire::test(EditMediaServerIntegration::class, ['record' => $integration->id])
+        ->fillForm(['aiostreams_enable_all_catalogs' => false])
+        ->assertSchemaStateSet([
+            'aiostreams_selected_catalog_ids' => ['popular_movie', 'recent_movie', 'popular_series'],
+        ]);
+});
+
 it('links the series edit action to the full Series edit page instead of opening a slideOver', function () {
     $integration = MediaServerIntegration::create([
         'user_id' => $this->user->id,

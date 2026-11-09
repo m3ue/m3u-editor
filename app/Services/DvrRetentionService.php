@@ -6,6 +6,7 @@ use App\Casts\UtcDateTime;
 use App\Enums\DvrRecordingStatus;
 use App\Models\DvrRecording;
 use App\Models\DvrSetting;
+use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -20,6 +21,12 @@ use Illuminate\Support\Facades\Storage;
  */
 class DvrRetentionService
 {
+    /**
+     * How long a file must stay missing, while other library files are present, before
+     * its recordings are treated as gone rather than temporarily unavailable.
+     */
+    private const MISSING_FILE_GRACE_DAYS = 7;
+
     /**
      * Run retention enforcement for all DVR settings.
      */
@@ -201,42 +208,195 @@ class DvrRetentionService
     private function enforceDiskQuota(DvrSetting $setting): void
     {
         $quotaBytes = $setting->global_disk_quota_gb * 1024 * 1024 * 1024;
-        $disk = $setting->storage_disk ?: config('dvr.storage_disk');
+        $files = $this->reconcileMissingFiles($setting, $this->libraryFiles($setting));
 
-        $usedBytes = DvrRecording::where('dvr_setting_id', $setting->id)
-            ->where('status', DvrRecordingStatus::Completed->value)
-            ->whereNotNull('file_size_bytes')
-            ->sum('file_size_bytes');
+        // A file that isn't on disk uses no space: leave it out of the total (so other
+        // recordings aren't evicted for it).
+        $present = array_values(array_filter($files, fn (array $file): bool => $file['on_disk']));
+        $usedBytes = $this->bytesOnDisk($files);
 
         if ($usedBytes <= $quotaBytes) {
             return;
         }
 
-        Log::info("DVR retention: disk quota exceeded for setting {$setting->id}", [
-            'used_gb' => round($usedBytes / (1024 ** 3), 2),
+        // When half or more of the library looks missing, the storage is probably not
+        // (fully) mounted: the sizes can't be trusted, so don't evict anything this run.
+        // Files that stay missing leave the library after the grace period, so this clears.
+        $missing = count($files) - count($present);
+        if ($missing > 0 && $missing * 2 >= count($files)) {
+            Log::warning("DVR retention: {$missing} of ".count($files).' library files are not on disk - storage may be unavailable, skipping quota enforcement', [
+                'setting_id' => $setting->id,
+            ]);
+
+            return;
+        }
+
+        Log::info("DVR retention: quota exceeded for setting {$setting->id}", [
+            'used_gb' => round($usedBytes / 1024 / 1024 / 1024, 2),
             'quota_gb' => $setting->global_disk_quota_gb,
         ]);
 
-        $recordings = DvrRecording::where('dvr_setting_id', $setting->id)
-            ->where('status', DvrRecordingStatus::Completed->value)
-            ->whereNotNull('file_size_bytes')
-            ->orderBy('actual_end')
-            ->get();
-
-        foreach ($recordings as $recording) {
+        foreach ($present as $file) {
             if ($usedBytes <= $quotaBytes) {
                 break;
             }
 
-            $fileSize = (int) ($recording->file_size_bytes ?? 0);
+            $recording = DvrRecording::find($file['recording_ids'][0]);
 
-            if ($this->deleteRecordingFile($recording, $setting)) {
-                $usedBytes -= $fileSize;
-                Log::info("DVR retention: quota-based deleted recording {$recording->id} ({$recording->title})");
+            if ($recording && $this->deleteRecordingFile($recording, $setting, $file['recording_ids'])) {
+                Log::info("DVR retention: quota-based deleted {$file['path']} (recordings ".implode(', ', $file['recording_ids']).')');
             } else {
-                Log::warning("DVR retention: skipping size deduction for recording {$recording->id} — file deletion failed");
+                Log::warning("DVR retention: could not free {$file['path']} - file deletion failed");
             }
+
+            // Freed or stuck, this run can't reclaim the file's space any more. Leaving a
+            // stuck file in the total would evict every other recording trying to make up
+            // for space that can't come back.
+            $usedBytes -= $file['bytes'];
         }
+    }
+
+    /**
+     * Library space used by a DVR setting, as the disk quota measures it: the size on
+     * disk of each library file that is present, counted once.
+     */
+    public function libraryUsageBytes(DvrSetting $setting): int
+    {
+        return $this->bytesOnDisk($this->libraryFiles($setting));
+    }
+
+    /**
+     * @param  list<array{bytes: int, on_disk: bool}>  $files
+     */
+    private function bytesOnDisk(array $files): int
+    {
+        return array_sum(array_column(array_filter($files, fn (array $file): bool => $file['on_disk']), 'bytes'));
+    }
+
+    /**
+     * Track when library files went missing, and retire the ones that stayed missing.
+     *
+     * A missing file can mean an unavailable share or a file that is really gone. Rows
+     * are marked when their file first goes missing (the owner is told once) and cleared
+     * if it comes back. A file still missing after the grace period, while other files
+     * prove the storage is there, has its rows purged. With no files present at all the
+     * storage itself may be down, so nothing is purged however long that lasts.
+     *
+     * @param  list<array{path: string, bytes: int, on_disk: bool, missing_since: ?int, recording_ids: list<int>}>  $files
+     * @return list<array{path: string, bytes: int, on_disk: bool, missing_since: ?int, recording_ids: list<int>}> The files still in the library.
+     */
+    private function reconcileMissingFiles(DvrSetting $setting, array $files): array
+    {
+        $anyPresent = array_any($files, fn (array $file): bool => $file['on_disk']);
+        $graceCutoff = now()->subDays(self::MISSING_FILE_GRACE_DAYS)->getTimestamp();
+        $library = [];
+        $newlyMissing = [];
+        $returned = [];
+        $gone = [];
+
+        foreach ($files as $file) {
+            if ($file['on_disk']) {
+                if ($file['missing_since'] !== null) {
+                    array_push($returned, ...$file['recording_ids']);
+                }
+            } elseif ($file['missing_since'] === null) {
+                array_push($newlyMissing, ...$file['recording_ids']);
+            } elseif ($anyPresent && $file['missing_since'] <= $graceCutoff) {
+                array_push($gone, ...$file['recording_ids']);
+
+                continue;
+            }
+
+            $library[] = $file;
+        }
+
+        if ($returned !== []) {
+            DvrRecording::whereIn('id', $returned)->update(['file_missing_since' => null]);
+        }
+
+        if ($newlyMissing !== []) {
+            DvrRecording::whereIn('id', $newlyMissing)->update(['file_missing_since' => UtcDateTime::forQuery(now())]);
+            $this->notifyFilesMissing($setting, count($newlyMissing));
+        }
+
+        if ($gone !== []) {
+            $this->purgeRecordings($gone);
+            Log::warning('DVR retention: purged '.count($gone).' recording(s) whose files stayed missing for '.self::MISSING_FILE_GRACE_DAYS." days [setting {$setting->id}]", [
+                'recording_ids' => $gone,
+            ]);
+        }
+
+        return $library;
+    }
+
+    private function notifyFilesMissing(DvrSetting $setting, int $count): void
+    {
+        if (! $user = $setting->user) {
+            return;
+        }
+
+        Notification::make()
+            ->warning()
+            ->title(__('DVR recordings missing from storage'))
+            ->body(__('Files for :count recordings are missing from DVR storage. If storage is unavailable, the disk quota may be paused until it returns. Recordings removed on purpose leave the library after :days days.', [
+                'count' => $count,
+                'days' => self::MISSING_FILE_GRACE_DAYS,
+            ]))
+            ->broadcast($user)
+            ->sendToDatabase($user);
+    }
+
+    /**
+     * A setting's library files, oldest content first, with every recording on each.
+     *
+     * Recordings post-processed before output paths were unique can share one file
+     * (same title, same day); summing file_size_bytes per row counted that file once
+     * per row. Each file is listed once with its size on disk. Where the size can't be
+     * read, the largest size any of its rows recorded is used (a newer row may have a
+     * null or smaller figure; the file can't be smaller than its largest recording).
+     *
+     * @return list<array{path: string, bytes: int, on_disk: bool, missing_since: ?int, recording_ids: list<int>}>
+     */
+    private function libraryFiles(DvrSetting $setting): array
+    {
+        $storage = Storage::disk($setting->storage_disk ?: config('dvr.storage_disk'));
+        $files = [];
+
+        $recordings = DvrRecording::where('dvr_setting_id', $setting->id)
+            ->where('status', DvrRecordingStatus::Completed->value)
+            ->whereNotNull('file_path')
+            ->orderBy('id')
+            ->get(['id', 'file_path', 'file_size_bytes', 'actual_end', 'file_missing_since']);
+
+        foreach ($recordings as $recording) {
+            $file = &$files[$recording->file_path];
+            $file ??= ['path' => $recording->file_path, 'recorded' => 0, 'newest_end' => 0, 'missing_since' => null, 'recording_ids' => []];
+            $file['recorded'] = max($file['recorded'], (int) $recording->file_size_bytes);
+            // A recording with no end time has an unknown age: don't evict it first.
+            $file['newest_end'] = max($file['newest_end'], $recording->actual_end?->getTimestamp() ?? PHP_INT_MAX);
+            if ($recording->file_missing_since) {
+                $file['missing_since'] = min($file['missing_since'] ?? PHP_INT_MAX, $recording->file_missing_since->getTimestamp());
+            }
+            $file['recording_ids'][] = $recording->id;
+            unset($file);
+        }
+
+        $files = array_values($files);
+        usort($files, fn (array $a, array $b): int => $a['newest_end'] <=> $b['newest_end']);
+
+        return array_map(function (array $f) use ($storage): array {
+            $onDisk = $storage->exists($f['path']);
+            $bytes = $f['recorded'];
+            if ($onDisk) {
+                try {
+                    $bytes = (int) $storage->size($f['path']);
+                } catch (\Throwable) {
+                    // keep the recorded size
+                }
+            }
+
+            return ['path' => $f['path'], 'bytes' => $bytes, 'on_disk' => $onDisk, 'missing_since' => $f['missing_since'], 'recording_ids' => $f['recording_ids']];
+        }, $files);
     }
 
     /**
@@ -249,8 +409,10 @@ class DvrRetentionService
      *
      * Uses a raw query to bypass model hooks (avoids N+1 relation loads and rule cascades
      * that are inappropriate in a bulk retention context).
+     *
+     * @param  list<int>  $recordingIds  Every row to purge with the file, when removing a whole file; defaults to this recording.
      */
-    private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting): bool
+    private function deleteRecordingFile(DvrRecording $recording, DvrSetting $setting, array $recordingIds = []): bool
     {
         if (empty($recording->file_path)) {
             return true;
@@ -259,14 +421,26 @@ class DvrRetentionService
         $storageDisk = $setting->storage_disk ?: config('dvr.storage_disk');
 
         try {
-            if (Storage::disk($storageDisk)->exists($recording->file_path)) {
+            // A legacy same-day collision can leave two rows on one file: purge this row
+            // but keep the file while another recording still points at it.
+            if ($recording->fileIsSharedWithOtherRecordings($recordingIds)) {
+                Log::info("DVR retention: keeping {$recording->file_path}, another recording still uses it", [
+                    'recording_id' => $recording->id,
+                ]);
+            } elseif (Storage::disk($storageDisk)->exists($recording->file_path)) {
                 Storage::disk($storageDisk)->delete($recording->file_path);
+
+                // The dvr disk has 'throw' => false, so a failed delete only returns false.
+                // Never purge rows pointing at a file that is still there: the recordings
+                // would lose their reference while the file keeps using the space.
+                if (Storage::disk($storageDisk)->exists($recording->file_path)) {
+                    Log::warning("DVR retention: could not delete {$recording->file_path}; keeping recording {$recording->id}");
+
+                    return false;
+                }
             }
 
-            DvrRecording::where('id', $recording->id)->update([
-                'status' => DvrRecordingStatus::Purged->value,
-                'file_path' => null,
-            ]);
+            $this->purgeRecordings($recordingIds ?: [$recording->id]);
 
             return true;
         } catch (\Exception $e) {
@@ -274,5 +448,17 @@ class DvrRetentionService
 
             return false;
         }
+    }
+
+    /**
+     * @param  list<int>  $recordingIds
+     */
+    private function purgeRecordings(array $recordingIds): void
+    {
+        DvrRecording::whereIn('id', $recordingIds)->update([
+            'status' => DvrRecordingStatus::Purged->value,
+            'file_path' => null,
+            'file_missing_since' => null,
+        ]);
     }
 }

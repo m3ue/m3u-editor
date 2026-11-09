@@ -71,22 +71,22 @@ class ProcessVodChannelsComplete implements ShouldQueue
         if ($allFailed) {
             Notification::make()
                 ->danger()
-                ->title("VOD sync completed with errors on \"{$this->playlist->name}\"")
-                ->body("All {$this->metadataAttempted} attempted VOD metadata fetch(es) failed. Previously fetched metadata was kept; nothing new was retrieved.")
+                ->title(__('VOD sync completed with errors on ":playlist"', ['playlist' => $this->playlist->name]))
+                ->body(__('All :count attempted VOD metadata fetch(es) failed. Previously fetched metadata was kept; nothing new was retrieved.', ['count' => $this->metadataAttempted]))
                 ->broadcast($this->playlist->user)
                 ->sendToDatabase($this->playlist->user);
         } elseif ($partiallyFailed) {
             Notification::make()
                 ->warning()
-                ->title("VOD sync completed with errors on \"{$this->playlist->name}\"")
-                ->body("{$this->metadataFailed} of {$this->metadataAttempted} VOD metadata fetch(es) failed. Successful channels were kept; failed ones will be retried on the next sync.")
+                ->title(__('VOD sync completed with errors on ":playlist"', ['playlist' => $this->playlist->name]))
+                ->body(__(':failed of :attempted VOD metadata fetch(es) failed. Successful channels were kept; failed ones will be retried on the next sync.', ['failed' => $this->metadataFailed, 'attempted' => $this->metadataAttempted]))
                 ->broadcast($this->playlist->user)
                 ->sendToDatabase($this->playlist->user);
         } else {
             Notification::make()
                 ->success()
-                ->title('VOD Sync Completed')
-                ->body("VOD sync completed successfully for playlist \"{$this->playlist->name}\".")
+                ->title(__('VOD Sync Completed'))
+                ->body(__('VOD sync completed successfully for playlist ":playlist".', ['playlist' => $this->playlist->name]))
                 ->broadcast($this->playlist->user)
                 ->sendToDatabase($this->playlist->user);
         }

@@ -48,12 +48,7 @@ class EmbyPublicationCatalogService
             }
 
             $catalog = $this->buildMapping($mapping, $username, $password);
-            $mapping->updateQuietly([
-                'last_planned_revision' => $catalog['revision'],
-                'status' => 'planned',
-                'status_summary' => count($catalog['items']).' top-level items planned.',
-                'error_summary' => null,
-            ]);
+            $this->applyPlannedRevision($mapping, $catalog);
             $mappings[] = $catalog;
         }
 
@@ -67,6 +62,50 @@ class EmbyPublicationCatalogService
     }
 
     /**
+     * Evaluate the mapping's status transition against the current database
+     * row, scoped update by scoped update, so a concurrent callback (e.g. a
+     * publish success landing mid-build) is never clobbered by a reload of
+     * this method's own, possibly stale, in-memory $mapping.
+     *
+     * @param  array<string, mixed>  $catalog
+     */
+    private function applyPlannedRevision(EmbyLibraryMapping $mapping, array $catalog): void
+    {
+        $revision = $catalog['revision'];
+        $plannedSummary = count($catalog['items']).' top-level items planned.';
+        $syncedSummary = __('Published revision is up to date.');
+        $preserveStatuses = ['failed', 'drifted', 'cleanup_pending'];
+
+        $mapping->newQuery()->whereKey($mapping->getKey())
+            ->update(['last_planned_revision' => $revision]);
+
+        $mapping->newQuery()->whereKey($mapping->getKey())
+            ->whereNotIn('status', $preserveStatuses)
+            ->where('last_applied_revision', $revision)
+            ->whereNotNull('last_success_at')
+            ->where('status', 'synced')
+            ->whereNotNull('status_summary')
+            ->where('status_summary', '<>', '')
+            ->update(['status' => 'synced', 'error_summary' => null]);
+
+        $mapping->newQuery()->whereKey($mapping->getKey())
+            ->whereNotIn('status', $preserveStatuses)
+            ->where('last_applied_revision', $revision)
+            ->whereNotNull('last_success_at')
+            ->where(fn ($query) => $query->where('status', '!=', 'synced')
+                ->orWhereNull('status_summary')
+                ->orWhere('status_summary', ''))
+            ->update(['status' => 'synced', 'status_summary' => $syncedSummary, 'error_summary' => null]);
+
+        $mapping->newQuery()->whereKey($mapping->getKey())
+            ->whereNotIn('status', $preserveStatuses)
+            ->where(fn ($query) => $query->where('last_applied_revision', '!=', $revision)
+                ->orWhereNull('last_applied_revision')
+                ->orWhereNull('last_success_at'))
+            ->update(['status' => 'planned', 'status_summary' => $plannedSummary, 'error_summary' => null]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function buildMapping(
@@ -77,6 +116,7 @@ class EmbyPublicationCatalogService
         $items = $mapping->collection_type === 'movies'
             ? $this->buildMovies($mapping, $username, $password)
             : $this->buildSeries($mapping, $username, $password);
+        $items = $this->disambiguateItemFolders($items);
 
         return $this->withRevision([
             'mapping_uuid' => $mapping->uuid,
@@ -93,6 +133,43 @@ class EmbyPublicationCatalogService
             'full_snapshot' => true,
             'items' => $items,
         ]);
+    }
+
+    /**
+     * Keep human-readable paths unless distinct canonical items share a slug.
+     * Reserve all original names first so generated suffixes cannot shadow them.
+     *
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array<string, mixed>>
+     */
+    private function disambiguateItemFolders(array $items): array
+    {
+        $counts = array_count_values(array_map(
+            fn (array $item): string => strtolower($item['relative_folder']),
+            $items,
+        ));
+        $used = array_fill_keys(array_keys($counts), true);
+
+        foreach ($items as &$item) {
+            $folder = $item['relative_folder'];
+            if ($counts[strtolower($folder)] < 2) {
+                continue;
+            }
+
+            $base = Str::limit($folder, 130, '').'-'.substr(hash('sha256', $item['canonical_id']), 0, 16);
+            $candidate = $base;
+            $suffix = 1;
+            while (isset($used[strtolower($candidate)])) {
+                $candidate = $base.'-'.$suffix++;
+            }
+
+            $used[strtolower($candidate)] = true;
+            $item['relative_folder'] = $candidate;
+            $item['base_filename'] = $candidate;
+        }
+        unset($item);
+
+        return $items;
     }
 
     /**

@@ -28,6 +28,12 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
     // Giving a timeout of 30 minutes to the Job to process the file
     public $timeout = 60 * 30;
 
+    /**
+     * TMDB's image host. Its URLs don't expire, and a cover there may be a manual TMDB
+     * match, so a sync never swaps it for the provider's (often also TMDB-hosted) cover.
+     */
+    private const TMDB_IMAGE_HOST = 'image.tmdb.org';
+
     /** Default user agent used when the playlist has none configured. */
     public string $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36';
 
@@ -147,7 +153,13 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             ->where('source_category_id', $sourceCategoryId)
             ->pluck('last_modified', 'source_series_id');
 
+        $existingCovers = $playlist->series()
+            ->where('source_category_id', $sourceCategoryId)
+            ->pluck('cover', 'source_series_id');
+
         $insertBuffer = [];
+        $listedExistingIds = [];
+        $listedAnySeries = false;
 
         foreach (Items::fromString($seriesStreamsResponse->body()) as $item) {
             $itemName = trim((string) ($item->name ?? $item->title ?? ''));
@@ -170,18 +182,32 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 continue;
             }
 
+            $listedAnySeries = true;
+
             $lastModified = isset($item->last_modified) && $item->last_modified
-                ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
+                ? Carbon::createFromTimestamp((int) $item->last_modified, config('app.timezone'))->toDateTimeString()
                 : null;
 
             if ($existingSeriesIds->has($item->series_id)) {
-                // Already in DB — only update last_modified if it changed
+                $listedExistingIds[] = $item->series_id;
+
+                // Already in DB - only update last_modified and the provider cover if they changed
+                $changes = [];
                 $storedModified = $existingSeriesIds->get($item->series_id);
                 if ($lastModified && $lastModified !== $storedModified) {
+                    $changes['last_modified'] = $lastModified;
+                }
+
+                $refreshedCover = $this->refreshedProviderCover($existingCovers->get($item->series_id), $item->cover ?? null);
+                if ($refreshedCover !== null) {
+                    $changes['cover'] = $refreshedCover;
+                }
+
+                if ($changes !== []) {
                     $playlist->series()
                         ->where('source_series_id', $item->series_id)
                         ->where('source_category_id', $sourceCategoryId)
-                        ->update(['last_modified' => $lastModified]);
+                        ->update($changes);
                 }
 
                 continue;
@@ -219,6 +245,8 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             $this->flushInsertBuffer($insertBuffer, $playlist, $sourceCategoryId, $sourceCategoryName);
         }
 
+        $this->stampListedSeries($playlist, $sourceCategoryId, $listedExistingIds, $listedAnySeries);
+
         // Update progress: scale 0→100 across all chunks. Intermediate chunks are
         // capped at 99 so the UI doesn't show 100% until the final chunk completes.
         $isLastChunk = $this->index === $this->batchCount - 1;
@@ -236,6 +264,111 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         }
 
         $playlist->update($update);
+    }
+
+    /**
+     * The provider's new cover for a series already in the DB, or null to keep the stored one.
+     *
+     * Some providers sign cover URLs with a short expiry, so the cover saved when the series was
+     * first imported stops loading a few days later. The listing carries a fresh URL, so take it
+     * when the stored cover is blank or comes from the same image host. A cover from another host
+     * (TMDB, or one set by hand) is left alone, and so is any TMDB-hosted cover, even when the
+     * provider's covers are on TMDB too: it could be the poster a manual TMDB match picked.
+     */
+    private function refreshedProviderCover(?string $storedCover, mixed $providerCover): ?string
+    {
+        $providerCover = is_string($providerCover) ? trim($providerCover) : '';
+        if ($providerCover === '' || $providerCover === $storedCover || ! filter_var($providerCover, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+
+        if (blank($storedCover)) {
+            return $providerCover;
+        }
+
+        $storedHost = parse_url($storedCover, PHP_URL_HOST);
+        $providerHost = parse_url($providerCover, PHP_URL_HOST);
+
+        return is_string($storedHost) && is_string($providerHost)
+            && strcasecmp($storedHost, $providerHost) === 0
+            && strcasecmp($storedHost, self::TMDB_IMAGE_HOST) !== 0
+            ? $providerCover
+            : null;
+    }
+
+    /**
+     * Stamp the series the provider still lists with this sync's batch number.
+     *
+     * ProcessM3uImportComplete::seriesCleanup() removes every series in a surviving category
+     * that did not get the current batch number, the same way channels are retired, so a series
+     * the provider removed (or re-added under a new series_id) does not linger as a duplicate.
+     *
+     * A category that came back with no usable series is treated as a provider blip rather than
+     * as every series having been removed: all of its existing series are kept.
+     *
+     * @param  list<int|string>  $listedExistingIds  series_ids already in the DB that the listing returned
+     */
+    private function stampListedSeries(Playlist $playlist, mixed $sourceCategoryId, array $listedExistingIds, bool $listedAnySeries): void
+    {
+        if (! $listedAnySeries) {
+            $kept = $playlist->series()
+                ->where('source_category_id', $sourceCategoryId)
+                ->update(['import_batch_no' => $this->batchNo]);
+
+            if ($kept > 0) {
+                Log::warning('ProcessM3uImportSeriesChunk: category returned no series, keeping its existing series', [
+                    'source_category_id' => $sourceCategoryId,
+                    'playlist_id' => $playlist->id,
+                    'kept_series' => $kept,
+                ]);
+            }
+
+            return;
+        }
+
+        foreach (array_chunk($listedExistingIds, 500) as $ids) {
+            $playlist->series()
+                ->where('source_category_id', $sourceCategoryId)
+                ->whereIn('source_series_id', $ids)
+                ->update(['import_batch_no' => $this->batchNo]);
+        }
+    }
+
+    /**
+     * Drop rows whose series_id already exists in the playlist under another category.
+     *
+     * A series the provider moved to this category is moved here too, keeping its enabled state
+     * and everything attached to it. One already stamped by an earlier category this sync (listed
+     * under several categories) stays where it is, so it never flips between them on each sync.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>> The rows that really are new.
+     */
+    private function adoptExistingSeries(array $rows, Playlist $playlist, Category $category, mixed $sourceCategoryId): array
+    {
+        $existingIds = $playlist->series()
+            ->whereIn('source_series_id', array_column($rows, 'source_series_id'))
+            ->pluck('source_series_id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        if ($existingIds === []) {
+            return $rows;
+        }
+
+        $playlist->series()
+            ->whereIn('source_series_id', $existingIds)
+            ->where('import_batch_no', '!=', $this->batchNo)
+            ->update([
+                'category_id' => $category->id,
+                'source_category_id' => $sourceCategoryId,
+                'import_batch_no' => $this->batchNo,
+            ]);
+
+        return array_values(array_filter(
+            $rows,
+            fn (array $row): bool => ! in_array((string) $row['source_series_id'], $existingIds, true)
+        ));
     }
 
     /**
@@ -261,9 +394,13 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                     ]
                 );
 
-                Series::insertOrIgnore(
-                    array_map(fn ($row) => $row + ['category_id' => $category->id], $rows)
-                );
+                $rows = $this->adoptExistingSeries($rows, $playlist, $category, $sourceCategoryId);
+
+                if ($rows !== []) {
+                    Series::insertOrIgnore(
+                        array_map(fn ($row) => $row + ['category_id' => $category->id], $rows)
+                    );
+                }
             }, 5);
         } catch (QueryException $e) {
             // SQLSTATE 23503 = foreign_key_violation (PostgreSQL).

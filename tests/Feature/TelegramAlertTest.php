@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\Job;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use NotificationChannels\Telegram\TelegramChannel;
 
@@ -142,4 +143,30 @@ it('does not alert on a failed telegram alert delivery to avoid loops', function
     $listener->handle(telegramAlertFailedJobEvent(TelegramAlert::class));
 
     Notification::assertNothingSent();
+});
+
+it('does not queue another telegram alert when logging a failed telegram delivery', function () {
+    telegramAlertMockSettings([
+        'telegram_alerts_enabled' => true,
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
+        'telegram_chat_id' => '123456789',
+    ]);
+    config(['logging.default' => 'alerts']);
+
+    (new TelegramAlert('[ERROR] Something went wrong', Crypt::encryptString('test-token')))
+        ->failed(new Exception('Bad Request: chat not found'));
+
+    Notification::assertNothingSent();
+});
+
+it('still forwards ordinary error logs to telegram through the alerts channel', function () {
+    telegramAlertMockSettings([
+        'telegram_alerts_enabled' => true,
+        'telegram_bot_token' => Crypt::encryptString('test-token'),
+        'telegram_chat_id' => '123456789',
+    ]);
+
+    Log::channel('alerts')->error('Playlist sync failed');
+
+    Notification::assertSentOnDemandTimes(TelegramAlert::class, 1);
 });

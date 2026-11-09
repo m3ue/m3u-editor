@@ -42,6 +42,7 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -136,7 +137,7 @@ class CategoryResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
-            ->modifyQueryUsing(function (Builder $query) {
+            ->modifyQueryUsing(function (Builder $query, HasTable $livewire) {
                 $query->with(['parent', 'playlist'])
                     ->withCount('series')
                     ->withCount('enabled_series')
@@ -145,6 +146,12 @@ class CategoryResource extends Resource implements CopilotResource
                         'descendantSeries as descendant_series_count',
                         'descendantSeries as enabled_descendant_series_count' => fn (Builder $subQuery) => $subQuery->where('series.enabled', true),
                     ]);
+
+                // Filament can't lock single rows from dragging, so sort mode only lists
+                // categories the next sync won't renumber (Category Auto Sort off).
+                if ($livewire->isTableReordering()) {
+                    $query->sortOrderUnlocked();
+                }
             })
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
@@ -174,7 +181,10 @@ class CategoryResource extends Resource implements CopilotResource
                     ->type('number')
                     ->placeholder(__('Sort Order'))
                     ->sortable()
-                    ->tooltip(__('Category sort order'))
+                    ->disabled(fn (Category $record): bool => $record->isSortOrderLockedToProvider())
+                    ->tooltip(fn (Category $record): string => $record->isSortOrderLockedToProvider()
+                        ? __('Category Auto Sort is on for this playlist, so this category follows the provider order.')
+                        : __('Category sort order'))
                     ->toggleable(),
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))

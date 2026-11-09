@@ -63,6 +63,7 @@ class ChannelImporter extends Importer
             'name' => $this->data['name'],
             'group' => $this->data['group'],
             'playlist_id' => $this->options['playlist'],
+            'is_vod' => $this->options['is_vod'],
         ])->first();
     }
 

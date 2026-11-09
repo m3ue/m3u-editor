@@ -10,7 +10,7 @@
  * - The M3U output emits group-titles in the custom order
  * - PlaylistAliasResource sort helpers reconcile selection/order and resolve the
  *   imported group's custom name for display
- * - SourceGroup::displayLabelsForIds() prefers the imported custom name
+ * - SourceGroup::displayLabelsForIds() shows the imported custom name with the provider's
  */
 
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
@@ -347,13 +347,13 @@ describe('SourceGroup::displayLabelsForIds', function () {
         $this->playlist = Playlist::factory()->for($this->user)->create();
     });
 
-    it('returns the imported custom name when the group has been imported', function () {
+    it('returns the imported custom name with the provider name when the group has been renamed', function () {
         $sg = SourceGroup::create(['playlist_id' => $this->playlist->id, 'name' => 'Sports', 'type' => 'live']);
         makeLiveGroup($this->user, $this->playlist, 'Sports', 1, customName: 'UK Sports HD');
 
         $labels = SourceGroup::displayLabelsForIds($this->playlist->id, 'live', [$sg->id]);
 
-        expect($labels[$sg->id])->toBe('UK Sports HD');
+        expect($labels[$sg->id])->toBe('UK Sports HD (provider: Sports)');
     });
 
     it('falls back to the source name when no imported group exists', function () {

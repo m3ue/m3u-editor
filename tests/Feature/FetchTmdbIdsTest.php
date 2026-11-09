@@ -502,6 +502,48 @@ it('overwrites existing IDs when overwrite is true', function () {
     expect($channel->info['tmdb_id'])->toBe(603);
 });
 
+it('keeps the existing correct tmdb_id when overwrite search finds no confident match (issue #1647)', function () {
+    Http::fake([
+        // Overwrite's re-search finds nothing confident for this title.
+        'https://api.themoviedb.org/3/search/movie*' => Http::response(['results' => []], 200),
+        'https://api.themoviedb.org/3/movie/424/external_ids*' => Http::response([
+            'imdb_id' => 'tt0108052',
+        ], 200),
+        'https://api.themoviedb.org/3/movie/424*' => Http::response([
+            'id' => 424,
+            'title' => "Schindler's List",
+            'overview' => 'In German-occupied Poland...',
+            'release_date' => '1993-12-15',
+        ], 200),
+    ]);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => "Schindler's List",
+        'tmdb_id' => 424, // Already correct
+        'year' => null, // Missing metadata the user wants refreshed
+    ]);
+
+    $job = new TestableFetchTmdbIds(
+        vodChannelIds: [$channel->id],
+        seriesIds: null,
+        overwriteExisting: true,
+        user: $this->user,
+    );
+
+    $job->handle(app(TmdbService::class));
+
+    $channel->refresh();
+
+    // The known-good ID must survive a failed overwrite re-search, and metadata should
+    // still get populated from it - not discarded in favor of reporting "not found".
+    expect($channel->tmdb_id)->toBe(424)
+        ->and($channel->info['tmdb_search_failed'] ?? false)->toBeFalse()
+        ->and($channel->info['plot'])->toBe('In German-occupied Poland...');
+});
+
 it('refreshes VOD rating from TMDB when overwrite is true and metadata already populated', function () {
     Http::fake([
         'https://api.themoviedb.org/3/search/movie*' => Http::response([
@@ -1588,7 +1630,7 @@ it('excludes VOD channels that were attempted but had no match from query when o
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
     $tmdb->shouldNotReceive('searchMovie');
-    $tmdb->shouldNotReceive('getMovieDetails');
+    $tmdb->shouldNotReceive('getMovieDetailsWithTvFallback');
 
     $job = new TestableFetchTmdbIds(
         vodPlaylistId: $this->playlist->id,
@@ -1601,7 +1643,7 @@ it('excludes VOD channels that were attempted but had no match from query when o
 it('includes VOD channels with tmdb_id but missing metadata even when overwrite is false', function () {
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    $tmdb->shouldReceive('getMovieDetails')->with(603)->andReturn([
+    $tmdb->shouldReceive('getMovieDetailsWithTvFallback')->with(603, null)->andReturn([
         'tmdb_id' => 603,
         'overview' => 'A computer hacker learns about the true nature of reality.',
         'poster_url' => 'https://image.tmdb.org/t/p/w500/matrix.jpg',
@@ -1825,7 +1867,7 @@ it('with lookupScope new, only processes VOD channels with new=true regardless o
     ]);
 
     $tmdb->shouldReceive('searchMovie')->once()->with('New Disabled Movie', Mockery::any())->andReturn(null);
-    $tmdb->shouldNotReceive('getMovieDetails');
+    $tmdb->shouldNotReceive('getMovieDetailsWithTvFallback');
 
     $job = new TestableFetchTmdbIds(
         vodPlaylistId: $this->playlist->id,
@@ -2013,7 +2055,7 @@ it('fetches IDs only for enabled VOD channels in the given groups', function () 
     ]);
 
     $tmdb->shouldReceive('searchMovie')->once()->with('Enabled In A', Mockery::any())->andReturn(null);
-    $tmdb->shouldNotReceive('getMovieDetails');
+    $tmdb->shouldNotReceive('getMovieDetailsWithTvFallback');
 
     $job = new TestableFetchTmdbIds(
         vodGroupIds: [$groupA->id],
@@ -2101,7 +2143,7 @@ it('expands a merged VOD group to its child groups', function () {
     ]);
 
     $tmdb->shouldReceive('searchMovie')->once()->with('On Child Group', Mockery::any())->andReturn(null);
-    $tmdb->shouldNotReceive('getMovieDetails');
+    $tmdb->shouldNotReceive('getMovieDetailsWithTvFallback');
 
     $job = new TestableFetchTmdbIds(
         vodGroupIds: [$merged->id],
@@ -2343,7 +2385,7 @@ it('searches TMDB with cleaned VOD title when name filter is enabled', function 
         ->once()
         ->with('The Matrix', Mockery::any())
         ->andReturn(['tmdb_id' => 603, 'imdb_id' => 'tt0133093']);
-    $tmdb->shouldReceive('getMovieDetails')->andReturn(null);
+    $tmdb->shouldReceive('getMovieDetailsWithTvFallback')->andReturn(null);
 
     $job = new TestableFetchTmdbIds(vodChannelIds: [$channel->id], user: $this->user);
     $job->handle($tmdb);
@@ -2442,7 +2484,7 @@ it('does not re-fetch a VOD title that TMDB has no poster for once it has been l
 
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    $tmdb->shouldNotReceive('getMovieDetails');
+    $tmdb->shouldNotReceive('getMovieDetailsWithTvFallback');
     $tmdb->shouldNotReceive('searchMovie');
 
     (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
@@ -2467,7 +2509,7 @@ it('runs the VOD library-name genre check only once per title', function () {
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
     // Genuinely single-genre: nothing to change, but it must not be asked again.
-    $tmdb->shouldReceive('getMovieDetails')->once()->with(4242)->andReturn(['genres' => 'Drama']);
+    $tmdb->shouldReceive('getMovieDetailsWithTvFallback')->once()->with(4242, null)->andReturn(['genres' => 'Drama']);
 
     foreach ([1, 2] as $run) {
         (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
@@ -2495,7 +2537,7 @@ it('checks the VOD genre again when a provider refresh sets it back to a library
 
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    $tmdb->shouldReceive('getMovieDetails')->twice()->with(4244)->andReturn(['genres' => 'Action']);
+    $tmdb->shouldReceive('getMovieDetailsWithTvFallback')->twice()->with(4244, null)->andReturn(['genres' => 'Action']);
     $run = fn () => (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
 
     $run();
@@ -2527,7 +2569,7 @@ it('retries the VOD genre check when the TMDB lookup failed', function () {
 
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    $tmdb->shouldReceive('getMovieDetails')->twice()->with(4243)->andReturn(null);
+    $tmdb->shouldReceive('getMovieDetailsWithTvFallback')->twice()->with(4243, null)->andReturn(null);
 
     foreach ([1, 2] as $run) {
         (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);

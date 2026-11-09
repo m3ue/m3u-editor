@@ -291,6 +291,38 @@ it('ignores integrations without Use for caching and other users\' integrations'
     Http::assertNothingSent();
 });
 
+it('sends automatic caching to the instance marked as the caching default when more than one is eligible (issue #1669)', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'radarr', ['url' => 'http://radarr-a.test', 'is_default_cache_target' => false]);
+    cvaArr($playlist, 'radarr', ['url' => 'http://radarr-b.test', 'is_default_cache_target' => true]);
+
+    Http::fake([
+        'radarr-b.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup()),
+        'radarr-b.test/api/v3/movie' => Http::response(['id' => 7]),
+    ]);
+
+    expect(cvaService()->dispatch(cvaChannel($playlist)))->toBe(CacheDispatchResult::SentToArr);
+
+    Http::assertSent(fn (Request $request): bool => str_starts_with($request->url(), 'http://radarr-b.test'));
+    Http::assertNotSent(fn (Request $request): bool => str_starts_with($request->url(), 'http://radarr-a.test'));
+});
+
+it('falls back to the oldest eligible instance when none is marked as the caching default', function () {
+    $playlist = cvaPlaylist();
+    $older = cvaArr($playlist, 'radarr', ['url' => 'http://radarr-a.test']);
+    cvaArr($playlist, 'radarr', ['url' => 'http://radarr-b.test']);
+
+    Http::fake([
+        'radarr-a.test/api/v3/movie/lookup*' => Http::response(cvaMovieLookup()),
+        'radarr-a.test/api/v3/movie' => Http::response(['id' => 7]),
+    ]);
+
+    expect(cvaService()->dispatch(cvaChannel($playlist)))->toBe(CacheDispatchResult::SentToArr);
+
+    Http::assertSent(fn (Request $request): bool => str_starts_with($request->url(), 'http://radarr-a.test'));
+    expect($older->id)->toBeLessThan(ArrIntegration::query()->where('url', 'http://radarr-b.test')->value('id'));
+});
+
 it('keeps cache:content on the provider', function () {
     $playlist = cvaPlaylist();
     cvaArr($playlist, 'radarr');

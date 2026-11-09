@@ -119,3 +119,97 @@ it('passes through Xtream channels that have no source_key unchanged', function 
     expect($result[0]['source_id'])->toBe('stream-12345')
         ->and($result[0])->not->toHaveKey('source_key');
 });
+
+/**
+ * An existing channel row as assignCollisionSourceIds() matches it.
+ *
+ * @return array{source_key: string, source_id: string, stream_id: ?string, url: ?string, is_vod: bool}
+ */
+function collisionRow(string $sourceKey, string $sourceId, ?string $tvgId, string $url): array
+{
+    return ['source_key' => $sourceKey, 'source_id' => $sourceId, 'stream_id' => $tvgId, 'url' => $url, 'is_vod' => false];
+}
+
+function collisionEntry(string $sourceKey, ?string $tvgId, string $url): array
+{
+    return ['source_key' => $sourceKey, 'stream_id' => $tvgId, 'url' => $url, 'is_vod' => false, 'playlist_id' => 1];
+}
+
+it('keeps the rows an older hashing scheme created when the feed is reordered', function () {
+    $key = 'NewsNewsNews';
+    $rows = [
+        collisionRow($key, md5($key), 'tvg-a', 'http://example.test/a.ts'),
+        collisionRow($key, md5($key.':dup:1'), 'tvg-b', 'http://example.test/b.ts'),
+    ];
+
+    $result = ProcessM3uImport::assignCollisionSourceIds(collect([
+        collisionEntry($key, 'tvg-b', 'http://example.test/b.ts'),
+        collisionEntry($key, 'tvg-a', 'http://example.test/a.ts'),
+    ]), $rows)->pluck('source_id', 'url')->all();
+
+    expect($result)->toBe([
+        'http://example.test/b.ts' => md5($key.':dup:1'),
+        'http://example.test/a.ts' => md5($key),
+    ]);
+});
+
+it('keeps the existing row when a duplicate of its name appears', function () {
+    $key = 'NewsNewsNews';
+    $rows = [collisionRow($key, md5($key), 'tvg-a', 'http://example.test/a.ts')];
+
+    $result = ProcessM3uImport::assignCollisionSourceIds(collect([
+        collisionEntry($key, 'tvg-c', 'http://example.test/c.ts'),
+        collisionEntry($key, 'tvg-a', 'http://example.test/a.ts'),
+    ]), $rows)->pluck('source_id', 'url')->all();
+
+    expect($result['http://example.test/a.ts'])->toBe(md5($key))
+        ->and($result['http://example.test/c.ts'])->toBe(md5($key.'|sid:tvg-c'));
+});
+
+it('keeps the existing row when its duplicate disappears', function () {
+    $key = 'NewsNewsNews';
+    $rows = [
+        collisionRow($key, md5($key.'|sid:tvg-a'), 'tvg-a', 'http://example.test/a.ts'),
+        collisionRow($key, md5($key.'|sid:tvg-b'), 'tvg-b', 'http://example.test/b.ts'),
+    ];
+
+    $result = ProcessM3uImport::assignCollisionSourceIds(collect([
+        collisionEntry($key, 'tvg-a', 'http://example.test/a.ts'),
+    ]), $rows)->all();
+
+    expect($result[0]['source_id'])->toBe(md5($key.'|sid:tvg-a'));
+});
+
+it('never hands a dropped entry\'s row to a new duplicate with a different tvg-id', function () {
+    $key = 'NewsNewsNews';
+    $rows = [
+        collisionRow($key, md5($key), 'tvg-a', 'http://example.test/a.ts'),
+        collisionRow($key, md5($key.':dup:1'), 'tvg-b', 'http://example.test/b.ts'),
+    ];
+
+    $result = ProcessM3uImport::assignCollisionSourceIds(collect([
+        collisionEntry($key, 'tvg-a', 'http://example.test/a.ts'),
+        collisionEntry($key, 'tvg-c', 'http://example.test/c.ts'),
+    ]), $rows)->pluck('source_id', 'url')->all();
+
+    expect($result['http://example.test/a.ts'])->toBe(md5($key))
+        ->and($result['http://example.test/c.ts'])->not->toBeIn([md5($key), md5($key.':dup:1')]);
+});
+
+it('follows the URL of duplicate-named entries without a tvg-id', function () {
+    $key = 'NewsNewsNews';
+    $rows = [
+        collisionRow($key, md5($key), null, 'http://example.test/a.ts'),
+        collisionRow($key, md5($key.':dup:1'), null, 'http://example.test/b.ts'),
+    ];
+
+    $result = ProcessM3uImport::assignCollisionSourceIds(collect([
+        collisionEntry($key, null, 'http://example.test/b.ts'),
+        collisionEntry($key, null, 'http://example.test/a.ts'),
+    ]), $rows)->pluck('source_id', 'url')->all();
+
+    expect($result)->toBe([
+        'http://example.test/b.ts' => md5($key.':dup:1'),
+        'http://example.test/a.ts' => md5($key),
+    ]);
+});

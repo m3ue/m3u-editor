@@ -348,7 +348,7 @@ class GuestBrowseShows extends Page
 
         if (! $channel) {
             Notification::make()
-                ->title(__('No matching channel found for ":title". The recording may not start — check your channel EPG mapping.', ['title' => $programme->title]))
+                ->title(__('No matching channel found for ":title". The recording may not start, check your channel EPG mapping.', ['title' => $programme->title]))
                 ->warning()
                 ->send();
         }

@@ -36,7 +36,7 @@
                                 {{ __('Recordings') }}
                             </th>
                             <th class="px-3 py-2 text-right text-xs font-medium tracking-wide text-gray-500 uppercase dark:text-gray-400">
-                                {{ __('Used') }}
+                                {{ __('Library size') }}
                             </th>
                             <th class="px-3 py-2 text-right text-xs font-medium tracking-wide text-gray-500 uppercase dark:text-gray-400">
                                 {{ __('Quota') }}

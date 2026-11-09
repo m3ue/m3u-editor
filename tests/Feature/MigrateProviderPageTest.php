@@ -10,7 +10,6 @@ use App\Models\Playlist;
 use App\Models\ProviderMigrationPlanRow;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -57,8 +56,8 @@ it('renders for the playlist owner', function () {
 it('is not reachable for a user who does not own the playlist', function () {
     $source = Playlist::factory()->create(['user_id' => User::factory()->create()->id]);
 
-    expect(fn () => Livewire::test(MigrateProvider::class, ['record' => $source->id]))
-        ->toThrow(ModelNotFoundException::class);
+    Livewire::test(MigrateProvider::class, ['record' => $source->id])
+        ->assertNotFound();
 });
 
 it('is not found for a network playlist', function () {

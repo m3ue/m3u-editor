@@ -504,6 +504,34 @@ class EpgProgrammeStore
     }
 
     /**
+     * Stream the title and subtitle of every programme on air at some point in
+     * `($fromTs, $toTs)`, across all channels, without decoding whole payloads.
+     * A programme with no stop time counts as on air from its start.
+     *
+     * @param  list<string>  $dates  Local `Y-m-d` buckets that can hold such a programme
+     * @return Generator<int, array{channel_id: string, start_ts: int, stop_ts: int|null, title: string, subtitle: string}>
+     */
+    public function readAiring(array $dates, int $fromTs, int $toTs): Generator
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT channel_id, start_ts, stop_ts, json_extract(data, '$.title') AS title, json_extract(data, '$.subtitle') AS subtitle "
+            .'FROM programmes WHERE date IN ('.implode(',', array_fill(0, count($dates), '?')).') '
+            .'AND start_ts < ? AND (stop_ts IS NULL OR stop_ts > ?)'
+        );
+        $statement->execute([...$dates, $toTs, $fromTs]);
+
+        while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            yield [
+                'channel_id' => $row['channel_id'],
+                'start_ts' => (int) $row['start_ts'],
+                'stop_ts' => $row['stop_ts'] !== null ? (int) $row['stop_ts'] : null,
+                'title' => (string) $row['title'],
+                'subtitle' => (string) $row['subtitle'],
+            ];
+        }
+    }
+
+    /**
      * @param  array{channel_id: string, start_ts: int|string|null, stop_ts: int|string|null, data: string}  $row
      * @return array<string, mixed>
      */

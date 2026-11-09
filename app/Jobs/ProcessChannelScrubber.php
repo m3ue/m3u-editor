@@ -158,6 +158,17 @@ class ProcessChannelScrubber implements ShouldQueue
     ): void {
         $scrubberId = $scrubber->id;
 
+        if (empty($chunkJobs)) {
+            dispatch(new ProcessChannelScrubberComplete(
+                scrubberId: $scrubberId,
+                logId: $logId,
+                batchNo: $batchNo,
+                start: $start,
+            ));
+
+            return;
+        }
+
         Bus::batch($chunkJobs)
             ->then(function () use ($scrubberId, $logId, $batchNo, $start) {
                 dispatch(new ProcessChannelScrubberComplete(

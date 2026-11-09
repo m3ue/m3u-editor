@@ -154,6 +154,26 @@ it('replaces the lineup selection from the edit slide-over without touching the 
     Http::assertNotSent(fn (Request $request) => in_array($request->method(), ['PUT', 'DELETE'], true));
 });
 
+it('opens and saves the edit slide-over without SchedulesDirect requests while SD is disabled', function () {
+    Http::fake();
+    config()->set('services.schedules_direct.enabled', false);
+    $epg = ($this->makeSdEpg)(['USA-A'], [
+        'sd_country' => 'DEU',
+        'sd_postal_code' => '10115',
+    ]);
+
+    Livewire::test(ListEpgs::class)
+        ->callAction(TestAction::make('edit')->table($epg), data: [
+            'name' => 'Renamed Guide',
+        ])
+        ->assertHasNoActionErrors();
+
+    expect($epg->refresh()->name)->toBe('Renamed Guide')
+        ->and($epg->sd_country)->toBe('DEU');
+
+    Http::assertNothingSent();
+});
+
 it('lists the account lineups and removes the selected one from the record action', function () {
     sdFakeAccount(['USA-A', 'USA-B']);
     $epg = ($this->makeSdEpg)(['USA-A']);

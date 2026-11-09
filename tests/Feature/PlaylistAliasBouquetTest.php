@@ -263,7 +263,7 @@ it('does not leak another user\'s bouquet contribution when the bouquets state i
         ->assertSuccessful()
         ->set('data.bouquets', [$foreignBouquet->id])
         ->assertSuccessful()
-        ->assertSee('Assigned bouquets contribute 0 live groups, 0 VOD groups, and 0 series categories in addition to your manual selections.')
+        ->assertSee('Allow bouquets add 0 live groups, 0 VOD groups and 0 series categories. Block bouquets hide 0 live groups, 0 VOD groups and 0 series categories.')
         ->assertDontSee('Secret Live Group')
         ->assertDontSee('Secret VOD Group')
         ->assertDontSee('Secret Category');

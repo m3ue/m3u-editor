@@ -706,9 +706,16 @@ class StrmFileMapping extends Model
             ->leftJoin($table, function ($join) use ($table) {
                 $join->on('strm_file_mappings.syncable_id', '=', "{$table}.id");
             })
-            ->where(function ($query) use ($table) {
+            // Disabling a series leaves its episodes enabled, so an episode's
+            // files are also orphaned once its series is disabled or gone.
+            ->when($syncableType === Episode::class, fn ($query) => $query
+                ->leftJoin('series', 'series.id', '=', 'episodes.series_id'))
+            ->where(function ($query) use ($table, $syncableType) {
                 $query->whereNull("{$table}.id")
-                    ->orWhere("{$table}.enabled", false);
+                    ->orWhere("{$table}.enabled", false)
+                    ->when($syncableType === Episode::class, fn ($query) => $query
+                        ->orWhereNull('series.id')
+                        ->orWhere('series.enabled', false));
             })
             ->select('strm_file_mappings.id', 'strm_file_mappings.current_path');
 

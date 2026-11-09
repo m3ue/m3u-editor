@@ -39,6 +39,7 @@ class GroupFindAndReplaceReset implements ShouldQueue
                 ->where('user_id', $this->user_id)
                 ->when($this->playlist_id, fn ($query) => $query->where('playlist_id', $this->playlist_id))
                 ->when($this->group_type, fn ($query) => $query->where('type', $this->group_type))
+                ->where('custom', false)
                 ->whereColumn('name', '!=', 'name_internal')
                 ->chunkById(1000, function ($groups) use (&$totalUpdated) {
                     $groupIds = $groups->pluck('id')->toArray();
@@ -56,7 +57,7 @@ class GroupFindAndReplaceReset implements ShouldQueue
                 });
         } else {
             $this->groups
-                ->filter(fn ($group) => $group->name !== $group->name_internal)
+                ->filter(fn ($group) => ! $group->custom && $group->name !== $group->name_internal)
                 ->chunk(1000)
                 ->each(function ($chunk) use (&$totalUpdated) {
                     $groupIds = $chunk->pluck('id')->toArray();

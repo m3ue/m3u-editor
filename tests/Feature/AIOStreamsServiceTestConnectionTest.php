@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\MediaServerException;
 use App\Models\MediaServerIntegration;
 use App\Models\User;
 use App\Services\AIOStreamsService;
@@ -66,6 +67,31 @@ it('reports all valid catalogs when the manifest is well-formed', function () {
 
     expect($result['catalogs'])->toBe(2)
         ->and($integration->aiostreams_catalogs)->toHaveCount(2);
+});
+
+it('keeps manual catalog selections that are still in the manifest and prunes removed ones', function () {
+    $integration = makeAioIntegration();
+    $integration->forceFill([
+        'aiostreams_enable_all_catalogs' => false,
+        'aiostreams_selected_catalog_ids' => ['popular_movie', 'popular_series', 'gone_movie'],
+    ])->save();
+
+    Http::fake([
+        'aiostreams.test/*' => Http::response([
+            'id' => 'aiostreams',
+            'name' => 'AIOStreams',
+            'version' => '1.0.0',
+            'catalogs' => [
+                ['id' => 'popular', 'type' => 'movie', 'name' => 'Popular'],
+                ['id' => 'popular', 'type' => 'series', 'name' => 'Popular'],
+                ['id' => 'recent', 'type' => 'movie', 'name' => 'Recent'],
+            ],
+        ], 200),
+    ]);
+
+    AIOStreamsService::make($integration)->testConnection();
+
+    expect($integration->aiostreams_selected_catalog_ids)->toBe(['popular_movie', 'popular_series']);
 });
 
 // ── aiostreams_meta_id_prefixes: computed from the manifest's `meta` resource
@@ -142,4 +168,29 @@ it('stores a wildcard when the manifest declares meta without restricting idPref
     AIOStreamsService::make($integration)->testConnection();
 
     expect($integration->aiostreams_meta_id_prefixes)->toBe(['*']);
+});
+
+it('reports an HTTP failure as a MediaServerException once retries run out (issue #1809)', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake(['aiostreams.test/*' => Http::response([], 503)]);
+
+    expect(fn () => (new AIOStreamsService($integration))->testConnection())
+        ->toThrow(MediaServerException::class, 'Failed to fetch manifest: HTTP 503');
+});
+
+it('reports a connection failure without quoting the manifest URL (issue #1809)', function () {
+    $integration = makeAioIntegration();
+
+    Http::fake(['aiostreams.test/*' => Http::failedConnection()]);
+
+    $thrown = null;
+    try {
+        (new AIOStreamsService($integration))->testConnection();
+    } catch (MediaServerException $e) {
+        $thrown = $e;
+    }
+
+    expect($thrown)->not->toBeNull()
+        ->and($thrown->getMessage())->not->toContain('aiostreams.test');
 });

@@ -194,6 +194,21 @@ class Series extends Model
     }
 
     /**
+     * Provider-sourced series that no category listing returned this sync (the series was
+     * removed, or re-added under a new series_id). Every listed series is stamped with the
+     * batch by its provider category id, wherever it sits now, so this also covers series
+     * moved into a genre or custom category. Locally created series (DVR recordings, rows
+     * without a provider series or category id) are never included.
+     */
+    public function scopeNoLongerListed(Builder $query, string $batchNo): Builder
+    {
+        return $query->whereNotNull('source_series_id')
+            ->whereNotNull('source_category_id')
+            ->where('import_batch_no', '!=', $batchNo)
+            ->where('import_batch_no', '!=', 'dvr');
+    }
+
+    /**
      * The US content rating (e.g. "TV-MA"): TMDB's first, then the rating a
      * media server sync stored. Shared by get_series_info, tvshow.nfo and the view page.
      */
@@ -214,12 +229,15 @@ class Series extends Model
                 ->orWhereNotNull('imdb_id');
 
             if ($isPgsql) {
-                $q->orWhereRaw("metadata::jsonb ?? 'tmdb_id'")
-                    ->orWhereRaw("metadata::jsonb ?? 'tmdb'")
-                    ->orWhereRaw("metadata::jsonb ?? 'tvdb_id'")
-                    ->orWhereRaw("metadata::jsonb ?? 'tvdb'")
-                    ->orWhereRaw("metadata::jsonb ?? 'imdb_id'")
-                    ->orWhereRaw("metadata::jsonb ?? 'imdb'");
+                // ->>'key' (value), not ?? 'key' (key existence): a key can be present with a
+                // null/empty value (e.g. a prior failed enrichment), which should still count
+                // as "no ID" - the ?? operator would wrongly call that "has an ID" (issue #1645).
+                $q->orWhereRaw("metadata::jsonb->>'tmdb_id' IS NOT NULL AND metadata::jsonb->>'tmdb_id' != ''")
+                    ->orWhereRaw("metadata::jsonb->>'tmdb' IS NOT NULL AND metadata::jsonb->>'tmdb' != ''")
+                    ->orWhereRaw("metadata::jsonb->>'tvdb_id' IS NOT NULL AND metadata::jsonb->>'tvdb_id' != ''")
+                    ->orWhereRaw("metadata::jsonb->>'tvdb' IS NOT NULL AND metadata::jsonb->>'tvdb' != ''")
+                    ->orWhereRaw("metadata::jsonb->>'imdb_id' IS NOT NULL AND metadata::jsonb->>'imdb_id' != ''")
+                    ->orWhereRaw("metadata::jsonb->>'imdb' IS NOT NULL AND metadata::jsonb->>'imdb' != ''");
             }
         });
     }
@@ -234,15 +252,17 @@ class Series extends Model
             return $query;
         }
 
+        // ->>'key' (value), not ?? 'key' (key existence): stays the exact negation of
+        // scopeHasSeriesId() above instead of excluding rows that ought to match (issue #1645).
         return $query->where(function (Builder $q) {
             $q->whereNull('metadata')
                 ->orWhere(function (Builder $inner) {
-                    $inner->whereRaw("NOT (metadata::jsonb ?? 'tmdb_id')")
-                        ->whereRaw("NOT (metadata::jsonb ?? 'tmdb')")
-                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb_id')")
-                        ->whereRaw("NOT (metadata::jsonb ?? 'tvdb')")
-                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb_id')")
-                        ->whereRaw("NOT (metadata::jsonb ?? 'imdb')");
+                    $inner->whereRaw("(metadata::jsonb->>'tmdb_id' IS NULL OR metadata::jsonb->>'tmdb_id' = '')")
+                        ->whereRaw("(metadata::jsonb->>'tmdb' IS NULL OR metadata::jsonb->>'tmdb' = '')")
+                        ->whereRaw("(metadata::jsonb->>'tvdb_id' IS NULL OR metadata::jsonb->>'tvdb_id' = '')")
+                        ->whereRaw("(metadata::jsonb->>'tvdb' IS NULL OR metadata::jsonb->>'tvdb' = '')")
+                        ->whereRaw("(metadata::jsonb->>'imdb_id' IS NULL OR metadata::jsonb->>'imdb_id' = '')")
+                        ->whereRaw("(metadata::jsonb->>'imdb' IS NULL OR metadata::jsonb->>'imdb' = '')");
                 });
         });
     }
@@ -348,7 +368,7 @@ class Series extends Model
                 // Use the provider-supplied timestamp when available; fall back to now + 24 hours
                 // so the freshness check treats this fetch as valid for one day.
                 $providerLastModified = isset($info['last_modified']) && $info['last_modified']
-                    ? Carbon::createFromTimestamp((int) $info['last_modified'])
+                    ? Carbon::createFromTimestamp((int) $info['last_modified'], config('app.timezone'))
                     : now()->addDay();
 
                 $update = [
@@ -518,13 +538,16 @@ class Series extends Model
                     // (truncated/rate-limited answer, or a real removal - we can't tell which
                     // from one fetch) is left untouched rather than assumed gone. Only
                     // provider-sourced rows are ever considered, so locally created episodes
-                    // (DVR recordings, manual entries) are never touched.
+                    // (DVR recordings, manual entries) are never touched. Matched on the ids the
+                    // provider listed, not this run's import_batch_no: an overlapping fetch of the
+                    // same series re-stamps these rows, and would have them deleted as "stale".
                     $seasonsInResponse = array_map('intval', array_keys($eps));
-                    DB::transaction(function () use ($seasonsInResponse, $batchNo) {
+                    $episodeIdsInResponse = collect($eps)->flatten(1)->map(fn (array $ep) => (int) $ep['id'])->all();
+                    DB::transaction(function () use ($seasonsInResponse, $episodeIdsInResponse) {
                         $removedEpisodes = $this->episodes()
                             ->whereIn('season', $seasonsInResponse)
                             ->whereNotNull('source_episode_id')
-                            ->where('import_batch_no', '!=', $batchNo)
+                            ->whereNotIn('source_episode_id', $episodeIdsInResponse)
                             ->delete();
 
                         $removedSeasons = $this->seasons()

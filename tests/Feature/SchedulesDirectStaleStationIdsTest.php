@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
+beforeEach(fn () => fakeSchedulesDirectChangeDetection());
+
 it('refreshes sd_station_ids from the current lineup on every sync instead of caching stale ids', function () {
     $user = User::factory()->create();
 

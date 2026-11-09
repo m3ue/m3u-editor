@@ -347,7 +347,7 @@ it('generates a schedule when the network contains only pinned content in shuffl
 });
 
 it('does not overlap a pin with the protected currently-airing programme', function () {
-    // Monday 2026-01-05 08:00 UTC — a programme is already airing [07:50, 08:50],
+    // Monday 2026-01-05 08:00 UTC - a programme is already airing [07:50, 08:50],
     // and a pin is anchored for today at 08:20, squarely inside that interval
     // (and after $startFrom, so the window-start guard doesn't skip it for an
     // unrelated reason before the collision check ever runs).

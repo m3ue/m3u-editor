@@ -67,6 +67,24 @@ it('still succeeds when the provider returns real info', function () {
         ->and($channel->refresh()->last_metadata_fetch)->not->toBeNull();
 });
 
+it('keeps movie_data when the provider answers without extended info', function () {
+    $channel = Channel::factory()->for($this->playlist)->for($this->user)->create([
+        'is_vod' => true,
+        'source_id' => 'vod-1',
+        'last_metadata_fetch' => null,
+    ]);
+
+    $result = $channel->fetchMetadata(vodProviderFixture([
+        'info' => [],
+        'movie_data' => ['stream_id' => 1, 'name' => 'A movie', 'container_extension' => 'mkv'],
+    ]), skipTmdb: true);
+
+    $channel->refresh();
+    expect($result)->toBeTrue()
+        ->and($channel->last_metadata_fetch)->not->toBeNull()
+        ->and($channel->movie_data['container_extension'] ?? null)->toBe('mkv');
+});
+
 it('reports a danger notification and keeps errors set when every attempted metadata fetch failed', function () {
     Notification::fake();
 

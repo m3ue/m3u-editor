@@ -7,9 +7,11 @@ use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\Playlist;
 use App\Models\User;
+use App\Services\EpgCacheService;
 use App\Services\ProviderMigrationPlanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
@@ -160,6 +162,28 @@ it('preserves an EPG mapping by copying the FK when the target has no equivalent
 
     expect($targetZee->refresh()->epg_channel_id)->toBe($sourceEpgChannel->id);
 });
+
+it('drops the replacement playlists warm XMLTV and gzip exports once channels are migrated', function (bool $dryRun) {
+    Storage::fake('local');
+    ['source' => $source, 'target' => $target] = migrationFixture($this->user);
+
+    $guidePaths = [
+        EpgCacheService::getPlaylistEpgCachePath($target, false),
+        EpgCacheService::getPlaylistEpgCachePath($target, true),
+    ];
+    foreach ($guidePaths as $path) {
+        Storage::disk('local')->put($path, 'warm guide with zero programmes');
+    }
+    $sourceGuide = EpgCacheService::getPlaylistEpgCachePath($source, false);
+    Storage::disk('local')->put($sourceGuide, 'source guide');
+
+    migrationJob($source, $target, ['dryRun' => $dryRun])->handle();
+
+    foreach ($guidePaths as $path) {
+        expect(Storage::disk('local')->exists($path))->toBe($dryRun);
+    }
+    Storage::disk('local')->assertExists($sourceGuide);
+})->with(['applied' => false, 'dry run' => true]);
 
 it('re-maps an EPG mapping to the target providers own EPG channel with the same identity', function () {
     $sourceEpg = Epg::factory()->create(['user_id' => $this->user->id]);

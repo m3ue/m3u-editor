@@ -34,6 +34,12 @@ class EpgController extends Controller
         // Fetch the EPG
         $epg = Epg::where('uuid', $uuid)->firstOrFail();
 
+        if ($epg->isSchedulesDirectDisabled()) {
+            return response()->json([
+                'message' => "EPG \"{$epg->name}\" can't be synced while SchedulesDirect is disabled.",
+            ], 409);
+        }
+
         // Refresh the EPG
         // Refresh the playlist
         dispatch(new ProcessEpgImport($epg, $request->force ?? true));

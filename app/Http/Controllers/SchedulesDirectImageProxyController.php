@@ -39,11 +39,19 @@ class SchedulesDirectImageProxyController extends Controller
     /**
      * Proxy SchedulesDirect program images with authentication
      *
-     * Route: /schedules-direct/{epg}/image/{imageHash}
+     * Route: /schedules-direct/{epg}/image/{imageHash}?v={lastUpdate}
+     *
+     * `v` is the image's lastUpdate (UNIX timestamp) from /metadata/programs.
+     * SchedulesDirect URIs are ephemeral rather than content hashes, so a cached
+     * copy older than `v` is downloaded again.
      */
     public function proxyImage(Request $request, string $epgId, string $imageHash)
     {
         $sourceKey = LogoCacheService::schedulesDirectSourceKey($epgId, $imageHash);
+        $version = $request->query('v');
+        $sourceUpdatedAt = is_string($version) && ctype_digit($version) ? (int) $version : null;
+        // A cached copy found to be out of date, served if the refresh fails
+        $staleCopy = null;
 
         try {
             // Find the EPG
@@ -57,13 +65,15 @@ class SchedulesDirectImageProxyController extends Controller
                 return response()->json(['error' => 'EPG does not use SchedulesDirect'], 400);
             }
 
-            // Image hashes are content-addressed, so a cached copy never goes
-            // stale and is served even after the daily download limit trips.
+            // A cached copy is current unless the image changed upstream since
+            // it was stored. A stale copy is still served whenever the image
+            // can't be fetched again (download limit, address block, outage).
             $cachedProfile = ImageProfile::tryFrom((string) (LogoCacheService::readCacheMetadata($sourceKey)['profile'] ?? ''));
             $cacheFile = LogoCacheService::findImage($sourceKey, $cachedProfile);
-            if ($cacheFile) {
+            if ($cacheFile && ($sourceUpdatedAt === null || ! LogoCacheService::isOlderThan($sourceKey, $sourceUpdatedAt))) {
                 return $this->imageResponse($cacheFile);
             }
+            $staleCopy = $cacheFile;
 
             if (Cache::has(self::ADDRESS_BLOCKED_KEY)) {
                 return $this->cachedCopyOrAddressBlocked($sourceKey);
@@ -78,7 +88,7 @@ class SchedulesDirectImageProxyController extends Controller
             $cacheKey = "sd_image_{$epgId}_{$imageHash}";
             $cachedFailure = Cache::get($cacheKey);
             if (isset($cachedFailure['not_found'])) {
-                return response()->json(['error' => 'Image not found'], 404);
+                return $staleCopy ? $this->imageResponse($staleCopy) : response()->json(['error' => 'Image not found'], 404);
             }
 
             if (isset($cachedFailure['download_limit'])) {
@@ -116,7 +126,9 @@ class SchedulesDirectImageProxyController extends Controller
                     ? ImageProfile::forDimensions((int) $dimensions[0], (int) $dimensions[1])
                     : null;
 
-                $cacheFile = LogoCacheService::storeImage($sourceKey, $body, $contentType, $profile);
+                // Replace every copy of the old version, including other sizes
+                LogoCacheService::clearBySourceKey($sourceKey);
+                $cacheFile = LogoCacheService::storeImage($sourceKey, $body, $contentType, $profile, $sourceUpdatedAt);
 
                 Log::debug('Successfully proxied SchedulesDirect image', [
                     'epg_id' => $epgId,
@@ -143,7 +155,7 @@ class SchedulesDirectImageProxyController extends Controller
             if ($response->status() === 404 || $sdCode === SchedulesDirectService::IMAGE_NOT_FOUND_CODE) {
                 Cache::put($cacheKey, ['not_found' => true], now()->addDays(self::NOT_FOUND_TTL_DAYS));
 
-                return response()->json(['error' => 'Image not found'], 404);
+                return $staleCopy ? $this->imageResponse($staleCopy) : response()->json(['error' => 'Image not found'], 404);
             }
 
             // Daily download limit (5002/5003, sent as HTTP 200): cache at both the
@@ -166,6 +178,10 @@ class SchedulesDirectImageProxyController extends Controller
                 Cache::put(self::ADDRESS_BLOCKED_KEY, true, now()->addDay());
 
                 return $this->cachedCopyOrAddressBlocked($sourceKey);
+            }
+
+            if ($staleCopy) {
+                return $this->imageResponse($staleCopy);
             }
 
             return response()->json([
@@ -203,6 +219,10 @@ class SchedulesDirectImageProxyController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            if ($staleCopy) {
+                return $this->imageResponse($staleCopy);
+            }
 
             return response()->json([
                 'error' => 'Internal server error while proxying image',

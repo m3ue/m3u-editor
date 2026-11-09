@@ -146,8 +146,14 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
     public function table(Table $table): Table
     {
         $resource = $this->resourceClass();
-        $groupName = $this->selectedGroupId
-            ? Group::query()->whereKey($this->selectedGroupId)->value('name')
+        // Scoped like baseQuery(): the event listener above accepts any group id.
+        $groupName = $this->playlistId && $this->selectedGroupId
+            ? Group::query()
+                ->whereKey($this->selectedGroupId)
+                ->where('user_id', auth()->id())
+                ->where('playlist_id', $this->playlistId)
+                ->where('type', $this->contentType)
+                ->value('name')
             : null;
 
         // We only want the first two items

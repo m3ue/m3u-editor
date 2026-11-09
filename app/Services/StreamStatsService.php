@@ -124,11 +124,12 @@ class StreamStatsService
             return '4K';
         }
 
-        if ($height !== null && $height >= 1080) {
+        // Width counts too: a scope release is cropped vertically (1920x800 is still 1080p).
+        if (($width !== null && $width >= 1900) || ($height !== null && $height >= 1080)) {
             return '1080p';
         }
 
-        if ($height !== null && $height >= 720) {
+        if (($width !== null && $width >= 1260) || ($height !== null && $height >= 720)) {
             return '720p';
         }
 

@@ -16,6 +16,9 @@ services:
       - PG_USER=${PG_USER:-m3ue}
       - PG_PASSWORD=${PG_PASSWORD:-changeme}
       - PG_PORT=${PG_PORT:-5432}
+      - POSTGRES_VERSION=${POSTGRES_VERSION:-17} # Set to 18 + restart to upgrade embedded Postgres in place
+      - POSTGRES_ROLLBACK=${POSTGRES_ROLLBACK:-false} # Required alongside a lowered POSTGRES_VERSION to actually roll back
+      - PG_CLIENT_VERSION=${PG_CLIENT_VERSION:-}
 
       # Database Connection (m3u-editor)
       - DB_CONNECTION=pgsql

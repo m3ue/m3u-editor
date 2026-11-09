@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
+# Prefer the versioned client tools matching whichever major pg-cluster.sh
+# activated (POSTGRES_BIN_DIR) over the unversioned psql/pg_isready/vacuumdb
+# on PATH, which may be a different major after an opt-in upgrade.
+if [ -n "${POSTGRES_BIN_DIR:-}" ]; then
+    export PATH="${POSTGRES_BIN_DIR}:${PATH}"
+fi
+
 # If using local embedded Postgres, wait for it to be ready then configure roles/DB.
 if [ "${POSTGRES_LOCAL_ENABLED}" = "true" ]; then
     echo "[db-init] Waiting for local Postgres on port ${PG_PORT}..."
@@ -112,6 +119,16 @@ else
     echo "[db-init] Migrations complete."
 fi
 /usr/bin/php /var/www/html/artisan migrate --database=jobs --force
+
+# pg_upgrade (pg-cluster.sh) copies data but not planner statistics; rebuild
+# them now rather than leaving the new cluster to guess query plans until
+# autovacuum eventually catches up. Set once by pg_cluster_prepare for the
+# boot that performed the upgrade, never persisted.
+if [ "${POSTGRES_LOCAL_ENABLED}" = "true" ] && [ "${POSTGRES_POST_UPGRADE:-false}" = "true" ]; then
+    echo "[db-init] Rebuilding planner statistics after the Postgres upgrade..."
+    su-exec "${WWWUSER}" vacuumdb -U postgres -h localhost -p "${PG_PORT}" --all --analyze-in-stages
+    echo "[db-init] Planner statistics rebuilt."
+fi
 
 # Build the EPG candidate-recall trigram indexes now that migrations have
 # created epg_channels (can't do this earlier - the table doesn't exist yet

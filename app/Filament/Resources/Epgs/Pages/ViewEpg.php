@@ -42,6 +42,7 @@ class ViewEpg extends ViewRecord
                 ->label(__('Process'))
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
+                ->hidden(fn (): bool => $this->getRecord()->isSchedulesDirectDisabled())
                 ->action(function () {
                     $record = $this->getRecord();
                     $record->update([

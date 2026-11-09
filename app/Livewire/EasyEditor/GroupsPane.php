@@ -254,6 +254,7 @@ class GroupsPane extends Component implements HasActions, HasForms, HasTable
                     ->action(function (array $data): void {
                         Group::create([
                             'name' => $data['name'],
+                            'name_internal' => $data['name'],
                             'user_id' => auth()->id(),
                             'playlist_id' => $this->playlistId,
                             'custom' => true,

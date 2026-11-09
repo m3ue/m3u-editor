@@ -207,11 +207,11 @@ class ProcessVodChannels implements ShouldQueue
             ->allowFailures()
             ->finally(function (Batch $batch) use ($playlist, $completionJob, $syncRunId): void {
                 if ($batch->failedJobs > 0) {
-                    $error = "{$batch->failedJobs} of {$batch->totalJobs} VOD chunk(s) failed while processing \"{$playlist->name}\". Successfully processed channels were kept; failed ones will be retried on the next sync.";
+                    $error = __(':failed of :total VOD chunk(s) failed while processing ":playlist". Successfully processed channels were kept; failed ones will be retried on the next sync.', ['failed' => $batch->failedJobs, 'total' => $batch->totalJobs, 'playlist' => $playlist->name]);
                     Log::warning($error);
                     Notification::make()
                         ->warning()
-                        ->title("VOD sync completed with errors on \"{$playlist->name}\"")
+                        ->title(__('VOD sync completed with errors on ":playlist"', ['playlist' => $playlist->name]))
                         ->body($error)
                         ->broadcast($playlist->user)
                         ->sendToDatabase($playlist->user);

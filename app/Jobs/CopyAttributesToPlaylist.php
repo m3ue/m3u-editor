@@ -7,6 +7,7 @@ use App\Models\CustomPlaylist;
 use App\Models\EpgChannel;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Services\EpgCacheService;
 use App\Services\ProviderMigrationPlanner;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -110,6 +111,12 @@ class CopyAttributesToPlaylist implements ShouldQueue
         // Dry runs never write and never notify; the caller reads $this->report directly.
         if ($this->dryRun) {
             return $results;
+        }
+
+        // Bulk channel writes skip model events, so drop the target's generated
+        // XMLTV/gzip guide; otherwise copied EPG mappings stay invisible until it expires.
+        if ($results > 0) {
+            EpgCacheService::clearPlaylistEpgCacheFile($playlist);
         }
 
         // If here, success! Notify the user

@@ -220,7 +220,7 @@ it('prunable() only targets rows older than 30 days', function () {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Issue #1691 — a successful pipeline run with zero local matches must still
+// Issue #1691 - a successful pipeline run with zero local matches must still
 // get a snapshot marker row, so it's discoverable as the latest run and the
 // next nonempty run diffs against it (not against an older nonempty run).
 // ──────────────────────────────────────────────────────────────────────────────

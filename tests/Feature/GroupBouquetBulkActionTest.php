@@ -59,26 +59,24 @@ it('writes vod and category keys per type', function () {
         ->and($bouquet->getSelectedLiveGroupNames())->toBe([]);
 });
 
-it('writes nothing when every selected group is custom', function () {
-    // Custom groups (user-created, `custom = true`) have no matching SourceGroup row -
-    // the staleness tooling would falsely flag them, and only is_custom channels ever
-    // match them via the fallback name path, so they cannot be added to a bouquet.
+it('adds custom groups by their stable name', function () {
     $bouquet = Bouquet::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
         'group_selections' => ['selected_groups' => ['Existing']],
     ]);
     $groups = collect([
-        Group::factory()->for($this->playlist)->for($this->user)->create(['name_internal' => 'Custom A', 'type' => 'live', 'custom' => true]),
+        Group::factory()->for($this->playlist)->for($this->user)->create(['name' => 'Renamed A', 'name_internal' => 'Custom A', 'type' => 'live', 'custom' => true]),
         Group::factory()->for($this->playlist)->for($this->user)->create(['name_internal' => 'Custom B', 'type' => 'live', 'custom' => true]),
     ]);
 
     PlaylistService::addGroupRecordsToBouquet($groups, $bouquet->id, 'live');
 
-    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Existing']);
+    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Existing', 'Custom A', 'Custom B'])
+        ->and($bouquet->staleSelectionNames())->not->toContain('Custom A', 'Custom B');
 });
 
-it('merges only the non-custom names from a mixed selection', function () {
+it('merges provider and custom names from a mixed selection', function () {
     $bouquet = Bouquet::factory()->create([
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
@@ -91,5 +89,5 @@ it('merges only the non-custom names from a mixed selection', function () {
 
     PlaylistService::addGroupRecordsToBouquet($groups, $bouquet->id, 'live');
 
-    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Sports']);
+    expect($bouquet->refresh()->getSelectedLiveGroupNames())->toBe(['Sports', 'Custom A']);
 });

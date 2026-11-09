@@ -7,11 +7,23 @@ use Illuminate\Support\Collection;
 
 /**
  * Shared pieces of the SourceGroup / SourceCategory display-label resolvers behind
- * the playlist alias pickers: id normalisation, the optional join that appends the
- * owning playlist's name, and the id => label map built from the selected rows.
+ * the playlist and playlist alias pickers: id normalisation, the optional join that
+ * appends the owning playlist's name, and the id => label map built from the selected
+ * rows.
  */
 trait HasPlaylistScopedDisplayLabels
 {
+    /**
+     * The label for a provider group or category: the provider's name, with the user's
+     * rename in front of it when there is one, so both stay visible in the pickers.
+     */
+    public static function labelWithProviderName(?string $customName, string $providerName): string
+    {
+        return filled($customName) && $customName !== $providerName
+            ? __(':name (provider: :provider)', ['name' => $customName, 'provider' => $providerName])
+            : $providerName;
+    }
+
     /**
      * Integer ids from a scalar or list, dropping anything non-numeric.
      *
@@ -37,18 +49,18 @@ trait HasPlaylistScopedDisplayLabels
     }
 
     /**
-     * Rows selected as (id, label[, playlist_name]) to an id => label map, with the
-     * playlist name appended whenever the row carries one.
+     * Rows selected as (id, provider_name[, custom_name][, playlist_name]) to an
+     * id => label map, with the playlist name appended whenever the row carries one.
      *
      * @param  Collection<int, object>  $rows
      * @return array<int, string>
      */
     protected static function labelsById(Collection $rows): array
     {
-        return $rows->mapWithKeys(fn ($row): array => [
-            $row->id => filled($row->playlist_name)
-                ? "{$row->label} ({$row->playlist_name})"
-                : $row->label,
-        ])->all();
+        return $rows->mapWithKeys(function ($row): array {
+            $label = self::labelWithProviderName($row->custom_name, $row->provider_name);
+
+            return [$row->id => filled($row->playlist_name) ? "{$label} ({$row->playlist_name})" : $label];
+        })->all();
     }
 }

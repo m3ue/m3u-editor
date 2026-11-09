@@ -49,7 +49,11 @@ class CheckSeriesStrmProgress implements ShouldQueue
             'processed' => $seriesProcessed,
             'total' => $this->totalSeries,
             'remaining' => $seriesRemaining,
-            'progress_pct' => round(($seriesProcessed / $this->totalSeries) * 100, 1),
+            // totalSeries is legitimately 0 when a sync starts with zero
+            // enabled series; cleanup still has to run for that case.
+            'progress_pct' => $this->totalSeries > 0
+                ? round(($seriesProcessed / $this->totalSeries) * 100, 1)
+                : 100.0,
         ]);
 
         if ($seriesRemaining <= 0) {

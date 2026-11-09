@@ -54,7 +54,8 @@ Route::get('/auth/oidc/redirect', [OidcController::class, 'redirect'])->name('au
 Route::get('/auth/oidc/callback', [OidcController::class, 'callback'])->name('auth.oidc.callback');
 
 // In-app watch progress tracking (admin panel + guest panel)
-Route::middleware(['throttle:60,1'])->group(function () {
+// Fetch and update share the 60/min limit. If clients report 429s, check this first.
+Route::middleware(['throttle:60,1,watch-progress'])->group(function () {
     Route::get('/api/watch-progress', [WatchProgressController::class, 'fetch'])->name('watch-progress.fetch');
     Route::post('/api/watch-progress', [WatchProgressController::class, 'update'])->name('watch-progress.update');
 });
@@ -454,13 +455,13 @@ Route::prefix('series-rules')->group(function () {
 });
 
 // Playlist API routes (public with UUID auth - rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->prefix('playlist')->group(function () {
+Route::middleware(['throttle:5,1,playlist-sync'])->prefix('playlist')->group(function () {
     Route::get('{uuid}/sync', [PlaylistController::class, 'refreshPlaylist'])
         ->name('api.playlist.sync');
 });
 
 // EPG API routes (rate limited to prevent DoS/queue flooding)
-Route::middleware(['throttle:5,1'])->prefix('epg')->group(function () {
+Route::middleware(['throttle:5,1,epg-sync'])->prefix('epg')->group(function () {
     Route::get('{uuid}/sync', [EpgController::class, 'refreshEpg'])
         ->name('api.epg.sync');
 });

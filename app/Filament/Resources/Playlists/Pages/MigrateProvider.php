@@ -180,7 +180,7 @@ class MigrateProvider extends Page implements HasTable
             ->color('primary')
             ->visible(fn (): bool => filled($this->sessionKey))
             ->requiresConfirmation()
-            ->modalDescription(fn (): string => __('Only the rows marked "Include" that point at a replacement channel are migrated. Existing clients keep the same playlist output, now served from the replacement provider.').' '.(
+            ->modalDescription(fn (): string => __('Only the rows marked "Include" that point at a replacement channel are migrated. Their settings are copied onto the replacement playlist and the source playlist is left unchanged, so existing clients must be switched to the replacement playlist\'s URLs to use the new provider.').' '.(
                 ($this->data['migrate_custom_playlists'] ?? true)
                     ? __('Custom Playlists that curated channels from this playlist will be repointed at their replacement, keeping per-custom-playlist channel numbers, sort order and custom groups. Source-only rows with no replacement match are left in place.')
                     : __('Custom Playlist membership is not part of this migration; playlists that curated channels from this source will keep pointing at the old channels.')

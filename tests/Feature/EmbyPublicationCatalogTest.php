@@ -100,7 +100,7 @@ it('builds a deterministic managed movie catalog with safe metadata and playback
             "https://m3u-editor.test/movie/tuner/secret/{$channel->id}.mkv?proxy=true"
         )
         ->and($variant['failover'])->toBe([])
-        ->and($variant['technical_metadata'])->toBe($channel->stream_stats)
+        ->and($variant['technical_metadata'])->toBe($channel->fresh()->stream_stats)
         ->and(json_encode($first))->not->toContain('provider.invalid')
         ->and(json_encode($first))->not->toContain('provider-secret');
 });

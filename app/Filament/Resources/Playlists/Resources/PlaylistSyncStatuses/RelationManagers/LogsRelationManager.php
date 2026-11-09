@@ -59,6 +59,7 @@ class LogsRelationManager extends RelationManager
                                 'primary',
                                 'primary' => 'channel',
                                 'gray' => 'group',
+                                'warning' => 'category',
                             ])
                             ->sortable()
                             ->searchable()
@@ -130,6 +131,8 @@ class LogsRelationManager extends RelationManager
             'removed_channels' => ['label' => __('Removed Channels'), 'type' => 'channel', 'status' => 'removed'],
             'added_groups' => ['label' => __('Added Groups'), 'type' => 'group', 'status' => 'added'],
             'removed_groups' => ['label' => __('Removed Groups'), 'type' => 'group', 'status' => 'removed'],
+            'added_categories' => ['label' => __('Added Categories'), 'type' => 'category', 'status' => 'added'],
+            'removed_categories' => ['label' => __('Removed Categories'), 'type' => 'category', 'status' => 'removed'],
             'added_series' => ['label' => __('Added Series'), 'type' => 'series', 'status' => 'added'],
             'removed_series' => ['label' => __('Removed Series'), 'type' => 'series', 'status' => 'removed'],
         ];

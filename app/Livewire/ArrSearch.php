@@ -84,6 +84,15 @@ class ArrSearch extends Component implements HasActions, HasSchemas
 
     public ?int $detailIntegrationId = null;
 
+    /**
+     * When the detail panel was opened from Discover and more than one eligible
+     * integration resolved the title, every candidate's match data, keyed by integration ID.
+     * Lets the user switch the request destination without losing their place.
+     *
+     * @var array<int, array<string, mixed>>
+     */
+    public array $detailCandidates = [];
+
     /** @var array<int, bool> keyed by seasonNumber */
     public array $selectedSeasons = [];
 
@@ -466,6 +475,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         $this->detailIndex = $index;
         $this->detailResult = $this->results[$index];
         $this->detailIntegrationId = (int) ($this->detailResult['integrationId'] ?? 0) ?: null;
+        $this->detailCandidates = [];
 
         // Pre-check all seasons except specials (season 0)
         $this->selectedSeasons = collect($this->detailResult['seasons'] ?? [])
@@ -501,6 +511,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
                 'guestMode' => $this->guestMode,
                 'detailIndex' => $this->detailIndex,
                 'detailIntegration' => $this->detailIntegration,
+                'detailCandidates' => $this->detailCandidates,
             ]))
             ->modalSubmitAction(false)
             ->modalCancelAction(false);
@@ -527,6 +538,7 @@ class ArrSearch extends Component implements HasActions, HasSchemas
         $this->detailResult = null;
         $this->detailIndex = null;
         $this->detailIntegrationId = null;
+        $this->detailCandidates = [];
         $this->selectedSeasons = [];
         $this->detailEpisodes = [];
         $this->detailCast = [];
@@ -1177,9 +1189,9 @@ class ArrSearch extends Component implements HasActions, HasSchemas
     #[On('request-from-discover')]
     public function requestFromDiscover(int $tmdbId, string $mediaType, ?string $title = null): void
     {
-        $resolved = $this->resolveDiscoverToArrResult($tmdbId, $mediaType, $title);
+        $candidates = $this->resolveDiscoverToArrResults($tmdbId, $mediaType, $title);
 
-        if (! $resolved) {
+        if (empty($candidates)) {
             Notification::make()
                 ->warning()
                 ->title(__('Not Found'))
@@ -1189,32 +1201,112 @@ class ArrSearch extends Component implements HasActions, HasSchemas
             return;
         }
 
-        // Append to results so the existing openDetail()/request() machinery can use the index
+        // Append the first candidate to results so the existing openDetail()/request() machinery can use the index
         $idx = count($this->results);
-        $this->results[$idx] = $resolved;
+        $this->results[$idx] = $candidates[0];
         $this->openDetail($idx);
+
+        // Keep every eligible instance's match data so the user can switch the
+        // request destination from the detail panel (see switchDetailIntegration()).
+        // Set after openDetail(), which resets detailCandidates for the normal (non-Discover) flow.
+        $this->detailCandidates = collect($candidates)->keyBy('integrationId')->all();
     }
 
     /**
-     * Resolve a TMDB discover item to an Arr-native result shape.
-     * Tries all Radarr/Sonarr integrations, not just the first.
+     * Switch the open detail panel's target integration to one of the other
+     * eligible instances that also resolved this title, without closing the panel.
+     */
+    public function switchDetailIntegration(int $integrationId): void
+    {
+        if ($integrationId === $this->detailIntegrationId) {
+            return;
+        }
+
+        $candidate = $this->detailCandidates[$integrationId] ?? null;
+
+        if (! $candidate) {
+            return;
+        }
+
+        $this->detailResult = $candidate;
+        $this->detailIntegrationId = $integrationId;
+
+        if ($this->detailIndex !== null) {
+            $this->results[$this->detailIndex] = $candidate;
+        }
+
+        // Re-check seasons/episode state for the newly selected instance's own library status.
+        $this->selectedSeasons = collect($this->detailResult['seasons'] ?? [])
+            ->mapWithKeys(fn ($s) => [(int) $s['seasonNumber'] => (int) $s['seasonNumber'] !== 0])
+            ->all();
+
+        $this->detailEpisodes = [];
+        $this->detailCast = [];
+        $this->detailReleases = [];
+        $this->detailSonarrEpisodeStatus = [];
+        $this->detailSonarrEpisodeFileInfo = [];
+        $this->detailEpisodeId = null;
+        $this->detailEpisodeSeason = null;
+        $this->detailEpisodeNumber = null;
+        $this->detailReleasesLabel = null;
+
+        $this->loadDetailEpisodes();
+    }
+
+    /**
+     * Resolve a TMDB discover item to every eligible Arr integration's match, in Arr-native result shape.
+     * Tries all Radarr/Sonarr integrations, not just the first, so the caller can offer a choice
+     * when more than one instance resolves the same title.
      * Falls back to a title search (verified by ID) when the tmdb:/tvdb: lookup returns nothing,
      * which is common for newer, foreign, or recently-added titles.
      *
-     * @return array<string, mixed>|null
+     * @return array<int, array<string, mixed>>
      */
-    public function resolveDiscoverToArrResult(int $tmdbId, string $mediaType, ?string $title = null): ?array
+    public function resolveDiscoverToArrResults(int $tmdbId, string $mediaType, ?string $title = null): array
     {
         $integrations = $this->integrationsForSearch;
+        $candidates = [];
 
         if ($mediaType === 'movie') {
             $radarrs = $integrations->filter(fn ($i) => $i->isRadarr());
 
-            // Pass 1: tmdb: lookup across all Radarr integrations
             foreach ($radarrs as $radarr) {
+                // Pass 1: tmdb: lookup
                 $items = ArrService::make($radarr)->search("tmdb:{$tmdbId}");
                 if ($items[0] ?? null) {
-                    return array_merge($items[0], [
+                    $candidates[] = array_merge($items[0], [
+                        'integrationId' => $radarr->id,
+                        'integrationName' => $radarr->name,
+                        'integrationType' => 'radarr',
+                    ]);
+
+                    continue;
+                }
+
+                // Pass 2: title fallback - verify the returned item has the right tmdbId
+                if (! $title) {
+                    continue;
+                }
+
+                $items = ArrService::make($radarr)->search($title);
+                $byId = collect($items)->first(fn ($i) => (int) ($i['tmdbId'] ?? 0) === $tmdbId);
+                $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                $singleResult = count($items) === 1 ? $items[0] : null;
+
+                if ($singleResult && ! $byId && ! $byTitle) {
+                    Log::warning('ArrSearch: single-result title fallback used without ID verification', [
+                        'tmdb_id' => $tmdbId,
+                        'title' => $title,
+                        'matched_title' => $singleResult['title'] ?? null,
+                        'matched_tmdb_id' => $singleResult['tmdbId'] ?? null,
+                        'integration_id' => $radarr->id,
+                    ]);
+                }
+
+                $match = $byId ?? $byTitle ?? $singleResult;
+
+                if ($match) {
+                    $candidates[] = array_merge($match, [
                         'integrationId' => $radarr->id,
                         'integrationName' => $radarr->name,
                         'integrationType' => 'radarr',
@@ -1222,99 +1314,71 @@ class ArrSearch extends Component implements HasActions, HasSchemas
                 }
             }
 
-            // Pass 2: title fallback — verify the returned item has the right tmdbId
-            if ($title) {
-                foreach ($radarrs as $radarr) {
-                    $items = ArrService::make($radarr)->search($title);
-                    $byId = collect($items)->first(fn ($i) => (int) ($i['tmdbId'] ?? 0) === $tmdbId);
-                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
-                    $singleResult = count($items) === 1 ? $items[0] : null;
-
-                    if ($singleResult && ! $byId && ! $byTitle) {
-                        Log::warning('ArrSearch: single-result title fallback used without ID verification', [
-                            'tmdb_id' => $tmdbId,
-                            'title' => $title,
-                            'matched_title' => $singleResult['title'] ?? null,
-                            'matched_tmdb_id' => $singleResult['tmdbId'] ?? null,
-                            'integration_id' => $radarr->id,
-                        ]);
-                    }
-
-                    $match = $byId ?? $byTitle ?? $singleResult;
-
-                    if ($match) {
-                        return array_merge($match, [
-                            'integrationId' => $radarr->id,
-                            'integrationName' => $radarr->name,
-                            'integrationType' => 'radarr',
-                        ]);
-                    }
-                }
-            }
-
-            return null;
+            return $candidates;
         }
 
         // TV: TMDB → TVDB → Sonarr
         $sonarrs = $integrations->filter(fn ($i) => $i->isSonarr());
 
         if ($sonarrs->isEmpty()) {
-            return null;
+            return [];
         }
 
         $externalIds = app(TmdbService::class)->getTvExternalIds($tmdbId);
         $tvdbId = $externalIds['tvdb_id'] ?? null;
 
-        if ($tvdbId) {
-            // Pass 1: tvdb: lookup across all Sonarr integrations
-            foreach ($sonarrs as $sonarr) {
+        foreach ($sonarrs as $sonarr) {
+            // Pass 1: tvdb: lookup
+            if ($tvdbId) {
                 $items = ArrService::make($sonarr)->search("tvdb:{$tvdbId}");
                 if ($items[0] ?? null) {
-                    return array_merge($items[0], [
+                    $candidates[] = array_merge($items[0], [
                         'integrationId' => $sonarr->id,
                         'integrationName' => $sonarr->name,
                         'integrationType' => 'sonarr',
                         'resolvedTmdbId' => $tmdbId,
                     ]);
+
+                    continue;
                 }
             }
-        }
 
-        // Pass 2: title fallback — verify by tvdbId when available, then by exact title
-        // (TMDB and TVDB sometimes disagree on the numeric ID for the same show)
-        if ($title) {
-            foreach ($sonarrs as $sonarr) {
-                $items = ArrService::make($sonarr)->search($title);
-                if ($tvdbId) {
-                    $byId = collect($items)->first(fn ($i) => (int) ($i['tvdbId'] ?? 0) === (int) $tvdbId);
-                    $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
-                    $match = $byId ?? $byTitle;
-                } else {
-                    $singleResult = count($items) === 1 ? $items[0] : null;
-                    if ($singleResult) {
-                        Log::warning('ArrSearch: single-result TV title fallback used without ID verification', [
-                            'tmdb_id' => $tmdbId,
-                            'title' => $title,
-                            'matched_title' => $singleResult['title'] ?? null,
-                            'matched_tvdb_id' => $singleResult['tvdbId'] ?? null,
-                            'integration_id' => $sonarr->id,
-                        ]);
-                    }
-                    $match = $singleResult;
-                }
+            // Pass 2: title fallback - verify by tvdbId when available, then by exact title
+            // (TMDB and TVDB sometimes disagree on the numeric ID for the same show)
+            if (! $title) {
+                continue;
+            }
 
-                if ($match) {
-                    return array_merge($match, [
-                        'integrationId' => $sonarr->id,
-                        'integrationName' => $sonarr->name,
-                        'integrationType' => 'sonarr',
-                        'resolvedTmdbId' => $tmdbId,
+            $items = ArrService::make($sonarr)->search($title);
+            if ($tvdbId) {
+                $byId = collect($items)->first(fn ($i) => (int) ($i['tvdbId'] ?? 0) === (int) $tvdbId);
+                $byTitle = collect($items)->first(fn ($i) => strtolower($i['title'] ?? '') === strtolower($title));
+                $match = $byId ?? $byTitle;
+            } else {
+                $singleResult = count($items) === 1 ? $items[0] : null;
+                if ($singleResult) {
+                    Log::warning('ArrSearch: single-result TV title fallback used without ID verification', [
+                        'tmdb_id' => $tmdbId,
+                        'title' => $title,
+                        'matched_title' => $singleResult['title'] ?? null,
+                        'matched_tvdb_id' => $singleResult['tvdbId'] ?? null,
+                        'integration_id' => $sonarr->id,
                     ]);
                 }
+                $match = $singleResult;
+            }
+
+            if ($match) {
+                $candidates[] = array_merge($match, [
+                    'integrationId' => $sonarr->id,
+                    'integrationName' => $sonarr->name,
+                    'integrationType' => 'sonarr',
+                    'resolvedTmdbId' => $tmdbId,
+                ]);
             }
         }
 
-        return null;
+        return $candidates;
     }
 
     public function render()

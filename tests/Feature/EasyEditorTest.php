@@ -246,3 +246,32 @@ it('will not move a channel across playlists via the drag drop handler', functio
 
     expect($this->channelA->fresh()->group_id)->toBe($this->groupA->id);
 });
+
+it('only names groups in the selected playlist and content type in the channels heading (issue #1815)', function () {
+    $otherUser = User::factory()->create();
+    $otherPlaylist = Playlist::factory()->for($otherUser)->create();
+    $foreignGroup = Group::factory()->for($otherUser)->for($otherPlaylist)
+        ->create(['name' => 'Synthetic group B', 'type' => 'live']);
+    $otherPlaylistGroup = Group::factory()->for($this->user)
+        ->for(Playlist::factory()->for($this->user))
+        ->create(['name' => 'My other playlist', 'type' => 'live']);
+
+    $pane = Livewire::test(ChannelsPane::class, [
+        'playlistId' => $this->playlist->id,
+        'contentType' => 'live',
+        'selectedGroupId' => $this->groupA->id,
+    ])->assertSee('News');
+
+    $pane->dispatch('easy-editor-group-selected', groupId: $foreignGroup->id)
+        ->assertDontSee('Synthetic group B');
+
+    $pane->dispatch('easy-editor-group-selected', groupId: $otherPlaylistGroup->id)
+        ->assertDontSee('My other playlist');
+
+    $this->vodGroup->update(['name' => 'Synthetic vod group']);
+    $pane->dispatch('easy-editor-group-selected', groupId: $this->vodGroup->id)
+        ->assertDontSee('Synthetic vod group');
+
+    $pane->dispatch('easy-editor-group-selected', groupId: $this->groupB->id)
+        ->assertSee('Sports');
+});

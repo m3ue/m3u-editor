@@ -39,6 +39,7 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\TextInputColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -94,7 +95,7 @@ class GroupResource extends Resource implements CopilotResource
     {
         return $table->persistFiltersInSession()
             ->persistSortInSession()
-            ->modifyQueryUsing(function (Builder $query) {
+            ->modifyQueryUsing(function (Builder $query, HasTable $livewire) {
                 $query->with(['parent', 'playlist'])
                     ->withCount('live_channels')
                     ->withCount('enabled_live_channels')
@@ -104,6 +105,12 @@ class GroupResource extends Resource implements CopilotResource
                         'descendantChannels as enabled_descendant_live_channels_count' => fn (Builder $subQuery) => $subQuery->where('channels.is_vod', false)->where('channels.enabled', true),
                     ])
                     ->where('groups.type', 'live');
+
+                // Filament can't lock single rows from dragging, so sort mode only lists
+                // groups the next sync won't renumber (custom, or Group Auto Sort off).
+                if ($livewire->isTableReordering()) {
+                    $query->sortOrderUnlocked();
+                }
             })
             ->filtersTriggerAction(function ($action) {
                 return $action->button()->label(__('Filters'));
@@ -133,7 +140,10 @@ class GroupResource extends Resource implements CopilotResource
                     ->type('number')
                     ->placeholder(__('Sort Order'))
                     ->sortable()
-                    ->tooltip(fn ($record) => $record->playlist->auto_sort ? 'Playlist auto-sort enabled; any changes will be overwritten on next sync' : 'Group sort order')
+                    ->disabled(fn (Group $record): bool => $record->isSortOrderLockedToProvider())
+                    ->tooltip(fn (Group $record): string => $record->isSortOrderLockedToProvider()
+                        ? __('Auto sort is on for this playlist, so this group follows the provider order.')
+                        : __('Group sort order'))
                     ->toggleable(),
                 ToggleColumn::make('enabled')
                     ->label(__('Auto Enable'))

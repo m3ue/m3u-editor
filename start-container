@@ -18,12 +18,28 @@ export FPMGROUP="root"
 export FPMPORT="${FPMPORT:-9000}" # Default 9000
 
 # Check if PostgreSQL enabled
-export PGDATA="/var/lib/postgresql/data"
+# PG_MOUNT is the single volume compose files mount (pgdata:/var/lib/postgresql/data).
+# PGDATA is re-exported by pg-cluster.sh to whichever cluster inside it is
+# actually active (the root, or a pg<N>/ created by an opt-in major upgrade).
+export PG_MOUNT="/var/lib/postgresql/data"
+export PGDATA="${PG_MOUNT}"
 export ENABLE_POSTGRES="${ENABLE_POSTGRES:-false}"
 export PG_DATABASE="${PG_DATABASE:-m3ue}"
 export PG_USER="${PG_USER:-root}"
 export PG_PASSWORD="${PG_PASSWORD:-root}"
 export PG_PORT="${PG_PORT:-5432}" # Default 5432
+# Which embedded Postgres major to run. Never auto-detected - bumping this
+# and restarting upgrades the existing data directory in place (see
+# docker/8.4/pg-cluster.sh); the previous version's cluster is retained for
+# rollback. Lowering it after an upgrade does nothing unless paired with
+# POSTGRES_ROLLBACK=true, since that discards any writes made since.
+export POSTGRES_VERSION="${POSTGRES_VERSION:-17}"
+export POSTGRES_ROLLBACK="${POSTGRES_ROLLBACK:-false}"
+# Resolved by pg-cluster.sh; defaulted here so supervisord's %(ENV_..)s
+# interpolation never sees an undefined var, even when embedded Postgres is
+# disabled (autostart=false still requires the var to exist).
+export POSTGRES_BIN_DIR="${POSTGRES_BIN_DIR:-/usr/libexec/postgresql17}"
+export POSTGRES_ACTIVE_VERSION="${POSTGRES_ACTIVE_VERSION:-17}"
 # pg_trgm similarity threshold for EPG candidate-recall matching (embedded
 # Postgres only - see docker/8.4/db-init.sh). Lower = more typo-tolerant
 # candidates surface for review, at the cost of a larger candidate pool.
@@ -443,6 +459,44 @@ php artisan app:generate-key
 # Check for updates
 php artisan app:update-check
 
+# If local embedded Postgres is enabled, pick/initialize/upgrade the data
+# directory before caching config below, so a resolved PG_CLIENT_VERSION is
+# part of the cache. Role/database setup and migrations are deferred to
+# [program:db-init] in supervisord.
+if [ "${ENABLE_POSTGRES}" = "true" ]; then
+  if [ -n "${DB_HOST}" ] && [ "${DB_HOST}" != "localhost" ] && [ "${DB_HOST}" != "127.0.0.1" ]; then
+    echo "📡 External Postgres configured at ${DB_HOST}. Skipping local data directory setup."
+    [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
+    echo "" > "${postgres_log_file}"
+    echo "INFO: Using external PostgreSQL at ${DB_HOST}:${DB_PORT:-5432}" >> "${postgres_log_file}"
+    chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
+  else
+    echo "📡 Preparing local Postgres data directory..."
+    [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
+    echo "" > "${postgres_log_file}"
+    chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
+
+    if [ -d "$PG_MOUNT" ]; then
+      chown -R $WWWUSER:$WWWGROUP "$PG_MOUNT"
+      chmod -R 700 "$PG_MOUNT"
+    fi
+
+    # Needed before pg_cluster_prepare, not after: an upgrade starts the old
+    # cluster on this socket directory to read its settings, so it must
+    # already exist. It's baked into the image at build time, but don't rely
+    # on that surviving into every runtime (e.g. a tmpfs-mounted /run).
+    mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
+
+    # shellcheck source=docker/8.4/pg-cluster.sh
+    . /var/www/html/docker/8.4/pg-cluster.sh
+    pg_cluster_prepare
+
+    export POSTGRES_LOCAL_ENABLED="true"
+    echo "✅ Local Postgres data directory ready (embedded ${POSTGRES_ACTIVE_VERSION} at ${PGDATA}). Supervisord will start and manage it."
+    echo ""
+  fi
+fi
+
 # Optimize Laravel
 php artisan optimize
 
@@ -461,48 +515,6 @@ fi
 # Always enable WAL on jobs database
 php artisan sqlite:wal-enable jobs
 echo ""
-
-# If local embedded Postgres is enabled, initialise the data directory.
-# Role/database setup and migrations are deferred to [program:db-init] in supervisord.
-if [ "${ENABLE_POSTGRES}" = "true" ]; then
-  if [ -n "${DB_HOST}" ] && [ "${DB_HOST}" != "localhost" ] && [ "${DB_HOST}" != "127.0.0.1" ]; then
-    echo "📡 External Postgres configured at ${DB_HOST}. Skipping local data directory setup."
-    [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
-    echo "" > "${postgres_log_file}"
-    echo "INFO: Using external PostgreSQL at ${DB_HOST}:${DB_PORT:-5432}" >> "${postgres_log_file}"
-    chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
-  else
-    echo "📡 Preparing local Postgres data directory..."
-    [ ! -f "${postgres_log_file}" ] && touch "${postgres_log_file}"
-    echo "" > "${postgres_log_file}"
-    chown $WWWUSER:$WWWGROUP "${postgres_log_file}"
-
-    if [ -d "$PGDATA" ]; then
-      chown -R $WWWUSER:$WWWGROUP "$PGDATA"
-      chmod -R 700 "$PGDATA"
-    fi
-
-    if [ ! -f "$PGDATA/PG_VERSION" ]; then
-      pwfile="/tmp/.pg_pwfile"
-      echo "$PG_PASSWORD" > "$pwfile"
-      chown $WWWUSER:$WWWGROUP "$pwfile" && chmod 600 "$pwfile"
-      echo "- Initializing Postgres data directory in $PGDATA..."
-      if ! su-exec $WWWUSER initdb --username=postgres --pwfile="$pwfile" -D "$PGDATA"; then
-        echo "FATAL: initdb failed. Check permissions on /var/lib/postgresql."
-        exit 1
-      fi
-      rm -f "$pwfile"
-      echo "- Data directory initialized."
-    else
-      echo "- Data directory already exists at $PGDATA."
-    fi
-
-    mkdir -p /run/postgresql && chown $WWWUSER:$WWWGROUP /run/postgresql
-    export POSTGRES_LOCAL_ENABLED="true"
-    echo "✅ Local Postgres data directory ready. Supervisord will start and manage it."
-    echo ""
-  fi
-fi
 
 # Register webhook for real-time cache invalidation
 # This works for both embedded and external m3u-proxy modes

@@ -86,10 +86,11 @@ class LogoCacheService
     /**
      * Merge [$changes] into the companion metadata for [$sourceKey]: `file`
      * (the original's path, absent when only a size copy is cached),
-     * `extension`, `content_type` and `profile` (the role it was cached for).
+     * `extension`, `content_type`, `profile` (the role it was cached for) and
+     * `source_updated_at` (when the upstream last changed the image, if known).
      * Null values leave a key unchanged.
      *
-     * @param  array{file?: ?string, extension?: string, content_type?: ?string, profile?: ?string}  $changes
+     * @param  array{file?: ?string, extension?: string, content_type?: ?string, profile?: ?string, source_updated_at?: ?int}  $changes
      */
     private static function writeCacheMetadata(string $sourceKey, array $changes): void
     {
@@ -227,9 +228,10 @@ class LogoCacheService
      * Cache freshly fetched image bytes for [$sourceKey] and return the file to
      * serve: with a profile, a downscaled copy when the source is wider than
      * the profile, otherwise the source bytes as the original (which then
-     * serves that profile too).
+     * serves that profile too). [$sourceUpdatedAt] records when the upstream
+     * last changed the image, for {@see isOlderThan()}.
      */
-    public static function storeImage(string $sourceKey, string $bytes, ?string $contentType, ?ImageProfile $profile = null): string
+    public static function storeImage(string $sourceKey, string $bytes, ?string $contentType, ?ImageProfile $profile = null, ?int $sourceUpdatedAt = null): string
     {
         $disk = Storage::disk('local');
         $disk->makeDirectory(self::CACHE_DIRECTORY);
@@ -248,9 +250,24 @@ class LogoCacheService
             'extension' => $extension,
             'content_type' => $contentType,
             'profile' => $profile?->value,
+            'source_updated_at' => $sourceUpdatedAt,
         ]);
 
         return $cacheFile;
+    }
+
+    /**
+     * Whether the cached copy of [$sourceKey] predates [$sourceUpdatedAt], the
+     * time the upstream last changed the image: compared with the update time
+     * recorded when it was stored, or for older entries with when it was cached.
+     */
+    public static function isOlderThan(string $sourceKey, int $sourceUpdatedAt): bool
+    {
+        $meta = self::readCacheMetadata($sourceKey) ?? [];
+        $cachedVersion = $meta['source_updated_at']
+            ?? (isset($meta['cached_at']) ? strtotime((string) $meta['cached_at']) : false);
+
+        return $cachedVersion === false || (int) $cachedVersion < $sourceUpdatedAt;
     }
 
     /**
@@ -352,7 +369,7 @@ class LogoCacheService
         return $cleared;
     }
 
-    private static function clearBySourceKey(string $sourceKey): int
+    public static function clearBySourceKey(string $sourceKey): int
     {
         $disk = Storage::disk('local');
         $cleared = 0;

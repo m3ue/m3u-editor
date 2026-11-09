@@ -10,7 +10,10 @@ use Illuminate\Console\Command;
  * Deletes `CachedContentFile` rows where:
  *  - `file_path IS NULL` (the job never wrote bytes to disk),
  *  - status is NOT `Downloading` (an in-flight download must never be
- *    deleted out from under the worker), and
+ *    deleted out from under the worker),
+ *  - source is NOT `arr` (the arr failback sweep owns those rows: it
+ *    waits on an active arr download however long it takes, and drops
+ *    rows whose integration no longer fails back), and
  *  - `updated_at` is older than --days.
  *
  * Age is judged by `updated_at` (not `created_at`) so a Failed row
@@ -44,6 +47,7 @@ class CacheContentOrphanCleanupCommand extends Command
         $query = CachedContentFile::query()
             ->whereNull('file_path')
             ->where('status', '!=', CachedContentFileStatus::Downloading->value)
+            ->notArrTracked()
             ->where('updated_at', '<', $cutoff);
 
         $count = $query->count();

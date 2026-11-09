@@ -4,6 +4,10 @@ namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Actions\RegexTesterAction;
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Filament\Resources\AedProfiles\AedProfileResource;
+use App\Services\EspnSportsService;
+use App\Services\Sports\SportsService;
+use App\Services\TheSportsDbService;
 use BackedEnum;
 use Exception;
 use Filament\Actions\Action;
@@ -13,6 +17,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -403,6 +408,154 @@ class ManageIntegrationSettings extends BaseSettingsPage
                                             ->inline(false)
                                             ->columnSpanFull()
                                             ->helperText(__('When enabled, individual stream URLs in generated playlists and Xtream API responses will be rewritten to route through MediaFlow Proxy. Applies only when the m3u-proxy is not already in use for a given playlist or stream.')),
+                                    ]),
+                            ]),
+                        Tab::make(__('Sports API'))
+                            ->id('sports')
+                            ->icon('heroicon-m-trophy')
+                            ->schema([
+                                Callout::make(__('Generate EPG data for your channels'))
+                                    ->info()
+                                    ->columnSpanFull()
+                                    ->description(__('Create an AED profile, turn on "Match real games", and assign it to your channels or groups.'))
+                                    ->visible(fn (Get $get): bool => (bool) $get('sports_espn_enabled') || (bool) $get('sports_tsdb_enabled'))
+                                    ->actions([
+                                        Action::make('open_aed_profiles')
+                                            ->label(__('Open AED Profiles'))
+                                            ->icon('heroicon-o-arrow-right')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->url(fn (): string => AedProfileResource::getUrl('index')),
+                                    ]),
+                                Section::make(__('Sports API (ESPN)'))
+                                    ->key('sports_espn')
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-trophy')
+                                    ->collapsible()
+                                    ->columns(2)
+                                    ->headerActions([
+                                        Action::make('test_sports_connection')
+                                            ->label(__('Test Connection'))
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function (Get $get): void {
+                                                try {
+                                                    $count = app(EspnSportsService::class)->testConnection($get('sports_espn_api_url'));
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title(__('Connection Successful'))
+                                                        ->body(__('The sports API answered with :count NFL games for today.', ['count' => $count]))
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Callout::make(__('Unofficial API'))
+                                            ->warning()
+                                            ->columnSpanFull()
+                                            ->description(__('ESPN\'s public API is undocumented and may change or stop working without notice. M3U Editor fetches and caches the data, so your TV apps never contact ESPN directly.')),
+                                        Toggle::make('sports_espn_enabled')
+                                            ->label(__('Use ESPN API (Unofficial)'))
+                                            ->inline(false)
+                                            ->live()
+                                            ->columnSpanFull()
+                                            ->helperText(__('Shows the Sports screen in M3U TV. Channels are matched using your EPG and channel names, so games are only watchable when your playlist carries them.')),
+                                        TextInput::make('sports_espn_api_url')
+                                            ->label(__('API URL'))
+                                            ->url()
+                                            ->placeholder(EspnSportsService::DEFAULT_API_URL)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => (bool) $get('sports_espn_enabled'))
+                                            ->helperText(__('Optional. The base URL scoreboards are read from, as {base}/{sport}/{league}/scoreboard. Leave empty to use ESPN\'s own; set it only to point at a mirror or a fixed endpoint if ESPN moves this one.')),
+                                    ]),
+                                Section::make(__('Sports API (TheSportsDB)'))
+                                    ->key('sports_tsdb')
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-trophy')
+                                    ->collapsible()
+                                    ->columns(2)
+                                    ->headerActions([
+                                        Action::make('test_tsdb_connection')
+                                            ->label(__('Test Connection'))
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function (Get $get): void {
+                                                try {
+                                                    $count = app(TheSportsDbService::class)->testConnection($get('sports_tsdb_api_key'));
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title(__('Connection Successful'))
+                                                        ->body(__('The key works: TheSportsDB listed :count NHL teams.', ['count' => $count]))
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                        Action::make('get_tsdb_api_key')
+                                            ->label(__('Get API Key'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://www.thesportsdb.com/pricing')
+                                            ->openUrlInNewTab(true),
+                                    ])
+                                    ->schema([
+                                        Callout::make(__('Paid API key required'))
+                                            ->info()
+                                            ->columnSpanFull()
+                                            ->description(__('Adds hundreds of leagues ESPN does not carry, or can replace ESPN entirely. The free key (123) is limited to 3 games a day and 10 teams a league, too few to list a league\'s games or match channels, so it is not accepted. Schedule and score data is provided by TheSportsDB.')),
+                                        Toggle::make('sports_tsdb_enabled')
+                                            ->label(__('Use TheSportsDB'))
+                                            ->inline(false)
+                                            ->live()
+                                            ->columnSpanFull()
+                                            ->helperText(__('With ESPN also on, a league both carry comes from ESPN, so games never appear twice.')),
+                                        TextInput::make('sports_tsdb_api_key')
+                                            ->label(__('TheSportsDB API Key'))
+                                            ->password()
+                                            ->revealable()
+                                            ->extraInputAttributes(['class' => 'privacy-sensitive'])
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => (bool) $get('sports_tsdb_enabled'))
+                                            ->required(fn (Get $get): bool => (bool) $get('sports_tsdb_enabled'))
+                                            ->notIn([TheSportsDbService::FREE_KEY])
+                                            ->validationMessages(['not_in' => __('The free key is not accepted. A paid TheSportsDB API key is required.')]),
+                                    ]),
+                                Section::make(__('Leagues'))
+                                    ->key('sports_leagues')
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-funnel')
+                                    ->collapsible()
+                                    ->visible(fn (Get $get): bool => (bool) $get('sports_espn_enabled') || (bool) $get('sports_tsdb_enabled'))
+                                    ->schema([
+                                        Select::make('sports_league_ids')
+                                            ->label(__('Limit to Leagues'))
+                                            ->multiple()
+                                            ->searchable()
+                                            ->options(fn (Get $get): array => app(SportsService::class)->leagueScopeOptions(
+                                                (bool) $get('sports_espn_enabled'),
+                                                (bool) $get('sports_tsdb_enabled'),
+                                                (array) $get('sports_league_ids'),
+                                            ))
+                                            ->placeholder(__('All leagues'))
+                                            ->hint(__('Recommended'))
+                                            ->hintIcon('heroicon-m-light-bulb')
+                                            ->helperText(__('Only these leagues are fetched, shown in M3U TV and offered to AED profiles, which reduces requests to the sports APIs and speeds up loading. Leave empty to use every league.')),
                                     ]),
                             ]),
                     ]),

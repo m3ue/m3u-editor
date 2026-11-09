@@ -45,7 +45,12 @@ class ListAssets extends ListRecords
                         ->required()
                         ->disk('public')
                         ->directory('assets/library')
-                        ->preserveFilenames(),
+                        ->preserveFilenames()
+                        ->acceptedFileTypes(AssetInventoryService::SAFE_IMAGE_MIME_TYPES)
+                        ->rules([
+                            'mimes:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                            'extensions:'.implode(',', AssetInventoryService::SAFE_IMAGE_EXTENSIONS),
+                        ]),
                 ])
                 ->action(function (array $data): void {
                     $asset = app(AssetInventoryService::class)->indexFile('public', $data['file'], 'upload');

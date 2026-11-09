@@ -18,12 +18,15 @@ use App\Services\Arr\SonarrService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class ContentRequestService
 {
+    public function __construct(private readonly TmdbService $tmdb) {}
+
     /** @return Collection<int, ArrIntegration> */
     public function integrations(Playlist|CustomPlaylist|MergedPlaylist $playlist): Collection
     {
@@ -95,9 +98,22 @@ class ContentRequestService
 
                 $resultKey = $mediaType.':'.$externalId;
 
+                $provider = [
+                    'integration_id' => $integration->id,
+                    'integration_name' => $integration->name,
+                    'already_available' => (bool) ($item['existsInLibrary'] ?? false),
+                    'seasons' => $mediaType === 'series'
+                        ? $this->resolveSeasons($service, $item)
+                        : [],
+                ];
+
                 if (isset($results[$resultKey])) {
+                    $results[$resultKey]['providers'][] = $provider;
+
                     continue;
                 }
+
+                $tmdbDetails = $this->resolveTmdbDetails($mediaType, $integration, $item, (string) $externalId);
 
                 $results[$resultKey] = [
                     'type' => $mediaType,
@@ -111,21 +127,121 @@ class ContentRequestService
                     'fanart' => $item['fanart'] ?? null,
                     'genres' => $item['genres'] ?? [],
                     'rating' => $item['rating'] ?? null,
-                    'runtime' => $item['runtime'] ?? null,
+                    'runtime' => $item['runtime'] ?? $tmdbDetails['runtime'] ?? null,
                     'certification' => $item['certification'] ?? null,
-                    'seasons' => $mediaType === 'series'
-                        ? $this->resolveSeasons($service, $item)
-                        : [],
-                    'already_available' => (bool) ($item['existsInLibrary'] ?? false),
+                    'cast_list' => $tmdbDetails['cast_list'] ?? [],
+                    'clearlogo' => $tmdbDetails['logo_url'] ?? null,
+                    'director' => $this->normalizeDirectors($tmdbDetails['director'] ?? null),
+                    'seasons' => $provider['seasons'],
+                    'already_available' => $provider['already_available'],
+                    'providers' => [$provider],
                 ];
             }
         }
 
         return [
-            'results' => array_values($results),
+            'results' => array_values(array_map($this->applyDefaultProvider(...), $results)),
             'searched_providers' => $searchedProviders,
             'unavailable_providers' => $unavailableProviders,
         ];
+    }
+
+    /**
+     * Points a merged search result's top-level provider fields at the first
+     * integration that doesn't already have the title, so one integration
+     * that has it can't hide another that could still take the request
+     * (m3u-tv #137). The title only counts as already available when every
+     * integration has it. Clients that predate `providers` keep working off
+     * these top-level fields.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function applyDefaultProvider(array $result): array
+    {
+        $providers = collect($result['providers']);
+        $default = $providers->first(fn (array $provider): bool => ! $provider['already_available'])
+            ?? $providers->first();
+
+        return [
+            ...$result,
+            'integration_id' => $default['integration_id'],
+            'integration_name' => $default['integration_name'],
+            'seasons' => $default['seasons'],
+            'already_available' => $providers->every(fn (array $provider): bool => $provider['already_available']),
+        ];
+    }
+
+    /**
+     * Resolve TMDB cast/clearlogo/director/runtime for a search result, so
+     * the guest-facing request detail screen gets the same metadata
+     * treatment as the Xtream VOD/series and AIOStreams detail screens (see
+     * AIOStreamsService::enrichMetaWithTmdb for the equivalent path). Best
+     * effort: returns an empty array on any failure or when TMDB isn't
+     * configured, leaving the existing Sonarr/Radarr-only fields untouched.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    private function resolveTmdbDetails(string $mediaType, ArrIntegration $integration, array $item, string $externalId): array
+    {
+        if (! $this->tmdb->isConfigured()) {
+            return [];
+        }
+
+        try {
+            if ($integration->isRadarr()) {
+                // Radarr's external id is already the TMDB id.
+                $tmdbId = (int) $externalId;
+            } else {
+                // Sonarr's external id is a TVDB id - resolve it to a TMDB id first.
+                $tmdbId = Cache::remember(
+                    "content_request.tmdb.tvdbmap.{$externalId}",
+                    now()->addWeek(),
+                    fn () => $this->tmdb->findByExternalId($externalId, 'tvdb_id', 'tv')['tmdb_id'] ?? null,
+                );
+            }
+
+            if (! $tmdbId) {
+                return [];
+            }
+
+            return Cache::remember(
+                "content_request.tmdb.details.{$mediaType}.{$tmdbId}",
+                now()->addWeek(),
+                fn () => $mediaType === 'series'
+                    ? $this->tmdb->getTvSeriesDetails((int) $tmdbId)
+                    : $this->tmdb->getMovieDetails((int) $tmdbId),
+            ) ?? [];
+        } catch (Throwable $throwable) {
+            Log::warning('Content request TMDB enrichment failed', [
+                'integration_id' => $integration->id,
+                'external_id' => $externalId,
+                'error' => $throwable->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * `TmdbService::getMovieDetails()` returns `director` as an array of
+     * names; `getTvSeriesDetails()` returns it as a single comma-joined
+     * string (or null). Normalize both into a plain array of names.
+     *
+     * @return array<int, string>
+     */
+    private function normalizeDirectors(array|string|null $director): array
+    {
+        if ($director === null) {
+            return [];
+        }
+
+        if (is_string($director)) {
+            return array_values(array_filter(array_map('trim', explode(',', $director))));
+        }
+
+        return $director;
     }
 
     /**

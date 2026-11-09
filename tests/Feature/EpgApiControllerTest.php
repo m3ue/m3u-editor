@@ -154,6 +154,35 @@ it('does not generate dummy epg when disabled', function () {
     $this->assertEmpty($data['programmes'][$channelId] ?? []);
 });
 
+it('reads a renamed channel\'s custom title for its aed profile, as the xmltv output does', function () {
+    $this->playlist->update(['dummy_epg' => false]);
+
+    $aedProfile = new AedProfile;
+    $aedProfile->forceFill([
+        'user_id' => $this->user->id,
+        'name' => 'Renamed AED',
+        'title_regex' => 'EVENT: (.+)',
+        'title_format' => '{title}',
+        'event_duration_minutes' => 120,
+    ])->save();
+
+    $channel = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'title' => 'Provider name with no event',
+        'title_custom' => 'EVENT: Renamed Final',
+        'enabled' => true,
+        'is_vod' => false,
+        'aed_profile_id' => $aedProfile->id,
+    ]);
+
+    $response = $this->getJson(route('api.epg.playlist.data', ['uuid' => $this->playlist->uuid]));
+    $response->assertOk();
+
+    $titles = collect($response->json('programmes')[$channel->id] ?? [])->pluck('title');
+    expect($titles)->toContain('Renamed Final');
+});
+
 it('generates aed dummy epg for a channel with an assigned aed profile even when playlist dummy epg is disabled', function () {
     $this->playlist->update(['dummy_epg' => false]);
 

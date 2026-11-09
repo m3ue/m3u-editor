@@ -17,6 +17,13 @@ use Throwable;
  */
 class AlertsHandler extends AbstractProcessingHandler
 {
+    /**
+     * Context key that keeps a log entry out of the alert channels. Set it when
+     * logging an alert delivery failure, so the failure is not sent as another
+     * alert through the same channel that just failed.
+     */
+    public const SKIP_CONTEXT_KEY = 'skip_alerts';
+
     public function __construct()
     {
         parent::__construct(Level::Error);
@@ -24,6 +31,10 @@ class AlertsHandler extends AbstractProcessingHandler
 
     protected function write(LogRecord $record): void
     {
+        if (! empty($record->context[self::SKIP_CONTEXT_KEY])) {
+            return;
+        }
+
         try {
             /** @var AlertService $alertService */
             $alertService = app(AlertService::class);

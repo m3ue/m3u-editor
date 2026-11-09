@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\EpgSourceType;
 use App\Enums\Status;
 use App\Enums\SyncRunPhase;
+use App\Models\Category;
 use App\Models\Channel;
 use App\Models\EpgMap;
 use App\Models\Group;
@@ -72,6 +73,8 @@ class ProcessM3uImportComplete implements ShouldQueue
         public bool $runningVodImport = true, // Default to true for VOD imports
         public ?int $syncRunId = null,
         bool $runningSeriesImport = false,
+        // The previous series sync's batch number (see ProcessM3uImport), null when unknown
+        public ?string $previousSeriesBatchNo = null,
     ) {
         $this->runningSeriesImport = $runningSeriesImport;
 
@@ -171,19 +174,44 @@ class ProcessM3uImportComplete implements ShouldQueue
         ]);
 
         // Get the added and removed series, only when series import ran this sync (matches the seriesCleanup gate).
-        // Existing series keep their original batch number, so only rows inserted this sync carry the current one.
-        // Series are removed along with their whole category, so a stale category batch means its series are going.
+        // A series goes when its whole category does (stale category batch) or when its category no longer lists it.
         $newSeries = null;
         $removedSeries = null;
+        $thresholdRemovedSeries = null;
+        $newCategories = null;
+        $removedCategories = null;
         if ($this->runningSeriesImport) {
-            $newSeries = Series::where([
-                ['playlist_id', $playlist->id],
-                ['import_batch_no', $this->batchNo],
-            ]);
-            $removedSeries = Series::whereHas('category', function ($q) use ($playlist) {
-                $q->where('playlist_id', $playlist->id)
+            // Categories have no "new" flag, so an added one is one created since this sync began.
+            // A removed one is what seriesCleanup() deletes: any category left on an earlier batch.
+            $newCategories = Category::where('playlist_id', $playlist->id)
+                ->where('created_at', '>=', $this->start->copy()->startOfSecond());
+            $removedCategories = Category::where('playlist_id', $playlist->id)
+                ->where('import_batch_no', '!=', $this->batchNo);
+
+            // Series the provider still lists are re-stamped with the current batch, so an added one
+            // is one created since this sync began, like a category.
+            $newSeries = Series::where('playlist_id', $playlist->id)
+                ->where('created_at', '>=', $this->start->copy()->startOfSecond());
+            $inRemovedCategory = fn ($q) => $q->whereHas('category', function ($category) use ($playlist) {
+                $category->where('playlist_id', $playlist->id)
                     ->where('import_batch_no', '!=', $this->batchNo);
             });
+            $removedSeries = Series::where('playlist_id', $playlist->id)
+                ->where(fn ($q) => $inRemovedCategory($q)->orWhere(fn ($unlisted) => $unlisted->noLongerListed($this->batchNo)));
+
+            // The series threshold guards against a provider blip dropping what the previous
+            // series sync still listed, so it only counts those (and removed categories). Series
+            // no listing has returned for longer, such as duplicates left from before series were
+            // removed one by one, are still removed but would otherwise trip it on every sync.
+            $thresholdRemovedSeries = Series::where('playlist_id', $playlist->id)
+                ->where(function ($q) use ($inRemovedCategory) {
+                    $inRemovedCategory($q);
+
+                    if ($this->previousSeriesBatchNo !== null) {
+                        $q->orWhere(fn ($unlisted) => $unlisted->noLongerListed($this->batchNo)
+                            ->where('import_batch_no', $this->previousSeriesBatchNo));
+                    }
+                });
         }
 
         // See if sync logs are disabled
@@ -201,6 +229,8 @@ class ProcessM3uImportComplete implements ShouldQueue
             $newChannelCount = $newChannels->count();
             $removedSeriesCount = $removedSeries?->count() ?? 0;
             $newSeriesCount = $newSeries?->count() ?? 0;
+            $removedCategoryCount = $removedCategories?->count() ?? 0;
+            $newCategoryCount = $newCategories?->count() ?? 0;
 
             $syncStats = [
                 'time' => $completedIn,
@@ -211,6 +241,8 @@ class ProcessM3uImportComplete implements ShouldQueue
                 'added_channels' => $newChannelCount,
                 'removed_series' => $removedSeriesCount,
                 'added_series' => $newSeriesCount,
+                'removed_categories' => $removedCategoryCount,
+                'added_categories' => $newCategoryCount,
                 'max_hit' => $this->maxHit,
             ];
             $logQueries = [
@@ -220,6 +252,8 @@ class ProcessM3uImportComplete implements ShouldQueue
                 'removedGroups' => $removedGroups,
                 'newSeries' => $newSeries,
                 'removedSeries' => $removedSeries,
+                'newCategories' => $newCategories,
+                'removedCategories' => $removedCategories,
             ];
 
             // Check if we need to invalidate the import before proceeding
@@ -251,9 +285,10 @@ class ProcessM3uImportComplete implements ShouldQueue
 
                 // Series threshold. Only counted when series import ran this sync: otherwise no category
                 // carries the current batch and every series would look removed (seriesCleanup skips them too).
-                if ($removedSeriesCount > $this->invalidateImportSeriesThreshold) {
+                $thresholdRemovedSeriesCount = $thresholdRemovedSeries?->count() ?? 0;
+                if ($thresholdRemovedSeriesCount > $this->invalidateImportSeriesThreshold) {
                     $this->cancelImport(
-                        "{$removedSeriesCount} series would have been removed, which exceeds the threshold of {$this->invalidateImportSeriesThreshold}.",
+                        "{$thresholdRemovedSeriesCount} series would have been removed, which exceeds the threshold of {$this->invalidateImportSeriesThreshold}.",
                         $user, $playlist, $syncLogsDisabled, $syncStats, $logQueries,
                     );
 
@@ -574,6 +609,9 @@ class ProcessM3uImportComplete implements ShouldQueue
      */
     private function seriesCleanup($playlist): void
     {
+        // Series a surviving category no longer lists (removed by the provider, or re-added under a new id)
+        $playlist->series()->noLongerListed($this->batchNo)->delete(); // will cascade to episodes
+
         foreach ($playlist->categories()->where('import_batch_no', '!=', $this->batchNo)->cursor() as $category) {
             $category->series()->delete(); // will cascade to episodes
             $category->delete();
@@ -585,7 +623,7 @@ class ProcessM3uImportComplete implements ShouldQueue
      *
      * Each query is cloned before use, so the caller can still run its deletes afterwards.
      *
-     * @param  array{newChannels: Builder|Relation, removedChannels: Builder|Relation, newGroups: Builder|Relation, removedGroups: Builder|Relation, newSeries: Builder|null, removedSeries: Builder|null}  $logQueries
+     * @param  array{newChannels: Builder|Relation, removedChannels: Builder|Relation, newGroups: Builder|Relation, removedGroups: Builder|Relation, newSeries: Builder|null, removedSeries: Builder|null, newCategories: Builder|null, removedCategories: Builder|null}  $logQueries
      */
     private function createSyncLogEntries(PlaylistSyncStatus $sync, array $logQueries): void
     {
@@ -600,6 +638,8 @@ class ProcessM3uImportComplete implements ShouldQueue
             ['query' => $logQueries['newChannels'], 'type' => 'channel', 'status' => 'added'],
             ['query' => $logQueries['removedSeries'], 'type' => 'series', 'status' => 'removed'],
             ['query' => $logQueries['newSeries'], 'type' => 'series', 'status' => 'added'],
+            ['query' => $logQueries['removedCategories'], 'type' => 'category', 'status' => 'removed'],
+            ['query' => $logQueries['newCategories'], 'type' => 'category', 'status' => 'added'],
         ];
 
         // Create the sync log entries
@@ -617,7 +657,7 @@ class ProcessM3uImportComplete implements ShouldQueue
                     'content_type' => match ($entry['type']) {
                         'channel' => $item->is_vod ? 'vod' : 'live',
                         'group' => $item->type === 'vod' ? 'vod' : 'live',
-                        'series' => 'series',
+                        'series', 'category' => 'series',
                     },
                     'status' => $entry['status'],
                     'meta' => $item,

@@ -4,11 +4,14 @@ namespace App\Filament\Forms\Components;
 
 use App\Filament\Tables\SourceCategoriesTable;
 use App\Filament\Tables\SourceGroupsTable;
+use App\Models\Category;
+use App\Models\Group;
 use App\Models\SourceCategory;
 use App\Models\SourceGroup;
 use App\Traits\HasGroupSelectionModalLabels;
 use Filament\Actions\Action;
 use Filament\Forms\Components\ModalTableSelect;
+use Filament\Forms\Components\Select;
 use Filament\Schemas\Components\Utilities\Get;
 
 /**
@@ -27,6 +30,70 @@ use Filament\Schemas\Components\Utilities\Get;
 class SourceGroupModalSelect
 {
     use HasGroupSelectionModalLabels;
+
+    /**
+     * Form state path of the virtual picker holding the custom groups picked for a
+     * selection key. They are saved into the same key as the provider names.
+     */
+    public static function customPicksPath(string $statePath): string
+    {
+        return 'custom_group_picks_'.substr($statePath, strrpos($statePath, '.') + 1);
+    }
+
+    /**
+     * The playlist's own groups (or, for $type 'categories', categories the provider did
+     * not supply), keyed by name_internal with the display name and a "(custom)" marker as
+     * the label, so one can't be mistaken for a provider group of the same name. The
+     * display name can be renamed, name_internal is the stable key. One whose name_internal
+     * matches a provider group or category is left out: it shares the provider pick's key.
+     *
+     * @return array<string, string>
+     */
+    public static function customGroupOptions(int $playlistId, string $type): array
+    {
+        $query = $type === 'categories'
+            ? Category::query()->nonProvider()
+            : Group::query()->where('type', $type)->where('custom', true)->nonProvider();
+
+        return $query
+            ->where('playlist_id', $playlistId)
+            ->whereNotNull('name_internal')
+            ->orderBy('name')
+            ->pluck('name', 'name_internal')
+            ->map(fn (string $name): string => $name.' '.__('(custom)'))
+            ->all();
+    }
+
+    /**
+     * Picker for the playlist's custom groups (live and VOD only). Virtual: it is not
+     * saved itself, the provider picker merges its picks into the selection key.
+     */
+    public static function customGroups(string $statePath, string $type): Select
+    {
+        $selectionKey = substr($statePath, strrpos($statePath, '.') + 1);
+
+        return Select::make(self::customPicksPath($statePath))
+            ->label($type === 'categories' ? __('Custom categories') : __('Custom groups'))
+            ->multiple()
+            ->searchable()
+            ->dehydrated(false)
+            ->columnSpanFull()
+            ->visible(fn (Get $get): bool => (bool) $get('playlist_id') && self::customGroupOptions((int) $get('playlist_id'), $type) !== [])
+            ->options(fn (Get $get): array => self::customGroupOptions((int) $get('playlist_id'), $type))
+            ->afterStateHydrated(function (Select $component, $record) use ($selectionKey, $type): void {
+                if (! $record?->playlist_id) {
+                    return;
+                }
+                $stored = (array) ($record->group_selections[$selectionKey] ?? []);
+                $component->state(array_values(array_intersect(
+                    array_keys(self::customGroupOptions($record->playlist_id, $type)),
+                    $stored,
+                )));
+            })
+            ->helperText($type === 'categories'
+                ? __('Categories the provider did not supply. Series sitting in them are matched, wherever they came from.')
+                : __('Groups you created yourself. Channels sitting in them are matched, wherever they came from.'));
+    }
 
     public static function make(string $statePath, string $type): ModalTableSelect
     {
@@ -69,11 +136,10 @@ class SourceGroupModalSelect
                 if (! $playlistId) {
                     return [];
                 }
-                $ids = array_filter($values, fn ($value): bool => is_numeric($value));
 
                 return $isCategories
-                    ? SourceCategory::where('playlist_id', $playlistId)->whereIn('id', $ids)->pluck('name', 'id')->toArray()
-                    : SourceGroup::displayLabelsForIds($playlistId, $type, $ids);
+                    ? SourceCategory::displayLabelsForIds($playlistId, $values)
+                    : SourceGroup::displayLabelsForIds($playlistId, $type, $values);
             })
             ->afterStateHydrated(function ($component, $state, $record) use ($sourceQuery): void {
                 // Hidden twin components are still hydrated; bail out unless this is
@@ -88,7 +154,7 @@ class SourceGroupModalSelect
                     );
                 }
             })
-            ->dehydrateStateUsing(function ($state, $record, Get $get) use ($sourceQuery, $selectionKey): array {
+            ->dehydrateStateUsing(function ($state, $record, Get $get) use ($sourceQuery, $selectionKey, $statePath, $type): array {
                 $playlistId = $record?->playlist_id ?? (int) $get('playlist_id');
                 $ids = is_array($state) ? array_values(array_filter($state, 'is_numeric')) : [];
 
@@ -99,7 +165,10 @@ class SourceGroupModalSelect
                 // Never-silently-shrink: previously-stored names the hydrator could
                 // not resolve (provider churn) are merged back in, unless the user
                 // deliberately cleared a selection that still had live entries.
-                $stored = $record?->group_selections[$selectionKey] ?? [];
+                $customPicks = array_values((array) $get(self::customPicksPath($statePath)));
+                $customNames = ! $playlistId ? [] : array_keys(self::customGroupOptions($playlistId, $type));
+
+                $stored = array_diff($record?->group_selections[$selectionKey] ?? [], $customNames);
                 if (! empty($stored) && $playlistId) {
                     $resolvable = $sourceQuery($playlistId)->whereIn('name', $stored)->pluck('name')->all();
                     $stale = array_values(array_diff($stored, $resolvable));
@@ -108,7 +177,7 @@ class SourceGroupModalSelect
                     }
                 }
 
-                return $names;
+                return array_values(array_unique(array_merge($names, $customPicks)));
             });
     }
 }

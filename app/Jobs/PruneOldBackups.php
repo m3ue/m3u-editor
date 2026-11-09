@@ -23,10 +23,16 @@ class PruneOldBackups implements ShouldQueue
      * Runs after a replacement backup has already been created, so the
      * excess/expired backups being pruned are never the only archive
      * available. See CreateBackup, which this job is chained after.
+     *
+     * CreateBackup reports a failure without failing the job (it also runs ahead
+     * of playlist syncs, which a failed backup must not stop), so the chain carries
+     * on either way. With $requireBackupSince set, nothing is pruned unless a backup
+     * from that point on exists, so repeated failures can't age out every archive.
      */
     public function __construct(
         public int $max,
         public int $deleteAfterDays,
+        public ?Carbon $requireBackupSince = null,
     ) {
         //
     }
@@ -47,6 +53,15 @@ class PruneOldBackups implements ShouldQueue
 
         // Order by backup date
         $data = collect($data)->sortByDesc('date');
+
+        if ($this->requireBackupSince !== null) {
+            $since = $this->requireBackupSince->copy()->startOfSecond();
+            if (! $data->contains(fn ($record) => Carbon::parse($record['date'])->gte($since))) {
+                Log::warning('Skipping backup pruning: no new backup was created, keeping the existing ones.');
+
+                return;
+            }
+        }
 
         // Determine which backups should be deleted for exceeding the max backups count...
         $toDelete = collect();

@@ -571,7 +571,7 @@ class FetchTmdbIds implements ShouldQueue
             $currentGenre = $info['genre'] ?? $channel->group ?? '';
             if (! empty($currentGenre) && ! str_contains($currentGenre, ',') && strlen($currentGenre) <= 20
                 && ($info['tmdb_genre_checked'] ?? null) !== $currentGenre) {
-                $details = $tmdb->getMovieDetails((int) $tmdbId);
+                $details = $tmdb->getMovieDetailsWithTvFallback((int) $tmdbId, $info['tmdb_media_type'] ?? null);
                 $genreUpdated = false;
                 if ($details) {
                     $info['tmdb_genre_checked'] = $currentGenre;
@@ -650,8 +650,13 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        // If we already have tmdb_id but missing metadata, use it directly
-        // Otherwise, search TMDB for the movie
+        // If we already have tmdb_id but missing metadata, use it directly.
+        // Otherwise (or when overwriting), search TMDB for the movie - overwrite is also how
+        // a wrongly-matched ID gets corrected. But if that search comes back with no
+        // confident match, fall back to the known ID instead of reporting "not found" and
+        // discarding it: overwriteExisting means "let a search correct the ID", not "throw
+        // away a perfectly good one when the search for a replacement happens to fail"
+        // (issue #1647).
         if ($tmdbId && ! $this->overwriteExisting) {
             $result = [
                 'tmdb_id' => $tmdbId,
@@ -664,6 +669,17 @@ class FetchTmdbIds implements ShouldQueue
         } else {
             // Search TMDB
             $result = $tmdb->searchMovie($title, $year);
+
+            if (! $result && $tmdbId) {
+                $result = [
+                    'tmdb_id' => $tmdbId,
+                    'imdb_id' => $channel->imdb_id ?? $info['imdb_id'] ?? null,
+                ];
+                Log::debug('FetchTmdbIds: Search found no confident match, falling back to existing TMDB ID', [
+                    'channel_id' => $channel->id,
+                    'tmdb_id' => $tmdbId,
+                ]);
+            }
         }
 
         if ($result && isset($result['tmdb_id'])) {
@@ -683,9 +699,14 @@ class FetchTmdbIds implements ShouldQueue
                 $info['imdb_id'] = $result['imdb_id'];
             }
 
-            // Fetch full movie details from TMDB to populate metadata
-            $details = $tmdb->getMovieDetails((int) $result['tmdb_id']);
+            // Fetch full movie details from TMDB to populate metadata, falling back to
+            // the TV endpoint when this tmdb_id turns out to belong to a series (#1590).
+            // Pass the media type from a previous fetch, if known, to skip straight to
+            // the right endpoint instead of retrying the movie lookup every time.
+            $details = $tmdb->getMovieDetailsWithTvFallback((int) $result['tmdb_id'], $info['tmdb_media_type'] ?? null);
             if ($details) {
+                $info['tmdb_media_type'] = $details['media_type'] ?? 'movie';
+
                 // Populate IMDB ID if missing
                 if (! empty($details['imdb_id']) && empty($updateData['imdb_id'])) {
                     $updateData['imdb_id'] = $details['imdb_id'];

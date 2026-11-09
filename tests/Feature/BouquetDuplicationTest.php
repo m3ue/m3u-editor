@@ -4,7 +4,9 @@ use App\Jobs\DuplicateCustomPlaylist;
 use App\Jobs\DuplicatePlaylist;
 use App\Models\Bouquet;
 use App\Models\Category;
+use App\Models\Channel;
 use App\Models\CustomPlaylist;
+use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\Series;
@@ -99,4 +101,34 @@ it('DuplicatePlaylist copies SourceCategory rows so a copied bouquet\'s category
     $alias->bouquets()->attach($copiedBouquet);
 
     expect($alias->series()->pluck('series.id'))->toContain($copiedSeries->id);
+});
+
+it('DuplicatePlaylist repoints merged groups and categories at their copied parents (issue #1816)', function () {
+    $playlist = Playlist::withoutEvents(fn () => Playlist::factory()->for($this->user)->create());
+
+    // The child sorts first by id, so its parent has not been copied yet when it is reached.
+    $childGroup = Group::factory()->for($this->user)->for($playlist)->create(['name' => 'Child', 'type' => 'live']);
+    $parentGroup = Group::factory()->for($this->user)->for($playlist)->create(['name' => 'Parent', 'type' => 'live', 'is_merged' => true]);
+    $childGroup->update(['parent_id' => $parentGroup->id]);
+    Channel::factory()->for($this->user)->for($playlist)->create(['group_id' => $childGroup->id, 'name' => 'In child']);
+
+    $childCategory = Category::factory()->for($this->user)->for($playlist)->create(['name' => 'Child cat']);
+    $parentCategory = Category::factory()->for($this->user)->for($playlist)->create(['name' => 'Parent cat', 'is_merged' => true]);
+    $childCategory->update(['parent_id' => $parentCategory->id]);
+
+    (new DuplicatePlaylist($playlist, name: 'P Copy'))->handle();
+
+    $copy = Playlist::where('name', 'P Copy')->firstOrFail();
+    $copiedChildGroup = Group::where('playlist_id', $copy->id)->where('name', 'Child')->firstOrFail();
+    $copiedParentGroup = Group::where('playlist_id', $copy->id)->where('name', 'Parent')->firstOrFail();
+    $copiedChildCategory = Category::where('playlist_id', $copy->id)->where('name', 'Child cat')->firstOrFail();
+    $copiedParentCategory = Category::where('playlist_id', $copy->id)->where('name', 'Parent cat')->firstOrFail();
+
+    expect($copiedChildGroup->parent_id)->toBe($copiedParentGroup->id)
+        ->and($copiedParentGroup->is_merged)->toBeTrue()
+        ->and($copiedChildGroup->channels()->count())->toBe(1)
+        ->and($copiedChildCategory->parent_id)->toBe($copiedParentCategory->id)
+        // Source hierarchy untouched.
+        ->and($childGroup->refresh()->parent_id)->toBe($parentGroup->id)
+        ->and($childCategory->refresh()->parent_id)->toBe($parentCategory->id);
 });

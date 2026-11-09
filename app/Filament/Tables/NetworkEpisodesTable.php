@@ -5,6 +5,7 @@ namespace App\Filament\Tables;
 use App\Models\Category;
 use App\Models\Episode;
 use App\Models\Series;
+use App\Services\LogoCacheService;
 use Filament\Actions\BulkActionGroup;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -50,7 +51,7 @@ class NetworkEpisodesTable
 
                         return $info['movie_image'] ?? $info['cover_big'] ?? null;
                     })
-                    ->defaultImageUrl('/images/placeholder-episode.png'),
+                    ->defaultImageUrl(fn (): string => LogoCacheService::getPlaceholderUrl('episode')),
 
                 TextColumn::make('title')
                     ->label(__('Episode Title'))

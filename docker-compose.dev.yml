@@ -30,6 +30,9 @@ services:
       - PG_DATABASE=m3ue_dev
       - PG_USER=m3ue
       - PG_PASSWORD=devpass
+      - POSTGRES_VERSION=${POSTGRES_VERSION:-17} # Set to 18 + restart to upgrade embedded Postgres in place
+      - POSTGRES_ROLLBACK=${POSTGRES_ROLLBACK:-false} # Required alongside a lowered POSTGRES_VERSION to actually roll back
+      - PG_CLIENT_VERSION=${PG_CLIENT_VERSION:-}
 
       # Database Connection
       - DB_CONNECTION=pgsql

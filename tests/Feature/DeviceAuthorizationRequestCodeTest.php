@@ -43,14 +43,14 @@ it('applies throttle middleware to the device code request route', function () {
     $route = app('router')->getRoutes()->getByName('device.code');
 
     expect($route)->not->toBeNull();
-    expect($route->middleware())->toContain('throttle:20,1');
+    expect($route->middleware())->toContain('throttle:20,1,device-code');
 });
 
 it('applies throttle middleware to the device token poll route', function () {
     $route = app('router')->getRoutes()->getByName('device.token');
 
     expect($route)->not->toBeNull();
-    expect($route->middleware())->toContain('throttle:60,1');
+    expect($route->middleware())->toContain('throttle:60,1,device-token');
 });
 
 it('returns 404 when device pairing is disabled', function () {

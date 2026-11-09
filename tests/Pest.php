@@ -5,6 +5,8 @@ use App\Models\MediaServerIntegration;
 use App\Services\EpgProgrammeStore;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -55,6 +57,27 @@ function something()
 }
 
 /**
+ * Fake the SchedulesDirect change-detection endpoints a sync calls first:
+ * /status lists no lineups, so every lineup downloads, and /schedules/md5
+ * reports a new MD5 for every requested station-day, so every station-day
+ * downloads. Register it before a test's own fakes so those still apply to
+ * every other endpoint.
+ */
+function fakeSchedulesDirectChangeDetection(): void
+{
+    Http::fake([
+        'json.schedulesdirect.org/20141201/status' => Http::response(['code' => 0, 'lineups' => []]),
+        'json.schedulesdirect.org/20141201/schedules/md5' => fn (Request $request) => Http::response(
+            collect($request->data())->mapWithKeys(fn (array $station) => [
+                $station['stationID'] => collect($station['date'])
+                    ->mapWithKeys(fn (string $date) => [$date => ['code' => 0, 'md5' => bin2hex(random_bytes(11))]])
+                    ->all(),
+            ])->all()
+        ),
+    ]);
+}
+
+/**
  * Seed an EPG's on-disk programme cache the way production writes it: a real
  * `programmes.sqlite` built through {@see EpgProgrammeStore}, plus a v2
  * `metadata.json`. Use this instead of hand-writing `programmes-{date}.jsonl`
@@ -100,6 +123,27 @@ function seedEpgProgrammeCache(Epg $epg, iterable $entries): void
     } catch (Throwable $e) {
         $store->discard();
         throw $e;
+    }
+}
+
+/**
+ * Evaluate a config file (e.g. 'horizon') with the given env vars set, restoring
+ * the previous values afterwards, so env-driven gating can be asserted per case.
+ */
+function configFileWith(string $name, array $env): array
+{
+    $previous = [];
+    foreach ($env as $key => $value) {
+        $previous[$key] = getenv($key);
+        putenv("{$key}={$value}");
+    }
+
+    try {
+        return require config_path("{$name}.php");
+    } finally {
+        foreach ($previous as $key => $value) {
+            putenv($value === false ? $key : "{$key}={$value}");
+        }
     }
 }
 

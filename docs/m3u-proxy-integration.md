@@ -20,6 +20,54 @@ cp .env.proxy.example .env
 docker-compose -f docker-compose.proxy.yml up -d
 ```
 
+## Optional isolated callback rate limits
+
+By default, proxy callbacks retain the existing shared `throttle:120,1` policy:
+requests from the same source IP/domain (or authenticated application user) share
+120 attempts per minute, including other routes using that legacy throttle key.
+A webhook burst can therefore use the resolver's allowance.
+
+Set these variables in the **m3u-editor** environment, not m3u-proxy, to opt in:
+
+```dotenv
+M3U_PROXY_ISOLATED_CALLBACK_RATE_LIMITS=false
+M3U_PROXY_CALLBACK_RESOLVER_PER_MINUTE=120
+M3U_PROXY_CALLBACK_WEBHOOK_PER_MINUTE=120
+M3U_PROXY_CALLBACK_BROADCAST_PER_MINUTE=120
+M3U_PROXY_CALLBACK_DVR_PER_MINUTE=120
+```
+
+Change the first value to `true` to enable four independent named limiters:
+
+| Callback route | Limiter / configuration key under `proxy.callback_rate_limits` |
+| --- | --- |
+| `/api/m3u-proxy/failover-resolver` | `m3u-proxy-callback-resolver` / `resolver` |
+| `/api/m3u-proxy/webhooks` | `m3u-proxy-callback-webhook` / `webhook` |
+| `/api/m3u-proxy/broadcast/callback` | `m3u-proxy-callback-broadcast` / `broadcast` |
+| `/api/dvr/callback` | `m3u-proxy-callback-dvr` / `dvr` |
+
+Each bucket is keyed by callback type, route domain and source IP, even if every
+callback uses the same IP and shared token. The token is not included in limiter
+keys or new log fields. All routes remain finite: per-minute limits must be
+integers from **1 to 60000**. Missing or invalid values (including zero, negative,
+fractional, nonnumeric or out-of-range values) fall back to **120**, never unlimited.
+Per-route overrides have no effect while isolation is disabled. Exceeding a bucket
+returns HTTP `429` with `Retry-After`; callback token authentication is unchanged
+and remains fail-closed when the token is unconfigured and the existing explicit
+local-development authentication bypass is disabled. This option does not enable
+that bypass.
+
+These editor settings work with either embedded or external proxy integration;
+no database migration or UI setting is needed. When using Compose, explicitly
+pass the variables through the editor service's `environment` or `env_file`;
+a Compose interpolation `.env` alone does not add new container variables.
+Rebuild the editor's Laravel configuration cache after changing settings
+(`php artisan config:cache` in its application directory), and restart any
+long-running application workers as appropriate. Existing cached routes are
+supported: the selection is made from Laravel configuration at request time,
+not frozen when `route:cache` runs. Set the switch back to `false` and rebuild
+configuration cache to restore the legacy shared policy.
+
 ## 🚀 Quick Start - Recommended Setup (External Instance)
 
 **Why External?** Running m3u-proxy as a separate container provides better performance, scalability, Redis-based pooling, and independent management. This is the **recommended production setup**.

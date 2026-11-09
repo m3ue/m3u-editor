@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BouquetKind;
 use App\Pivots\BouquetPlaylistAlias;
 use App\Rules\ValidRegexPattern;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,11 +18,21 @@ class Bouquet extends Model
 
     protected $casts = [
         'group_selections' => 'array',
+        'kind' => BouquetKind::class,
         'auto_include_new_live' => 'boolean',
         'auto_include_new_vod' => 'boolean',
         'auto_include_live_patterns' => 'array',
         'auto_include_vod_patterns' => 'array',
     ];
+
+    /**
+     * Whether this bouquet hides its groups from the aliases it is assigned to,
+     * rather than adding them.
+     */
+    public function isBlock(): bool
+    {
+        return $this->kind === BouquetKind::Block;
+    }
 
     public function user(): BelongsTo
     {
@@ -177,7 +188,7 @@ class Bouquet extends Model
             return;
         }
 
-        $key = $type === 'vod' ? 'selected_vod_groups' : 'selected_groups';
+        $key = PlaylistAlias::CONTENT_FILTER_KEYS[$type];
 
         self::where('playlist_id', $playlistId)->cursor()->each(function (self $bouquet) use ($key, $renames): void {
             $current = $bouquet->group_selections[$key] ?? [];
@@ -346,12 +357,15 @@ class Bouquet extends Model
         };
 
         if ($this->playlist_id) {
-            $resolve('selected_groups', fn (array $names) => SourceGroup::where('playlist_id', $this->playlist_id)
-                ->where('type', 'live')->whereIn('name', $names)->pluck('name')->all());
-            $resolve('selected_vod_groups', fn (array $names) => SourceGroup::where('playlist_id', $this->playlist_id)
-                ->where('type', 'vod')->whereIn('name', $names)->pluck('name')->all());
-            $resolve('selected_categories', fn (array $names) => SourceCategory::where('playlist_id', $this->playlist_id)
-                ->whereIn('name', $names)->pluck('name')->all());
+            $customNames = fn (string $type, array $names): array => Group::where('playlist_id', $this->playlist_id)
+                ->where('type', $type)->where('custom', true)->nonProvider()->whereIn('name_internal', $names)->pluck('name_internal')->all();
+            $resolve('selected_groups', fn (array $names) => array_merge(SourceGroup::where('playlist_id', $this->playlist_id)
+                ->where('type', 'live')->whereIn('name', $names)->pluck('name')->all(), $customNames('live', $names)));
+            $resolve('selected_vod_groups', fn (array $names) => array_merge(SourceGroup::where('playlist_id', $this->playlist_id)
+                ->where('type', 'vod')->whereIn('name', $names)->pluck('name')->all(), $customNames('vod', $names)));
+            $resolve('selected_categories', fn (array $names) => array_merge(SourceCategory::where('playlist_id', $this->playlist_id)
+                ->whereIn('name', $names)->pluck('name')->all(), Category::where('playlist_id', $this->playlist_id)
+                ->nonProvider()->whereIn('name_internal', $names)->pluck('name_internal')->all()));
         } elseif ($this->custom_playlist_id && $this->customPlaylist) {
             $resolve('selected_groups', fn (array $names) => $this->customPlaylist->filterableGroupsQuery(false)
                 ->whereIn('name', $names)->pluck('name')->all());

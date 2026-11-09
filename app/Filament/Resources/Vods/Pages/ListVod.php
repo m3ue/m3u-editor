@@ -426,6 +426,7 @@ class ListVod extends ListRecords
 
                 ImportAction::make()
                     ->importer(ChannelImporter::class)
+                    ->options(['is_vod' => true])
                     ->label(__('Import Channels'))
                     ->icon('heroicon-m-arrow-down-tray')
                     ->color('primary')

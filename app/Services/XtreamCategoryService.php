@@ -86,7 +86,9 @@ class XtreamCategoryService
      * through to the normal sort_order below.
      *
      * @param  Playlist|MergedPlaylist|PlaylistAlias  $playlist
-     * @param  array<int, string>  $aliasGroupFilter  provider group names an alias is limited to
+     *                                                           An alias's own filter decides which channels count, through
+     *                                                           PlaylistAlias::applyContentFilter(); $aliasGroupFilter only applies to other targets.
+     * @param  array<int, string>  $aliasGroupFilter  provider group names the listing is limited to
      * @return array<int, array{category_id: string, category_name: string, parent_id: int}>
      */
     public static function groupCategories($playlist, bool $isVod, array $aliasGroupFilter = []): array
@@ -97,9 +99,14 @@ class XtreamCategoryService
         $hidesUnmatched = $isVod && ($playlist instanceof MergedPlaylist
             || ($playlist instanceof PlaylistAlias && $playlist->merged_playlist_id));
 
-        $channelConstraint = function ($query) use ($isVod, $aliasGroupFilter, $hidesUnmatched): void {
+        $aliasType = $isVod ? 'vod' : 'live';
+        $filtersAlias = $playlist instanceof PlaylistAlias && $playlist->isContentFiltered($aliasType);
+
+        $channelConstraint = function ($query) use ($isVod, $aliasGroupFilter, $hidesUnmatched, $playlist, $aliasType, $filtersAlias): void {
             $query->where('enabled', true)->where('is_vod', $isVod);
-            if (! empty($aliasGroupFilter)) {
+            if ($filtersAlias) {
+                $query->where(fn ($query) => $playlist->applyContentFilter($query, $aliasType));
+            } elseif (! $playlist instanceof PlaylistAlias && ! empty($aliasGroupFilter)) {
                 $query->whereIn('group_internal', $aliasGroupFilter);
             }
             if ($hidesUnmatched) {
@@ -247,7 +254,9 @@ class XtreamCategoryService
     {
         $source = self::dynamicGroupSource($playlist);
 
-        if ($source === null || ! empty($aliasFilter)) {
+        $filtersAlias = $playlist instanceof PlaylistAlias && $playlist->isContentFiltered($isVod ? 'vod' : 'series');
+
+        if ($source === null || ! empty($aliasFilter) || $filtersAlias) {
             return $categories;
         }
 
