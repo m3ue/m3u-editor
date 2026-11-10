@@ -127,7 +127,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $query->where('playlist_id', $this->playlist_id);
             })
             ->when($this->series_ids !== null, function ($query) {
-                $query->whereIn('id', $this->series_ids);
+                $query->whereIntegerInRaw('id', $this->series_ids);
             })
             ->count();
 
@@ -229,7 +229,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 $query->where('playlist_id', $this->playlist_id);
             })
             ->when($this->series_ids !== null, function ($query) {
-                $query->whereIn('id', $this->series_ids);
+                $query->whereIntegerInRaw('id', $this->series_ids);
             })
             ->orderBy('id')
             ->skip($this->batchOffset)
@@ -285,7 +285,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     $q->where('series_id', $this->series->id);
                 }
                 if ($this->series_ids !== null) {
-                    $q->whereIn('series_id', $this->series_ids);
+                    $q->whereIntegerInRaw('series_id', $this->series_ids);
                 }
             })
             ->distinct()
@@ -391,7 +391,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                     $query->where('playlist_id', $this->playlist_id);
                 }
                 if ($this->series_ids !== null) {
-                    $query->whereIn('id', $this->series_ids);
+                    $query->whereIntegerInRaw('id', $this->series_ids);
                 }
             })
             ->get();
@@ -417,7 +417,7 @@ class SyncSeriesStrmFiles implements ShouldQueue
                 }
                 if ($this->series_ids !== null) {
                     $query->whereHas('series', function ($q) {
-                        $q->whereIn('id', $this->series_ids);
+                        $q->whereIntegerInRaw('id', $this->series_ids);
                     });
                 }
             })

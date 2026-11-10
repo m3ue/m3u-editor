@@ -617,7 +617,7 @@ class SyncVodStrmFiles implements ShouldQueue
                     $q->where('id', $this->channel->id);
                 }
                 if ($this->channel_ids !== null) {
-                    $q->whereIn('id', $this->channel_ids);
+                    $q->whereIntegerInRaw('id', $this->channel_ids);
                 }
             })
             ->distinct()
@@ -697,7 +697,7 @@ class SyncVodStrmFiles implements ShouldQueue
                     $query->where('playlist_id', $playlistId);
                 }
                 if ($this->channel_ids !== null) {
-                    $query->whereIn('id', $this->channel_ids);
+                    $query->whereIntegerInRaw('id', $this->channel_ids);
                 }
             })
             ->get();
@@ -724,7 +724,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 }
                 if ($this->channel_ids !== null) {
                     $query->whereHas('channels', function ($q) {
-                        $q->whereIn('id', $this->channel_ids);
+                        $q->whereIntegerInRaw('id', $this->channel_ids);
                     });
                 }
             })
@@ -766,7 +766,7 @@ class SyncVodStrmFiles implements ShouldQueue
                 $query->where('playlist_id', $playlistId);
             })
             ->when($this->channel_ids !== null, function ($query) {
-                $query->whereIn('id', $this->channel_ids);
+                $query->whereIntegerInRaw('id', $this->channel_ids);
             });
     }
 
