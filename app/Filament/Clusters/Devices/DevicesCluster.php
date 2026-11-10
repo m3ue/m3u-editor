@@ -5,6 +5,7 @@ namespace App\Filament\Clusters\Devices;
 use App\Filament\Clusters\Devices\Pages\PairDevice;
 use App\Filament\Resources\TvClientProfiles\TvClientProfileResource;
 use App\Filament\Resources\TvDevices\TvDeviceResource;
+use App\Filament\Resources\TvHomeScreens\TvHomeScreenResource;
 use BackedEnum;
 use Filament\Clusters\Cluster;
 use Filament\Pages\Enums\SubNavigationPosition;
@@ -38,7 +39,8 @@ class DevicesCluster extends Cluster
 
     /**
      * Registered Devices (push relay) first, Device Pairing second - the order
-     * the tabs used before this cluster replaced them - then M3U TV Profiles.
+     * the tabs used before this cluster replaced them - then Settings Profiles
+     * and Home Screens.
      *
      * @return array<class-string>
      */
@@ -48,6 +50,7 @@ class DevicesCluster extends Cluster
             TvDeviceResource::class,
             PairDevice::class,
             TvClientProfileResource::class,
+            TvHomeScreenResource::class,
         ];
     }
 

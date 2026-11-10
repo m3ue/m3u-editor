@@ -225,7 +225,7 @@ it('creates a profile from the panel with managed settings', function () {
         ->and($profile->settings)->toBe(['live_tv_layout' => ['mode' => 'enforced', 'value' => 'grid']]);
 });
 
-it('lists M3U TV Profiles in the Devices cluster while enhanced output is on', function () {
+it('lists Settings Profiles in the Devices cluster while enhanced output is on', function () {
     $this->actingAs(User::factory()->admin()->create());
 
     $settings = Mockery::mock(GeneralSettings::class);
@@ -246,7 +246,7 @@ it('lists M3U TV Profiles in the Devices cluster while enhanced output is on', f
         ->and(DevicesCluster::shouldRegisterNavigation())->toBeFalse();
 });
 
-it('keeps M3U TV Profiles admin-only, like the rest of the Devices cluster', function () {
+it('keeps Settings Profiles admin-only, like the rest of the Devices cluster', function () {
     $this->actingAs($this->user);
 
     expect(TvClientProfileResource::canAccess())->toBeFalse();

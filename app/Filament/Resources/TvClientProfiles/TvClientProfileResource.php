@@ -18,6 +18,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -75,23 +76,27 @@ class TvClientProfileResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return __('M3U TV Profiles');
+        return __('Settings Profiles');
     }
 
     public static function getModelLabel(): string
     {
-        return __('M3U TV Profile');
+        return __('Settings Profile');
     }
 
     public static function getPluralModelLabel(): string
     {
-        return __('M3U TV Profiles');
+        return __('Settings Profiles');
     }
 
     public static function form(Schema $schema): Schema
     {
         return $schema
             ->components([
+                Callout::make(__('Requires M3U TV :version or later', ['version' => TvClientSettings::MIN_APP_VERSION]))
+                    ->description(__('Older versions ignore profiles. Settings left as "Not managed" keep the app\'s own behavior.'))
+                    ->info()
+                    ->columnSpanFull(),
                 TextInput::make('name')
                     ->label(__('Profile Name'))
                     ->required()
@@ -130,7 +135,6 @@ class TvClientProfileResource extends Resource
                 ->all();
 
             $sections[] = Section::make($groupLabel)
-                ->description(__('Settings left as "Not managed" keep the app\'s own behavior. Requires M3U TV :version or later; older versions ignore this profile.', ['version' => TvClientSettings::MIN_APP_VERSION]))
                 ->compact()
                 ->collapsible()
                 ->schema($rows)

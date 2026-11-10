@@ -361,6 +361,20 @@ class XtreamApiController extends Controller
                 ->first()
             : null;
 
+        return $this->handleAs($request, $playlist, $authMethod, (string) $username, (string) $password, $playlistAuth);
+    }
+
+    /**
+     * Answers an already-authenticated request as [$playlist]. handle() calls
+     * it after checking the credentials; TvHomeScreenCategories calls it to
+     * read a playlist's categories exactly as its logins get them.
+     *
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     */
+    public function handleAs(Request $request, $playlist, string $authMethod, string $username = '', string $password = '', ?PlaylistAuth $playlistAuth = null)
+    {
+        $action = (string) $request->input('action', 'panel');
+
         $urlSafePass = urlencode($password);
         $urlSafeUser = urlencode($username);
 
@@ -617,7 +631,8 @@ class XtreamApiController extends Controller
                 // advertised so an app whose profile was removed drops it too.
                 $tvClientConfig = app(TvClientConfigService::class);
                 $m3uEditorPayload['client_config'] = $tvClientConfig->capability(
-                    $tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth)
+                    $tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth),
+                    $tvClientConfig->resolveHomeScreen($playlist),
                 );
 
                 $payload['m3u_editor'] = $m3uEditorPayload;
@@ -2290,9 +2305,11 @@ class XtreamApiController extends Controller
         } elseif ($action === TvClientConfigService::ACTION) {
             $tvClientConfig = app(TvClientConfigService::class);
 
-            return response()->json(
-                $tvClientConfig->payload($tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth))
-            );
+            return response()->json($tvClientConfig->payload(
+                $tvClientConfig->resolveProfile($playlist, $authMethod, $playlistAuth),
+                $tvClientConfig->resolveHomeScreen($playlist),
+                $tvClientConfig->rowKindsFrom($request->input('row_kinds')),
+            ));
         } elseif ($action === 'm3u_editor_register_publisher') {
             return $this->registerManagedLibraryPublisher($request, $playlist, $authMethod, $playlistAuth);
         } elseif ($action === 'm3u_editor_catalog') {

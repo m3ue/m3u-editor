@@ -320,18 +320,18 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             ->collapsed(fn ($record) => ! ($record?->library_publishing_enabled));
 
         $tvClientSection = Section::make(__('M3U TV'))
-            ->description(__('Manage the M3U TV app settings for this user with an M3U TV Profile.'))
+            ->description(__('Manage the M3U TV app settings for this user with a Settings Profile.'))
             ->compact()
             ->hidden(fn () => ! TvClientProfileResource::isEnabled())
             ->schema([
                 Select::make('tv_client_profile_id')
-                    ->label(__('M3U TV Profile'))
+                    ->label(__('Settings Profile'))
                     ->options(fn () => TvClientProfile::where('user_id', auth()->id())
                         ->orderBy('name')
                         ->pluck('name', 'id')
                         ->toArray())
                     ->placeholder(__('Use the default profile'))
-                    ->helperText(__('Leave empty to use your default M3U TV Profile, if you have one.'))
+                    ->helperText(__('Leave empty to use your default Settings Profile, if you have one.'))
                     ->nullable()
                     ->columnSpan(2),
             ])

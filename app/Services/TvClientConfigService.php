@@ -10,8 +10,11 @@ use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
 use App\Models\TvClientProfile;
 use App\Models\TvDevice;
+use App\Models\TvHomeScreen;
 use App\Support\TvClientSettings;
+use App\Support\TvHomeScreenLayout;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Resolves which TV Client Profile applies to an Xtream login and builds the
@@ -55,19 +58,53 @@ class TvClientConfigService
     }
 
     /**
-     * @return array{api_version: int, profile: string|null, settings: array<string, array{mode: string, value: string|int|bool}>|object, revision: string}
+     * The Home screen of the playlist the login resolved to. Every login to
+     * that playlist gets it: the owner's, aliases' (an Alias is its own
+     * playlist) and Playlist Auths assigned to it.
      */
-    public function payload(?TvClientProfile $profile): array
+    public function resolveHomeScreen(mixed $playlist): ?TvHomeScreen
     {
+        return $playlist instanceof Model ? TvHomeScreen::forPlaylist($playlist) : null;
+    }
+
+    /**
+     * [$rowKinds] are the Home row kinds the app can draw (its `row_kinds`
+     * parameter); rows of other kinds are left out.
+     *
+     * @param  list<string>  $rowKinds
+     * @return array{api_version: int, profile: string|null, settings: array<string, array{mode: string, value: string|int|bool}>|object, home_screen: array{mode: string, sections: list<array<string, mixed>>}|null, revision: string}
+     */
+    public function payload(
+        ?TvClientProfile $profile,
+        ?TvHomeScreen $homeScreen = null,
+        array $rowKinds = TvHomeScreenLayout::BASELINE_ROW_KINDS,
+    ): array {
         $settings = $profile?->managedSettings() ?? [];
+        $homeScreenPayload = $homeScreen === null ? null : [
+            'mode' => $homeScreen->mode,
+            'sections' => TvHomeScreenLayout::forRowKinds($homeScreen->layout(), $rowKinds),
+        ];
 
         return [
             'api_version' => TvClientSettings::API_VERSION,
             'profile' => $profile?->name,
             // An empty map still encodes as a JSON object.
             'settings' => $settings === [] ? (object) [] : $settings,
-            'revision' => $this->revision($settings),
+            'home_screen' => $homeScreenPayload,
+            'revision' => $this->revision($settings, $homeScreen),
         ];
+    }
+
+    /**
+     * The `row_kinds` an app sent, always including the built-in row.
+     *
+     * @return list<string>
+     */
+    public function rowKindsFrom(?string $rowKinds): array
+    {
+        $kinds = array_filter(array_map('trim', explode(',', (string) $rowKinds)));
+
+        return array_values(array_unique([...TvHomeScreenLayout::BASELINE_ROW_KINDS, ...$kinds]));
     }
 
     /**
@@ -77,23 +114,33 @@ class TvClientConfigService
      *
      * @return array{api_version: int, revision: string, action: string}
      */
-    public function capability(?TvClientProfile $profile): array
+    public function capability(?TvClientProfile $profile, ?TvHomeScreen $homeScreen = null): array
     {
         return [
             'api_version' => TvClientSettings::API_VERSION,
-            'revision' => $this->revision($profile?->managedSettings() ?? []),
+            'revision' => $this->revision($profile?->managedSettings() ?? [], $homeScreen),
             'action' => self::ACTION,
         ];
     }
 
     /**
+     * Covers the settings and, when there is one, the whole Home screen (all
+     * row kinds), so any change to either reaches the app.
+     *
      * @param  array<string, array{mode: string, value: string|int|bool}>  $settings
      */
-    public function revision(array $settings): string
+    public function revision(array $settings, ?TvHomeScreen $homeScreen = null): string
     {
         ksort($settings);
 
-        return substr(hash('sha256', json_encode($settings, JSON_THROW_ON_ERROR)), 0, 16);
+        // Without a Home screen this hashes exactly what earlier versions did,
+        // so existing installs don't refetch an unchanged config.
+        $content = $homeScreen === null ? $settings : [
+            'settings' => $settings,
+            'home_screen' => ['mode' => $homeScreen->mode, 'sections' => $homeScreen->layout()],
+        ];
+
+        return substr(hash('sha256', json_encode($content, JSON_THROW_ON_ERROR)), 0, 16);
     }
 
     /**
@@ -122,10 +169,49 @@ class TvClientConfigService
      */
     public function notifyPlaylistAuthChanged(PlaylistAuth $playlistAuth): void
     {
+        $this->notifyPlaylistAuths([$playlistAuth->id]);
+    }
+
+    /**
+     * Tells the devices signed in with these auths to refetch their config.
+     *
+     * @param  array<int, int>  $playlistAuthIds
+     */
+    public function notifyPlaylistAuths(array $playlistAuthIds): void
+    {
+        if ($playlistAuthIds === []) {
+            return;
+        }
+
         $this->broadcastTo(
             TvDevice::query()
                 ->whereNull('revoked_at')
-                ->where('playlist_auth_id', $playlistAuth->id)
+                ->whereIn('playlist_auth_id', $playlistAuthIds)
+        );
+    }
+
+    /**
+     * Tells every device signed in to these playlists, with any login, to
+     * refetch its config.
+     *
+     * @param  list<array{0: class-string<Model>, 1: int}>  $playlists  [model class, id] pairs
+     */
+    public function notifyPlaylists(array $playlists): void
+    {
+        if ($playlists === []) {
+            return;
+        }
+
+        $this->broadcastTo(
+            TvDevice::query()
+                ->whereNull('revoked_at')
+                ->where(function (Builder $query) use ($playlists): void {
+                    foreach ($playlists as [$model, $id]) {
+                        $query->orWhere(fn (Builder $query) => $query
+                            ->where('notifiable_type', (new $model)->getMorphClass())
+                            ->where('notifiable_id', $id));
+                    }
+                })
         );
     }
 
