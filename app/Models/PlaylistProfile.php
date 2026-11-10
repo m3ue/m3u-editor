@@ -363,6 +363,9 @@ class PlaylistProfile extends Model
      * Replaces the playlist's primary credentials with this profile's credentials.
      * If the profile has a custom URL, the entire base URL is replaced as well.
      *
+     * Xtream playlists swap the credentials stored in xtream_config; M3U playlists
+     * have no stored provider config and go through transformM3uUrl() instead.
+     *
      * Only reached for direct-to-provider profiles; profiles pointing at a
      * locally-hosted playlist are resolved by resolveInternalUrl() before this
      * is ever called (see transformChannelUrl()/transformEpisodeUrl()).
@@ -371,8 +374,12 @@ class PlaylistProfile extends Model
     {
         $playlist = $this->playlist;
 
-        if (! $playlist || ! $playlist->xtream_config) {
+        if (! $playlist) {
             return $originalUrl;
+        }
+
+        if (! $playlist->xtream_config) {
+            return $this->transformM3uUrl($originalUrl);
         }
 
         $sourceConfig = $playlist->xtream_config;
@@ -440,5 +447,269 @@ class PlaylistProfile extends Model
         ]);
 
         return $originalUrl;
+    }
+
+    /**
+     * Whether the provider behind this profile can be queried for account info
+     * (connection limits, expiry). Only Xtream-backed playlists expose a player
+     * API; M3U playlists rely on the user-entered max_streams instead.
+     */
+    public function supportsProviderInfo(): bool
+    {
+        return (bool) $this->playlist?->xtream_config;
+    }
+
+    /**
+     * Rewrite an M3U playlist's stream URL to this profile's account.
+     *
+     * M3U playlists carry no provider config, so the credentials to replace are the
+     * primary profile's (parsed from the playlist's M3U URL when profiles were
+     * enabled) or, when those are unknown, whatever the stream URL itself carries.
+     * The profile's URL, when set, replaces the provider's scheme/host/port. URLs
+     * in none of the recognised shapes (see parseStreamCredentials()) are returned
+     * untouched.
+     */
+    private function transformM3uUrl(string $originalUrl): string
+    {
+        if ($this->is_primary || $originalUrl === '' || blank($this->username) || blank($this->password)) {
+            return $originalUrl;
+        }
+
+        // Known primary credentials are matched strictly, like the Xtream path: a URL
+        // that does not carry them (another host, a CDN token) is left alone rather
+        // than having whatever it contains swapped out.
+        $primary = $this->playlist?->primaryProfile();
+        $primaryCredentialsKnown = $primary && filled($primary->username) && filled($primary->password);
+
+        $source = $primaryCredentialsKnown
+            ? ['username' => (string) $primary->username, 'password' => (string) $primary->password]
+            : static::parseStreamCredentials($originalUrl);
+
+        $transformedUrl = $source
+            ? static::swapStreamCredentials(
+                $originalUrl,
+                $source['username'],
+                $source['password'],
+                (string) $this->username,
+                (string) $this->password,
+                $this->url,
+            )
+            : null;
+
+        if ($transformedUrl === null) {
+            Log::warning('M3U profile URL transformation did NOT match', [
+                'profile_id' => $this->id,
+                'profile_name' => $this->name ?? 'N/A',
+                'playlist_id' => $this->playlist_id,
+                'primary_credentials_known' => $primaryCredentialsKnown,
+                'original_url' => static::redactStreamUrl($originalUrl),
+            ]);
+
+            return $originalUrl;
+        }
+
+        Log::debug('M3U profile URL transformation matched', [
+            'profile_id' => $this->id,
+            'profile_name' => $this->name ?? 'N/A',
+            'playlist_id' => $this->playlist_id,
+            'profile_base_url' => $this->url,
+            'original_url' => static::redactStreamUrl($originalUrl),
+            'transformed_url' => static::redactStreamUrl($transformedUrl),
+        ]);
+
+        return $transformedUrl;
+    }
+
+    /**
+     * Parse the account credentials out of a provider's M3U URL.
+     *
+     * Recognised shapes:
+     *   - http://host/get.php?username=USER&password=PASS[&type=m3u_plus...]
+     *   - http://host/USER/PASS/<file>
+     *   - http://host/(playlist|live)/USER/PASS/<file>
+     *
+     * Local file paths and URLs without credentials return null. The returned
+     * url is the provider's scheme/host/port only.
+     *
+     * @return array{url: string, username: string, password: string}|null
+     */
+    public static function parseM3uUrlCredentials(?string $url): ?array
+    {
+        $url = trim((string) $url);
+
+        if (! preg_match('#^(https?://[^/?\#]+)([^?\#]*)(?:\?([^\#]*))?#i', $url, $matches)) {
+            return null;
+        }
+
+        $baseUrl = $matches[1];
+        $path = $matches[2] ?? '';
+        parse_str($matches[3] ?? '', $query);
+
+        if (filled($query['username'] ?? null) && filled($query['password'] ?? null)) {
+            return [
+                'url' => $baseUrl,
+                'username' => (string) $query['username'],
+                'password' => (string) $query['password'],
+            ];
+        }
+
+        if (preg_match('#^/(?:playlist/|live/)?([^/]+)/([^/]+)/[^/]+$#', $path, $pathMatches)) {
+            return [
+                'url' => $baseUrl,
+                'username' => $pathMatches[1],
+                'password' => $pathMatches[2],
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse provider credentials out of a stream URL.
+     *
+     * Used for M3U playlists whose primary credentials are unknown (nothing could be
+     * parsed from the playlist URL). Recognised shapes:
+     *   - http://host/(live|series|movie)/USER/PASS/<stream>
+     *   - http://host/USER/PASS/<numeric id>[.ext] (requiring a numeric id keeps
+     *     arbitrary three-segment URLs from being read as credentials)
+     *   - http://host/path?username=USER&password=PASS[&...]
+     *
+     * @return array{url: string, username: string, password: string}|null
+     */
+    public static function parseStreamCredentials(string $url): ?array
+    {
+        if (preg_match('#^(https?://[^/?\#]+)/(?:live|series|movie)/([^/?\#]+)/([^/?\#]+)/[^?\#]+#', $url, $matches)) {
+            return ['url' => $matches[1], 'username' => $matches[2], 'password' => $matches[3]];
+        }
+
+        if (preg_match('#^(https?://[^/?\#]+)/([^/?\#]+)/([^/?\#]+)/\d+(?:\.\w+)?(?:[?\#].*)?$#', $url, $matches)) {
+            return ['url' => $matches[1], 'username' => $matches[2], 'password' => $matches[3]];
+        }
+
+        if (preg_match('#^(https?://[^/?\#]+)[^?\#]*\?([^\#]*)#', $url, $matches)) {
+            parse_str($matches[2], $query);
+
+            if (filled($query['username'] ?? null) && filled($query['password'] ?? null)) {
+                return [
+                    'url' => $matches[1],
+                    'username' => (string) $query['username'],
+                    'password' => (string) $query['password'],
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Swap the credentials, and optionally the provider base URL, in a stream URL.
+     *
+     * Handles the three URL shapes listed on parseStreamCredentials(). Returns null
+     * when the URL does not carry the source credentials in any of them. Credentials
+     * in a query string are matched raw or URL-encoded and written URL-encoded.
+     */
+    public static function swapStreamCredentials(
+        string $url,
+        string $sourceUsername,
+        string $sourcePassword,
+        string $targetUsername,
+        string $targetPassword,
+        ?string $targetBaseUrl = null,
+    ): ?string {
+        if ($sourceUsername === '' || $sourcePassword === '' || $targetUsername === '' || $targetPassword === '') {
+            return null;
+        }
+
+        $targetBaseUrl = filled($targetBaseUrl) ? rtrim($targetBaseUrl, '/') : null;
+        $username = preg_quote($sourceUsername, '#');
+        $password = preg_quote($sourcePassword, '#');
+
+        // Prefixed form: http://host/(live|series|movie)/USER/PASS/<stream>
+        if (preg_match('#^(https?://[^/?\#]+)/(live|series|movie)/'.$username.'/'.$password.'/(.+)$#', $url, $matches)) {
+            return ($targetBaseUrl ?? $matches[1])."/{$matches[2]}/{$targetUsername}/{$targetPassword}/{$matches[3]}";
+        }
+
+        // Prefix-less form: http://host/USER/PASS/<stream>
+        if (preg_match('#^(https?://[^/?\#]+)/'.$username.'/'.$password.'/(.+)$#', $url, $matches)) {
+            return ($targetBaseUrl ?? $matches[1])."/{$targetUsername}/{$targetPassword}/{$matches[2]}";
+        }
+
+        // Query form: http://host/path?username=USER&password=PASS[&...]
+        if (preg_match('#^(https?://[^/?\#]+)([^?\#]*)\?([^\#]*)(\#.*)?$#', $url, $matches)) {
+            $query = $matches[3];
+            $usernamePattern = '#(^|&)username=(?:'.$username.'|'.preg_quote(rawurlencode($sourceUsername), '#').')(?=&|$)#';
+            $passwordPattern = '#(^|&)password=(?:'.$password.'|'.preg_quote(rawurlencode($sourcePassword), '#').')(?=&|$)#';
+
+            if (preg_match($usernamePattern, $query) && preg_match($passwordPattern, $query)) {
+                $query = preg_replace($usernamePattern, '$1username='.rawurlencode($targetUsername), $query, 1);
+                $query = preg_replace($passwordPattern, '$1password='.rawurlencode($targetPassword), $query, 1);
+
+                return ($targetBaseUrl ?? $matches[1]).$matches[2].'?'.$query.($matches[4] ?? '');
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalise the URL and credentials a user entered for an M3U-backed profile.
+     *
+     * The URL may be the account's full M3U URL (e.g. .../get.php?username=U&password=P):
+     * its credentials fill any blank username/password and the URL is reduced to the
+     * provider base. Otherwise the query string and a trailing file segment are dropped
+     * so the stored URL is the scheme/host/port the stream URL rewrite expects.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function normalizeM3uProfileInput(array $data): array
+    {
+        $url = trim((string) ($data['url'] ?? ''));
+
+        if ($url === '') {
+            return $data;
+        }
+
+        if ($credentials = static::parseM3uUrlCredentials($url)) {
+            $data['url'] = $credentials['url'];
+            $data['username'] = filled($data['username'] ?? null) ? $data['username'] : $credentials['username'];
+            $data['password'] = filled($data['password'] ?? null) ? $data['password'] : $credentials['password'];
+
+            return $data;
+        }
+
+        $data['url'] = static::providerBaseUrl($url);
+
+        return $data;
+    }
+
+    /**
+     * Reduce a provider URL to its base: the query string and a trailing file
+     * segment (get.php, list.m3u8, ...) are dropped, path prefixes are kept.
+     */
+    public static function providerBaseUrl(string $url): string
+    {
+        $url = preg_replace('/[?#].*$/', '', trim($url));
+        $url = preg_replace('#^(https?://[^/]+)(/.*?)?/[^/]*\.[^/]*$#', '$1$2', $url);
+
+        return rtrim($url, '/');
+    }
+
+    /**
+     * Mask the credentials a stream URL carries, for logging.
+     */
+    private static function redactStreamUrl(string $url): string
+    {
+        $parsed = static::parseStreamCredentials($url);
+
+        if (! $parsed) {
+            return $url;
+        }
+
+        return str_replace(
+            [$parsed['username'], $parsed['password'], rawurlencode($parsed['username']), rawurlencode($parsed['password'])],
+            '***',
+            $url,
+        );
     }
 }

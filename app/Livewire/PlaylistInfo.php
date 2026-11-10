@@ -110,7 +110,8 @@ class PlaylistInfo extends Component
             $stats['max_streams_reached'] = $activeStreams > 0 && $activeStreams >= $availableStreams;
             $stats['active_connections'] = "$activeStreams/$availableStreams";
         }
-        if ($playlist->xtream) {
+        // Pooled M3U playlists report their profiles' combined capacity the same way
+        if ($playlist->xtream || $playlist->profiles_enabled) {
             $xtreamStats = $this->getXtreamStats($playlist);
             if (! empty($xtreamStats)) {
                 $stats = array_merge($stats, $xtreamStats);
@@ -245,6 +246,7 @@ class PlaylistInfo extends Component
                 'expires_in_24_hours_or_less' => $expiresIn24HoursOrLess,
                 'profiles_enabled' => true,
                 'profile_count' => count($poolStatus['profiles']),
+                'title' => $playlist->xtream ? 'Xtream Provider Details' : 'Provider Pool Details',
             ],
         ];
     }

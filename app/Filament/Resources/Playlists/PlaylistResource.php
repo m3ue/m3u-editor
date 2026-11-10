@@ -253,7 +253,7 @@ class PlaylistResource extends Resource implements CopilotResource
                 TextColumn::make('user_info')
                     ->label(__('Provider Streams'))
                     ->getStateUsing(function ($record) {
-                        if ($record->xtream) {
+                        if ($record->xtream || $record->profiles_enabled) {
                             try {
                                 // If profiles are enabled, show total capacity from all profiles
                                 if ($record->profiles_enabled) {
@@ -272,7 +272,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         return 'N/A';
                     })
                     ->description(function (Playlist $record): string {
-                        if (! $record->xtream) {
+                        if (! $record->xtream && ! $record->profiles_enabled) {
                             return '';
                         }
                         // If profiles are enabled, show combined active count
@@ -1201,15 +1201,17 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(false),
                 ]),
 
-            // Provider Profiles Section (Xtream only)
+            // Provider Profiles Section (Xtream and M3U playlists)
             Section::make(__('Provider Profiles'))
-                ->description(__('Pool multiple Xtream accounts from this provider to increase concurrent stream capacity.'))
+                ->description(fn (Get $get): string => $get('xtream')
+                    ? __('Pool multiple Xtream accounts from this provider to increase concurrent stream capacity.')
+                    : __('Pool multiple accounts from this provider under one M3U playlist. Channels and groups sync from the primary account; each additional profile\'s credentials are swapped into the stream URL when a stream starts.'))
                 ->icon('heroicon-o-user-group')
                 ->iconSize('md')
                 ->collapsible()
                 ->compact()
                 ->collapsed(fn (?Playlist $record): bool => ! ($record?->profiles_enabled ?? false))
-                ->hidden(fn (Get $get): bool => ! (auth()->user()->canUseProxy() && $get('xtream')))
+                ->hidden(fn (?Playlist $record): bool => ! auth()->user()->canUseProxy() || ($record?->is_network_playlist ?? false))
                 ->schema([
                     Grid::make()
                         ->columns(3)
@@ -1272,7 +1274,11 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->visible(fn (Get $get): bool => $get('profiles_enabled'))
                         ->schema([
                             Callout::make(__('Primary Account'))
-                                ->description(function (?Playlist $record): string {
+                                ->description(function (?Playlist $record, Get $get): string {
+                                    if (! $get('xtream')) {
+                                        return static::describeM3uPrimaryProfile($record, $get('url'));
+                                    }
+
                                     if (! $record || ! $record->xtream_config) {
                                         return 'Configure Xtream credentials above first.';
                                     }
@@ -1289,6 +1295,19 @@ class PlaylistResource extends Resource implements CopilotResource
 
                                     return "Username: {$username} (Profile will be created when saved)";
                                 }),
+
+                            TextInput::make('primary_profile_max_streams')
+                                ->label(__('Primary Max Streams'))
+                                ->numeric()
+                                ->minValue(1)
+                                ->default(1)
+                                ->helperText(__('Concurrent streams this account allows. M3U providers cannot be queried for this, so set it manually.'))
+                                ->dehydrated(false)
+                                ->afterStateHydrated(function (TextInput $component, ?Playlist $record): void {
+                                    $component->state($record?->primaryProfile()?->max_streams ?? 1);
+                                })
+                                ->visible(fn (Get $get): bool => ! $get('xtream'))
+                                ->columnSpan(1),
 
                             Actions::make([
                                 Action::make('test_primary_profile')
@@ -1357,7 +1376,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                                 ->send();
                                         }
                                     }),
-                            ])->verticallyAlignEnd(),
+                            ])
+                                ->visible(fn (Get $get): bool => (bool) $get('xtream'))
+                                ->verticallyAlignEnd(),
                         ]),
 
                     Repeater::make('additional_profiles')
@@ -1371,22 +1392,28 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->columnSpan(2),
                             TextInput::make('url')
                                 ->extraInputAttributes(['class' => 'privacy-sensitive'])
-                                ->label(__('Provider URL'))
-                                ->placeholder(fn (Get $get, $livewire) => $livewire->getRecord()?->xtream_config['url'] ?? 'http://provider.com:port')
+                                ->label(fn (Get $get): string => $get('../../xtream') ? __('Provider URL') : __('Provider URL or M3U URL'))
+                                ->placeholder(fn (Get $get, $livewire) => $livewire->getRecord()?->xtream_config['url']
+                                    ?? $livewire->getRecord()?->primaryProfile()?->url
+                                    ?? 'http://provider.com:port')
                                 ->rules([new UrlIsAllowed])
-                                ->helperText(__('Leave blank to use the same provider as the primary account.'))
+                                ->helperText(fn (Get $get): string => $get('../../xtream')
+                                    ? __('Leave blank to use the same provider as the primary account.')
+                                    : __('Leave blank to use the same provider as the primary account. You can also paste this account\'s full M3U URL and its username and password will be filled in automatically.'))
                                 ->columnSpan(2),
                             TextInput::make('username')
                                 ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                 ->label(__('Username'))
-                                ->required()
+                                // An M3U URL pasted into the URL field supplies the credentials itself
+                                ->required(fn (Get $get): bool => (bool) $get('../../xtream') || ! PlaylistProfile::parseM3uUrlCredentials($get('url')))
                                 ->live(onBlur: true)
                                 ->columnSpan(1),
                             TextInput::make('password')
                                 ->label(__('Password'))
                                 ->password()
                                 ->revealable()
-                                ->required(fn ($record) => $record === null) // Only required for new profiles
+                                ->required(fn ($record, Get $get) => $record === null // Only required for new profiles
+                                    && ((bool) $get('../../xtream') || ! PlaylistProfile::parseM3uUrlCredentials($get('url'))))
                                 ->dehydrated(fn ($state, $record) => filled($state) || $record === null) // Only save if filled or new
                                 ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->password)
                                 ->placeholder(fn ($record) => $record?->password ? '••••••••' : null)
@@ -1397,7 +1424,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->numeric()
                                 ->default(1)
                                 ->minValue(1)
-                                ->helperText(__('Use "Test" to auto-detect from provider.'))
+                                ->helperText(fn (Get $get): string => $get('../../xtream')
+                                    ? __('Use "Test" to auto-detect from provider.')
+                                    : __('Concurrent streams this account allows.'))
                                 ->columnSpan(1),
                             TextInput::make('priority')
                                 ->label(__('Priority'))
@@ -1426,6 +1455,8 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->icon('heroicon-o-signal')
                                 ->color('info')
                                 ->tooltip(__('Test credentials and auto-detect max connections'))
+                                // M3U providers expose no account API to test against
+                                ->visible(fn (?Playlist $record): bool => (bool) $record?->xtream_config)
                                 ->action(function (array $arguments, Repeater $component, Get $get, Set $set, ?Playlist $record): void {
                                     // Get the item data directly from the repeater's state
                                     $itemKey = $arguments['item'];
@@ -1501,6 +1532,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             $data['user_id'] = $record->user_id;
                             $data['playlist_id'] = $record->id;
 
+                            // M3U providers: no account API to test, only normalise the entered URL/credentials
+                            if (! $record->xtream_config) {
+                                return PlaylistProfile::normalizeM3uProfileInput($data);
+                            }
+
                             // Auto-test credentials and populate max_streams if not manually set or set to default
                             if (($data['max_streams'] ?? 1) <= 1 && ! empty($data['username']) && ! empty($data['password'])) {
                                 // Use profile URL if provided, otherwise use playlist URL
@@ -1531,6 +1567,11 @@ class PlaylistResource extends Resource implements CopilotResource
                             // If URL is empty but we have an existing record, preserve the old URL
                             if (empty($data['url']) && $record instanceof PlaylistProfile) {
                                 $data['url'] = $record->url;
+                            }
+
+                            // M3U providers: no account API to test, only normalise the entered URL/credentials
+                            if (! $playlist->xtream_config) {
+                                return PlaylistProfile::normalizeM3uProfileInput($data);
                             }
 
                             // Auto-test credentials and update max_streams if still at default
@@ -4060,6 +4101,51 @@ class PlaylistResource extends Resource implements CopilotResource
                 ])->columnSpanFull(),
 
         ];
+    }
+
+    /**
+     * Describe an M3U playlist's primary account for the Provider Profiles section.
+     *
+     * Before the profile exists the credentials are previewed from the M3U URL in
+     * the form, so the user can see what will be used when they save.
+     */
+    public static function describeM3uPrimaryProfile(?Playlist $record, ?string $formUrl): string
+    {
+        $primaryProfile = $record?->primaryProfile();
+
+        if ($primaryProfile) {
+            $credentials = filled($primaryProfile->username)
+                ? "Username: {$primaryProfile->username}"
+                : 'Credentials: parsed from each stream URL (none found in the M3U URL)';
+
+            return "{$credentials} | Max Streams: {$primaryProfile->max_streams}";
+        }
+
+        $credentials = PlaylistProfile::parseM3uUrlCredentials($formUrl);
+
+        return $credentials
+            ? "Username: {$credentials['username']} (Profile will be created when saved)"
+            : 'No credentials found in the M3U URL; they will be parsed from each stream URL instead (Profile will be created when saved)';
+    }
+
+    /**
+     * Create or sync an M3U playlist's primary profile when its form is saved.
+     *
+     * Xtream playlists get their primary profile from PlaylistListener; M3U ones get
+     * it here, only when a user saves the form with profiles enabled. The stream
+     * limit field is not a playlist column (it lives on the primary PlaylistProfile),
+     * so it is excluded from the saved form data and read from the raw form state.
+     *
+     * @param  array<string, mixed>  $rawFormState
+     */
+    public static function syncM3uPrimaryProfileFromForm(Playlist $record, array $rawFormState): void
+    {
+        $maxStreams = $rawFormState['primary_profile_max_streams'] ?? null;
+
+        ProfileService::ensureM3uPrimaryProfile(
+            $record,
+            is_numeric($maxStreams) ? (int) $maxStreams : null,
+        );
     }
 
     public static function getFormSteps(): array
