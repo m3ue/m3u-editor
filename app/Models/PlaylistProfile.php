@@ -485,6 +485,16 @@ class PlaylistProfile extends Model
             ? ['username' => (string) $primary->username, 'password' => (string) $primary->password]
             : static::parseStreamCredentials($originalUrl);
 
+        // The profile's own URL only relocates streams served by the primary account's
+        // provider, as the Xtream path anchors on the source base URL. A stream on
+        // another host (a CDN or edge node) keeps its host and only has its credentials
+        // swapped. When the primary's provider base is unknown there is nothing to
+        // anchor on and the profile URL applies.
+        $primaryBaseUrl = static::baseUrlOf((string) $primary?->url);
+        $targetBaseUrl = $primaryBaseUrl === null || strcasecmp(static::baseUrlOf($originalUrl) ?? '', $primaryBaseUrl) === 0
+            ? $this->url
+            : null;
+
         $transformedUrl = $source
             ? static::swapStreamCredentials(
                 $originalUrl,
@@ -492,7 +502,7 @@ class PlaylistProfile extends Model
                 $source['password'],
                 (string) $this->username,
                 (string) $this->password,
-                $this->url,
+                $targetBaseUrl,
             )
             : null;
 
@@ -525,8 +535,12 @@ class PlaylistProfile extends Model
      *
      * Recognised shapes:
      *   - http://host/get.php?username=USER&password=PASS[&type=m3u_plus...]
-     *   - http://host/USER/PASS/<file>
      *   - http://host/(playlist|live)/USER/PASS/<file>
+     *   - http://host/USER/PASS/<playlist file>, where the file is one of the names
+     *     providers use (m3u, m3u8, m3u_plus, playlist.m3u...). Without that
+     *     restriction any three-segment path (/iptv/countries/us.m3u) would read as
+     *     credentials, and a wrongly "known" primary account would disable the
+     *     stream-URL fallback for every pooled stream.
      *
      * Local file paths and URLs without credentials return null. The returned
      * url is the provider's scheme/host/port only.
@@ -553,7 +567,10 @@ class PlaylistProfile extends Model
             ];
         }
 
-        if (preg_match('#^/(?:playlist/|live/)?([^/]+)/([^/]+)/[^/]+$#', $path, $pathMatches)) {
+        if (
+            preg_match('#^/(?:playlist|live)/([^/]+)/([^/]+)/[^/]+$#', $path, $pathMatches)
+            || preg_match('#^/(?!(?:playlist|live)/)([^/]+)/([^/]+)/(?:playlist\.)?m3u(?:8|_plus)?$#i', $path, $pathMatches)
+        ) {
             return [
                 'url' => $baseUrl,
                 'username' => $pathMatches[1],
@@ -571,7 +588,8 @@ class PlaylistProfile extends Model
      * parsed from the playlist URL). Recognised shapes:
      *   - http://host/(live|series|movie)/USER/PASS/<stream>
      *   - http://host/USER/PASS/<numeric id>[.ext] (requiring a numeric id keeps
-     *     arbitrary three-segment URLs from being read as credentials)
+     *     arbitrary three-segment URLs from being read as credentials, and a
+     *     stream-type prefix is never read as the username)
      *   - http://host/path?username=USER&password=PASS[&...]
      *
      * @return array{url: string, username: string, password: string}|null
@@ -582,7 +600,7 @@ class PlaylistProfile extends Model
             return ['url' => $matches[1], 'username' => $matches[2], 'password' => $matches[3]];
         }
 
-        if (preg_match('#^(https?://[^/?\#]+)/([^/?\#]+)/([^/?\#]+)/\d+(?:\.\w+)?(?:[?\#].*)?$#', $url, $matches)) {
+        if (preg_match('#^(https?://[^/?\#]+)/(?!(?:live|series|movie)/)([^/?\#]+)/([^/?\#]+)/\d+(?:\.\w+)?(?:[?\#].*)?$#', $url, $matches)) {
             return ['url' => $matches[1], 'username' => $matches[2], 'password' => $matches[3]];
         }
 
@@ -693,6 +711,15 @@ class PlaylistProfile extends Model
         $url = preg_replace('#^(https?://[^/]+)(/.*?)?/[^/]*\.[^/]*$#', '$1$2', $url);
 
         return rtrim($url, '/');
+    }
+
+    /**
+     * The scheme, host and port of a URL (http://host:8080), or null when the
+     * string is not an http(s) URL.
+     */
+    private static function baseUrlOf(string $url): ?string
+    {
+        return preg_match('#^https?://[^/?\#]+#i', trim($url), $matches) ? $matches[0] : null;
     }
 
     /**

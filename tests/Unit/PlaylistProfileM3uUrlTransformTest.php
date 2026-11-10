@@ -105,6 +105,35 @@ it('replaces the provider host when the profile has its own URL', function () {
         ->toBe('http://backup.test:9000/live/backupuser/backuppass/123.ts');
 });
 
+it('keeps the host of a stream served off the primary provider even when the profile has its own URL', function () {
+    $playlist = m3uProfilePlaylist();
+    m3uProfilePrimary($playlist);
+    $profile = m3uProfileSecondary($playlist, ['url' => 'http://backup.test:9000']);
+
+    // Same account, but the stream lives on a CDN host rather than the provider base
+    $channel = Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'url' => 'http://cdn1.provider.test:8080/live/primaryuser/primarypass/1.ts',
+    ]);
+
+    expect($profile->transformChannelUrl($channel))
+        ->toBe('http://cdn1.provider.test:8080/live/backupuser/backuppass/1.ts');
+});
+
+it('applies the profile URL when the primary provider base is unknown', function () {
+    $playlist = m3uProfilePlaylist(['url' => 'http://provider.test/list.m3u']);
+    PlaylistProfile::factory()->forPlaylist($playlist)->primary()->create(['url' => null, 'username' => '', 'password' => '']);
+    $profile = m3uProfileSecondary($playlist, ['url' => 'http://backup.test:9000']);
+
+    $channel = Channel::factory()->create([
+        'playlist_id' => $playlist->id,
+        'url' => 'http://provider.test:8080/live/someuser/somepass/123.ts',
+    ]);
+
+    expect($profile->transformChannelUrl($channel))
+        ->toBe('http://backup.test:9000/live/backupuser/backuppass/123.ts');
+});
+
 it('parses the credentials from the stream URL when the primary account has none', function () {
     $playlist = m3uProfilePlaylist(['url' => 'http://provider.test/list.m3u']);
     m3uProfilePrimary($playlist, '', '');
@@ -177,9 +206,34 @@ it('parses credentials out of an M3U URL', function (?string $url, ?array $expec
         'http://provider.test/playlist/puser/ppass/m3u_plus',
         ['url' => 'http://provider.test', 'username' => 'puser', 'password' => 'ppass'],
     ],
+    'live-prefixed path form' => [
+        'http://provider.test/live/puser/ppass/tv.m3u8',
+        ['url' => 'http://provider.test', 'username' => 'puser', 'password' => 'ppass'],
+    ],
+    'bare m3u_plus path form' => [
+        'http://provider.test/puser/ppass/m3u_plus',
+        ['url' => 'http://provider.test', 'username' => 'puser', 'password' => 'ppass'],
+    ],
     'no credentials' => ['http://provider.test/list.m3u', null],
+    'three-segment path that is not credentials' => ['https://iptv-org.github.io/iptv/countries/us.m3u', null],
+    'api path with a playlist file' => ['http://provider.test/api/v1/list.m3u8', null],
     'local file path' => ['/data/playlists/list.m3u', null],
     'blank' => [null, null],
+]);
+
+it('parses credentials out of a stream URL', function (string $url, ?array $expected) {
+    expect(PlaylistProfile::parseStreamCredentials($url))->toBe($expected);
+})->with([
+    'prefixed form' => [
+        'http://provider.test:8080/live/suser/spass/123.ts',
+        ['url' => 'http://provider.test:8080', 'username' => 'suser', 'password' => 'spass'],
+    ],
+    'prefix-less numeric form' => [
+        'http://provider.test/suser/spass/123',
+        ['url' => 'http://provider.test', 'username' => 'suser', 'password' => 'spass'],
+    ],
+    'stream-type prefix is not a username' => ['http://provider.test/live/suser/123.ts', null],
+    'non-numeric last segment' => ['http://provider.test/some/path/file.ts', null],
 ]);
 
 it('swaps URL-encoded query credentials and encodes the replacement', function () {

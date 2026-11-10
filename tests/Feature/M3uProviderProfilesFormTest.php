@@ -202,3 +202,22 @@ it('does not touch the primary profile limit of an Xtream playlist', function ()
 
     expect($primary->fresh()->max_streams)->toBe(5);
 });
+
+it('loads a saved additional profile password into the edit form so it can be revealed', function (bool $xtream) {
+    $playlist = $xtream
+        ? Playlist::factory()->for($this->user)->create([
+            'xtream' => true,
+            'xtream_config' => ['url' => 'http://xtream.test', 'username' => 'xu', 'password' => 'xp', 'output' => 'ts'],
+            'enable_proxy' => true,
+            'profiles_enabled' => true,
+        ])
+        : m3uProfilesFormPlaylist($this->user);
+    PlaylistProfile::factory()->forPlaylist($playlist)->primary()->create();
+    PlaylistProfile::factory()->forPlaylist($playlist)->create(['name' => 'Backup', 'password' => 'backup-secret']);
+
+    // The model hides `password` from attributesToArray(), which the repeater fills from
+    $profiles = Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->get('data.additional_profiles');
+
+    expect(collect($profiles)->firstWhere('name', 'Backup')['password'] ?? null)->toBe('backup-secret');
+})->with(['Xtream playlist' => [true], 'M3U playlist' => [false]]);

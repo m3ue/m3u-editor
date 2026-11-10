@@ -1416,6 +1416,14 @@ class PlaylistResource extends Resource implements CopilotResource
                                     && ((bool) $get('../../xtream') || ! PlaylistProfile::parseM3uUrlCredentials($get('url'))))
                                 ->dehydrated(fn ($state, $record) => filled($state) || $record === null) // Only save if filled or new
                                 ->dehydrateStateUsing(fn ($state, $record) => filled($state) ? $state : $record?->password)
+                                // The model hides `password` from attributesToArray(), which the relationship
+                                // repeater fills its items from, so load it explicitly or the reveal button has
+                                // nothing to show for a saved profile.
+                                ->afterStateHydrated(function (TextInput $component, $record, $state): void {
+                                    if (blank($state) && $record instanceof PlaylistProfile && filled($record->password)) {
+                                        $component->state($record->password);
+                                    }
+                                })
                                 ->placeholder(fn ($record) => $record?->password ? '••••••••' : null)
                                 ->live(onBlur: true)
                                 ->columnSpan(1),
