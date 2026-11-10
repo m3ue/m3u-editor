@@ -275,3 +275,30 @@ it('only names groups in the selected playlist and content type in the channels 
     $pane->dispatch('easy-editor-group-selected', groupId: $this->groupB->id)
         ->assertSee('Sports');
 });
+
+it('saves failovers added when creating a custom channel from the channels pane', function () {
+    Livewire::test(ChannelsPane::class, [
+        'playlistId' => $this->playlist->id,
+        'contentType' => 'live',
+        'selectedGroupId' => $this->groupA->id,
+    ])
+        ->mountTableAction('createCustomChannel')
+        ->fillForm([
+            'playlist_id' => $this->playlist->id,
+            'group_id' => $this->groupA->id,
+            'title' => 'Blank channel',
+            'url' => 'https://example.com/blank.m3u8',
+            'failovers' => [
+                ['channel_failover_id' => $this->channelA->id],
+                ['channel_failover_id' => $this->channelB->id],
+            ],
+        ])
+        ->callMountedTableAction()
+        ->assertHasNoFormErrors();
+
+    $channel = Channel::where('title', 'Blank channel')->sole();
+
+    expect($channel->is_custom)->toBeTrue()
+        ->and($channel->failovers()->orderBy('sort')->pluck('channel_failover_id')->all())
+        ->toBe([$this->channelA->id, $this->channelB->id]);
+});

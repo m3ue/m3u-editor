@@ -10,9 +10,9 @@ use App\Models\Group;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
+use Filament\Actions\CreateAction;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Notifications\Notification;
 use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -20,6 +20,7 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -186,20 +187,22 @@ class ChannelsPane extends Component implements HasActions, HasForms, HasTable
             ->recordActions([$editGroup, $edit], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions($resource::getTableBulkActions())
             ->headerActions([
-                Action::make('createCustomChannel')
+                // CreateAction (not a plain Action) so the form's relationship
+                // fields, such as the failovers repeater, are saved once the
+                // channel exists - a plain Action silently drops them.
+                CreateAction::make('createCustomChannel')
                     ->label(__('New Channel'))
                     ->icon('heroicon-o-plus')
                     ->button()
+                    ->model(Channel::class)
                     ->modalHeading(__('New Custom Channel'))
                     ->modalDescription(__('NOTE: Custom channels need to be associated with a Playlist or Custom Playlist.'))
                     ->slideOver()
+                    ->createAnother(false)
                     ->schema(fn (): array => $resource::getForm())
-                    ->action(function (array $data) use ($resource): void {
-                        $resource::createCustomChannel(data: $data, model: Channel::class);
-
-                        Notification::make()->success()->title(__('Channel created'))->send();
-                        $this->resetTable();
-                    }),
+                    ->using(fn (array $data): Model => $resource::createCustomChannel(data: $data, model: Channel::class))
+                    ->successNotificationTitle(__('Channel created'))
+                    ->after(fn () => $this->resetTable()),
             ]);
     }
 }
