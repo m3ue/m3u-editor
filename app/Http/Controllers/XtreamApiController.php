@@ -4970,33 +4970,11 @@ class XtreamApiController extends Controller
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
             ->pluck('id', 'normalized_title');
 
-        // Collect the set of EPG channel_id strings this playlist's channels are mapped to.
-        $playlistChannels = $playlist->channels()
-            ->whereNotNull('epg_channel_id')
-            ->with('epgChannel')
-            ->get();
-
-        $epgChannelIds = $playlistChannels
-            ->map(fn (Channel $ch) => $ch->epgChannel?->channel_id)
-            ->filter()
-            ->unique()
-            ->values();
-
-        if ($epgChannelIds->isEmpty()) {
-            return response()->json([]);
-        }
-
-        // Build lookup: epg_channel_id string → [channel_id, channel_name] from the playlist.
-        $channelLookup = [];
-        foreach ($playlistChannels as $ch) {
-            $epgChanId = $ch->epgChannel?->channel_id;
-            if ($epgChanId && ! isset($channelLookup[$epgChanId])) {
-                $channelLookup[$epgChanId] = [
-                    'channel_id' => $ch->id,
-                    'channel_name' => $ch->title ?: ($ch->name ?? ''),
-                ];
-            }
-        }
+        // The EPG channels this playlist's channels are mapped to, as a subquery -
+        // playlists can have hundreds of thousands of channels.
+        $mappedEpgChannels = $playlist->channels()->getQuery()
+            ->whereNotNull('channels.epg_channel_id')
+            ->select('channels.epg_channel_id');
 
         // Fetch matching programmes across all mapped EPG channels, including those
         // that just finished (up to 24 hours ago) for discoverability. Programmes
@@ -5005,7 +4983,10 @@ class XtreamApiController extends Controller
         // airing_now below doesn't silently drop them.
         $now = Carbon::now();
         $cutoff = $now->copy()->subHours(24);
-        $programmes = EpgProgramme::whereIn('epg_channel_id', $epgChannelIds->toArray())
+        // Matched on each mapping's (epg_id, XMLTV id) pair: XMLTV ids are only
+        // unique within one EPG, so another EPG reusing the same id must not add
+        // its programmes here (#1827).
+        $programmes = EpgProgramme::onEpgChannels($mappedEpgChannels)
             ->where(function ($query) use ($cutoff, $now) {
                 $query->where('start_time', '>=', $cutoff)
                     ->orWhere('end_time', '>', $now);
@@ -5013,6 +4994,8 @@ class XtreamApiController extends Controller
             ->whereRaw('LOWER(title) LIKE LOWER(?)', ['%'.$q.'%'])
             ->limit(500)
             ->get();
+
+        $channelLookup = $this->searchEpgShowsChannelLookup($playlist, $programmes);
 
         // Group by SeriesKey-normalized title — this must match the normalization
         // in DvrRecordingRule::saving so rules created from these results will
@@ -5034,7 +5017,7 @@ class XtreamApiController extends Controller
             }
 
             $groups[$norm]['programmes'][] = $p;
-            $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+            $resolved = $channelLookup[$this->epgChannelKey($p->epg_id, $p->epg_channel_id)] ?? null;
             if ($resolved) {
                 $groups[$norm]['channel_ids'][$resolved['channel_id']] = $resolved;
             }
@@ -5094,7 +5077,8 @@ class XtreamApiController extends Controller
                     continue;
                 }
 
-                $channelKey = $channelLookup[$p->epg_channel_id]['channel_id'] ?? $p->epg_channel_id;
+                $epgChannelKey = $this->epgChannelKey($p->epg_id, $p->epg_channel_id);
+                $channelKey = $channelLookup[$epgChannelKey]['channel_id'] ?? $epgChannelKey;
                 if (! isset($airingNowByChannel[$channelKey])) {
                     $airingNowByChannel[$channelKey] = $p;
                 }
@@ -5141,17 +5125,76 @@ class XtreamApiController extends Controller
     }
 
     /**
+     * The playlist channel behind each programme in a `search_epg_shows` result,
+     * keyed by "epg_id|XMLTV id" so channels mapped to different EPGs that reuse
+     * the same XMLTV id stay apart. Enabled channels win over disabled duplicates.
+     * Only the channels mapped to the programmes' EPG channels are read, never
+     * the whole playlist.
+     *
+     * @param  Collection<int, EpgProgramme>  $programmes
+     * @return array<string, array{channel_id: int, channel_name: string}>
+     */
+    private function searchEpgShowsChannelLookup(Model $playlist, Collection $programmes): array
+    {
+        if ($programmes->isEmpty()) {
+            return [];
+        }
+
+        // Match the exact (epg_id, XMLTV id) pairs in the results, not the cross
+        // product of two independent lists, so no unrelated mappings are fetched.
+        $xmltvIdsByEpg = $programmes
+            ->groupBy('epg_id')
+            ->map(fn (Collection $epgProgrammes) => $epgProgrammes->pluck('epg_channel_id')->unique()->values()->all());
+
+        $mappedChannels = $playlist->channels()->getQuery()
+            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
+            ->where(function ($pairs) use ($xmltvIdsByEpg): void {
+                foreach ($xmltvIdsByEpg as $epgId => $xmltvIds) {
+                    $pairs->orWhere(fn ($pair) => $pair
+                        ->where('epg_channels.epg_id', $epgId)
+                        ->whereIn('epg_channels.channel_id', $xmltvIds));
+                }
+            })
+            ->orderByDesc('channels.enabled')
+            ->orderBy('channels.id')
+            ->toBase()
+            ->get(['channels.id', 'channels.title', 'channels.name', 'epg_channels.epg_id', 'epg_channels.channel_id as xmltv_id']);
+
+        $channelLookup = [];
+        foreach ($mappedChannels as $channel) {
+            $key = $this->epgChannelKey($channel->epg_id, $channel->xmltv_id);
+            if (! isset($channelLookup[$key])) {
+                $channelLookup[$key] = [
+                    'channel_id' => $channel->id,
+                    'channel_name' => $channel->title ?: ($channel->name ?? ''),
+                ];
+            }
+        }
+
+        return $channelLookup;
+    }
+
+    /**
+     * The "epg_id|XMLTV id" key used by searchEpgShowsChannelLookup(). XMLTV ids
+     * are only unique within one EPG, so the EPG id is part of the key.
+     */
+    private function epgChannelKey(int|string $epgId, string $xmltvId): string
+    {
+        return $epgId.'|'.$xmltvId;
+    }
+
+    /**
      * Build the per-episode payload used by both `recent_episodes[]` and `airing_now[]`
      * in `search_epg_shows`. The shapes must stay identical so the TV client can parse
      * either list with its existing `EpgShowEpisode.fromXtream` factory without needing
      * a second model.
      *
-     * @param  array<string, array{channel_id: int, channel_name: string}>  $channelLookup
+     * @param  array<string, array{channel_id: int, channel_name: string}>  $channelLookup  Keyed by "epg_id|XMLTV id"
      * @return array{channel_id: int|null, channel_name: string|null, title: string, subtitle: ?string, start_time: string, end_time: ?string, season: mixed, episode: mixed, description: ?string}
      */
     private function formatEpisodePayload(EpgProgramme $p, array $channelLookup): array
     {
-        $resolved = $channelLookup[$p->epg_channel_id] ?? null;
+        $resolved = $channelLookup[$this->epgChannelKey($p->epg_id, $p->epg_channel_id)] ?? null;
 
         return [
             'channel_id' => $resolved['channel_id'] ?? null,

@@ -201,9 +201,9 @@ class DvrSchedulerService
             return [];
         }
 
-        $epgChannelStringIds = $this->resolveSeriesEpgScope($rule);
+        $epgChannelScope = $this->resolveSeriesEpgScope($rule);
 
-        if (empty($epgChannelStringIds)) {
+        if ($epgChannelScope === [] || ($epgChannelScope instanceof Builder && ! (clone $epgChannelScope)->exists())) {
             Log::warning('DVR: Series rule has no EPG channel scope — skipping', [
                 'rule_id' => $rule->id,
                 'series_title' => $rule->series_title,
@@ -229,7 +229,7 @@ class DvrSchedulerService
         // could never be reached once the programme's start_time passed, even
         // though its scheduled_end was still in the future and retry budget remained.
         $query = EpgProgramme::query()
-            ->whereIn('epg_channel_id', $epgChannelStringIds)
+            ->onEpgChannels($epgChannelScope)
             ->whereIn('epg_id', Epg::where('user_id', $rule->dvrSetting->user_id)->select('id'))
             ->where('end_time', '>', $now)
             ->where('start_time', '<=', $lookahead)
@@ -346,24 +346,25 @@ class DvrSchedulerService
     }
 
     /**
-     * Resolve the EPG channel string IDs (e.g. "CNN", "BBC One") that a series rule
-     * should match programmes against. This prevents cross-playlist contamination and
-     * ensures the EPG fallback in resolveStreamUrl can always find a channel.
+     * Resolve the EPG channels (epg_channels.id values) that a series rule should
+     * match programmes against. Ids rather than XMLTV strings, so the programme
+     * query can match each (epg_id, channel_id) pair - see
+     * EpgProgramme::scopeOnEpgChannels() (#1827). This prevents cross-playlist
+     * contamination and ensures the EPG fallback in resolveStreamUrl can always
+     * find a channel.
      *
      * Priority:
-     *   1. Rule has epg_channel_id (int FK to epg_channels) → use that channel's string ID
-     *   2. Rule has channel_id → use that channel's EPG channel string ID
+     *   1. Rule has epg_channel_id (int FK to epg_channels) → that EPG channel
+     *   2. Rule has channel_id → that channel's EPG mapping
      *   3. Neither → all EPG-mapped channels in the DVR setting's playlist
      *
-     * @return list<string>
+     * @return Builder|list<int> A subquery selecting channels.epg_channel_id, or a literal id list
      */
-    private function resolveSeriesEpgScope(DvrRecordingRule $rule): array
+    private function resolveSeriesEpgScope(DvrRecordingRule $rule): Builder|array
     {
         // 1. Explicit EPG channel set on the rule
         if ($rule->epg_channel_id) {
-            $stringId = $rule->epgChannel?->channel_id;
-
-            return $stringId ? [$stringId] : [];
+            return $rule->epgChannel ? [$rule->epg_channel_id] : [];
         }
 
         // 2. Pinned channel: derive EPG scope from that channel's mapping
@@ -389,12 +390,7 @@ class DvrSchedulerService
 
         return Channel::whereIn('channels.id', $ownerChannelsSubquery)
             ->whereNotNull('channels.epg_channel_id')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-            ->distinct()
-            ->pluck('epg_channels.channel_id')
-            ->filter()
-            ->values()
-            ->all();
+            ->select('channels.epg_channel_id');
     }
 
     /**
@@ -408,9 +404,9 @@ class DvrSchedulerService
      * duplicate with no (or a stale) EPG mapping silently drops airings a
      * sibling duplicate would have matched.
      *
-     * @return list<string>
+     * @return Builder|list<int> A subquery selecting channels.epg_channel_id, or [] when unresolvable
      */
-    private function resolveEpgScopeForChannelLabel(DvrRecordingRule $rule, int $channelId): array
+    private function resolveEpgScopeForChannelLabel(DvrRecordingRule $rule, int $channelId): Builder|array
     {
         $pinned = Channel::find($channelId, ['id', 'title', 'name']);
 
@@ -429,12 +425,7 @@ class DvrSchedulerService
         return Channel::whereIn('channels.id', $ownerChannelsSubquery)
             ->where(fn (Builder $q) => $q->where('channels.title', $label)->orWhere('channels.name', $label))
             ->whereNotNull('channels.epg_channel_id')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-            ->distinct()
-            ->pluck('epg_channels.channel_id')
-            ->filter()
-            ->values()
-            ->all();
+            ->select('channels.epg_channel_id');
     }
 
     /**

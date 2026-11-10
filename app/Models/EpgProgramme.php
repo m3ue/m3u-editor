@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Contracts\Database\Query\Builder as QueryBuilderContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Carbon;
 
 class EpgProgramme extends Model
@@ -60,6 +62,24 @@ class EpgProgramme extends Model
     public function scopeForChannels(Builder $query, array $channelIds): Builder
     {
         return $query->whereIn('epg_channel_id', $channelIds);
+    }
+
+    /**
+     * Scope to programmes on the given EPG channels, matching each programme's
+     * (epg_id, epg_channel_id) pair rather than the XMLTV channel string alone.
+     * XMLTV ids are only unique within one EPG, so matching the string alone
+     * pulls in programmes from any other EPG that reuses it (#1827).
+     *
+     * @param  QueryBuilderContract|list<int>  $epgChannelIds  epg_channels.id values, typically a
+     *                                                         subquery selecting channels.epg_channel_id
+     */
+    public function scopeOnEpgChannels(Builder $query, QueryBuilderContract|array $epgChannelIds): Builder
+    {
+        return $query->whereExists(fn (QueryBuilder $epgChannels) => $epgChannels->selectRaw('1')
+            ->from('epg_channels')
+            ->whereColumn('epg_channels.epg_id', 'epg_programmes.epg_id')
+            ->whereColumn('epg_channels.channel_id', 'epg_programmes.epg_channel_id')
+            ->whereIn('epg_channels.id', $epgChannelIds));
     }
 
     /**

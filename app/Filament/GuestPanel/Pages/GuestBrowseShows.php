@@ -11,6 +11,7 @@ use App\Jobs\DvrSchedulerTick;
 use App\Models\Channel;
 use App\Models\DvrRecordingRule;
 use App\Models\DvrSetting;
+use App\Models\Epg;
 use App\Models\EpgProgramme;
 use App\Services\EpgProgrammeChannelResolver;
 use App\Services\ShowMetadataService;
@@ -568,7 +569,15 @@ class GuestBrowseShows extends Page
     {
         $dvrSetting = $this->getCachedDvrSetting();
 
+        // No DVR setting means no owner to scope to, so nothing to browse.
+        if (! $dvrSetting) {
+            return EpgProgramme::query()->whereRaw('1 = 0');
+        }
+
+        // Only the DVR owner's EPGs - XMLTV ids are only unique per EPG, and an
+        // unscoped query would otherwise reach every user's guide data.
         $query = EpgProgramme::query()
+            ->whereIn('epg_id', Epg::where('user_id', $dvrSetting->user_id)->select('id'))
             ->where('start_time', '>=', now())
             ->where('start_time', '<=', now()->addDays($this->days));
 
@@ -590,13 +599,9 @@ class GuestBrowseShows extends Page
             });
         }
 
-        $subquery = $dvrSetting?->ownerChannelsSubquery();
+        $subquery = $dvrSetting->ownerChannelsSubquery();
         if ($subquery) {
-            $epgChannelIds = $this->resolveEpgChannelScope($subquery);
-
-            if ($epgChannelIds !== null) {
-                $query->whereIn('epg_channel_id', $epgChannelIds);
-            }
+            $this->scopeToFilteredChannels($query, $subquery);
         }
 
         return $query;
@@ -816,84 +821,36 @@ class GuestBrowseShows extends Page
     }
 
     /**
-     * Resolve the set of XMLTV channel IDs in scope for the given channels.
+     * Limit the programme query to the guide data behind the DVR setting's channels,
+     * narrowed by the active channel filter. Programmes are matched on each mapped
+     * channel's own EPG (epg_id + XMLTV id), with a tvg-id (stream_id) fallback for
+     * unmapped channels - see EpgProgrammeChannelResolver::scopeToChannels().
      *
-     * Uses SQL joins (same as the authenticated BrowseShows) to avoid loading
-     * every Channel model into PHP memory.
+     * With no filter active and no guide-linked channels at all, the query is left
+     * unscoped (all programmes are fair game). An active filter that matches nothing
+     * yields 0 results.
      *
      * @param  Builder  $channelsSubquery  Subquery selecting channels.id, scoped to the owner
-     * @return list<string>|null
      */
-    private function resolveEpgChannelScope(Builder $channelsSubquery): ?array
+    private function scopeToFilteredChannels(Builder $query, Builder $channelsSubquery): void
     {
-        $includeDisabled = $this->shouldIncludeDisabledChannels();
+        $resolver = app(EpgProgrammeChannelResolver::class);
+
+        $channels = DB::table('channels')->whereIn('channels.id', clone $channelsSubquery);
+
+        if (! $this->shouldIncludeDisabledChannels()) {
+            $channels->where('channels.enabled', true);
+        }
 
         if ($this->channel_id) {
-            $channelQuery = DB::table('channels')
-                ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-                ->where('channels.id', $this->channel_id)
-                ->whereNotNull('channels.epg_channel_id');
-            if (! $includeDisabled) {
-                $channelQuery->where('channels.enabled', true);
-            }
-            $epgId = $channelQuery->value('epg_channels.channel_id');
-
-            if ($epgId) {
-                return [$epgId];
-            }
-
-            // No explicit EPG-channel mapping: fall back to the channel's own
-            // stream_id (tvg-id), matching the broader scope's merge logic below.
-            $streamIdQuery = DB::table('channels')
-                ->where('channels.id', $this->channel_id)
-                ->whereNotNull('channels.stream_id')
-                ->where('channels.stream_id', '!=', '');
-            if (! $includeDisabled) {
-                $streamIdQuery->where('channels.enabled', true);
-            }
-            $streamId = $streamIdQuery->value('channels.stream_id');
-
-            return $streamId ? [$streamId] : [];
+            $channels->where('channels.id', $this->channel_id);
+        } elseif ($this->group_id) {
+            $channels->where('channels.group_id', $this->group_id);
+        } elseif (! $resolver->hasGuideChannels($channels)) {
+            return;
         }
 
-        $epgMapBase = DB::table('channels')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id')
-            ->whereIn('channels.id', clone $channelsSubquery)
-            ->whereNotNull('channels.epg_channel_id');
-
-        if (! $includeDisabled) {
-            $epgMapBase->where('channels.enabled', true);
-        }
-
-        $streamIdBase = DB::table('channels')
-            ->whereIn('channels.id', clone $channelsSubquery)
-            ->whereNotNull('channels.stream_id')
-            ->where('channels.stream_id', '!=', '');
-
-        if (! $includeDisabled) {
-            $streamIdBase->where('channels.enabled', true);
-        }
-
-        if ($this->group_id) {
-            $ids = (clone $epgMapBase)
-                ->where('channels.group_id', $this->group_id)
-                ->pluck('epg_channels.channel_id')
-                ->merge(
-                    (clone $streamIdBase)
-                        ->where('channels.group_id', $this->group_id)
-                        ->pluck('channels.stream_id')
-                )
-                ->unique()->values()->all();
-
-            return ! empty($ids) ? $ids : null;
-        }
-
-        $ids = (clone $epgMapBase)
-            ->pluck('epg_channels.channel_id')
-            ->merge($streamIdBase->pluck('channels.stream_id'))
-            ->unique()->values()->all();
-
-        return ! empty($ids) ? $ids : null;
+        $resolver->scopeToChannels($query, $channels);
     }
 
     /**

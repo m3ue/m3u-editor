@@ -34,16 +34,16 @@ trait HasDvrMatchedAirings
             return [];
         }
 
-        $epgChannelIds = static::resolveEpgScopeForRule($rule);
+        $epgChannelScope = static::resolveEpgScopeForRule($rule);
 
-        if (empty($epgChannelIds)) {
+        if ($epgChannelScope === [] || ($epgChannelScope instanceof Builder && ! (clone $epgChannelScope)->exists())) {
             return [];
         }
 
         $userId = $dvrSetting->user_id;
 
         $query = EpgProgramme::query()
-            ->whereIn('epg_channel_id', $epgChannelIds)
+            ->onEpgChannels($epgChannelScope)
             ->where('start_time', '>=', now())
             ->where('start_time', '<=', now()->addDays(14))
             ->whereHas('epg', fn (Builder $q) => $q->where('user_id', $userId))
@@ -152,22 +152,20 @@ trait HasDvrMatchedAirings
     }
 
     /**
-     * Resolve the EPG channel string IDs in scope for a series rule, applying
-     * include_disabled_channels from the rule's DvrSetting.
+     * Resolve the EPG channels (epg_channels.id values) in scope for a series
+     * rule, applying include_disabled_channels from the rule's DvrSetting.
      *
      * Mirrors DvrSchedulerService::resolveSeriesEpgScope() with added channel
      * enabled/disabled filtering.
      *
-     * @return list<string>
+     * @return Builder|list<int> A subquery selecting channels.epg_channel_id, or a literal id list
      */
-    private static function resolveEpgScopeForRule(DvrRecordingRule $rule): array
+    private static function resolveEpgScopeForRule(DvrRecordingRule $rule): Builder|array
     {
         $includeDisabled = $rule->dvrSetting->include_disabled_channels ?? false;
 
         if ($rule->epg_channel_id) {
-            $stringId = $rule->epgChannel?->channel_id;
-
-            return $stringId ? [$stringId] : [];
+            return $rule->epgChannel ? [$rule->epg_channel_id] : [];
         }
 
         if ($rule->channel_id) {
@@ -184,23 +182,19 @@ trait HasDvrMatchedAirings
             return [];
         }
 
-        // Resolve distinct EPG channel string IDs entirely at the database
-        // level - playlists can have hundreds of thousands of channels, and
-        // this runs on every keystroke of the matched-airings preview, so
-        // hydrating every Channel/EpgChannel model here is not an option.
+        // Resolved entirely at the database level - playlists can have hundreds
+        // of thousands of channels, and this runs on every keystroke of the
+        // matched-airings preview, so hydrating every Channel/EpgChannel model
+        // here is not an option.
         $query = Channel::whereIn('channels.id', $ownerChannelsSubquery)
             ->whereNotNull('channels.epg_channel_id')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
+            ->select('channels.epg_channel_id');
 
         if (! $includeDisabled) {
             $query->where('channels.enabled', true);
         }
 
-        return $query->distinct()
-            ->pluck('epg_channels.channel_id')
-            ->filter()
-            ->values()
-            ->all();
+        return $query;
     }
 
     /**
@@ -214,9 +208,9 @@ trait HasDvrMatchedAirings
      * duplicate with no (or a stale) EPG mapping silently hides airings a
      * sibling duplicate would have matched.
      *
-     * @return list<string>
+     * @return Builder|list<int> A subquery selecting channels.epg_channel_id, or [] when unresolvable
      */
-    private static function resolveEpgScopeForChannelLabel(DvrRecordingRule $rule, int $channelId, bool $includeDisabled): array
+    private static function resolveEpgScopeForChannelLabel(DvrRecordingRule $rule, int $channelId, bool $includeDisabled): Builder|array
     {
         $pinned = Channel::find($channelId, ['id', 'title', 'name']);
 
@@ -235,17 +229,13 @@ trait HasDvrMatchedAirings
         $query = Channel::whereIn('channels.id', $ownerChannelsSubquery)
             ->where(fn (Builder $q) => $q->where('channels.title', $label)->orWhere('channels.name', $label))
             ->whereNotNull('channels.epg_channel_id')
-            ->join('epg_channels', 'epg_channels.id', '=', 'channels.epg_channel_id');
+            ->select('channels.epg_channel_id');
 
         if (! $includeDisabled) {
             $query->where('channels.enabled', true);
         }
 
-        return $query->distinct()
-            ->pluck('epg_channels.channel_id')
-            ->filter()
-            ->values()
-            ->all();
+        return $query;
     }
 
     /**

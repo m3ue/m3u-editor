@@ -6,6 +6,7 @@ use App\Models\Channel;
 use App\Models\Epg;
 use App\Models\EpgChannel;
 use App\Models\EpgProgramme;
+use Illuminate\Contracts\Database\Query\Builder as QueryBuilderContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -61,6 +62,46 @@ class EpgProgrammeChannelResolver
             ->where('stream_id', $programme->epg_channel_id)
             ->orderByDesc('enabled')
             ->first($columns);
+    }
+
+    /**
+     * Limit a programme query to what the given channels carry: programmes on each
+     * mapped channel's own EPG channel (matched on epg_id + XMLTV id), plus, for
+     * channels with no EPG mapping, programmes whose XMLTV id equals the channel's
+     * tvg-id (stream_id). A mapped channel's tvg-id is deliberately not matched as
+     * well - it is usually the same XMLTV string, and would pull the same channel's
+     * programmes back in from every other EPG that reuses it (#1827).
+     *
+     * @param  QueryBuilderContract  $channels  Query over the channels table with the caller's filters applied
+     */
+    public function scopeToChannels(Builder $programmes, QueryBuilderContract $channels): Builder
+    {
+        return $programmes->where(fn (Builder $scoped) => $scoped
+            ->onEpgChannels((clone $channels)
+                ->whereNotNull('channels.epg_channel_id')
+                ->select('channels.epg_channel_id'))
+            ->orWhereIn('epg_programmes.epg_channel_id', (clone $channels)
+                ->whereNull('channels.epg_channel_id')
+                ->whereNotNull('channels.stream_id')
+                ->where('channels.stream_id', '!=', '')
+                ->select('channels.stream_id')));
+    }
+
+    /**
+     * Whether any of the given channels can be matched to guide data, either by an
+     * EPG mapping or a tvg-id (stream_id).
+     *
+     * @param  QueryBuilderContract  $channels  Query over the channels table with the caller's filters applied
+     */
+    public function hasGuideChannels(QueryBuilderContract $channels): bool
+    {
+        return (clone $channels)
+            ->where(fn (QueryBuilderContract $guide) => $guide
+                ->whereNotNull('channels.epg_channel_id')
+                ->orWhere(fn (QueryBuilderContract $tvg) => $tvg
+                    ->whereNotNull('channels.stream_id')
+                    ->where('channels.stream_id', '!=', '')))
+            ->exists();
     }
 
     /**

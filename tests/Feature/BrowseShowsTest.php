@@ -291,7 +291,7 @@ it('resolves the once rule channel and airing channel name from the programme\'s
         'channel_id' => '101',
         'display_name' => 'BBC Two',
     ]);
-    $channel = Channel::factory()->for($this->setting->playlist)->create(['epg_channel_id' => $epgChannel->id]);
+    $channel = Channel::factory()->for($this->setting->playlist)->create(['epg_channel_id' => $epgChannel->id, 'enabled' => true]);
 
     $programme = EpgProgramme::factory()->for($this->epg)->create([
         'title' => 'Match of the Day',
