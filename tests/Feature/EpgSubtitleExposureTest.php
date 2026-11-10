@@ -11,7 +11,6 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -67,13 +66,6 @@ function xtreamApiUrl(string $username, string $password, string $action, array 
 }
 
 it('exposes the EPG programme subtitle on search_epg_shows recent_episodes (plain)', function () {
-    // searchEpgShows uses `where('title', 'ilike', ...)` which is Postgres-only.
-    // The test env (phpunit.xml) uses sqlite_testing, so this exercise of the
-    // query path is gated to non-sqlite drivers. CI runs against Postgres.
-    if (DB::connection()->getDriverName() === 'sqlite') {
-        $this->markTestSkipped('searchEpgShows uses Postgres-specific `ilike`; skip on sqlite.');
-    }
-
     DvrSetting::factory()
         ->enabled()
         ->for($this->user)
@@ -98,7 +90,7 @@ it('exposes the EPG programme subtitle on search_epg_shows recent_episodes (plai
     $start = Carbon::now()->addHour();
     $end = (clone $start)->addHour();
 
-    EpgProgramme::factory()->create([
+    EpgProgramme::factory()->for($epg)->create([
         'epg_channel_id' => 'channel.test',
         'title' => 'The Bear',
         'subtitle' => 'Groundhog Day',
