@@ -6,6 +6,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\User;
 use App\Services\EmbyManagedSetupService;
 use App\Services\MediaServerService;
+use GuzzleHttp\TransferStats;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -29,14 +30,14 @@ beforeEach(function () {
     ]);
 });
 
-it('bootstraps managed publishing over trusted Docker HTTP with the saved administrator credential', function () {
+it('bootstraps managed publishing over trusted Docker HTTP with the saved administrator credential', function (string $host) {
     $this->integration->update([
-        'host' => 'emby',
+        'host' => $host,
         'ssl' => false,
     ]);
     Http::preventStrayRequests();
     Http::fake([
-        'http://emby:8096/M3uEditor/Managed/Setup/V1' => Http::response([
+        "http://{$host}:8096/M3uEditor/Managed/Setup/V1" => Http::response([
             'CapabilityVersion' => 1,
             'IntegrationId' => $this->integration->id,
             'ConfirmedRoot' => '/config/plugins/m3u-editor/managed-publishing',
@@ -56,10 +57,11 @@ it('bootstraps managed publishing over trusted Docker HTTP with the saved admini
         ->and($this->integration->emby_publisher_writable_paths)
         ->toBe(['/srv/emby']);
     Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
-        && $request->url() === 'http://emby:8096/M3uEditor/Managed/Setup/V1'
+        && $request->url() === "http://{$host}:8096/M3uEditor/Managed/Setup/V1"
         && $request->hasHeader('X-Emby-Token', 'emby-secret')
+        && $request->hasHeader('Accept', 'application/json')
         && $request->data() === ['IntegrationId' => $this->integration->id]);
-});
+})->with(['emby', 'emby-test', 'emby_test']);
 
 it('allows managed setup only over approved transport origins', function (string $host, bool $ssl, bool $allowed) {
     $this->integration->update([
@@ -82,9 +84,17 @@ it('allows managed setup only over approved transport origins', function (string
         Http::assertSentCount(1);
     } else {
         Http::assertNothingSent();
+        expect($this->integration->refresh())
+            ->emby_managed_setup_binding_id->toBeNull()
+            ->emby_managed_setup_root->toBeNull()
+            ->emby_managed_setup_capability_version->toBeNull()
+            ->emby_managed_setup_contract_version->toBeNull();
     }
 })->with([
     'Docker service name over HTTP' => ['emby', false, true],
+    'Docker underscore name over HTTP' => ['emby_test', false, true],
+    'Docker underscore name over HTTPS' => ['emby_test', true, true],
+    'Docker mixed punctuation over HTTP' => ['Emby_test-1', false, true],
     'IPv4 loopback over HTTP' => ['127.0.0.1', false, true],
     'RFC1918 10/8 over HTTP' => ['10.2.3.4', false, true],
     'RFC1918 172.16/12 over HTTP' => ['172.31.255.1', false, true],
@@ -100,6 +110,22 @@ it('allows managed setup only over approved transport origins', function (string
     'public hostname over HTTPS' => ['emby.example.com', true, true],
     'userinfo-like host over HTTPS' => ['admin@emby.example.com', true, false],
     'query-like host over HTTPS' => ['emby.example.com?target=private', true, false],
+    'dotted underscore host over HTTP' => ['emby_test.internal', false, false],
+    'dotted underscore host over HTTPS' => ['emby_test.example.com', true, false],
+    'trailing-dot underscore host' => ['emby_test.', false, false],
+    'underscore-leading host' => ['_emby_test', false, false],
+    'hyphen-leading underscore host' => ['-emby_test', false, false],
+    'overlong underscore label' => ['emby_'.str_repeat('a', 59), false, false],
+    'port-like host' => ['emby_test:8096', true, false],
+    'percent-encoded host' => ['emby%5ftest', true, false],
+    'octal-encoded public IPv4' => ['010.010.010.010', false, false],
+    'short public IPv4' => ['8.8.2056', false, false],
+    'fragment-like host' => ['emby_test#fragment', true, false],
+    'path-like host' => ['emby_test/path', true, false],
+    'backslash host' => ['emby_test\\other', true, false],
+    'control character host' => ["emby_test\nother", true, false],
+    'space in host' => ['emby test', true, false],
+    'empty host' => ['', true, false],
 ]);
 
 it('adds the confirmed managed root while preserving existing publisher roots and mappings', function () {
@@ -325,6 +351,39 @@ it('requires every managed setup response to remain on the exact requested origi
         ->and($method->invoke($service, 'https://emby.test:8096', 'https://emby.test:8920/M3uEditor/Managed/Setup/V1'))->toBeFalse();
 });
 
+it('keeps Docker underscore setup responses on the requested origin without following redirects', function (string $effectiveUrl, int $status, bool $allowed) {
+    $this->integration->updateQuietly(['host' => 'emby_test', 'ssl' => false]);
+    Http::preventStrayRequests();
+    Http::globalOptions(['on_stats' => fn (TransferStats $stats): TransferStats => new TransferStats(
+        $stats->getRequest(), handlerStats: ['url' => $effectiveUrl],
+    )]);
+    Http::fake(function (Request $request, array $options) use ($status) {
+        expect($options['allow_redirects'])->toBeFalse();
+
+        return Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $this->integration->id,
+            'ConfirmedRoot' => '/srv/emby/managed',
+            'Ready' => true,
+        ], $status, ['Location' => 'https://other.test/target']);
+    });
+
+    expect(app(EmbyManagedSetupService::class)->setup($this->integration)['success'])->toBe($allowed);
+    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request->url() === 'http://emby_test:8096/M3uEditor/Managed/Setup/V1');
+    if (! $allowed) {
+        expect($this->integration->refresh())
+            ->emby_managed_setup_binding_id->toBeNull()
+            ->emby_managed_setup_root->toBeNull();
+    }
+})->with([
+    'same origin' => ['http://emby_test:8096/M3uEditor/Managed/Setup/V1', 200, true],
+    'different scheme' => ['https://emby_test:8096/M3uEditor/Managed/Setup/V1', 200, false],
+    'different host' => ['http://other:8096/M3uEditor/Managed/Setup/V1', 200, false],
+    'different port' => ['http://emby_test:8920/M3uEditor/Managed/Setup/V1', 200, false],
+    'redirect' => ['http://emby_test:8096/M3uEditor/Managed/Setup/V1', 302, false],
+]);
+
 it('uses a stable operation identity and accepts only a direct companion-prepared child path', function (string $root, string $preparedPath) {
     $this->integration->updateQuietly([
         'emby_managed_setup_binding_id' => $this->integration->id,
@@ -405,6 +464,56 @@ it('fails closed on malformed or malicious prepare responses without exposing se
         'State' => 'prepared',
         'Success' => true,
     ]],
+]);
+
+it('uses the Docker underscore alias for each managed library lifecycle request', function (string $action, string $method, string $state) {
+    $this->integration->updateQuietly([
+        'host' => 'emby_test',
+        'ssl' => false,
+        'emby_managed_setup_binding_id' => $this->integration->id,
+        'emby_managed_setup_root' => '/srv/emby/managed',
+        'emby_managed_setup_capability_version' => 1,
+        'emby_managed_setup_contract_version' => 1,
+    ]);
+    $service = app(EmbyManagedSetupService::class);
+    $operationId = $service->libraryOperationId($this->integration, 'Managed Movies', 'movies');
+    $path = '/srv/emby/managed/movies-0123456789abcdef01234567';
+    $url = 'http://emby_test:8096/M3uEditor/Managed/Libraries/V1/'.$action;
+    Http::preventStrayRequests();
+    Http::fake([$url => function (Request $request, array $options) use ($operationId, $path, $state) {
+        expect($options['allow_redirects'])->toBeFalse();
+
+        return Http::response([
+            'CapabilityVersion' => 1,
+            'IntegrationId' => $this->integration->id,
+            'OperationId' => $operationId,
+            'PreparedPath' => $path,
+            'State' => $state,
+            'Success' => true,
+        ]);
+    }]);
+
+    $result = match ($action) {
+        'Prepare' => $service->prepareLibrary($this->integration, 'Managed Movies', 'movies'),
+        'Commit' => $service->commitLibrary($this->integration, $operationId, $path),
+        'Abort' => $service->abortLibrary($this->integration, $operationId, $path),
+    };
+
+    expect($result)->toMatchArray(['success' => true, 'path' => $path, 'state' => $state]);
+    $payload = ['IntegrationId' => $this->integration->id, 'OperationId' => $operationId];
+    if ($action === 'Prepare') {
+        $payload += ['Name' => 'Managed Movies', 'CollectionType' => 'movies'];
+    }
+    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request->url() === $url
+        && $request->method() === $method
+        && $request->hasHeader('X-Emby-Token', 'emby-secret')
+        && $request->hasHeader('Accept', 'application/json')
+        && $request->data() === $payload);
+})->with([
+    ['Prepare', 'PUT', 'prepared'],
+    ['Commit', 'POST', 'committed'],
+    ['Abort', 'POST', 'aborted'],
 ]);
 
 it('rejects an unsupported managed companion before making a library lifecycle request', function () {

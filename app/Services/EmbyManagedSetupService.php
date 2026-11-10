@@ -328,6 +328,10 @@ class EmbyManagedSetupService
             return true;
         }
 
+        if (str_contains($host, '_') && preg_match('/\A[a-z0-9][a-z0-9_-]{0,62}\z/i', $host) === 1) {
+            return true;
+        }
+
         return filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false;
     }
 

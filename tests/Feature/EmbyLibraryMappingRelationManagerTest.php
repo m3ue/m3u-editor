@@ -280,7 +280,7 @@ it('keeps an existing all-items publication disabled in the create modal', funct
         ->toHaveKey('all:movies', 'Already published');
 });
 
-it('publishes a first-time movie source to a new Emby library with safe derived defaults', function () {
+it('publishes a first-time movie source to a new Emby library with safe derived defaults', function (string $host, bool $ssl) {
     $user = User::factory()->create(['permissions' => ['use_integrations']]);
     $this->actingAs($user);
     $playlist = Playlist::factory()->for($user)->createQuietly();
@@ -297,6 +297,7 @@ it('publishes a first-time movie source to a new Emby library with safe derived 
         'emby_publisher_writable_paths' => null,
     ]);
     $managedPath = '/config/plugins/m3u-editor/managed-publishing/movies-0123456789abcdef01234567';
+    $integration->updateQuietly(['host' => $host, 'ssl' => $ssl]);
     $baselineTransactionLevel = DB::transactionLevel();
     $transactionLevels = [];
     $libraryRequestCount = 0;
@@ -381,7 +382,27 @@ it('publishes a first-time movie source to a new Emby library with safe derived 
         ->status->toBe('planned')
         ->and($mapping->last_planned_revision)->toBeString()->not->toBeEmpty()
         ->and($transactionLevels)->each->toBe($baselineTransactionLevel);
-});
+    expect($integration->refresh())
+        ->emby_managed_setup_binding_id->toBe($integration->id)
+        ->emby_managed_setup_root->toBe('/config/plugins/m3u-editor/managed-publishing');
+    $origin = ($ssl ? 'https' : 'http')."://{$host}:8096";
+    foreach (Http::recorded() as [$request]) {
+        expect($request->url())->toStartWith($origin.'/');
+        expect($request->hasHeader('X-Emby-Token', 'emby-secret'))->toBeTrue();
+    }
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
+        && $request->url() === $origin.'/M3uEditor/Managed/Libraries/V1/Prepare'
+        && $request['Name'] === 'Managed Movies'
+        && $request['CollectionType'] === 'movies');
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === $origin.'/M3uEditor/Managed/Libraries/V1/Commit');
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === $origin.'/Library/VirtualFolders'
+        && $request['Paths'] === [$managedPath]);
+})->with([
+    'HTTPS hostname' => ['emby.test', true],
+    'Docker underscore HTTP alias' => ['emby_test', false],
+]);
 
 it('publishes multiple movie groups into distinct subpaths of one existing library', function () {
     config(['app.key' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
