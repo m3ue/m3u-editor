@@ -321,6 +321,7 @@ class ProbeStreams implements ShouldQueue
         $userId = $playlist->user?->id;
 
         $batch = Bus::batch($chunkJobs)
+            ->name(($this->isSeriesProbe ? 'Probe Series Streams' : 'Probe VOD Streams').": {$playlist->name}")
             ->then(function () use ($complete) {
                 dispatch($complete);
             })

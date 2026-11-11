@@ -180,3 +180,17 @@ it('completes series probe phase when no streams are eligible', function () {
         isSeriesProbe: true,
     ))->handle();
 });
+
+it('names the vod probe batch after the playlist', function () {
+    $this->playlist->updateQuietly(['probe_use_batching' => true]);
+    Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+
+    (new ProbeStreams(playlistId: $this->playlist->id))->handle();
+
+    Bus::assertBatched(fn ($batch) => $batch->name === "Probe VOD Streams: {$this->playlist->name}");
+});

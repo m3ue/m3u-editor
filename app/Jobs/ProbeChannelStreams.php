@@ -164,6 +164,7 @@ class ProbeChannelStreams implements ShouldQueue
         $syncRunId = $this->syncRunId;
 
         $batch = Bus::batch($chunkJobs)
+            ->name($playlist ? "Probe Channel Streams: {$playlist->name}" : 'Probe Channel Streams')
             ->then(function () use ($playlistId, $channelIds, $total, $start, $syncRunId) {
                 dispatch(new ProbeChannelStreamsComplete(
                     playlistId: $playlistId,

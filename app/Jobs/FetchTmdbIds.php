@@ -24,6 +24,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Job to fetch full TMDB metadata (plot, artwork, cast, genres, seasons/episodes)
@@ -226,6 +227,7 @@ class FetchTmdbIds implements ShouldQueue
         $seriesPlaylistIds = $this->resolveTouchedSeriesPlaylistIds();
 
         Bus::batch($jobs->all())
+            ->name(self::batchName($vodPlaylistIds, $seriesPlaylistIds))
             ->onConnection('redis') // force to use redis connection
             ->onQueue('import')
             ->allowFailures()
@@ -1592,6 +1594,24 @@ class FetchTmdbIds implements ShouldQueue
         self::incrementBatchStat($batchId, 'not_found', $this->notFoundCount);
         self::incrementBatchStat($batchId, 'skipped', $this->skippedCount);
         self::incrementBatchStat($batchId, 'errors', $this->errorCount);
+    }
+
+    /**
+     * Label for the chunk batch so the Live Queue shows which playlists it covers.
+     * Capped well under the job_batches.name column length (255).
+     *
+     * @param  array<int>  $vodPlaylistIds
+     * @param  array<int>  $seriesPlaylistIds
+     */
+    protected static function batchName(array $vodPlaylistIds, array $seriesPlaylistIds): string
+    {
+        $playlistNames = Playlist::query()
+            ->whereIn('id', array_unique([...$vodPlaylistIds, ...$seriesPlaylistIds]))
+            ->orderBy('name')
+            ->pluck('name')
+            ->implode(', ');
+
+        return Str::limit($playlistNames === '' ? 'TMDB Metadata' : "TMDB Metadata: {$playlistNames}", 200);
     }
 
     /**

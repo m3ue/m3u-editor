@@ -58,6 +58,6 @@ it('still dispatches a batch for a nonempty parallel scan', function () {
 
     (new ProcessChannelScrubber($scrubber->id))->handle();
 
-    Bus::assertBatched(fn ($batch) => true);
+    Bus::assertBatched(fn ($batch) => $batch->name === "Channel Scrubber: {$scrubber->name}");
     Bus::assertNotDispatched(ProcessChannelScrubberComplete::class);
 });

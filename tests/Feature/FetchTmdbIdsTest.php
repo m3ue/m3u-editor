@@ -809,7 +809,8 @@ it('splits large lookups into batched chunk jobs', function () {
     $job->handle(app(TmdbService::class));
 
     Bus::assertBatched(function ($batch) {
-        return count($batch->jobs) === 3;
+        return count($batch->jobs) === 3
+            && $batch->name === "TMDB Metadata: {$this->playlist->name}";
     });
 });
 

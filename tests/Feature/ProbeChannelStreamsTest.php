@@ -288,3 +288,18 @@ it('can probe already probed live channels when only unprobed is false', functio
         ProbeChannelStreamsComplete::class,
     ]);
 });
+
+it('names the live probe batch after the playlist', function () {
+    Bus::fake();
+    $this->playlist->updateQuietly(['probe_use_batching' => true]);
+    Channel::factory()->for($this->playlist)->create([
+        'enabled' => true,
+        'is_vod' => false,
+        'probe_enabled' => true,
+        'stream_stats_probed_at' => null,
+    ]);
+
+    (new ProbeChannelStreams(playlistId: $this->playlist->id))->handle();
+
+    Bus::assertBatched(fn ($batch) => $batch->name === "Probe Channel Streams: {$this->playlist->name}");
+});
