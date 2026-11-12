@@ -22,6 +22,7 @@ class PluginManifest
         public readonly array $schema,
         public readonly array $settings,
         public readonly array $actions,
+        public readonly array $apiEndpoints,
         public readonly array $dataOwnership,
         public readonly ?string $repository,
         public readonly string $path,
@@ -50,6 +51,7 @@ class PluginManifest
             schema: $schema,
             settings: array_values($manifest['settings'] ?? []),
             actions: array_values($manifest['actions'] ?? []),
+            apiEndpoints: self::normalizeObjectList($manifest['api_endpoints'] ?? [], 'api_endpoints'),
             dataOwnership: self::normalizeDataOwnership(
                 Arr::get($manifest, 'data_ownership', []),
                 $pluginId,
@@ -129,6 +131,21 @@ class PluginManifest
             'tables' => $tables,
             'ui_tables' => array_values($schema['ui_tables'] ?? []),
         ];
+    }
+
+    private static function normalizeObjectList(mixed $value, string $field): array
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new RuntimeException("Manifest field [{$field}] must be a list.");
+        }
+
+        foreach ($value as $item) {
+            if (! is_array($item)) {
+                throw new RuntimeException("Manifest field [{$field}] must only contain objects.");
+            }
+        }
+
+        return $value;
     }
 
     private static function normalizeStringList(mixed $value, string $field): array

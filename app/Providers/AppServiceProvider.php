@@ -350,6 +350,14 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by(optional($request->user())->id ?: $request->ip());
         });
 
+        // Plugin API endpoints: keyed by client IP only. Not by submitted username (a client
+        // could spread guesses across logins) and not by plugin id (logins are checked before
+        // the plugin is looked up, so any id in the URL would buy a fresh allowance).
+        RateLimiter::for('plugin-api', function (Request $request) {
+            return Limit::perMinute(max(1, (int) config('plugins.api.rate_limit_per_minute', 120)))
+                ->by('plugin-api|'.$request->ip());
+        });
+
         // Named separately as well as keyed by route class: even callbacks from
         // the same proxy IP/token cannot consume another callback's allowance.
         foreach (['resolver', 'webhook', 'broadcast', 'dvr'] as $callback) {

@@ -28,6 +28,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Callout;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
@@ -145,6 +146,13 @@ class PluginResource extends Resource implements CopilotResource
                                                 ))),
                                         ]),
                                 ]),
+                            Section::make(__('API Endpoints'))
+                                ->description(__('HTTP endpoints this plugin answers for callers outside M3U Editor.'))
+                                ->compact()
+                                ->icon('heroicon-m-globe-alt')
+                                ->iconColor('warning')
+                                ->visible(fn (?Plugin $record): bool => $record?->exposesApiEndpoints() ?? false)
+                                ->schema(fn (?Plugin $record): array => self::apiEndpointComponents($record)),
                             Section::make(__('Technical Details'))
                                 ->compact()
                                 ->icon('heroicon-m-magnifying-glass')
@@ -209,6 +217,14 @@ class PluginResource extends Resource implements CopilotResource
                 TextColumn::make('name')
                     ->searchable()
                     ->sortable(),
+                TextColumn::make('api_endpoint_count')
+                    ->label(__('API Endpoints'))
+                    ->state(fn (Plugin $record): ?int => $record->exposesApiEndpoints() ? count($record->api_endpoints ?? []) : null)
+                    ->badge()
+                    ->color('warning')
+                    ->icon('heroicon-m-globe-alt')
+                    ->tooltip(__('Callable from outside M3U Editor by any Xtream login'))
+                    ->toggleable(),
                 TextColumn::make('version')
                     ->sortable()
                     ->badge()
@@ -431,6 +447,55 @@ class PluginResource extends Resource implements CopilotResource
             'table' => ManagePluginTable::route('/{record}/tables/{table}'),
             'run' => ViewPluginRun::route('/{record}/runs/{run}'),
         ];
+    }
+
+    /**
+     * Warnings plus one copyable URL per endpoint, so an admin sees exactly what
+     * outside callers can reach before and after trusting the plugin.
+     *
+     * @return array<int, Component>
+     */
+    protected static function apiEndpointComponents(?Plugin $record): array
+    {
+        if (! $record?->exposesApiEndpoints()) {
+            return [];
+        }
+
+        $components = [
+            Callout::make(__('Reachable from outside M3U Editor'))
+                ->warning()
+                ->description(__('Any Xtream login (playlist owner, PlaylistAuth or alias) can call these endpoints. Each call runs this plugin\'s code, scoped to the playlist that login unlocks.')),
+        ];
+
+        if (in_array('network_egress', $record->permissions ?? [], true)) {
+            $components[] = Callout::make(__('Can fetch remote URLs for outside callers'))
+                ->danger()
+                ->description(__('This plugin also declares Network Egress. Confirm it only fetches caller-influenced URLs through the host SSRF guard ($context->safeGet()) before trusting it.'));
+        }
+
+        foreach ($record->api_endpoints ?? [] as $endpoint) {
+            $endpointId = (string) ($endpoint['id'] ?? '');
+            if ($endpointId === '') {
+                continue;
+            }
+
+            $fields = collect($endpoint['fields'] ?? [])->pluck('id')->filter()->implode(', ');
+            $url = route('api.plugins.endpoint', ['pluginId' => $record->plugin_id, 'endpoint' => $endpointId]);
+
+            $components[] = TextInput::make('api_endpoint_'.Str::slug($endpointId, '_'))
+                ->label($endpoint['label'] ?? Str::headline($endpointId))
+                ->prefix('POST')
+                ->formatStateUsing(fn (): string => $url)
+                ->copyable()
+                ->disabled()
+                ->dehydrated(false)
+                ->helperText(collect([
+                    $endpoint['description'] ?? null,
+                    $fields !== '' ? __('Accepts: :fields', ['fields' => $fields]) : __('Accepts no payload fields.'),
+                ])->filter()->implode(' '));
+        }
+
+        return $components;
     }
 
     protected static function pluginTableLinks(?Plugin $record): string

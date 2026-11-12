@@ -2,6 +2,7 @@
 
 namespace App\Plugins;
 
+use App\Exceptions\PluginApiRequestException;
 use App\Jobs\ExecutePluginInvocation;
 use App\Models\CustomPlaylist;
 use App\Models\MergedPlaylist;
@@ -12,14 +13,15 @@ use App\Models\Plugin;
 use App\Models\PluginInstallReview;
 use App\Models\PluginRun;
 use App\Models\User;
+use App\Plugins\Contracts\ApiEndpointPluginInterface;
 use App\Plugins\Contracts\HookablePluginInterface;
 use App\Plugins\Contracts\LifecyclePluginInterface;
 use App\Plugins\Contracts\PluginInterface;
 use App\Plugins\Contracts\PluginSelectOptionsProviderInterface;
 use App\Plugins\Contracts\ScheduledPluginInterface;
 use App\Plugins\Support\PluginActionResult;
+use App\Plugins\Support\PluginApiRequestContext;
 use App\Plugins\Support\PluginExecutionContext;
-use App\Plugins\Support\PluginPlaylistQueryContext;
 use App\Plugins\Support\PluginSelectOptionsContext;
 use App\Plugins\Support\PluginUninstallContext;
 use App\Plugins\Support\PluginValidationResult;
@@ -32,6 +34,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -77,6 +80,7 @@ class PluginManager
                 'capabilities' => $manifest?->capabilities ?? Arr::get($result->manifestData, 'capabilities', []),
                 'hooks' => $manifest?->hooks ?? Arr::get($result->manifestData, 'hooks', []),
                 'actions' => $manifest?->actions ?? Arr::get($result->manifestData, 'actions', []),
+                'api_endpoints' => $manifest?->apiEndpoints ?? [],
                 'permissions' => $manifest?->permissions ?? Arr::get($result->manifestData, 'permissions', []),
                 'schema_definition' => $manifest?->schema ?? Arr::get($result->manifestData, 'schema', []),
                 'settings_schema' => $manifest?->settings ?? Arr::get($result->manifestData, 'settings', []),
@@ -164,6 +168,7 @@ class PluginManager
             'capabilities' => $result->manifest?->capabilities ?? $plugin->capabilities,
             'hooks' => $result->manifest?->hooks ?? $plugin->hooks,
             'actions' => $result->manifest?->actions ?? $plugin->actions,
+            'api_endpoints' => $result->manifest?->apiEndpoints ?? $plugin->api_endpoints,
             'permissions' => $result->manifest?->permissions ?? $plugin->permissions,
             'schema_definition' => $result->manifest?->schema ?? $plugin->schema_definition,
             'settings_schema' => $result->manifest?->settings ?? $plugin->settings_schema,
@@ -670,55 +675,104 @@ class PluginManager
     }
 
     /**
-     * @param  array<string, mixed>  $payload
-     * @return array<string, mixed>
+     * Answer an authenticated Xtream login's call to a manifest-declared API endpoint.
+     *
+     * Only ids listed in the trusted manifest are routable, and the plugin only ever sees
+     * the endpoint's declared fields after host validation.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<mixed>
+     *
+     * @throws PluginApiRequestException
      */
-    public function queryForPlaylist(
+    public function handleApiRequest(
         string $pluginId,
-        string $query,
-        array $payload,
+        string $endpointId,
+        array $input,
         Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias $playlist,
         ?PlaylistAuth $playlistAuth = null,
     ): array {
-        abort_unless(config('plugins.enabled', true), 404);
-        $plugin = $this->findPluginById($pluginId);
-        abort_unless($plugin && $plugin->isInstalled() && $plugin->available, 404);
+        if (! config('plugins.enabled', true)) {
+            throw PluginApiRequestException::notFound();
+        }
 
-        $plugin = $this->validate($plugin);
-        abort_unless($plugin->available, 404);
-        try {
-            $this->assertPluginLoadable($plugin, requireEnabled: true);
-            $this->assertPluginRunnable($plugin);
-        } catch (RuntimeException) {
-            abort(403);
+        $plugin = $this->findPluginById($pluginId);
+        if (! $plugin || ! $plugin->isInstalled() || ! $plugin->available || $plugin->getApiEndpointDefinition($endpointId) === null) {
+            throw PluginApiRequestException::notFound();
+        }
+
+        $plugin = $this->pluginReadyForApiRequest($plugin);
+
+        // Re-check against the (possibly refreshed) registry row: the declaration may have changed on disk.
+        if (! $plugin->exposesApiEndpoints() || $plugin->getApiEndpointDefinition($endpointId) === null) {
+            throw PluginApiRequestException::notFound();
+        }
+
+        $validator = Validator::make($input, $this->schemaMapper->apiEndpointRules($plugin, $endpointId));
+        if ($validator->fails()) {
+            throw PluginApiRequestException::invalidPayload($validator->errors()->keys());
         }
 
         try {
             $instance = $this->resolvePluginInstance($plugin);
-            $supported = method_exists($instance, 'playlistQueryNames')
-                && is_callable([$instance, 'playlistQueryNames'])
-                && method_exists($instance, 'queryForPlaylist')
-                && is_callable([$instance, 'queryForPlaylist']);
-            $names = $supported ? $instance->playlistQueryNames() : [];
-        } catch (Throwable) {
-            throw new RuntimeException('Plugin query failed.');
-        }
-        abort_unless(is_array($names) && in_array($query, $names, true), 404);
-
-        try {
-            $result = $instance->queryForPlaylist($query, $payload, new PluginPlaylistQueryContext(
-                $playlist, $playlistAuth, $this->resolvedSettings($plugin),
-            ));
-            if (! is_array($result)) {
-                throw new RuntimeException('Invalid plugin query result.');
+            if (! $instance instanceof ApiEndpointPluginInterface) {
+                throw new RuntimeException("Plugin [{$plugin->plugin_id}] does not implement API endpoints.");
             }
 
-            return $result;
-        } catch (ValidationException) {
-            abort(422);
-        } catch (Throwable) {
-            throw new RuntimeException('Plugin query failed.');
+            return $instance->handleApiRequest(
+                $endpointId,
+                $validator->validated(),
+                PluginApiRequestContext::make($plugin, $endpointId, $playlist, $playlistAuth, $this->resolvedSettings($plugin)),
+            );
+        } catch (ValidationException $exception) {
+            throw PluginApiRequestException::invalidPayload(array_keys($exception->errors()));
+        } catch (Throwable $exception) {
+            Log::warning('Plugin API request failed', [
+                'plugin_id' => $plugin->plugin_id,
+                'endpoint' => $endpointId,
+                'exception' => $exception,
+            ]);
+
+            throw PluginApiRequestException::failed();
         }
+    }
+
+    /**
+     * Re-hash the plugin's files against the trusted snapshot before loading its code,
+     * the same guarantee instantiate() gives actions and hooks. The registry row is
+     * only rewritten (via validate()) when something drifted, so a busy endpoint does
+     * not write to the database on every request.
+     *
+     * @throws PluginApiRequestException
+     */
+    private function pluginReadyForApiRequest(Plugin $plugin): Plugin
+    {
+        $onDisk = $this->normalizeHashSnapshot(
+            $this->integrityService->hashesForPlugin((string) $plugin->path, $plugin->entrypoint),
+        );
+
+        $unchanged = $onDisk !== []
+            && $onDisk === $this->normalizeHashSnapshot($plugin->trusted_hashes ?? [])
+            && $onDisk === $this->currentHashSnapshot($plugin)
+            && $plugin->validation_status === 'valid'
+            && $plugin->hasVerifiedIntegrity();
+
+        if (! $unchanged) {
+            $plugin = $this->validate($plugin);
+        }
+
+        if (! $plugin->available) {
+            throw PluginApiRequestException::notFound();
+        }
+
+        try {
+            $this->assertPluginLoadable($plugin, requireEnabled: true);
+            $this->assertPluginRunnable($plugin);
+        } catch (RuntimeException) {
+            throw PluginApiRequestException::forbidden();
+        }
+
+        return $plugin;
     }
 
     public function executeAction(

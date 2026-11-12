@@ -60,6 +60,21 @@ class PluginInstallReviewResource extends Resource implements CopilotResource
         return 3;
     }
 
+    /**
+     * Endpoint ids declared in the staged manifest. Read from the snapshot because
+     * the plugin row does not exist (or is not updated) until the review is approved.
+     *
+     * @return array<int, string>
+     */
+    protected static function reviewApiEndpointIds(?PluginInstallReview $record): array
+    {
+        $endpoints = data_get($record?->manifest_snapshot, 'api_endpoints');
+
+        return is_array($endpoints)
+            ? collect($endpoints)->pluck('id')->filter(fn (mixed $id): bool => is_string($id) && $id !== '')->values()->all()
+            : [];
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema->components([
@@ -90,13 +105,28 @@ class PluginInstallReviewResource extends Resource implements CopilotResource
                     Callout::make(__('High-Risk Permissions'))
                         ->description(function (?PluginInstallReview $record): string {
                             $highRisk = collect($record?->permissions ?? [])
-                                ->intersect(['network_egress', 'filesystem_write', 'schema_manage'])
+                                ->intersect(['network_egress', 'filesystem_write', 'schema_manage', 'api_endpoints'])
                                 ->values();
 
                             return $highRisk->isNotEmpty()
                                 ? $highRisk->implode(', ')
                                 : 'No high-risk permissions declared.';
                         })
+                        ->columnSpanFull(),
+                    Callout::make(__('Exposes API endpoints'))
+                        ->warning()
+                        ->visible(fn (?PluginInstallReview $record): bool => static::reviewApiEndpointIds($record) !== [])
+                        ->description(fn (?PluginInstallReview $record): string => __('Once trusted, any Xtream login can POST to: :endpoints', [
+                            'endpoints' => collect(static::reviewApiEndpointIds($record))
+                                ->map(fn (string $endpointId): string => '/api/plugins/'.$record?->plugin_id.'/'.$endpointId)
+                                ->implode(', '),
+                        ]))
+                        ->columnSpanFull(),
+                    Callout::make(__('Can fetch remote URLs for outside callers'))
+                        ->danger()
+                        ->visible(fn (?PluginInstallReview $record): bool => static::reviewApiEndpointIds($record) !== []
+                            && in_array('network_egress', $record?->permissions ?? [], true))
+                        ->description(__('This plugin also declares Network Egress. Confirm it only fetches caller-influenced URLs through the host SSRF guard ($context->safeGet()) before trusting it.'))
                         ->columnSpanFull(),
                     Textarea::make('schema_json')
                         ->label(__('Schema'))

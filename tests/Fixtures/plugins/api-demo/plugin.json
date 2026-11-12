@@ -1,0 +1,69 @@
+{
+  "id": "api-demo",
+  "name": "API Demo",
+  "version": "1.0.0",
+  "api_version": "1.0.0",
+  "description": "Reference plugin for the [api_endpoints] capability. Answers read-only questions about the playlist a login unlocks and shows the SSRF-guarded fetch helper.",
+  "entrypoint": "Plugin.php",
+  "class": "AppLocalPlugins\\ApiDemo\\Plugin",
+  "capabilities": [
+    "api_endpoints"
+  ],
+  "hooks": [],
+  "permissions": [
+    "db_read",
+    "network_egress",
+    "api_endpoints"
+  ],
+  "schema": {
+    "tables": []
+  },
+  "settings": [
+    {
+      "id": "greeting",
+      "type": "text",
+      "label": "Greeting",
+      "default": "Hello"
+    }
+  ],
+  "actions": [],
+  "api_endpoints": [
+    {
+      "id": "playlist-summary",
+      "label": "Playlist summary",
+      "description": "Returns the name and type of the playlist the login unlocks.",
+      "fields": []
+    },
+    {
+      "id": "echo",
+      "label": "Echo",
+      "description": "Echoes a validated message, for testing API clients.",
+      "fields": [
+        {
+          "id": "message",
+          "type": "text",
+          "label": "Message",
+          "required": true
+        },
+        {
+          "id": "shout",
+          "type": "boolean",
+          "label": "Shout"
+        }
+      ]
+    },
+    {
+      "id": "url-status",
+      "label": "URL status",
+      "description": "Fetches a caller-supplied URL through the host SSRF guard and returns only its HTTP status.",
+      "fields": [
+        {
+          "id": "url",
+          "type": "text",
+          "label": "URL",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

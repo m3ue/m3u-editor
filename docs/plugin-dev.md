@@ -318,6 +318,7 @@ Supported permissions:
 - `queue_jobs`
 - `hook_subscriptions`
 - `scheduled_runs`
+- `api_endpoints`
 
 Rules:
 
@@ -325,6 +326,7 @@ Rules:
 - scheduled capability requires `scheduled_runs`
 - declared schema requires `schema_manage`
 - declared files/directories require `filesystem_write`
+- declared `api_endpoints` require both the `api_endpoints` capability and the `api_endpoints` permission
 
 `network_egress` is declarative only in this phase. It is shown during review, but not OS-sandboxed.
 
@@ -556,6 +558,7 @@ Current capabilities:
 - `channel_processor`
 - `stream_analysis`
 - `scheduled`
+- `api_endpoints` (see [API Endpoints](#api-endpoints))
 
 ## Hooks
 
@@ -615,105 +618,120 @@ class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
 
 `$context->value($key, $default)` returns the current row value for a field listed in `depends_on`. Use this to build context-aware option lists that change based on related column values in the same row.
 
-## Read-only Playlist Queries
+## API Endpoints
 
-Plugins may optionally implement these two **public** methods, without importing a new interface:
+A plugin can answer HTTP requests from outside M3U Editor (for example a media server plugin reading data your plugin stored). Endpoints are declared in `plugin.json`, so they are covered by the integrity hash: adding or changing one sends the plugin back to review.
 
-```php
-public function playlistQueryNames(): array
-{
-    return ['echo_readonly'];
-}
-
-public function queryForPlaylist(string $query, array $payload, object $context): array
-{
-    // Validate the query-specific payload before reading any data.
-    return ['value' => $payload['value'] ?? null];
-}
-```
-
-The host invokes only `queryForPlaylist`, and only for a name in `playlistQueryNames()` using strict comparison. Query names are not PHP method names: they never dispatch `runAction`, hooks, or arbitrary methods. Existing plugins without these optional methods remain loadable and return 404 for queries. No new manifest capability or credential is required.
-
-### HTTP contract
-
-Send an `application/x-www-form-urlencoded` **POST** to `/player_api.php`, with all fields in the body:
-
-```text
-username=<existing Xtream username>
-password=<existing Xtream password>
-action=plugin_query
-plugin_id=sample-plugin
-query=echo_readonly
-payload={"value":"synthetic"}
-```
-
-Use HTTPS and do not put credentials in URLs or logs. This uses the existing Xtream playlist authentication, including owner/default-login configuration, PlaylistAuth assignment, credential expiry, alias authentication and `xapi_enabled`. It grants no access to other playlists. Query credentials supplied only in the URL are rejected. Other Xtream actions retain their existing behavior.
-
-- `plugin_id`: at most 100 ASCII characters, starting with a lowercase letter or digit, followed by lowercase letters, digits or hyphens.
-- `query`: at most 100 ASCII characters, starting with a letter, digit or underscore, followed by letters, digits, underscores, dots or hyphens; it must also be explicitly allowlisted by the plugin.
-- `payload`: a required JSON string decoding to an object or array, not a JSON scalar. The plugin owns query-specific validation and pagination.
-- The **entire encoded body**, not just `payload`, is limited to 128 KiB (131072 bytes). The complete encoded JSON response, including its envelope, is limited to 512 KiB (524288 bytes). Limits are inclusive. Larger web-server/PHP request limits do not remove these checks; smaller server limits may reject earlier.
-
-Successful response:
+### Declaring endpoints
 
 ```json
 {
-  "api_version": 1,
-  "plugin_id": "sample-plugin",
-  "query": "echo_readonly",
-  "data": {"value": "synthetic"}
+  "capabilities": ["api_endpoints"],
+  "permissions": ["db_read", "api_endpoints"],
+  "api_endpoints": [
+    {
+      "id": "echo",
+      "label": "Echo",
+      "description": "Echoes a validated message.",
+      "fields": [
+        { "id": "message", "type": "text", "label": "Message", "required": true },
+        { "id": "shout", "type": "boolean", "label": "Shout" }
+      ]
+    }
+  ]
 }
 ```
 
-`api_version` here is the integer query-envelope version, separate from the manifest's plugin API version. `data` is the array returned by the plugin, encoded with normal JSON object/list semantics. Clients must validate the envelope and the query-specific result before using it.
+- `id`: 1-64 lowercase letters, digits, hyphens or underscores, starting with a letter or digit. Only declared ids are routable.
+- `fields`: the payload the host accepts, using the normal field definitions. Allowed types are `boolean`, `number`, `text`, `textarea`, `tags` and static-option `select`. `model_select`, `table_select`, `options_provider`, `visible_when` and `visibility_provider` are rejected: they depend on a signed-in user or an admin form, and API callers have neither.
+- The plugin class must implement `App\Plugins\Contracts\ApiEndpointPluginInterface`:
 
-### Server-created context and authorization
+```php
+use App\Plugins\Contracts\ApiEndpointPluginInterface;
+use App\Plugins\Support\PluginApiRequestContext;
 
-`PluginPlaylistQueryContext` exposes exactly:
+class Plugin implements ApiEndpointPluginInterface, PluginInterface
+{
+    public function handleApiRequest(string $endpoint, array $payload, PluginApiRequestContext $context): array
+    {
+        return match ($endpoint) {
+            'echo' => ['message' => $payload['message']],
+        };
+    }
+}
+```
 
-- `$context->playlist`: an object with `id`, `type` and `user_id` from the authenticated output playlist.
-- `$context->playlistAuth`: `null` for owner/alias login, otherwise an object containing only the authenticated PlaylistAuth's `id` and `user_id`.
-- `$context->settings`: the plugin's resolved operator settings, including declared defaults. These are private inputs to plugin code, **not** response data; never echo sensitive settings.
+`tests/Fixtures/plugins/api-demo` is a complete reference plugin.
 
-No raw Request, Eloquent model, password, token, username or playlist UUID is passed. A UUID can itself be a default-login credential. Client payload fields never select or override these context fields.
+### Calling an endpoint
 
-When resolving the playlist, allowlist the four host model classes and use only the server context, for example:
+```http
+POST /api/plugins/{plugin_id}/{endpoint}
+Authorization: Basic base64(username:password)
+Content-Type: application/json
+
+{"payload": {"message": "hi"}}
+```
+
+- **Authentication** is an existing Xtream login: playlist owner default login, PlaylistAuth or playlist alias. It goes through the same authenticator as `/player_api.php`, so expiry, disabled PlaylistAuths and disabled Xtream output are rejected the same way. Send it in a Basic header (preferred) or as `username` and `password` in the JSON body. The query string is never read, so credentials in a URL do not authenticate.
+- **Body** must be JSON (`415` otherwise) and at most 128 KiB. `payload` must be a JSON object.
+- **Response** is at most 512 KiB, including the envelope:
+
+```json
+{ "api_version": 1, "plugin_id": "api-demo", "endpoint": "echo", "data": { "message": "hi" } }
+```
+
+- **Rate limit**: 120 requests per minute per client IP, across all plugins (`PLUGIN_API_RATE_LIMIT`).
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 401 | `unauthorized` | Missing, wrong, expired or disabled login, or Xtream output disabled |
+| 403 | `plugin_unavailable` | Plugin is disabled, untrusted, blocked, invalid, or its files changed since trust |
+| 404 | `not_found` | Plugin system disabled, unknown plugin, or undeclared endpoint |
+| 405 | | Not a POST |
+| 413 | `request_too_large` / `response_too_large` | A size limit was exceeded |
+| 415 | `json_required` | Body is not JSON |
+| 422 | `invalid_payload` | Payload failed validation; `fields` lists the field names, never values or messages |
+| 429 | | Rate limit reached; respect `Retry-After` |
+| 500 | `plugin_request_failed` | The plugin threw or returned non-JSON data. Details go to the server log only |
+
+### What the host guarantees
+
+- The plugin's files are re-hashed against the trusted snapshot before its code loads on every request, the same check actions and hooks get.
+- The plugin only receives the endpoint's declared fields, after validation. Text values are capped at 2048 characters.
+- `$context` carries identifiers, never credentials:
+  - `$context->playlist`: `id`, `type` (model class) and `user_id` of the playlist the login unlocks
+  - `$context->playlistAuth`: `id` and `user_id` for PlaylistAuth logins, otherwise `null`
+  - `$context->settings`: the plugin's resolved settings (never echo these back)
+- Calls are synchronous and create no `PluginRun`.
+
+### What the plugin must do
+
+Plugins are trusted in-process PHP, not a sandbox. The host cannot stop plugin code from reaching the database or network directly, so:
+
+- **Resolve the playlist from `$context` only**, never from the payload. Allowlist the four model classes and scope by `user_id`:
 
 ```php
 $class = match ($context->playlist->type) {
-    \App\Models\Playlist::class => \App\Models\Playlist::class,
-    \App\Models\CustomPlaylist::class => \App\Models\CustomPlaylist::class,
-    \App\Models\MergedPlaylist::class => \App\Models\MergedPlaylist::class,
-    \App\Models\PlaylistAlias::class => \App\Models\PlaylistAlias::class,
-    default => throw new \RuntimeException('Unsupported playlist scope.'),
+    \App\Models\Playlist::class,
+    \App\Models\CustomPlaylist::class,
+    \App\Models\MergedPlaylist::class,
+    \App\Models\PlaylistAlias::class => $context->playlist->type,
+    default => throw new \RuntimeException('Unsupported playlist type.'),
 };
-$playlist = $class::query()
-    ->where('user_id', $context->playlist->user_id)
-    ->findOrFail($context->playlist->id);
+$playlist = $class::query()->where('user_id', $context->playlist->user_id)->findOrFail($context->playlist->id);
 ```
 
-Keep the **exact output model**: do not replace an alias/custom/merged playlist with an owner's broader playlist. Resolve requested channel IDs through that output's native relationships, enforce enabled-channel/group filters, and reject foreign IDs. An owner ID alone is not a playlist authorization check. Bind any cursor/cache entry to both the playlist type/ID and optional auth ID, as well as the validated query parameters.
+- **Keep the exact playlist scope.** Do not widen an alias, custom or merged playlist to its owner's other playlists, and reject ids from the payload that do not belong to it.
+- **Fetch caller-influenced URLs only with `$context->safeGet($url)`.** It blocks non-HTTP schemes and private, loopback, link-local and reserved destinations, re-checks every redirect, and pins the resolved IP against DNS rebinding. It requires the `network_egress` permission. A plugin that declares both `api_endpoints` and `network_egress` is flagged during review for exactly this reason.
+- **Stay read-only** and bound your own work (pagination, result sizes).
+- **Throw `Illuminate\Validation\ValidationException`** for invalid input. Callers see only the field names.
 
-Before loading plugin code, the manager checks installation and availability, validates current files against the trusted hashes, then applies the existing enabled, valid, blocked, trust and integrity guards. Disabling the plugin system makes queries unavailable. These synchronous queries create no PluginRun and do not enqueue actions. Implementations must remain read-only: no enrichment, network writes, jobs or mutation of guide/plugin data. Normal host validation can refresh plugin registry integrity metadata.
+### Review and visibility
 
-Plugins are already trusted in-process PHP, **not a sandbox**. This context avoids handing credentials to a query by default; it does not restrict trusted PHP's own database/container access. Plugin authors remain responsible for read-only behavior, payload authorization, bounded work and not exposing settings or secrets in results.
-
-### Errors and compatibility
-
-Errors are small JSON objects with an `error` code, never exception messages, traces or submitted values:
-
-| HTTP status | Meaning |
-|---|---|
-| 401 | Missing/invalid credentials, expired/disabled PlaylistAuth or disabled Xtream output |
-| 404 | Plugin system disabled, missing/uninstalled/unavailable plugin, unsupported query or absent optional methods |
-| 403 | Installed plugin fails enabled, validation, trust, blocked or integrity checks |
-| 405 | Non-POST query request (`Allow: POST`) |
-| 422 | Invalid generic input or a query-specific Laravel `ValidationException` |
-| 413 | Request body or encoded response exceeds its limit |
-| 429 | An existing host/proxy request limit rejects the request; clients should respect `Retry-After` when present |
-| 500 | Plugin loading, execution or JSON serialization failed; internal details are withheld |
-
-No new rate-limit policy is imposed on other Xtream actions. Plugins should throw `ValidationException` for invalid query-specific input; arbitrary plugin HTTP exceptions are treated as generic failures, not forwarded. A missing hook on an older host may return that host's existing unsupported-action response. Consumers should treat the query as an optional capability rather than detect it from version strings. No plugin-specific fields are added to programme storage or XMLTV.
+- The install review flags `api_endpoints` as a high-risk permission and lists every endpoint URL.
+- The plugin page shows an **API Endpoints** section with each copyable URL and the fields it accepts, plus a warning when the plugin can also make outbound requests.
+- The plugin list has an **API Endpoints** column showing how many endpoints each plugin exposes.
 
 ## Field Types
 
