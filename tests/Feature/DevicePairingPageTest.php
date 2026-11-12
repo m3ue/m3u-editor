@@ -12,6 +12,19 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+/**
+ * Repeater rows in the raw shape the browser produces: one keyed item per
+ * row, each holding the simple field's value under its name.
+ *
+ * @return array<string, array{playlist_auth_id: string}>
+ */
+function credentialRows(int ...$ids): array
+{
+    return collect($ids)
+        ->mapWithKeys(fn (int $id, int $index): array => ["row-{$index}" => ['playlist_auth_id' => (string) $id]])
+        ->all();
+}
+
 it('hides the device pairing page from non-admins', function () {
     $this->actingAs(User::factory()->create());
 
@@ -36,8 +49,8 @@ it('approves a pending code and assigns the chosen credential', function () {
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => $deviceAuth->user_code,
-            'playlist_auth_ids' => [$playlistAuth->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
         ->call('approve');
 
     $this->assertDatabaseHas('device_authorizations', [
@@ -58,8 +71,8 @@ it('approves a code typed lowercase and without the dash', function () {
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => 'xkqp9f3t',
-            'playlist_auth_ids' => [$playlistAuth->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
         ->call('approve');
 
     $this->assertDatabaseHas('device_authorizations', [
@@ -79,8 +92,8 @@ it('approves a code typed with extra whitespace around the dash', function () {
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => ' xkqp 9f3t ',
-            'playlist_auth_ids' => [$playlistAuth->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
         ->call('approve');
 
     $this->assertDatabaseHas('device_authorizations', [
@@ -99,8 +112,8 @@ it('shows a generic error for an unknown or expired code', function () {
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => 'ZZZZ-ZZZZ',
-            'playlist_auth_ids' => [$playlistAuth->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
         ->call('approve')
         ->assertNotified();
 });
@@ -197,8 +210,8 @@ it('approves several credentials in the chosen order, first as primary', functio
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => $deviceAuth->user_code,
-            'playlist_auth_ids' => [$kids->id, $living->id, $sports->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($kids->id, $living->id, $sports->id))
         ->call('approve');
 
     $deviceAuth->refresh();
@@ -218,10 +231,36 @@ it('refuses a pairing that includes another user\'s credential', function () {
     Livewire::test(PairDevice::class)
         ->fillForm([
             'user_code' => $deviceAuth->user_code,
-            'playlist_auth_ids' => [$own->id, $other->id],
         ], 'content')
+        ->set('data.playlist_auth_ids', credentialRows($own->id, $other->id))
         ->call('approve')
-        ->assertNotified();
+        ->assertHasFormErrors();
 
     expect($deviceAuth->refresh()->status)->toBe('pending');
+});
+
+it('approves credentials picked through the repeater rows the way the browser sets them', function () {
+    $admin = User::factory()->admin()->create();
+    $this->actingAs($admin);
+
+    // Occupy id 1 with someone else's credential: the raw repeater item used
+    // to be cast straight to int, which always produced 1.
+    PlaylistAuth::factory()->for(User::factory()->create())->create();
+    $living = PlaylistAuth::factory()->for($admin)->create();
+    $kids = PlaylistAuth::factory()->for($admin)->create();
+    $deviceAuth = DeviceAuthorization::factory()->create(['user_code' => 'XKQP-9F3T']);
+
+    $page = Livewire::test(PairDevice::class);
+    $firstRow = array_key_first($page->get('data.playlist_auth_ids'));
+
+    $page->set('data.user_code', 'XKQP9F3T')
+        ->set("data.playlist_auth_ids.{$firstRow}.playlist_auth_id", (string) $kids->id)
+        ->set('data.playlist_auth_ids.second-row', ['playlist_auth_id' => (string) $living->id])
+        ->call('approve')
+        ->assertHasNoFormErrors();
+
+    $deviceAuth->refresh();
+    expect($deviceAuth->status)->toBe('approved')
+        ->and($deviceAuth->playlist_auth_id)->toBe($kids->id)
+        ->and($deviceAuth->playlist_auth_ids)->toBe([$kids->id, $living->id]);
 });

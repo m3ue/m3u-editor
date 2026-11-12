@@ -162,7 +162,10 @@ class PairDevice extends Page
             return;
         }
 
-        $data = $this->data;
+        // Dehydrated state, not the raw $this->data: the simple repeater keeps
+        // each raw item as ['playlist_auth_id' => id] and only flattens it to
+        // a plain list of ids here. This also runs the form's validation.
+        $data = $this->content->getState();
         $userCode = self::normalizeUserCode($data['user_code'] ?? null);
 
         $deviceAuth = DeviceAuthorization::where('user_code', $userCode)
