@@ -61,6 +61,7 @@ use App\Services\VodFileNameService;
 use App\Services\WatchHistory\WatchHistoryScrobbler;
 use App\Services\WatchProgressLinker;
 use App\Services\XtreamCategoryService;
+use App\Services\XtreamLoginAuthenticator;
 use App\Settings\GeneralSettings;
 use App\Support\ChannelNumber;
 use App\Support\EpgProgrammeArtwork;
@@ -351,14 +352,7 @@ class XtreamApiController extends Controller
         }
 
         $playlistAuth = $authMethod === 'playlist_auth'
-            ? PlaylistAuth::where('username', $username)
-                ->where('password', $password)
-                ->where('enabled', true)
-                ->where(function ($query) {
-                    $query->whereNull('expires_at')
-                        ->orWhere('expires_at', '>', now());
-                })
-                ->first()
+            ? app(XtreamLoginAuthenticator::class)->activePlaylistAuth($username, $password)
             : null;
 
         return $this->handleAs($request, $playlist, $authMethod, (string) $username, (string) $password, $playlistAuth);
@@ -6094,17 +6088,10 @@ class XtreamApiController extends Controller
      */
     private function authenticate(Request $request)
     {
-        $username = $request->input('username');
-        $password = $request->input('password');
-
-        $result = PlaylistFacade::authenticate($username, $password);
-
-        // Ensure Xtream API output is enabled for this playlist
-        if (is_array($result) && $result[0] !== null && ! $result[0]->xapi_enabled) {
-            $result[0] = null;
-        }
-
-        return $result;
+        return app(XtreamLoginAuthenticator::class)->authenticate(
+            $request->input('username'),
+            $request->input('password'),
+        );
     }
 
     private function formatRuntimeFromSeconds(?int $seconds): ?string

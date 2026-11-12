@@ -63,6 +63,22 @@ class PluginSchemaMapper
         return $this->rulesForFields($action['fields'] ?? [], '', $plugin);
     }
 
+    /**
+     * Validation rules for an API endpoint's payload. Text values are length-capped
+     * because the caller is outside the app, unlike action forms.
+     *
+     * @return array<string, array<int, mixed>>
+     */
+    public function apiEndpointRules(Plugin $plugin, string $endpointId): array
+    {
+        $endpoint = $plugin->getApiEndpointDefinition($endpointId);
+        $maxLength = (int) config('plugins.api.max_text_length', 2048);
+
+        return collect($this->rulesForFields($endpoint['fields'] ?? [], '', $plugin))
+            ->map(fn (array $rules): array => in_array('string', $rules, true) ? [...$rules, 'max:'.$maxLength] : $rules)
+            ->all();
+    }
+
     public function defaultsForFields(array $fields, array $existing = []): array
     {
         $defaults = [];

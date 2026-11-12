@@ -19,6 +19,7 @@ class Plugin extends Model
         'permissions' => 'array',
         'schema_definition' => 'array',
         'actions' => 'array',
+        'api_endpoints' => 'array',
         'settings_schema' => 'array',
         'settings' => 'array',
         'data_ownership' => 'array',
@@ -68,6 +69,26 @@ class Plugin extends Model
         }
 
         return null;
+    }
+
+    public function getApiEndpointDefinition(string $endpointId): ?array
+    {
+        foreach ($this->api_endpoints ?? [] as $endpoint) {
+            if (($endpoint['id'] ?? null) === $endpointId) {
+                return $endpoint;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether this plugin exposes HTTP endpoints that Xtream logins can call.
+     */
+    public function exposesApiEndpoints(): bool
+    {
+        return in_array('api_endpoints', $this->capabilities ?? [], true)
+            && ($this->api_endpoints ?? []) !== [];
     }
 
     public function getSetting(string $key, mixed $default = null): mixed

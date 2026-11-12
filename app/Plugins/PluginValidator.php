@@ -118,6 +118,7 @@ class PluginValidator
             }
         }
 
+        $errors = [...$errors, ...$this->validateApiEndpoints($manifest, $fieldTypes)];
         $errors = [...$errors, ...$this->validateDataOwnership($manifest)];
         $errors = [...$errors, ...$this->validateSchema($manifest)];
 
@@ -607,6 +608,94 @@ class PluginValidator
 
         if ($type === 'table_select' && blank($field['table'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} table_select fields require [table]";
+        }
+
+        return $errors;
+    }
+
+    /**
+     * API endpoints are reachable by any Xtream login, so the declaration must be
+     * explicit on every axis: the capability (interface), the permission (shown at
+     * trust time) and the endpoint list (routable ids and their accepted fields).
+     *
+     * @param  array<int, string>  $fieldTypes
+     * @return array<int, string>
+     */
+    private function validateApiEndpoints(PluginManifest $manifest, array $fieldTypes): array
+    {
+        $errors = [];
+        $declaresCapability = in_array('api_endpoints', $manifest->capabilities, true);
+        $declaresPermission = in_array('api_endpoints', $manifest->permissions, true);
+
+        if ($manifest->apiEndpoints === []) {
+            if ($declaresCapability) {
+                $errors[] = 'Plugins using the [api_endpoints] capability must declare at least one entry in [api_endpoints].';
+            }
+
+            return $errors;
+        }
+
+        if (! $declaresCapability) {
+            $errors[] = 'Plugins declaring [api_endpoints] must use the [api_endpoints] capability.';
+        }
+
+        if (! $declaresPermission) {
+            $errors[] = 'Plugins declaring [api_endpoints] must declare the [api_endpoints] permission.';
+        }
+
+        $allowedFieldTypes = array_values(array_intersect($fieldTypes, config('plugins.api.field_types', [])));
+        $endpointIds = [];
+
+        foreach ($manifest->apiEndpoints as $endpoint) {
+            $endpointId = $endpoint['id'] ?? null;
+            if (! is_string($endpointId) || ! preg_match('/\A[a-z0-9][a-z0-9_-]{0,63}\z/', $endpointId)) {
+                $errors[] = 'API endpoint [id] must be 1-64 lowercase letters, digits, hyphens or underscores, starting with a letter or digit.';
+
+                continue;
+            }
+
+            if (in_array($endpointId, $endpointIds, true)) {
+                $errors[] = "Duplicate API endpoint id [{$endpointId}]";
+            }
+
+            $endpointIds[] = $endpointId;
+            $group = "api_endpoints.{$endpointId}";
+
+            foreach (['label', 'description'] as $key) {
+                if (isset($endpoint[$key]) && ! is_string($endpoint[$key])) {
+                    $errors[] = "{$group}.{$key} must be a string";
+                }
+            }
+
+            if (! is_array($endpoint['fields'] ?? [])) {
+                $errors[] = "{$group}.fields must be a list";
+
+                continue;
+            }
+
+            foreach ($endpoint['fields'] ?? [] as $field) {
+                if (! is_array($field)) {
+                    $errors[] = "{$group}.fields must only contain objects";
+
+                    continue;
+                }
+
+                $fieldId = $field['id'] ?? 'field';
+                $type = $field['type'] ?? 'text';
+                if (! in_array($type, $allowedFieldTypes, true)) {
+                    $errors[] = "{$group}.{$fieldId} uses type [{$type}], which API endpoints do not accept";
+
+                    continue;
+                }
+
+                foreach (['options_provider', 'visible_when', 'visibility_provider'] as $uiOnlyKey) {
+                    if (filled($field[$uiOnlyKey] ?? null)) {
+                        $errors[] = "{$group}.{$fieldId} cannot use [{$uiOnlyKey}] on an API endpoint";
+                    }
+                }
+
+                $errors = [...$errors, ...$this->validateFieldDefinition($field, $allowedFieldTypes, $group)];
+            }
         }
 
         return $errors;

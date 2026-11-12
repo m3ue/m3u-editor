@@ -1,5 +1,6 @@
 <?php
 
+use App\Plugins\Contracts\ApiEndpointPluginInterface;
 use App\Plugins\Contracts\ChannelProcessorPluginInterface;
 use App\Plugins\Contracts\EpgProcessorPluginInterface;
 use App\Plugins\Contracts\ScheduledPluginInterface;
@@ -175,6 +176,7 @@ return [
         'queue_jobs' => 'Run actions, hooks, or schedules through background jobs',
         'hook_subscriptions' => 'Receive host lifecycle hook invocations',
         'scheduled_runs' => 'Run scheduled plugin actions',
+        'api_endpoints' => 'Expose HTTP endpoints that any Xtream login can call',
     ],
 
     'capabilities' => [
@@ -203,6 +205,11 @@ return [
             'label' => 'Scheduled',
             'description' => 'Run actions on a cron schedule',
         ],
+        'api_endpoints' => [
+            'interface' => ApiEndpointPluginInterface::class,
+            'label' => 'API Endpoints',
+            'description' => 'Answer authenticated HTTP requests at /api/plugins/{plugin}/{endpoint}',
+        ],
     ],
 
     'hooks' => [
@@ -216,6 +223,19 @@ return [
     ],
 
     'prefill_max_source_rows' => 1000,
+
+    /**
+     * Plugin API endpoints (the [api_endpoints] capability). Field types are limited to
+     * plain values: model/table selects check ownership against a signed-in user, which
+     * an Xtream login does not have. The rate limit is per client IP, across all plugins.
+     */
+    'api' => [
+        'field_types' => ['boolean', 'number', 'text', 'textarea', 'tags', 'select'],
+        'max_text_length' => 2048,
+        'max_request_bytes' => 131072,
+        'max_response_bytes' => 524288,
+        'rate_limit_per_minute' => $pluginIntEnv('PLUGIN_API_RATE_LIMIT', 120),
+    ],
 
     'field_types' => [
         'section',

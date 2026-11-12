@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\DeviceAuthorizationController;
 use App\Http\Controllers\Api\DispatcharrController;
 use App\Http\Controllers\Api\EpgApiController;
 use App\Http\Controllers\Api\M3uProxyApiController;
+use App\Http\Controllers\Api\PluginApiController;
 use App\Http\Controllers\Api\TvApiController;
 use App\Http\Controllers\ArrWebhookController;
 use App\Http\Controllers\DvrCallbackController;
@@ -116,6 +117,18 @@ Route::prefix('vod')->middleware('dispatcharr.auth')->group(function () {
 Route::post('dvr/callback', [DvrCallbackController::class, 'handle'])
     ->middleware(['m3u-proxy.callback', ThrottleM3uProxyCallback::class.':dvr'])
     ->name('dvr.callback');
+
+/*
+ * Plugin API endpoints (the [api_endpoints] plugin capability). Authenticated with an
+ * Xtream login in a Basic header or the JSON body; see PluginApiController.
+ */
+Route::post('plugins/{pluginId}/{endpoint}', PluginApiController::class)
+    ->where([
+        'pluginId' => '[a-z0-9][a-z0-9-]{0,99}',
+        'endpoint' => '[a-z0-9][a-z0-9_-]{0,63}',
+    ])
+    ->middleware('throttle:plugin-api')
+    ->name('api.plugins.endpoint');
 
 /*
  * Device authorization (Trakt-style pairing) - lets the TV app request a
