@@ -41,7 +41,6 @@ use App\Models\Series;
 use App\Models\StreamProfile;
 use App\Models\ViewerFavorite;
 use App\Models\ViewerWatchProgress;
-use App\Plugins\PluginManager;
 use App\Providers\VersionServiceProvider;
 use App\Services\AedExtractorService;
 use App\Services\AIOStreamsAuthorizationService;
@@ -5815,7 +5814,7 @@ class XtreamApiController extends Controller
         }
 
         try {
-            $data = app(PluginManager::class)->queryForPlaylist(
+            $data = app('App\Plugins\PluginManager')->queryForPlaylist(
                 $input['plugin_id'], $input['query'], $payload, $playlist, $playlistAuth,
             );
         } catch (HttpExceptionInterface $exception) {
