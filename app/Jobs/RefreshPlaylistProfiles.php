@@ -43,7 +43,7 @@ class RefreshPlaylistProfiles implements ShouldQueue
         // Refresh a specific profile
         if ($this->profileId) {
             $profile = PlaylistProfile::find($this->profileId);
-            if ($profile) {
+            if ($profile && $profile->supportsProviderInfo()) {
                 $this->refreshProfile($profile);
             }
 
@@ -53,7 +53,7 @@ class RefreshPlaylistProfiles implements ShouldQueue
         // Refresh all profiles for a specific playlist
         if ($this->playlistId) {
             $playlist = Playlist::find($this->playlistId);
-            if ($playlist && $playlist->profiles_enabled) {
+            if ($playlist && $playlist->profiles_enabled && $playlist->xtream) {
                 $this->refreshPlaylistProfiles($playlist);
             }
 
@@ -66,10 +66,14 @@ class RefreshPlaylistProfiles implements ShouldQueue
 
     /**
      * Refresh all profiles across all playlists.
+     *
+     * M3U-backed playlists have no provider API to query and are left out.
      */
     protected function refreshAllProfiles(): void
     {
-        $playlists = Playlist::where('profiles_enabled', true)->get();
+        $playlists = Playlist::where('profiles_enabled', true)
+            ->where('xtream', true)
+            ->get();
 
         if ($playlists->isEmpty()) {
             // If no playlists with profiles enabled, nothing to do

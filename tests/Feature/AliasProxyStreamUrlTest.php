@@ -170,6 +170,7 @@ test('proxied stream through an alias of a pooled-provider playlist keeps the pr
         'enable_proxy' => false,
         'profiles_enabled' => true,
         'available_streams' => 0,
+        'xtream' => true,
         'xtream_config' => [
             'url' => 'http://provider.example.com:8080',
             'username' => 'olduser',

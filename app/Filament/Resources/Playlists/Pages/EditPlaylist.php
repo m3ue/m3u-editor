@@ -115,6 +115,10 @@ class EditPlaylist extends EditRecord
 
         $this->saveDvrAndRequestFormData($record, $this->form->getRawState());
 
+        // M3U playlists with profiles enabled: create/sync the primary profile from
+        // the M3U URL and store the stream limit entered on the form.
+        PlaylistResource::syncM3uPrimaryProfileFromForm($record, $this->form->getRawState());
+
         if ($record->wasChanged('dynamic_groups_config')) {
             (new SyncDynamicGroups($record->id, refreshMembership: false))->handle();
             SyncDynamicGroups::queueRefresh($record->id);

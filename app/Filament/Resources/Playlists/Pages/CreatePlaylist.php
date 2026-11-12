@@ -37,6 +37,9 @@ class CreatePlaylist extends CreateRecord
     {
         $data = $this->form->getState();
 
+        // M3U playlists with profiles enabled: create the primary profile from the M3U URL
+        PlaylistResource::syncM3uPrimaryProfileFromForm($this->record, $this->form->getRawState());
+
         // Handle authentication based on the selected option
         if (isset($data['auth_option'])) {
             switch ($data['auth_option']) {

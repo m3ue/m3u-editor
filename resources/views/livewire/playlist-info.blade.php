@@ -181,7 +181,7 @@
                                 <div class="mr-1 rounded-lg bg-white p-1 ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10">
                                     <x-heroicon-s-bolt class="h-4 w-4 text-green-500" />
                                 </div>
-                                Xtream Provider Details
+                                {{ $stats['xtream_info']['title'] ?? 'Xtream Provider Details' }}
                             </h3>
 
                             <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">

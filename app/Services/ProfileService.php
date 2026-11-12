@@ -676,10 +676,16 @@ class ProfileService
 
     /**
      * Refresh provider info for all profiles in a playlist.
+     *
+     * M3U-backed playlists have no provider API to query, so their profiles are skipped.
      */
     public static function refreshAllProfiles(Playlist $playlist): array
     {
         $results = [];
+
+        if (! $playlist->xtream) {
+            return $results;
+        }
 
         foreach ($playlist->profiles()->get() as $profile) {
             $results[$profile->id] = static::refreshProfile($profile);
@@ -690,10 +696,19 @@ class ProfileService
 
     /**
      * Refresh provider info for a single profile.
+     *
+     * Returns false without any network call for profiles of M3U-backed playlists,
+     * which expose no account API (see PlaylistProfile::supportsProviderInfo()).
      */
     public static function refreshProfile(PlaylistProfile $profile): bool
     {
         try {
+            if (! $profile->supportsProviderInfo()) {
+                Log::debug("Skipping provider info refresh for profile {$profile->id}: playlist is not Xtream-backed");
+
+                return false;
+            }
+
             $xtreamConfig = $profile->xtream_config;
 
             if (! $xtreamConfig) {
@@ -832,11 +847,12 @@ class ProfileService
     /**
      * Create the primary profile from a playlist's xtream_config.
      *
-     * Called when profiles are first enabled on a playlist.
+     * Called when profiles are first enabled on a playlist. M3U playlists (xtream
+     * off, even with a stale xtream_config) are handled by ensureM3uPrimaryProfile().
      */
     public static function createPrimaryProfile(Playlist $playlist): ?PlaylistProfile
     {
-        if (! $playlist->xtream_config) {
+        if (! $playlist->xtream || ! $playlist->xtream_config) {
             return null;
         }
 
@@ -881,7 +897,9 @@ class ProfileService
      */
     public static function syncPrimaryProfile(Playlist $playlist): void
     {
-        if (! $playlist->xtream_config) {
+        // M3U playlists own their primary via ensureM3uPrimaryProfile(); a stale
+        // xtream_config left over from switching the playlist type must not overwrite it.
+        if (! $playlist->xtream || ! $playlist->xtream_config) {
             return;
         }
 
@@ -915,6 +933,83 @@ class ProfileService
                 'profile_id' => $primaryProfile->id,
             ]);
         }
+    }
+
+    /**
+     * Create the primary profile for an M3U playlist.
+     *
+     * The account's URL and credentials are parsed from the playlist's M3U URL when it
+     * carries them (get.php?username=..&password=.. or /USER/PASS/ forms). When it does
+     * not, the profile is created with blank credentials and stream URLs are parsed at
+     * stream time instead. M3U providers expose no account API, so max_streams starts
+     * at 1 and is set by the user.
+     */
+    private static function createM3uPrimaryProfile(Playlist $playlist): PlaylistProfile
+    {
+        $credentials = PlaylistProfile::parseM3uUrlCredentials($playlist->url);
+
+        return PlaylistProfile::create([
+            'playlist_id' => $playlist->id,
+            'user_id' => $playlist->user_id,
+            'name' => 'Primary Account',
+            'url' => $credentials['url'] ?? null,
+            'username' => $credentials['username'] ?? '',
+            'password' => $credentials['password'] ?? '',
+            'max_streams' => 1,
+            'priority' => 0,
+            'enabled' => true,
+            'is_primary' => true,
+        ]);
+    }
+
+    /**
+     * Ensure an M3U playlist's primary profile exists and follows its M3U URL.
+     *
+     * Called from the playlist form when a user saves an M3U playlist with profiles
+     * enabled - deliberately not from PlaylistListener, so playlists whose profiles
+     * were set up by other means never gain an auto-created primary. Xtream playlists
+     * (or profiles disabled) are left alone and return null.
+     *
+     * Credentials are only rewritten when the M3U URL carries some; a URL without
+     * credentials leaves the stored ones alone rather than blanking them. When
+     * $maxStreams is given (>= 1) it becomes the primary's stream limit, since M3U
+     * providers cannot report one.
+     */
+    public static function ensureM3uPrimaryProfile(Playlist $playlist, ?int $maxStreams = null): ?PlaylistProfile
+    {
+        if ($playlist->xtream || ! $playlist->profiles_enabled) {
+            return null;
+        }
+
+        $primaryProfile = $playlist->profiles()->where('is_primary', true)->first()
+            ?? static::createM3uPrimaryProfile($playlist);
+
+        $updates = [];
+
+        if (
+            ($credentials = PlaylistProfile::parseM3uUrlCredentials($playlist->url))
+            && ($primaryProfile->url !== $credentials['url']
+                || $primaryProfile->username !== $credentials['username']
+                || $primaryProfile->password !== $credentials['password'])
+        ) {
+            $updates = $credentials;
+        }
+
+        if ($maxStreams !== null && $maxStreams >= 1 && $primaryProfile->max_streams !== $maxStreams) {
+            $updates['max_streams'] = $maxStreams;
+        }
+
+        if ($updates) {
+            $primaryProfile->update($updates);
+
+            Log::info('Synced M3U primary profile from playlist form', [
+                'playlist_id' => $playlist->id,
+                'profile_id' => $primaryProfile->id,
+                'fields' => array_keys($updates),
+            ]);
+        }
+
+        return $primaryProfile;
     }
 
     /**
