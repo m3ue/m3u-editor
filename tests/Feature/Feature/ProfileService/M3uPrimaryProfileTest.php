@@ -182,3 +182,21 @@ it('refreshAllProfiles returns nothing for an M3U playlist', function () {
 
     Http::assertNothingSent();
 });
+
+it('manages the primary of a playlist switched from Xtream to M3U from its M3U URL, not its stale xtream_config', function () {
+    $playlist = m3uPrimaryPlaylist($this->user);
+    $playlist->update(['xtream_config' => ['url' => 'http://old-xtream.test', 'username' => 'xu', 'password' => 'xp']]);
+
+    $primary = ProfileService::ensureM3uPrimaryProfile($playlist, 3);
+
+    // The Xtream-only sync (run by PlaylistListener on every update) must not overwrite it
+    ProfileService::syncPrimaryProfile($playlist);
+
+    expect($primary)->not->toBeNull()
+        ->and($primary->fresh()->username)->toBe('puser')
+        ->and($primary->fresh()->url)->toBe('http://provider.test:8080')
+        ->and($primary->fresh()->max_streams)->toBe(3)
+        ->and(ProfileService::refreshAllProfiles($playlist))->toBe([]);
+
+    Http::assertNothingSent();
+});

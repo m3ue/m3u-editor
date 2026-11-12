@@ -53,7 +53,7 @@ class RefreshPlaylistProfiles implements ShouldQueue
         // Refresh all profiles for a specific playlist
         if ($this->playlistId) {
             $playlist = Playlist::find($this->playlistId);
-            if ($playlist && $playlist->profiles_enabled && $playlist->xtream_config) {
+            if ($playlist && $playlist->profiles_enabled && $playlist->xtream) {
                 $this->refreshPlaylistProfiles($playlist);
             }
 
@@ -72,7 +72,7 @@ class RefreshPlaylistProfiles implements ShouldQueue
     protected function refreshAllProfiles(): void
     {
         $playlists = Playlist::where('profiles_enabled', true)
-            ->whereNotNull('xtream_config')
+            ->where('xtream', true)
             ->get();
 
         if ($playlists->isEmpty()) {

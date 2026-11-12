@@ -1464,7 +1464,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->color('info')
                                 ->tooltip(__('Test credentials and auto-detect max connections'))
                                 // M3U providers expose no account API to test against
-                                ->visible(fn (?Playlist $record): bool => (bool) $record?->xtream_config)
+                                ->visible(fn (Get $get): bool => (bool) $get('xtream'))
                                 ->action(function (array $arguments, Repeater $component, Get $get, Set $set, ?Playlist $record): void {
                                     // Get the item data directly from the repeater's state
                                     $itemKey = $arguments['item'];
@@ -1541,7 +1541,7 @@ class PlaylistResource extends Resource implements CopilotResource
                             $data['playlist_id'] = $record->id;
 
                             // M3U providers: no account API to test, only normalise the entered URL/credentials
-                            if (! $record->xtream_config) {
+                            if (! $record->xtream) {
                                 return PlaylistProfile::normalizeM3uProfileInput($data);
                             }
 
@@ -1566,20 +1566,21 @@ class PlaylistResource extends Resource implements CopilotResource
                         })
                         ->mutateRelationshipDataBeforeSaveUsing(function (array $data, Get $get, $livewire, $record): array {
                             $playlist = $livewire->getRecord();
+                            $existingProfile = $record instanceof PlaylistProfile ? $record : null;
 
                             // If password is empty but we have an existing record, preserve the old password
-                            if (empty($data['password']) && $record instanceof PlaylistProfile) {
-                                $data['password'] = $record->password;
+                            if (empty($data['password']) && $existingProfile) {
+                                $data['password'] = $existingProfile->password;
                             }
 
                             // If URL is empty but we have an existing record, preserve the old URL
-                            if (empty($data['url']) && $record instanceof PlaylistProfile) {
-                                $data['url'] = $record->url;
+                            if (empty($data['url']) && $existingProfile) {
+                                $data['url'] = $existingProfile->url;
                             }
 
                             // M3U providers: no account API to test, only normalise the entered URL/credentials
-                            if (! $playlist->xtream_config) {
-                                return PlaylistProfile::normalizeM3uProfileInput($data);
+                            if (! $playlist->xtream) {
+                                return PlaylistProfile::normalizeM3uProfileInput($data, $existingProfile);
                             }
 
                             // Auto-test credentials and update max_streams if still at default

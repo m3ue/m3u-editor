@@ -266,6 +266,31 @@ it('keeps typed credentials over those in a pasted M3U URL', function () {
     expect($data)->toMatchArray(['url' => 'http://backup.test', 'username' => 'typed', 'password' => 'typedpass']);
 });
 
+it('replaces stored credentials with those of an M3U URL pasted into an existing profile', function () {
+    $existing = m3uProfileSecondary(m3uProfilePlaylist(), ['username' => 'olduser', 'password' => 'oldpass']);
+
+    // The edit form loads the stored username and password, so they arrive unchanged
+    $data = PlaylistProfile::normalizeM3uProfileInput([
+        'url' => 'http://backup.test/get.php?username=newuser&password=newpass',
+        'username' => 'olduser',
+        'password' => 'oldpass',
+    ], $existing);
+
+    expect($data)->toMatchArray(['url' => 'http://backup.test', 'username' => 'newuser', 'password' => 'newpass']);
+});
+
+it('keeps credentials edited by hand on an existing profile over a pasted M3U URL', function () {
+    $existing = m3uProfileSecondary(m3uProfilePlaylist(), ['username' => 'olduser', 'password' => 'oldpass']);
+
+    $data = PlaylistProfile::normalizeM3uProfileInput([
+        'url' => 'http://backup.test/get.php?username=newuser&password=newpass',
+        'username' => 'typed',
+        'password' => 'oldpass',
+    ], $existing);
+
+    expect($data)->toMatchArray(['username' => 'typed', 'password' => 'newpass']);
+});
+
 it('reduces a provider URL to its base', function (string $url, string $expected) {
     expect(PlaylistProfile::providerBaseUrl($url))->toBe($expected);
 })->with([
@@ -284,4 +309,16 @@ it('reports provider info support only for Xtream-backed playlists', function ()
 
     expect($m3uProfile->supportsProviderInfo())->toBeFalse()
         ->and($xtreamProfile->supportsProviderInfo())->toBeTrue();
+});
+
+it('treats a playlist switched from Xtream to M3U as M3U despite its stale xtream_config', function () {
+    $playlist = m3uProfilePlaylist([
+        'xtream_config' => ['url' => 'http://old-xtream.test', 'username' => 'xu', 'password' => 'xp'],
+    ]);
+    m3uProfilePrimary($playlist);
+    $profile = m3uProfileSecondary($playlist);
+
+    expect($profile->transformUrl('http://provider.test:8080/live/primaryuser/primarypass/123.ts'))
+        ->toBe('http://provider.test:8080/live/backupuser/backuppass/123.ts')
+        ->and($profile->supportsProviderInfo())->toBeFalse();
 });

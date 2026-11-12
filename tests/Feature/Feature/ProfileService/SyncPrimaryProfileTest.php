@@ -59,6 +59,7 @@ it('updates stale url, username and password when xtream_config changes', functi
     $playlist = Playlist::factory()->create([
         'user_id' => $this->user->id,
         'profiles_enabled' => true,
+        'xtream' => true,
         'xtream_config' => [
             'url' => 'http://new.provider.cc:8080',
             'username' => 'newuser',
@@ -93,6 +94,7 @@ it('does not update the primary profile when credentials already match', functio
     $playlist = Playlist::factory()->create([
         'user_id' => $this->user->id,
         'profiles_enabled' => true,
+        'xtream' => true,
         'xtream_config' => [
             'url' => 'http://provider.cc:8080',
             'username' => 'user',

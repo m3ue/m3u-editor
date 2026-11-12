@@ -364,7 +364,7 @@ class PlaylistProfile extends Model
      * If the profile has a custom URL, the entire base URL is replaced as well.
      *
      * Xtream playlists swap the credentials stored in xtream_config; M3U playlists
-     * have no stored provider config and go through transformM3uUrl() instead.
+     * (xtream off, even with a stale xtream_config) go through transformM3uUrl() instead.
      *
      * Only reached for direct-to-provider profiles; profiles pointing at a
      * locally-hosted playlist are resolved by resolveInternalUrl() before this
@@ -378,11 +378,15 @@ class PlaylistProfile extends Model
             return $originalUrl;
         }
 
-        if (! $playlist->xtream_config) {
+        if (! $playlist->xtream) {
             return $this->transformM3uUrl($originalUrl);
         }
 
         $sourceConfig = $playlist->xtream_config;
+
+        if (! $sourceConfig) {
+            return $originalUrl;
+        }
 
         // Extract source provider details
         $sourceBaseUrl = rtrim((string) ($sourceConfig['server'] ?? $sourceConfig['url'] ?? ''), '/');
@@ -456,7 +460,7 @@ class PlaylistProfile extends Model
      */
     public function supportsProviderInfo(): bool
     {
-        return (bool) $this->playlist?->xtream_config;
+        return (bool) $this->playlist?->xtream;
     }
 
     /**
@@ -507,11 +511,16 @@ class PlaylistProfile extends Model
             : null;
 
         if ($transformedUrl === null) {
-            Log::warning('M3U profile URL transformation did NOT match', [
+            // The stream goes out unchanged, so it plays on whichever account the URL
+            // carries (usually the primary) while the pool counts it against this profile.
+            Log::warning('M3U profile URL transformation did NOT match; stream will use the original URL and its account, not this profile', [
                 'profile_id' => $this->id,
                 'profile_name' => $this->name ?? 'N/A',
                 'playlist_id' => $this->playlist_id,
                 'primary_credentials_known' => $primaryCredentialsKnown,
+                'hint' => $primaryCredentialsKnown
+                    ? 'The stream URL does not carry the stored primary credentials. If the playlist URL changed, re-save the playlist with a URL that includes the current credentials.'
+                    : 'No credentials could be read from the stream URL.',
                 'original_url' => static::redactStreamUrl($originalUrl),
             ]);
 
@@ -673,14 +682,17 @@ class PlaylistProfile extends Model
      * Normalise the URL and credentials a user entered for an M3U-backed profile.
      *
      * The URL may be the account's full M3U URL (e.g. .../get.php?username=U&password=P):
-     * its credentials fill any blank username/password and the URL is reduced to the
-     * provider base. Otherwise the query string and a trailing file segment are dropped
-     * so the stored URL is the scheme/host/port the stream URL rewrite expects.
+     * its credentials are used and the URL is reduced to the provider base. A username
+     * or password the user typed by hand takes precedence, but on an existing profile a
+     * value that still matches the stored one was not typed (the edit form loads it), so
+     * the pasted URL's credentials replace it. Otherwise the query string and a trailing
+     * file segment are dropped so the stored URL is the scheme/host/port the stream URL
+     * rewrite expects.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public static function normalizeM3uProfileInput(array $data): array
+    public static function normalizeM3uProfileInput(array $data, ?self $existingProfile = null): array
     {
         $url = trim((string) ($data['url'] ?? ''));
 
@@ -690,8 +702,15 @@ class PlaylistProfile extends Model
 
         if ($credentials = static::parseM3uUrlCredentials($url)) {
             $data['url'] = $credentials['url'];
-            $data['username'] = filled($data['username'] ?? null) ? $data['username'] : $credentials['username'];
-            $data['password'] = filled($data['password'] ?? null) ? $data['password'] : $credentials['password'];
+
+            foreach (['username', 'password'] as $field) {
+                $enteredValue = $data[$field] ?? null;
+                $isUnchangedStoredValue = $existingProfile && $enteredValue === $existingProfile->{$field};
+
+                if (blank($enteredValue) || $isUnchangedStoredValue) {
+                    $data[$field] = $credentials[$field];
+                }
+            }
 
             return $data;
         }

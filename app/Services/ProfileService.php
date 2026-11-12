@@ -683,7 +683,7 @@ class ProfileService
     {
         $results = [];
 
-        if (! $playlist->xtream_config) {
+        if (! $playlist->xtream) {
             return $results;
         }
 
@@ -847,12 +847,12 @@ class ProfileService
     /**
      * Create the primary profile from a playlist's xtream_config.
      *
-     * Called when profiles are first enabled on a playlist. M3U playlists have
-     * no xtream_config and are handled by ensureM3uPrimaryProfile() instead.
+     * Called when profiles are first enabled on a playlist. M3U playlists (xtream
+     * off, even with a stale xtream_config) are handled by ensureM3uPrimaryProfile().
      */
     public static function createPrimaryProfile(Playlist $playlist): ?PlaylistProfile
     {
-        if (! $playlist->xtream_config) {
+        if (! $playlist->xtream || ! $playlist->xtream_config) {
             return null;
         }
 
@@ -897,7 +897,9 @@ class ProfileService
      */
     public static function syncPrimaryProfile(Playlist $playlist): void
     {
-        if (! $playlist->xtream_config) {
+        // M3U playlists own their primary via ensureM3uPrimaryProfile(); a stale
+        // xtream_config left over from switching the playlist type must not overwrite it.
+        if (! $playlist->xtream || ! $playlist->xtream_config) {
             return;
         }
 
@@ -975,7 +977,7 @@ class ProfileService
      */
     public static function ensureM3uPrimaryProfile(Playlist $playlist, ?int $maxStreams = null): ?PlaylistProfile
     {
-        if ($playlist->xtream || $playlist->xtream_config || ! $playlist->profiles_enabled) {
+        if ($playlist->xtream || ! $playlist->profiles_enabled) {
             return null;
         }
 

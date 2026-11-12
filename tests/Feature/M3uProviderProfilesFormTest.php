@@ -221,3 +221,41 @@ it('loads a saved additional profile password into the edit form so it can be re
 
     expect(collect($profiles)->firstWhere('name', 'Backup')['password'] ?? null)->toBe('backup-secret');
 })->with(['Xtream playlist' => [true], 'M3U playlist' => [false]]);
+
+it('updates an existing profile from a newly pasted M3U URL', function () {
+    $playlist = m3uProfilesFormPlaylist($this->user);
+    ProfileService::ensureM3uPrimaryProfile($playlist);
+    $backup = PlaylistProfile::factory()->forPlaylist($playlist)->create([
+        'name' => 'Backup',
+        'url' => 'http://backup.test:9000',
+        'username' => 'olduser',
+        'password' => 'oldpass',
+    ]);
+
+    $component = Livewire::test(EditPlaylist::class, ['record' => $playlist->id]);
+    $itemKey = array_key_first($component->get('data.additional_profiles'));
+
+    $component
+        ->set('data.user_agent', 'Test Agent')
+        ->set("data.additional_profiles.{$itemKey}.url", 'http://backup.test:9000/get.php?username=newuser&password=newpass&type=m3u_plus')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($backup->fresh())
+        ->url->toBe('http://backup.test:9000')
+        ->username->toBe('newuser')
+        ->password->toBe('newpass');
+});
+
+it('shows the M3U profile fields for a playlist switched from Xtream with a stale xtream_config', function () {
+    $playlist = m3uProfilesFormPlaylist($this->user);
+    $playlist->update(['xtream_config' => ['url' => 'http://old-xtream.test', 'username' => 'xu', 'password' => 'xp']]);
+
+    Livewire::test(EditPlaylist::class, ['record' => $playlist->id])
+        ->fillForm(['user_agent' => 'Test Agent', 'primary_profile_max_streams' => 4])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    // Before, the stale config made the backend skip the M3U primary and drop the limit
+    expect($playlist->profiles()->where('is_primary', true)->first()?->max_streams)->toBe(4);
+});
