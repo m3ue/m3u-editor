@@ -376,12 +376,12 @@ class XtreamApiController extends Controller
                 ->first()
             : null;
 
+        $urlSafePass = urlencode($password);
+        $urlSafeUser = urlencode($username);
+
         if ($action === 'plugin_query') {
             return $this->pluginQuery($request, $playlist, $playlistAuth);
         }
-
-        $urlSafePass = urlencode($password);
-        $urlSafeUser = urlencode($username);
 
         // Check if Custom Playlist (or Custom Playlist via Alias) as we handle these differently
         $isCustomPlaylist = $playlist instanceof CustomPlaylist || ($playlist instanceof PlaylistAlias && $playlist->custom_playlist_id);
