@@ -212,6 +212,18 @@ it('withholds the edl url when comskip is disabled for the recording', function 
     expect($response->json('info'))->not->toHaveKey('edl_url');
 });
 
+it('emits dvr_uuid for the owner without an edl, so clients can manage the recording', function () {
+    $this->setting->update(['enable_comskip' => false]);
+    $channel = dvrEdlVodChannel($this, $this->recording->id);
+    $episode = dvrEdlEpisode($this, $this->recording->id);
+
+    $vod = $this->getJson(dvrEdlApiUrl('get_vod_info', ['vod_id' => $channel->id]))->assertOk();
+    $series = $this->getJson(dvrEdlApiUrl('get_series_info', ['series_id' => $episode->series_id]))->assertOk();
+
+    expect($vod->json('info.dvr_uuid'))->toBe($this->recording->uuid)
+        ->and($series->json('episodes.1.0.dvr_uuid'))->toBe($this->recording->uuid);
+});
+
 it('honours a per-rule comskip override that disagrees with the setting', function () {
     // The old gate read DvrSetting::enable_comskip alone, but
     // DvrRecording::shouldRunComskip() lets a per-rule flag win. Setting on +

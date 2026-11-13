@@ -1434,10 +1434,7 @@ class XtreamApiController extends Controller
                                 // Omitted for ordinary episodes - see get_vod_info.
                                 ...($episode->dvr_recording_id ? ['dvr_recording' => true] : []),
                                 ...($episodeDvrRecording ? $this->dvrRecordedFields($episodeDvrRecording) : []),
-                                ...($episodeEdlUrl !== null ? [
-                                    'dvr_uuid' => $episodeDvrRecording->uuid,
-                                    'edl_url' => $episodeEdlUrl,
-                                ] : []),
+                                ...($episodeEdlUrl !== null ? ['edl_url' => $episodeEdlUrl] : []),
                             ];
                         }
                     }
@@ -1887,7 +1884,6 @@ class XtreamApiController extends Controller
 
                     $dvrEdlUrl = $this->dvrEdlUrl($dvrRecording, $username, $password);
                     if ($dvrEdlUrl !== null) {
-                        $defaultInfo['dvr_uuid'] = $dvrRecording->uuid;
                         $defaultInfo['edl_url'] = $dvrEdlUrl;
                     }
                 }
@@ -5658,14 +5654,16 @@ class XtreamApiController extends Controller
     }
 
     /**
-     * When and from which channel a library item's DVR recording was made, for
-     * clients to show alongside it. Absent fields are left out.
+     * The DVR recording behind a library item, for clients to show alongside
+     * it: its uuid (to manage it, e.g. delete_dvr_recording), and when and
+     * from which channel it was recorded. Absent fields are left out.
      *
-     * @return array{dvr_recorded_at?: string, dvr_channel_name?: string}
+     * @return array{dvr_uuid: string, dvr_recorded_at?: string, dvr_channel_name?: string}
      */
     private function dvrRecordedFields(DvrRecording $recording): array
     {
         return array_filter([
+            'dvr_uuid' => $recording->uuid,
             'dvr_recorded_at' => $recording->recordedAt()?->toIso8601String(),
             'dvr_channel_name' => $recording->sourceChannelName(),
         ], fn (?string $value): bool => $value !== null && $value !== '');
