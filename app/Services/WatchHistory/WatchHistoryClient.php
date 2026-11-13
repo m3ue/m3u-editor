@@ -11,9 +11,10 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Str;
 
 /**
- * Talks to one Trakt or SIMKL account: device sign-in, token refresh,
- * scrobbles, and reading or adding watch history. Ported from the M3U TV
- * app's TraktService / SimklService so both sides behave alike.
+ * Talks to one Trakt, SIMKL or MDBList account: device sign-in, token
+ * refresh, scrobbles, and reading or adding watch history. Ported from the
+ * M3U TV app's TraktService / SimklService / MdblistService so both sides
+ * behave alike.
  */
 abstract class WatchHistoryClient
 {
@@ -23,6 +24,17 @@ abstract class WatchHistoryClient
      */
     public const WATCHED_THRESHOLD = 80.0;
 
+    /**
+     * Where addToHistory() posts the `{movies, shows}` body.
+     */
+    protected string $historyPath = '/sync/history';
+
+    /**
+     * The response key holding the `{movies, episodes}` counts the service
+     * recognised from an addToHistory() call.
+     */
+    protected string $historyAddedKey = 'added';
+
     public function __construct(protected WatchHistoryIntegration $integration) {}
 
     public static function make(WatchHistoryIntegration $integration): self
@@ -30,6 +42,7 @@ abstract class WatchHistoryClient
         return match ($integration->provider) {
             WatchHistoryProvider::Trakt => new TraktClient($integration),
             WatchHistoryProvider::Simkl => new SimklClient($integration),
+            WatchHistoryProvider::Mdblist => new MdblistClient($integration),
         };
     }
 
@@ -130,13 +143,32 @@ abstract class WatchHistoryClient
             return 0;
         }
 
-        $response = $this->authorized(fn (string $token): Response => $this->http($token)->post('/sync/history', self::historyPayload($items)));
+        $response = $this->authorized(fn (string $token): Response => $this->http($token)->post($this->historyPath, self::historyPayload($items)));
 
         if (! $response->successful()) {
             $this->throwFor($response);
         }
 
-        return (int) $response->json('added.movies', 0) + (int) $response->json('added.episodes', 0);
+        return (int) $response->json("{$this->historyAddedKey}.movies", 0) + (int) $response->json("{$this->historyAddedKey}.episodes", 0);
+    }
+
+    /**
+     * GET a JSON endpoint as the signed-in account, throwing on failure.
+     *
+     * @param  array<string, int|string>  $query
+     * @return array<int|string, mixed>
+     */
+    protected function getJson(string $path, array $query = []): array
+    {
+        $response = $this->authorized(fn (string $token): Response => $this->http($token)->get($path, $query));
+
+        if (! $response->successful()) {
+            $this->throwFor($response);
+        }
+
+        $data = $response->json();
+
+        return is_array($data) ? $data : [];
     }
 
     /**

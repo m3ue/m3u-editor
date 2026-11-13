@@ -91,16 +91,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Watch History Trackers (Trakt, SIMKL)
+    | Watch History Trackers (Trakt, SIMKL, MDBList)
     |--------------------------------------------------------------------------
     |
     | Public client ids for the device sign-in flow, shared with the M3U TV
-    | app. Neither is a secret: Trakt signs in with PKCE and SIMKL's device
-    | flow takes no client secret. Register your own app and set these to
-    | use it instead (Trakt: https://trakt.tv/oauth/applications, SIMKL:
-    | https://simkl.com/settings/developer/ with the "TV, devices & command
-    | line" type). Changing one signs existing connections out on their next
-    | token refresh.
+    | app. None is a secret: Trakt signs in with PKCE, and the SIMKL and
+    | MDBList device flows take no client secret. Register your own app and
+    | set these to use it instead (Trakt: https://trakt.tv/oauth/applications,
+    | SIMKL: https://simkl.com/settings/developer/ with the "TV, devices &
+    | command line" type, MDBList: https://mdblist.com/developer/ with the
+    | "Device Code App" type). Changing one signs existing connections out on
+    | their next token refresh.
     |
     */
     'trakt' => [
@@ -109,6 +110,10 @@ return [
 
     'simkl' => [
         'client_id' => env('SIMKL_CLIENT_ID') ?: 'a3a6b6b8105c1df0ebce03f1c52665c4b664e7fc0368d3b4c81c94ef842f4f13',
+    ],
+
+    'mdblist' => [
+        'client_id' => env('MDBLIST_CLIENT_ID') ?: 'cATsHhss7WwiKfuocEVFrNZQgPuLJojA31UqC8rX',
     ],
 
     'stremio' => [

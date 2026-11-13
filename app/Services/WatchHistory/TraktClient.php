@@ -167,22 +167,6 @@ class TraktClient extends WatchHistoryClient
             : null;
     }
 
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function getJson(string $path): array
-    {
-        $response = $this->authorized(fn (string $token): Response => $this->http($token)->get($path));
-
-        if (! $response->successful()) {
-            $this->throwFor($response);
-        }
-
-        $data = $response->json();
-
-        return is_array($data) ? array_values($data) : [];
-    }
-
     protected function throwFor(Response $response): never
     {
         $retryAfter = match (true) {

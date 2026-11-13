@@ -6,12 +6,14 @@ enum WatchHistoryProvider: string
 {
     case Trakt = 'trakt';
     case Simkl = 'simkl';
+    case Mdblist = 'mdblist';
 
     public function getLabel(): string
     {
         return match ($this) {
             self::Trakt => 'Trakt',
             self::Simkl => 'SIMKL',
+            self::Mdblist => 'MDBList',
         };
     }
 
@@ -20,6 +22,7 @@ enum WatchHistoryProvider: string
         return match ($this) {
             self::Trakt => 'danger',
             self::Simkl => 'info',
+            self::Mdblist => 'warning',
         };
     }
 

@@ -12,6 +12,6 @@ class ListWatchHistoryIntegrations extends ListRecords
 
     public function getSubheading(): string|Htmlable|null
     {
-        return __('Send watch progress from Playlist Auths to Trakt or SIMKL, and import or export existing watch history.');
+        return __('Send watch progress from Playlist Auths to Trakt, SIMKL or MDBList, and import or export existing watch history.');
     }
 }

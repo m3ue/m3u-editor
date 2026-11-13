@@ -187,23 +187,6 @@ class SimklClient extends WatchHistoryClient
         return $response->successful() ? $response->json('user.name') : null;
     }
 
-    /**
-     * @param  array<string, string>  $query
-     * @return array<int|string, mixed>
-     */
-    private function getJson(string $path, array $query = []): array
-    {
-        $response = $this->authorized(fn (string $token): Response => $this->http($token)->get($path, $query));
-
-        if (! $response->successful()) {
-            $this->throwFor($response);
-        }
-
-        $data = $response->json();
-
-        return is_array($data) ? $data : [];
-    }
-
     protected function throwFor(Response $response): never
     {
         $error = $response->json('error');

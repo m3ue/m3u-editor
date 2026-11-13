@@ -37,6 +37,11 @@ class WatchHistoryIntegrationFactory extends Factory
         return $this->state(['provider' => WatchHistoryProvider::Simkl]);
     }
 
+    public function mdblist(): static
+    {
+        return $this->state(['provider' => WatchHistoryProvider::Mdblist]);
+    }
+
     public function disconnected(): static
     {
         return $this->state([

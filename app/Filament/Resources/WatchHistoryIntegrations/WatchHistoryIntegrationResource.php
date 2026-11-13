@@ -39,8 +39,8 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * Trakt / SIMKL accounts the server sends Playlist Auth watch progress to,
- * with on-demand import and export of existing history.
+ * Trakt, SIMKL and MDBList accounts the server sends Playlist Auth watch
+ * progress to, with on-demand import and export of existing history.
  */
 class WatchHistoryIntegrationResource extends Resource
 {
@@ -55,17 +55,17 @@ class WatchHistoryIntegrationResource extends Resource
 
     public static function getNavigationLabel(): string
     {
-        return __('Trakt & SIMKL');
+        return __('Watch Tracking');
     }
 
     public static function getModelLabel(): string
     {
-        return __('Trakt/SIMKL account');
+        return __('Watch Tracking Account');
     }
 
     public static function getPluralModelLabel(): string
     {
-        return __('Trakt & SIMKL');
+        return __('Watch Tracking');
     }
 
     public static function getNavigationGroup(): ?string
@@ -157,7 +157,7 @@ class WatchHistoryIntegrationResource extends Resource
         return $table
             ->headerActions([
                 CreateAction::make()
-                    ->label(__('Add Trakt / SIMKL'))
+                    ->label(__('Add Account'))
                     ->slideOver()
                     ->mutateDataUsing(fn (array $data): array => [...$data, 'user_id' => Auth::id()])
                     // Go straight on to signing in to the new account.
@@ -246,8 +246,8 @@ class WatchHistoryIntegrationResource extends Resource
                 ]),
             ])
             ->defaultSort('name')
-            ->emptyStateHeading(__('No Trakt or SIMKL accounts'))
-            ->emptyStateDescription(__('Add an account to send Playlist Auth watch progress to Trakt or SIMKL.'))
+            ->emptyStateHeading(__('No watch tracking accounts'))
+            ->emptyStateDescription(__('Add a Trakt, SIMKL or MDBList account to send Playlist Auth watch progress to it.'))
             ->emptyStateIcon('heroicon-o-check-badge');
     }
 

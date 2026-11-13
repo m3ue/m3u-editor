@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A Trakt or SIMKL account the server sends watch progress to on behalf of
- * the Playlist Auths attached to it (every viewer signed in with one).
+ * A Trakt, SIMKL or MDBList account the server sends watch progress to on
+ * behalf of the Playlist Auths attached to it (every viewer signed in with
+ * one).
  */
 class WatchHistoryIntegration extends Model
 {
