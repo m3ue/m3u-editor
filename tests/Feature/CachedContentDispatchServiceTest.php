@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CachedContentFileStatus;
+use App\Enums\CachedContentManagedBy;
 use App\Enums\CacheDispatchResult;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Filament\Resources\Vods\VodResource;
@@ -99,6 +100,18 @@ it('creates one Pending row keyed to the channel and queues one download', funct
         ->and($row->title)->toBe($channel->display_title);
 
     Bus::assertDispatched(DownloadCachedContentFile::class, fn (DownloadCachedContentFile $job) => $job->cachedContentFileId === $row->id);
+});
+
+it('marks only a newly dispatched managed publishing file as managed', function () {
+    $persisted = new GeneralSettings;
+    $persisted->enable_cache = true;
+    $persisted->save();
+    $channel = makeCacheableChannel();
+
+    $result = app(CachedContentDispatchService::class)->dispatchManaged($channel);
+
+    expect($result)->toBe(CacheDispatchResult::Queued)
+        ->and(CachedContentFile::sole()->managed_by)->toBe(CachedContentManagedBy::ManagedPublishing);
 });
 
 it('stamps the playlist owner even when another user triggers the dispatch', function () {

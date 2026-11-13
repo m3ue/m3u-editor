@@ -10,7 +10,10 @@ use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
 use App\Services\CachedContentDispatchService;
+use App\Services\ManagedCacheCapacityService;
 use App\Settings\GeneralSettings;
+use GuzzleHttp\Psr7\PumpStream;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -45,6 +48,45 @@ beforeEach(function () {
     // registration order), so the failure-path test's 404 stub would be
     // shadowed by the 200 wildcard. Each test sets its own Http::fake()
     // with the exact URL pattern it needs.
+});
+
+it('bounds managed provider connection and body waits below the account reservation ttl', function () {
+    $options = [];
+    Http::fake(function ($request, array $requestOptions) use (&$options) {
+        $options = $requestOptions;
+
+        return Http::response('fixture', 200);
+    });
+    $capacity = Mockery::mock(ManagedCacheCapacityService::class);
+    $capacity->shouldReceive('renew')->zeroOrMoreTimes()->andReturnTrue();
+    app()->instance(ManagedCacheCapacityService::class, $capacity);
+    $job = new DownloadCachedContentFile(1);
+    (new ReflectionProperty($job, 'managedCapacityReservation'))->setValue($job, 'synthetic-account:token');
+    $playlist = Playlist::factory()->for(User::factory())->createQuietly();
+
+    (new ReflectionMethod($job, 'fetchWithSafeRedirects'))->invoke($job, 'http://198.51.100.1/fixture.mp4', $playlist);
+
+    expect($options['timeout'])->toBeGreaterThan(0)->toBeLessThan(120)
+        ->and($options['read_timeout'] ?? 0)->toBeGreaterThan(0)->toBeLessThan(120);
+});
+
+it('does not enter a provider body read after its managed account reservation is lost', function () {
+    Storage::fake('cache');
+    $reads = 0;
+    $body = new PumpStream(function () use (&$reads) {
+        return ++$reads === 1 ? 'fixture' : false;
+    });
+    $response = new Illuminate\Http\Client\Response(new Response(200, [], $body));
+    $capacity = Mockery::mock(ManagedCacheCapacityService::class);
+    $capacity->shouldReceive('renew')->zeroOrMoreTimes()->andReturnFalse();
+    app()->instance(ManagedCacheCapacityService::class, $capacity);
+    $job = new DownloadCachedContentFile(1);
+    (new ReflectionProperty($job, 'managedCapacityReservation'))->setValue($job, 'synthetic-account:token');
+
+    (new ReflectionMethod($job, 'streamResponseToDisk'))->invoke($job, $response, Storage::disk('cache'), 'blocked.part');
+
+    expect($reads)->toBe(0)
+        ->and((new ReflectionProperty($job, 'cancelled'))->getValue($job))->toBeTrue();
 });
 
 // --- happy path ---

@@ -76,6 +76,9 @@ class StreamLocalFile
         ?string $range,
         array $extraHeaders = [],
         int $chunkSize = self::CHUNK_SIZE,
+        ?\Closure $onStart = null,
+        ?\Closure $onProgress = null,
+        ?\Closure $onFinish = null,
     ): StreamedResponse {
         $headers = [
             'Content-Type' => $mimeType,
@@ -88,18 +91,18 @@ class StreamLocalFile
             try {
                 [$start, $end, $length] = static::parseRangeOrThrow($range, $fileSize);
             } catch (InvalidRangeException) {
-                return static::rangeNotSatisfiableResponse($fileSize, $mimeType, $filename);
+                return static::rangeNotSatisfiableResponse($fileSize, $mimeType, $filename, $onFinish);
             }
 
             return response()->stream(
-                static fn () => static::streamBytes($fullPath, $start, $length, $chunkSize),
+                static fn () => static::streamBytes($fullPath, $start, $length, $chunkSize, $onStart, $onProgress, $onFinish),
                 206,
                 [...$headers, 'Content-Length' => $length, 'Content-Range' => "bytes {$start}-{$end}/{$fileSize}"],
             );
         }
 
         return response()->stream(
-            static fn () => static::streamBytes($fullPath, 0, $fileSize, $chunkSize),
+            static fn () => static::streamBytes($fullPath, 0, $fileSize, $chunkSize, $onStart, $onProgress, $onFinish),
             200,
             [...$headers, 'Content-Length' => $fileSize],
         );
@@ -109,28 +112,43 @@ class StreamLocalFile
      * Echo $length bytes of the file starting at $start, flushing each chunk
      * and stopping early once the client disconnects.
      */
-    private static function streamBytes(string $fullPath, int $start, int $length, int $chunkSize): void
-    {
-        $handle = fopen($fullPath, 'rb');
-        if ($handle === false) {
-            return;
-        }
+    private static function streamBytes(
+        string $fullPath,
+        int $start,
+        int $length,
+        int $chunkSize,
+        ?\Closure $onStart,
+        ?\Closure $onProgress,
+        ?\Closure $onFinish,
+    ): void {
+        $handle = @fopen($fullPath, 'rb');
 
-        fseek($handle, $start);
-        $remaining = $length;
-
-        while ($remaining > 0 && ! feof($handle) && connection_status() === CONNECTION_NORMAL) {
-            $data = fread($handle, min($chunkSize, $remaining));
-            if ($data === false || $data === '') {
-                break;
+        try {
+            if ($handle === false) {
+                return;
             }
 
-            echo $data;
-            flush();
-            $remaining -= strlen($data);
-        }
+            $onStart?->__invoke();
+            fseek($handle, $start);
+            $remaining = $length;
 
-        fclose($handle);
+            while ($remaining > 0 && ! feof($handle) && connection_status() === CONNECTION_NORMAL) {
+                $data = fread($handle, min($chunkSize, $remaining));
+                if ($data === false || $data === '') {
+                    break;
+                }
+
+                echo $data;
+                flush();
+                $remaining -= strlen($data);
+                $onProgress?->__invoke();
+            }
+        } finally {
+            if ($handle !== false && $handle !== null) {
+                fclose($handle);
+            }
+            $onFinish?->__invoke();
+        }
     }
 
     /**
@@ -221,7 +239,7 @@ class StreamLocalFile
      * spec - the client learns the file size from the Content-Range
      * header (bytes wildcard, then slash, then total size).
      */
-    private static function rangeNotSatisfiableResponse(int $fileSize, string $mimeType, string $filename): StreamedResponse
+    private static function rangeNotSatisfiableResponse(int $fileSize, string $mimeType, string $filename, ?\Closure $onFinish): StreamedResponse
     {
         $headers = [
             'Content-Type' => $mimeType,
@@ -230,8 +248,8 @@ class StreamLocalFile
             'Content-Disposition' => 'inline; filename="'.$filename.'"',
         ];
 
-        return response()->stream(static function (): void {
-            // 416 has no body per RFC 7233.
+        return response()->stream(static function () use ($onFinish): void {
+            $onFinish?->__invoke();
         }, 416, $headers);
     }
 }

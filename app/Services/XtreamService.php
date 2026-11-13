@@ -274,8 +274,10 @@ class XtreamService
 
     public function userInfo($timeout = 5): array
     {
-        $url = $this->server
-            ."/player_api.php?username={$this->user}&password={$this->pass}";
+        $url = $this->server.'/player_api.php?'.http_build_query([
+            'username' => $this->user,
+            'password' => $this->pass,
+        ], encoding_type: PHP_QUERY_RFC3986);
 
         return $this->call(url: $url, timeout: $timeout) ?? []; // set short timeout
     }
