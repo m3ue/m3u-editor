@@ -10,6 +10,7 @@ use App\Http\Controllers\BackupDownloadController;
 use App\Http\Controllers\CachedContentStreamController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\CustomPlaylistController;
+use App\Http\Controllers\DvrArtworkController;
 use App\Http\Controllers\DvrRecordingDownloadController;
 use App\Http\Controllers\DvrStreamController;
 use App\Http\Controllers\EpgController;
@@ -37,6 +38,7 @@ use App\Http\Controllers\WatchProgressController;
 use App\Http\Controllers\WebhookTestController;
 use App\Http\Controllers\XtreamApiController;
 use App\Http\Controllers\XtreamStreamController;
+use App\Services\DvrArtworkService;
 use App\Services\ExternalIpService;
 use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\Route;
@@ -180,6 +182,12 @@ Route::get('/dvr/signed/{uuid}/live.m3u8', [DvrStreamController::class, 'signedH
 Route::get('/dvr/signed/{uuid}.{format?}', [DvrStreamController::class, 'signedStream'])
     ->middleware(ValidateSignature::relative(['client_id']))
     ->name('dvr.recording.stream.signed');
+// Generated library artwork for DVR recordings no metadata provider matched.
+Route::get('/dvr/artwork/{kind}/{logo}.jpg', DvrArtworkController::class)
+    ->whereIn('kind', [DvrArtworkService::POSTER, DvrArtworkService::BACKDROP])
+    ->where('logo', '[A-Za-z0-9\-_]+')
+    ->middleware(ValidateSignature::relative())
+    ->name('dvr.artwork');
 Route::get('/dvr/{username}/{password}/{uuid}/live.m3u8', [DvrStreamController::class, 'hlsPlaylist'])
     ->name('dvr.recording.hls.playlist');
 Route::get('/dvr/{username}/{password}/{uuid}/edl', [DvrStreamController::class, 'edl'])

@@ -19,29 +19,7 @@ class LogoService
             return LogoCacheService::getPlaceholderUrl('logo');
         }
 
-        $logoUrl = '';
-
-        // Determine logo based on logo_type preference
-        if ($channel->logo) {
-            // Logo override takes precedence
-            $logoUrl = $channel->logo;
-        } elseif ($channel->logo_type === ChannelLogoType::Channel) {
-            $logoUrl = $channel->logo_internal;
-        } else {
-            $logoUrl = $channel->epgChannel?->icon_custom
-                ?? $channel->epgChannel?->icon
-                ?? $channel->logo
-                ?? $channel->logo_internal;
-        }
-
-        // Fallback to any available logo if preferred type is empty
-        if (empty($logoUrl)) {
-            $logoUrl = $channel->logo
-                ?? $channel->logo_internal
-                ?? $channel->epgChannel?->icon_custom
-                ?? $channel->epgChannel?->icon
-                ?? '';
-        }
+        $logoUrl = self::preferredChannelLogo($channel);
 
         // If still empty, return placeholder
         if (empty($logoUrl)) {
@@ -64,6 +42,56 @@ class LogoService
         return $playlist?->enable_logo_proxy
             ? LogoProxyController::generateProxyUrl($logoUrl, internal: true) // Don't use `PROXY_URL_OVERRIDE`, use base app url for Resource requests
             : $logoUrl;
+    }
+
+    /**
+     * The channel's logo source (URL or local path) before proxying: the logo
+     * override, then the logo its logo type prefers (channel or EPG), then
+     * any other it has. Empty when it has none.
+     */
+    public static function preferredChannelLogo($channel): string
+    {
+        // Determine logo based on logo_type preference
+        if ($channel->logo) {
+            // Logo override takes precedence
+            $logoUrl = $channel->logo;
+        } elseif ($channel->logo_type === ChannelLogoType::Channel) {
+            $logoUrl = $channel->logo_internal;
+        } else {
+            $logoUrl = $channel->epgChannel?->icon_custom
+                ?? $channel->epgChannel?->icon
+                ?? $channel->logo
+                ?? $channel->logo_internal;
+        }
+
+        // Fallback to any available logo if preferred type is empty
+        if (empty($logoUrl)) {
+            $logoUrl = $channel->logo
+                ?? $channel->logo_internal
+                ?? $channel->epgChannel?->icon_custom
+                ?? $channel->epgChannel?->icon
+                ?? '';
+        }
+
+        return (string) $logoUrl;
+    }
+
+    /**
+     * Every logo source the channel has, in the order {@see preferredChannelLogo()}
+     * picks from, for callers that can try the next one when a logo turns out
+     * to be unreachable.
+     *
+     * @return list<string>
+     */
+    public static function channelLogoCandidates($channel): array
+    {
+        return array_values(array_unique(array_filter([
+            self::preferredChannelLogo($channel),
+            $channel->logo,
+            $channel->logo_internal,
+            $channel->epgChannel?->icon_custom,
+            $channel->epgChannel?->icon,
+        ], fn (?string $logo): bool => filled($logo))));
     }
 
     /**

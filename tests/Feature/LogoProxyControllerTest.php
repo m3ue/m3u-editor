@@ -400,3 +400,32 @@ it('keys media server image urls by integration, item and type rather than the s
         ->and(LogoCacheService::sourceKeyForUrl('https://example.com/poster.jpg'))
         ->toBe('https://example.com/poster.jpg');
 });
+
+it('refuses a remote logo whose dimensions exceed the pixel limit, without caching it', function () {
+    $remoteUrl = 'https://example.com/huge-dimensions.png';
+
+    Http::fake([
+        $remoteUrl => Http::response(oversizedPng(), 200, ['Content-Type' => 'image/png']),
+    ]);
+
+    $this->get(proxyPathFor($remoteUrl).'?p=poster')->assertOk();
+
+    expect(cachedLogoFiles())->toBe([]);
+});
+
+it('caches an oversized image unresized instead of decoding it', function () {
+    $png = oversizedPng();
+
+    expect(LogoCacheService::optimize($png, 600))->toBeNull();
+});
+
+it('aborts a logo download that passes the size limit', function (int $expected, int $downloaded) {
+    LogoCacheService::downloadLimitOptions()['progress']($expected, $downloaded);
+})->throws(RuntimeException::class)->with([
+    'declared size' => [LogoCacheService::MAX_IMAGE_BYTES + 1, 0],
+    'received bytes' => [0, LogoCacheService::MAX_IMAGE_BYTES + 1],
+]);
+
+it('lets a logo download within the size limit continue', function () {
+    LogoCacheService::downloadLimitOptions()['progress'](LogoCacheService::MAX_IMAGE_BYTES, LogoCacheService::MAX_IMAGE_BYTES);
+})->throwsNoExceptions();

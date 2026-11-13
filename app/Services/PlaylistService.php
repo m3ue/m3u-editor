@@ -162,7 +162,7 @@ class PlaylistService
             $epgUrl = route('epg.generate', ['uuid' => $playlist->uuid]);
             $epgZipUrl = route('epg.generate.compressed', ['uuid' => $playlist->uuid]);
             if ($hdhrAuthPath) {
-                $hdhrUrl = route('playlist.hdhr.overview.auth', [
+                $hdhrUrl = PlaylistUrlService::credentialRoute('playlist.hdhr.overview.auth', [
                     'uuid' => $playlist->uuid,
                     'username' => $playlistAuth->username,
                     'password' => $playlistAuth->password,

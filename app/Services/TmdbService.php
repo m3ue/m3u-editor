@@ -1312,8 +1312,23 @@ class TmdbService
         });
 
         return isset($candidates[0]['file_path'])
-            ? 'https://image.tmdb.org/t/p/w500'.$candidates[0]['file_path']
+            ? self::rasterLogoUrl('https://image.tmdb.org/t/p/w500'.$candidates[0]['file_path'])
             : null;
+    }
+
+    /**
+     * [$url] with a TMDB SVG title logo swapped for the PNG rendition TMDB
+     * serves at the same path. Clients draw title logos as raster images (an
+     * SVG fails and shows the plain title instead), and resizing skips SVG.
+     * Any other URL is returned unchanged.
+     */
+    public static function rasterLogoUrl(?string $url): ?string
+    {
+        if ($url === null || ! str_starts_with($url, 'https://image.tmdb.org/')) {
+            return $url;
+        }
+
+        return preg_replace('/\.svg$/i', '.png', $url);
     }
 
     /**

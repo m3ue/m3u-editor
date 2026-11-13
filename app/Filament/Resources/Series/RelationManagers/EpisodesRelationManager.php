@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Series\RelationManagers;
 
 use App\Filament\Tables\CacheStateColumn;
+use App\Filament\Tables\DvrSourceColumn;
 use App\Filament\Tables\ProbeStatusColumn;
 use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
@@ -73,6 +74,8 @@ class EpisodesRelationManager extends RelationManager
                 TextColumn::make('title')
                     ->limit(50)
                     ->tooltip(fn ($record) => $record->title),
+
+                DvrSourceColumn::make(fn ($record): bool => (bool) $record->dvr_recording_id),
 
                 ToggleColumn::make('enabled')
                     ->label(__('Enabled')),

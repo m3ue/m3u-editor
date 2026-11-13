@@ -286,6 +286,31 @@ it('emits clearlogo in get_vod_info from channel info', function () {
     $response->assertJsonPath('info.clearlogo', 'https://image.tmdb.org/t/p/w500/logo.png');
 });
 
+it('emits a stored TMDB SVG clearlogo as its PNG rendition in get_vod_info and get_series_info', function () {
+    $group = Group::factory()->for($this->user)->create();
+    $channel = Channel::factory()->for($this->playlist)->for($group)->create([
+        'enabled' => true,
+        'is_vod' => true,
+        'last_metadata_fetch' => now(),
+        'info' => ['clearlogo' => 'https://image.tmdb.org/t/p/w500/vector-logo.svg'],
+    ]);
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'enabled' => true,
+        'tmdb_id' => 1396,
+        'metadata' => ['clearlogo' => 'https://image.tmdb.org/t/p/w500/vector-logo.svg'],
+        'last_modified' => now(),
+    ]);
+    Season::factory()->create(['series_id' => $series->id, 'season_number' => 1, 'episode_count' => 1]);
+
+    $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_vod_info', ['vod_id' => $channel->id]))
+        ->assertOk()
+        ->assertJsonPath('info.clearlogo', 'https://image.tmdb.org/t/p/w500/vector-logo.png');
+    $this->getJson(xtreamCastUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]))
+        ->assertOk()
+        ->assertJsonPath('info.clearlogo', 'https://image.tmdb.org/t/p/w500/vector-logo.png');
+});
+
 it('omits clearlogo in get_vod_info when channel info has none', function () {
     $group = Group::factory()->for($this->user)->create();
     $channel = Channel::factory()->for($this->playlist)->for($group)->create([

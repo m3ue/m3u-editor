@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Enums\ImageProfile;
 use App\Settings\GeneralSettings;
+use Closure;
 use Illuminate\Support\Facades\Image;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class LogoCacheService
@@ -14,6 +16,49 @@ class LogoCacheService
     public const CACHE_DIRECTORY = 'cached-logos';
 
     public const LEGACY_EXTENSIONLESS_PREFIX = 'logo_';
+
+    /**
+     * Largest image downloaded for the cache.
+     */
+    public const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+    /**
+     * Largest image decoded. A few-KB file can declare huge dimensions, and
+     * GD allocates the full bitmap (about 4 bytes per pixel) when decoding.
+     */
+    public const MAX_IMAGE_PIXELS = 4096 * 4096;
+
+    /**
+     * HTTP client options that abort a download once it passes
+     * {@see MAX_IMAGE_BYTES}, instead of buffering an oversized (or endless)
+     * body before checking its size.
+     *
+     * @return array{progress: Closure(int, int): void}
+     */
+    public static function downloadLimitOptions(): array
+    {
+        return [
+            'progress' => static function (int $expected, int $downloaded): void {
+                if ($expected > self::MAX_IMAGE_BYTES || $downloaded > self::MAX_IMAGE_BYTES) {
+                    throw new RuntimeException('Image exceeds '.self::MAX_IMAGE_BYTES.' bytes.');
+                }
+            },
+        ];
+    }
+
+    /**
+     * Whether an image of [$info] (getimagesize() output) is small enough to
+     * decode safely.
+     *
+     * @param  array<int|string, mixed>  $info
+     */
+    public static function withinPixelLimit(array $info): bool
+    {
+        $width = (int) ($info[0] ?? 0);
+        $height = (int) ($info[1] ?? 0);
+
+        return $width > 0 && $height > 0 && $width * $height <= self::MAX_IMAGE_PIXELS;
+    }
 
     /**
      * Extensions a cache file can carry (see normalizeExtensionFromContentType()).
@@ -280,6 +325,15 @@ class LogoCacheService
     {
         $info = @getimagesizefromstring($bytes);
         if (! is_array($info) || (int) ($info[0] ?? 0) <= $maxWidth) {
+            return null;
+        }
+
+        if (! self::withinPixelLimit($info)) {
+            Log::warning('Image too large to resize, caching original', [
+                'width' => $info[0],
+                'height' => $info[1],
+            ]);
+
             return null;
         }
 

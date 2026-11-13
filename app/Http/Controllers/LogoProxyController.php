@@ -121,6 +121,7 @@ class LogoProxyController extends Controller
             // Every redirect hop is checked, not just $url: a public host
             // could otherwise 302 the proxy onto a private address.
             $response = PrivateNetworkGuard::get($url, fn (): PendingRequest => Http::timeout(10)
+                ->withOptions(LogoCacheService::downloadLimitOptions())
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
                 ]));
@@ -131,8 +132,15 @@ class LogoProxyController extends Controller
 
             $content = $response->body();
 
-            // Check file size (limit to 5MB)
-            if (strlen($content) > 5 * 1024 * 1024) {
+            if (strlen($content) > LogoCacheService::MAX_IMAGE_BYTES) {
+                return null;
+            }
+
+            // No real logo comes near the pixel limit, so one over it is
+            // refused before it reaches the cache, where resizing would
+            // decode it. SVG has no raster size here and is sanitized below.
+            $dimensions = @getimagesizefromstring($content);
+            if (is_array($dimensions) && ! LogoCacheService::withinPixelLimit($dimensions)) {
                 return null;
             }
 

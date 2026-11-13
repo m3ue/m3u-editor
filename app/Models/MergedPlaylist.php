@@ -187,6 +187,25 @@ class MergedPlaylist extends Model
     }
 
     /**
+     * Which of a source's series rows (series, seasons or episodes, per [$table]) a merge
+     * includes, shared with merged-playlist aliases: everything when the source contributes
+     * series, and otherwise still the series the DVR created from its recordings. The
+     * include_series toggle is for provider series; a DVR recording stays reachable through
+     * the merge (see DvrAccessScope::settingIdsForPlaylist()) for as long as its source is
+     * not fully excluded, so its library series follows the same rule.
+     */
+    public static function includesSeriesFromSource(string $table): Closure
+    {
+        return fn ($query) => $query
+            ->where('merged_playlist_playlist.include_series', true)
+            ->orWhere(fn ($dvr) => $dvr
+                ->where("{$table}.import_batch_no", 'dvr')
+                ->where(fn ($included) => $included
+                    ->where('merged_playlist_playlist.include_live', true)
+                    ->orWhere('merged_playlist_playlist.include_vod', true)));
+    }
+
+    /**
      * Series rule for only_unmatched sources, shared with merged-playlist aliases: a local
      * series (with its seasons and episodes) is hidden once any of its episodes, or an episode
      * of another local copy with the same tmdb_id, is matched to an enabled provider episode of
@@ -289,7 +308,7 @@ class MergedPlaylist extends Model
             'playlist_id',
             'id',
             'playlist_id'
-        )->where('merged_playlist_playlist.include_series', true)
+        )->where(self::includesSeriesFromSource('series'))
             ->where(self::onlyUnmatchedSeries('series'));
     }
 
@@ -307,7 +326,7 @@ class MergedPlaylist extends Model
             'playlist_id',
             'id',
             'playlist_id'
-        )->where('merged_playlist_playlist.include_series', true)
+        )->where(self::includesSeriesFromSource('seasons'))
             ->where(self::onlyUnmatchedSeries('seasons'));
     }
 
@@ -320,7 +339,7 @@ class MergedPlaylist extends Model
             'playlist_id',
             'id',
             'playlist_id'
-        )->where('merged_playlist_playlist.include_series', true)
+        )->where(self::includesSeriesFromSource('episodes'))
             ->where(self::onlyUnmatchedSeries('episodes'));
     }
 

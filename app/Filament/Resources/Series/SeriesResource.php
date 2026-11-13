@@ -14,6 +14,7 @@ use App\Filament\Resources\Series\Pages\EditSeries;
 use App\Filament\Resources\Series\Pages\ListSeries;
 use App\Filament\Resources\Series\Pages\ViewSeries;
 use App\Filament\Resources\Series\RelationManagers\EpisodesRelationManager;
+use App\Filament\Tables\DvrSourceColumn;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\ProbeStreamsChunk;
@@ -158,6 +159,7 @@ class SeriesResource extends Resource implements CopilotResource
                     return $query->orWhereRaw('LOWER(series.name) LIKE ?', ['%'.strtolower($search).'%']);
                 })
                 ->sortable(),
+            DvrSourceColumn::make(fn ($record): bool => $record->import_batch_no === 'dvr'),
             TextInputColumn::make('sort')
                 ->label(__('Sort Order'))
                 ->rules(['min:0'])

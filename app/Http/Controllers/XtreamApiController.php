@@ -64,6 +64,7 @@ use App\Services\XtreamCategoryService;
 use App\Services\XtreamLoginAuthenticator;
 use App\Settings\GeneralSettings;
 use App\Support\ChannelNumber;
+use App\Support\DvrLibraryFallback;
 use App\Support\EpgProgrammeArtwork;
 use App\Support\EpisodeNumberParser;
 use App\Support\SeriesKey;
@@ -74,6 +75,7 @@ use Dedoc\Scramble\Attributes\QueryParameter;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
@@ -1119,7 +1121,7 @@ class XtreamApiController extends Controller
                         $backdropPaths = json_decode($backdropPaths, true) ?? [];
                     }
                     $backdropPaths = array_filter($backdropPaths);
-                    $clearLogo = $seriesItem->metadata['clearlogo'] ?? null;
+                    $clearLogo = TmdbService::rasterLogoUrl($seriesItem->metadata['clearlogo'] ?? null);
                     if ($playlist->enable_logo_proxy) {
                         $cover = $this->proxyImageUrl($cover, ImageProfile::Poster);
                         $backdropPaths = array_map(fn ($path) => $this->proxyImageUrl($path, ImageProfile::Backdrop), $backdropPaths);
@@ -1256,7 +1258,7 @@ class XtreamApiController extends Controller
 
             if ($dvrGranted) {
                 $seriesItem->load([
-                    'seasons.episodes.dvrRecording' => fn ($query) => $query->with(['dvrSetting', 'recordingRule']),
+                    'seasons.episodes.dvrRecording' => fn ($query) => $query->with(['dvrSetting', 'recordingRule', 'channel']),
                 ]);
             }
 
@@ -1266,7 +1268,7 @@ class XtreamApiController extends Controller
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
             $backdropPaths = array_filter($backdropPaths);
-            $clearLogo = $seriesItem->metadata['clearlogo'] ?? null;
+            $clearLogo = TmdbService::rasterLogoUrl($seriesItem->metadata['clearlogo'] ?? null);
             if ($playlist->enable_logo_proxy) {
                 $cover = $this->proxyImageUrl($cover, ImageProfile::Poster);
                 $backdropPaths = array_map(fn ($path) => $this->proxyImageUrl($path, ImageProfile::Backdrop), $backdropPaths);
@@ -1336,6 +1338,12 @@ class XtreamApiController extends Controller
                 $seriesInfo['clearlogo'] = $clearLogo;
             }
 
+            // Marks a series the DVR created, so clients can tag it as recorded.
+            // Omitted for ordinary series, keeping those payloads unchanged.
+            if ($seriesItem->import_batch_no === 'dvr') {
+                $seriesInfo['dvr_recording'] = true;
+            }
+
             // "More like this" - persisted on series->metadata['related_tmdb'] during TMDB
             // enrichment, resolved here against the playlist's own VOD/series library.
             // Absent on non-TMDB-enriched rows or when nothing in the library matches,
@@ -1390,13 +1398,17 @@ class XtreamApiController extends Controller
                                     : $episode->info['cover_big'];
                             }
 
-                            $episodeEdlUrl = $dvrGranted
+                            $episodeDvrRecording = $dvrGranted
                                 && $episode->dvrRecording
                                 && $this->dvrRecordingVisibleToCaller($episode->dvrRecording, $authMethod, $playlistAuth)
-                                ? $this->dvrEdlUrl($episode->dvrRecording, $username, $password)
+                                ? $episode->dvrRecording
+                                : null;
+                            $episodeEdlUrl = $episodeDvrRecording
+                                ? $this->dvrEdlUrl($episodeDvrRecording, $username, $password)
                                 : null;
 
-                            $episodeInfo = $episode->info ?? [];
+                            // Internal bookkeeping, not part of the wire format.
+                            $episodeInfo = Arr::except($episode->info ?? [], DvrLibraryFallback::KEY);
                             if (array_key_exists('rating', $episodeInfo)) {
                                 $episodeInfo['rating'] = TmdbRating::suppressIfLowVotes(
                                     $episodeInfo['rating'],
@@ -1419,9 +1431,11 @@ class XtreamApiController extends Controller
                                 'custom_sid' => $episode->custom_sid ?? '',
                                 'stream_id' => $episode->id,
                                 'direct_source' => '',
-                                // Omitted for ordinary episodes — see get_vod_info.
+                                // Omitted for ordinary episodes - see get_vod_info.
+                                ...($episode->dvr_recording_id ? ['dvr_recording' => true] : []),
+                                ...($episodeDvrRecording ? $this->dvrRecordedFields($episodeDvrRecording) : []),
                                 ...($episodeEdlUrl !== null ? [
-                                    'dvr_uuid' => $episode->dvrRecording->uuid,
+                                    'dvr_uuid' => $episodeDvrRecording->uuid,
                                     'edl_url' => $episodeEdlUrl,
                                 ] : []),
                             ];
@@ -1806,7 +1820,7 @@ class XtreamApiController extends Controller
                 $backdropPaths = json_decode($backdropPaths, true) ?? [];
             }
             $backdropPaths = array_filter($backdropPaths);
-            $clearLogo = $info['clearlogo'] ?? null;
+            $clearLogo = TmdbService::rasterLogoUrl($info['clearlogo'] ?? null);
             if ($playlist->enable_logo_proxy) {
                 $cover = $this->proxyImageUrl($cover, ImageProfile::Poster);
                 $movieImage = $this->proxyImageUrl($movieImage, ImageProfile::Poster);
@@ -1860,20 +1874,22 @@ class XtreamApiController extends Controller
             ];
 
             // When this library item was integrated from a DVR recording, hand
-            // back the recording's commercial-skip EDL so playback from Movies
-            // gets the same comskip support as playback from the Recordings
-            // screen — same file, so the EDL offsets apply unchanged. Keys are
-            // omitted entirely for ordinary VOD, keeping those payloads
-            // byte-identical to before.
+            // back when and where it was recorded, and the recording's
+            // commercial-skip EDL so playback from Movies gets the same comskip
+            // support as playback from the Recordings screen (same file, so the
+            // EDL offsets apply unchanged). Keys are omitted entirely for
+            // ordinary VOD, keeping those payloads byte-identical to before.
             if ($channel->dvr_recording_id && $this->canAdvertiseDvrFeature($playlist, $authMethod, $playlistAuth)) {
-                $dvrRecording = $channel->dvrRecording()->with(['dvrSetting', 'recordingRule'])->first();
-                $dvrEdlUrl = $dvrRecording && $this->dvrRecordingVisibleToCaller($dvrRecording, $authMethod, $playlistAuth)
-                    ? $this->dvrEdlUrl($dvrRecording, $username, $password)
-                    : null;
+                $dvrRecording = $channel->dvrRecording()->with(['dvrSetting', 'recordingRule', 'channel'])->first();
 
-                if ($dvrEdlUrl !== null) {
-                    $defaultInfo['dvr_uuid'] = $dvrRecording->uuid;
-                    $defaultInfo['edl_url'] = $dvrEdlUrl;
+                if ($dvrRecording && $this->dvrRecordingVisibleToCaller($dvrRecording, $authMethod, $playlistAuth)) {
+                    $defaultInfo = [...$defaultInfo, ...$this->dvrRecordedFields($dvrRecording)];
+
+                    $dvrEdlUrl = $this->dvrEdlUrl($dvrRecording, $username, $password);
+                    if ($dvrEdlUrl !== null) {
+                        $defaultInfo['dvr_uuid'] = $dvrRecording->uuid;
+                        $defaultInfo['edl_url'] = $dvrEdlUrl;
+                    }
                 }
             }
 
@@ -1902,6 +1918,12 @@ class XtreamApiController extends Controller
             // those responses stay byte-identical.
             if (! empty($clearLogo)) {
                 $defaultInfo['clearlogo'] = $clearLogo;
+            }
+
+            // Marks a movie added from a DVR recording, for every viewer (the
+            // recorded-at fields above need DVR access). Omitted for ordinary VOD.
+            if ($channel->dvr_recording_id) {
+                $defaultInfo['dvr_recording'] = true;
             }
 
             // "More like this" - persisted on channel->info['related_tmdb'] during TMDB
@@ -5633,6 +5655,20 @@ class XtreamApiController extends Controller
         $recording->delete();
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * When and from which channel a library item's DVR recording was made, for
+     * clients to show alongside it. Absent fields are left out.
+     *
+     * @return array{dvr_recorded_at?: string, dvr_channel_name?: string}
+     */
+    private function dvrRecordedFields(DvrRecording $recording): array
+    {
+        return array_filter([
+            'dvr_recorded_at' => $recording->recordedAt()?->toIso8601String(),
+            'dvr_channel_name' => $recording->sourceChannelName(),
+        ], fn (?string $value): bool => $value !== null && $value !== '');
     }
 
     /**

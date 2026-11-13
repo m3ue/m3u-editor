@@ -11,6 +11,7 @@ use App\Models\Playlist;
 use App\Models\PlaylistAuth;
 use App\Services\AIOStreamsAuthorizationService;
 use App\Services\AIOStreamsService;
+use App\Services\TmdbService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -189,7 +190,7 @@ class AIOStreamsProxyController extends Controller
     private function proxyMetaImages(array $meta): array
     {
         if (is_string($meta['clearlogo'] ?? null)) {
-            $meta['clearlogo'] = XtreamApiController::proxyImageUrl($meta['clearlogo'], ImageProfile::TitleLogo);
+            $meta['clearlogo'] = XtreamApiController::proxyImageUrl(TmdbService::rasterLogoUrl($meta['clearlogo']), ImageProfile::TitleLogo);
         }
 
         if (is_array($meta['cast_list'] ?? null)) {

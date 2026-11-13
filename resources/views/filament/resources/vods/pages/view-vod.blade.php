@@ -141,6 +141,9 @@
 
                     {{-- Metadata Badges --}}
                     <div class="flex flex-wrap items-center gap-2 text-sm">
+                        @if ($record->dvr_recording_id)
+                            <x-dvr-recording-badge :recording="$record->dvrRecording" />
+                        @endif
                         @if ($year)
                             <span class="rounded-full bg-white/10 px-3 py-1">{{ $year }}</span>
                         @endif
@@ -269,6 +272,9 @@
                     @endif
 
                     <div class="flex flex-wrap items-center gap-2 text-sm">
+                        @if ($record->dvr_recording_id)
+                            <x-dvr-recording-badge :recording="$record->dvrRecording" />
+                        @endif
                         @if ($year)
                             <span class="rounded bg-gray-200 px-2 py-1 dark:bg-gray-700">{{ $year }}</span>
                         @endif

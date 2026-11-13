@@ -70,6 +70,9 @@
 
                     {{-- Metadata Badges --}}
                     <div class="flex flex-wrap items-center gap-2 text-sm">
+                        @if ($record->import_batch_no === 'dvr')
+                            <x-dvr-recording-badge />
+                        @endif
                         @if ($record->release_date)
                             <span class="rounded-full bg-white/10 px-3 py-1">{{ $record->release_date }}</span>
                         @endif
@@ -200,6 +203,9 @@
                 {{-- Info --}}
                 <div class="flex-1 space-y-3">
                     <div class="flex flex-wrap items-center gap-2 text-sm">
+                        @if ($record->import_batch_no === 'dvr')
+                            <x-dvr-recording-badge />
+                        @endif
                         @if ($record->release_date)
                             <span class="rounded bg-gray-200 px-2 py-1 dark:bg-gray-700">{{ $record->release_date }}</span>
                         @endif

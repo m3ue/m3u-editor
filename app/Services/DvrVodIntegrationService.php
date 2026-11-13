@@ -11,10 +11,13 @@ use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\Season;
 use App\Models\Series;
+use App\Support\DvrLibraryFallback;
 use App\Support\EpisodeNumberParser;
 use Exception;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
+use Throwable;
 
 /**
  * DvrVodIntegrationService — Converts completed DVR recordings into VOD entries.
@@ -32,6 +35,7 @@ class DvrVodIntegrationService
 
     public function __construct(
         private readonly TmdbService $tmdbService,
+        private readonly DvrArtworkService $artwork,
     ) {}
 
     /**
@@ -162,9 +166,15 @@ class DvrVodIntegrationService
 
         // When no metadata is available use the clean title + recording date so
         // repeated recordings of the same show are individually identifiable.
-        $name = $tmdb['name'] ?? $tvmaze['name'] ?? ($cleanTitle.' — '.$this->formatRecordingDate($recording));
+        $name = $tmdb['name'] ?? $tvmaze['name'] ?? ($cleanTitle.' ('.$this->formatRecordingDate($recording).')');
 
         $sourceLogo = $this->resolveSourceChannelLogo($recording);
+        // A match without a poster (common for obscure titles) still gets
+        // generated art rather than the bare channel logo.
+        $hasProviderPoster = isset($tmdb['poster_url']) || ! empty($tvmaze['poster_url']);
+        $artwork = $hasProviderPoster ? null : $this->generatedArtwork($sourceLogo);
+        $generatedBackdrop = $artwork && ! isset($tmdb['backdrop_url']);
+        $poster = $tmdb['poster_url'] ?? $tvmaze['poster_url'] ?? $artwork['poster'] ?? $sourceLogo ?? null;
 
         // Find existing or prepare new channel
         $channel = Channel::where('dvr_recording_id', $recording->id)->first();
@@ -196,24 +206,50 @@ class DvrVodIntegrationService
             ?? $tvmaze['premiered']
             ?? $recording->programme_start?->toDateString();
 
-        $channel->info = [
-            'plot' => $tmdb['overview'] ?? $recording->description ?? $tvmaze['overview'] ?? null,
-            'cover_big' => $tmdb['backdrop_url'] ?? $sourceLogo ?? null,
-            'movie_image' => $tmdb['poster_url'] ?? $tvmaze['poster_url'] ?? $sourceLogo ?? null,
+        // The match's title logo, so clients have it from the first catalog
+        // load rather than only once someone opens the details. Looked up
+        // once, when the movie is added; a re-integration keeps the one it has.
+        $existingLogo = $isNew || DvrLibraryFallback::isFallback($channel->info, 'clearlogo') ? null : ($channel->info['clearlogo'] ?? null);
+        $titleLogo = ! empty($tmdb['id'])
+            ? ($existingLogo ?? ($isNew ? $this->tmdbTitleLogo((int) $tmdb['id'], ($tmdb['type'] ?? null) === 'tv' ? 'tv' : 'movie') : null))
+            : null;
+
+        $info = [
+            'plot' => $tmdb['overview'] ?? $recording->description ?? $tvmaze['overview'] ?? $recording->recordedNote(),
+            // cover_big is the poster (as for provider VOD), not the backdrop.
+            'cover_big' => $poster,
+            'movie_image' => $poster,
             'release_date' => $releaseDate,
             'tmdb_id' => $tmdb['id'] ?? null,
+            ...$this->durationInfo($recording),
+            ...array_filter([
+                'backdrop_path' => isset($tmdb['backdrop_url']) ? [$tmdb['backdrop_url']] : ($generatedBackdrop ? [$artwork['backdrop']] : null),
+                'clearlogo' => $titleLogo ?? $artwork['clearlogo'] ?? null,
+                'genre' => $tmdb ? null : ($recording->epg_programme_data['category'] ?? null),
+            ]),
         ];
 
         if ($tmdb) {
-            $channel->logo = $tmdb['poster_url'] ?? $sourceLogo;
+            $channel->logo = $tmdb['poster_url'] ?? $artwork['poster'] ?? $sourceLogo;
             if (! empty($tmdb['id'])) {
                 $channel->tmdb_id = $tmdb['id'];
             }
         } elseif (! empty($tvmaze['poster_url'])) {
             $channel->logo = $tvmaze['poster_url'];
-        } elseif ($sourceLogo) {
-            $channel->logo = $sourceLogo;
+        } elseif ($artwork || $sourceLogo) {
+            $channel->logo = $artwork['poster'] ?? $sourceLogo;
         }
+
+        // Everything not from TMDB/TVMaze is a stand-in a later TMDB match may replace.
+        $channel->info = DvrLibraryFallback::mark($info, array_keys(array_filter([
+            'plot' => ! isset($tmdb['overview']) && ($recording->description !== null || empty($tvmaze['overview'])),
+            'cover_big' => ! $hasProviderPoster,
+            'movie_image' => ! $hasProviderPoster,
+            'backdrop_path' => $generatedBackdrop,
+            'clearlogo' => $titleLogo === null && (bool) $artwork,
+            'genre' => ! $tmdb,
+            'logo' => ! $hasProviderPoster,
+        ])), ['logo' => $channel->logo]);
 
         $channel->year = $releaseDate ? substr($releaseDate, 0, 4) : null;
 
@@ -256,6 +292,8 @@ class DvrVodIntegrationService
 
         // Find-or-create the Series (always update metadata if tmdb available)
         $series = $this->findOrCreateSeries($seriesName, $playlistId, $userId, $category->id, $tmdb, $sourceLogo, $tvmaze);
+        // Episode rows fall back to generated art unless the show has a poster.
+        $artwork = isset($tmdb['poster_url']) || ! empty($tvmaze['poster_url']) ? null : $this->generatedArtwork($sourceLogo);
 
         // Find-or-create the Season
         $season = $this->findOrCreateSeason($series, $seasonNumber, $playlistId, $userId, $category->id);
@@ -286,17 +324,34 @@ class DvrVodIntegrationService
         $episode->url = $streamUrl;
         $episode->info = [
             'plot' => $tmdbEpisode['overview'] ?? $tvmazeEpisode['summary']
-                ?? $recording->description ?? $tmdb['overview'] ?? null,
+                ?? $recording->description ?? $tmdb['overview'] ?? $recording->recordedNote(),
             'release_date' => $tmdbEpisode['air_date'] ?? $tvmazeEpisode['airdate']
                 ?? $recording->programme_start?->toDateString(),
             'duration_secs' => $recording->duration_seconds,
+            ...array_intersect_key($this->durationInfo($recording), ['duration' => true]),
+            // A generated backdrop is 16:9 like an episode still, so it fits
+            // episode rows better than a poster-shaped image.
             'movie_image' => $tmdbEpisode['still_url'] ?? $tvmazeEpisode['image']
-                ?? $tmdb['poster_url'] ?? $sourceLogo ?? null,
+                ?? $tmdb['poster_url'] ?? $artwork['backdrop'] ?? $sourceLogo ?? null,
             'tmdb_id' => $tmdb['id'] ?? null,
             'season' => $seasonNumber,
         ];
+        $hasProviderEpisode = $tmdbEpisode !== null || $tvmazeEpisode !== null;
+        $episode->info = DvrLibraryFallback::mark($episode->info, array_keys(array_filter([
+            'plot' => ! $hasProviderEpisode && ($recording->description !== null || ! isset($tmdb['overview'])),
+            'movie_image' => ! isset($tmdbEpisode['still_url']) && ! isset($tvmazeEpisode['image']) && ! isset($tmdb['poster_url']),
+        ])));
+        // get_series_info reads the episode's own plot column over info['plot'].
+        $episode->plot = $episode->info['plot'];
 
         $episode->save();
+
+        // A new episode moves the series up "Recently Updated" rows, the way a
+        // newly recorded movie shows up among recently added movies.
+        if ($isNew) {
+            $series->last_modified = now();
+            $series->save();
+        }
 
         // Keep episode_count accurate so players show the season correctly.
         $season->episode_count = $season->episodes()->count();
@@ -337,7 +392,7 @@ class DvrVodIntegrationService
      * title reads "S01E03 - Subtitle" (or "S01E03 - Show Title" when no subtitle
      * is available).  Without numbering, and when no metadata was found, the
      * recording date is appended so repeated recordings of the same channel are
-     * individually identifiable (e.g. "CNN News — Apr 21, 2026").
+     * individually identifiable (e.g. "CNN News (Apr 21, 2026)").
      */
     private function buildEpisodeTitle(DvrRecording $recording): string
     {
@@ -362,7 +417,7 @@ class DvrVodIntegrationService
         );
 
         if (! $hasMetadata) {
-            return $label.' — '.$this->formatRecordingDate($recording);
+            return $label.' ('.$this->formatRecordingDate($recording).')';
         }
 
         return $label;
@@ -411,11 +466,144 @@ class DvrVodIntegrationService
     }
 
     /**
-     * Resolve a logo URL from the recording's source playlist channel.
+     * Generated poster and backdrop for a recording no metadata provider
+     * matched, with the channel logo as the title logo when it can be fetched.
+     * Null without a logo.
      *
-     * Priority:
-     *   1. Channel::logo_internal (direct M3U logo stored locally)
-     *   2. EpgChannel::icon (TVG logo from the EPG feed)
+     * @return array{poster: string, backdrop: string, clearlogo: string|null}|null
+     */
+    private function generatedArtwork(?string $sourceLogo): ?array
+    {
+        if (! $sourceLogo || ! filter_var($sourceLogo, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+
+        return [
+            'poster' => $this->artwork->url(DvrArtworkService::POSTER, $sourceLogo),
+            'backdrop' => $this->artwork->url(DvrArtworkService::BACKDROP, $sourceLogo),
+            // A logo that can't be fetched would only show as a broken image,
+            // so clients fall back to the title text instead.
+            'clearlogo' => $this->artwork->hasUsableLogo($sourceLogo) ? $sourceLogo : null,
+        ];
+    }
+
+    /**
+     * Series cover, backdrop and title logo from the channel logo: generated
+     * art when the logo is a usable URL, otherwise the logo as the cover.
+     *
+     * @param  array<string, mixed>|null  $metadata  existing series metadata to keep
+     * @return array<string, mixed>
+     */
+    private function seriesArtworkAttributes(string $sourceLogo, ?array $metadata = null): array
+    {
+        $artwork = $this->generatedArtwork($sourceLogo);
+        $attributes = $artwork
+            ? ['cover' => $artwork['poster'], 'backdrop_path' => [$artwork['backdrop']]]
+            : ['cover' => $sourceLogo];
+        $metadata ??= [];
+        if (isset($artwork['clearlogo'])) {
+            $metadata['clearlogo'] = $artwork['clearlogo'];
+        }
+
+        return [
+            ...$attributes,
+            'metadata' => DvrLibraryFallback::mark($metadata, ['cover', 'backdrop_path', 'clearlogo'], $attributes),
+        ];
+    }
+
+    /**
+     * Stores the TMDB title logo on a series that just got its match, unless
+     * it already has a real one. Clients show it on the home screen, which
+     * reads the catalog and never the details fetch that would fill it later.
+     */
+    private function applySeriesTitleLogo(Series $series, int $tmdbId): void
+    {
+        if (! DvrLibraryFallback::replaceable($series->metadata, 'clearlogo')) {
+            return;
+        }
+
+        $logo = $this->tmdbTitleLogo($tmdbId, 'tv');
+        if ($logo === null) {
+            return;
+        }
+
+        $series->metadata = DvrLibraryFallback::release([...($series->metadata ?? []), 'clearlogo' => $logo], ['clearlogo']);
+        $series->save();
+    }
+
+    /**
+     * The TMDB title logo (clearlogo) for a match: one details lookup, null
+     * when TMDB is not configured, has no logo, or the lookup fails.
+     *
+     * @param  'tv'|'movie'  $type
+     */
+    private function tmdbTitleLogo(int $tmdbId, string $type): ?string
+    {
+        if (! $this->tmdbService->isConfigured()) {
+            return null;
+        }
+
+        try {
+            $details = $type === 'tv'
+                ? $this->tmdbService->getTvSeriesDetails($tmdbId)
+                : $this->tmdbService->getMovieDetails($tmdbId);
+        } catch (Throwable $e) {
+            Log::warning('DvrVodIntegration: TMDB title logo lookup failed', ['tmdb_id' => $tmdbId, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        return filled($details['logo_url'] ?? null) ? $details['logo_url'] : null;
+    }
+
+    /**
+     * Series metadata once a TMDB match arrives for a series that had none:
+     * the TMDB blob, keeping the stand-in bookkeeping for art the match did
+     * not replace. A matched poster drops the channel-logo title logo too,
+     * so the show is not labeled with the channel.
+     *
+     * @param  array<string, mixed>|null  $metadata
+     * @param  array<string, mixed>  $tmdb
+     * @return array<string, mixed>
+     */
+    private function upgradedSeriesMetadata(?array $metadata, array $tmdb, bool $replacedBackdrop): array
+    {
+        $kept = Arr::only($metadata ?? [], ['clearlogo', DvrLibraryFallback::KEY]);
+        $hasPoster = ! empty($tmdb['poster_url']);
+        if ($hasPoster && DvrLibraryFallback::isFallback($kept, 'clearlogo')) {
+            unset($kept['clearlogo']);
+        }
+
+        return DvrLibraryFallback::release([...$tmdb, ...$kept], array_keys(array_filter([
+            'cover' => $hasPoster,
+            'backdrop_path' => $replacedBackdrop,
+            'clearlogo' => $hasPoster,
+        ])));
+    }
+
+    /**
+     * The recording's length in the Xtream info shape (`duration_secs` plus an
+     * `HH:MM:SS` `duration`), or nothing when it isn't known.
+     *
+     * @return array{duration_secs?: int, duration?: string}
+     */
+    private function durationInfo(DvrRecording $recording): array
+    {
+        $seconds = (int) $recording->duration_seconds;
+        if ($seconds <= 0) {
+            return [];
+        }
+
+        return [
+            'duration_secs' => $seconds,
+            'duration' => sprintf('%02d:%02d:%02d', intdiv($seconds, 3600), intdiv($seconds % 3600, 60), $seconds % 60),
+        ];
+    }
+
+    /**
+     * Resolve a logo from the recording's source playlist channel, in the
+     * order the rest of the app shows channel logos ({@see LogoService::channelLogoCandidates()}),
+     * skipping remote logos that can't be downloaded.
      */
     private function resolveSourceChannelLogo(DvrRecording $recording): ?string
     {
@@ -425,17 +613,19 @@ class DvrVodIntegrationService
             return null;
         }
 
-        if (! empty($channel->logo_internal)) {
-            return $channel->logo_internal;
+        // The logo the rest of the app shows for the channel, or when that one
+        // can't be downloaded (a dead provider link), the next it has, such as
+        // the EPG icon. Local and own-server logos are taken as they are: the
+        // outbound guard won't fetch them, but clients can load them.
+        $candidates = LogoService::channelLogoCandidates($channel);
+        foreach ($candidates as $logo) {
+            $isRemote = filter_var($logo, FILTER_VALIDATE_URL) && ! str_starts_with($logo, url('/'));
+            if (! $isRemote || $this->artwork->hasUsableLogo($logo)) {
+                return $logo;
+            }
         }
 
-        $epgChannel = $channel->epgChannel ?? null;
-
-        if ($epgChannel && ! empty($epgChannel->icon)) {
-            return $epgChannel->icon;
-        }
-
-        return null;
+        return $candidates[0] ?? null;
     }
 
     /**
@@ -495,25 +685,42 @@ class DvrVodIntegrationService
             'import_batch_no' => 'dvr',
         ];
 
+        // A match without a poster (common for obscure titles) still gets the
+        // generated art, marked as stand-ins a later TMDB fetch may replace.
+        $providerPoster = $tmdb ? ($tmdb['poster_url'] ?? null) : ($tvmaze['poster_url'] ?? null);
+        $standIns = ($tmdb || $tvmaze) && ! $providerPoster && $sourceLogo ? $this->seriesArtworkAttributes($sourceLogo) : [];
+
         if ($tmdb) {
-            $defaults['cover'] = $tmdb['poster_url'] ?? $sourceLogo;
+            $defaults['cover'] = $tmdb['poster_url'] ?? $standIns['cover'] ?? $sourceLogo;
+            // Clients show the backdrop on the home screen, so it is stored
+            // right away rather than on the first details fetch.
+            $backdrop = ! empty($tmdb['backdrop_url']) ? [$tmdb['backdrop_url']] : ($standIns['backdrop_path'] ?? null);
+            if ($backdrop) {
+                $defaults['backdrop_path'] = $backdrop;
+            }
             $defaults['plot'] = $tmdb['overview'] ?? null;
             $defaults['release_date'] = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? null;
-            $defaults['metadata'] = $tmdb;
+            $defaults['metadata'] = DvrLibraryFallback::release(
+                [...$tmdb, ...($standIns['metadata'] ?? [])],
+                ! empty($tmdb['backdrop_url']) ? ['backdrop_path'] : [],
+            );
             if (! empty($tmdb['id'])) {
                 $defaults['tmdb_id'] = $tmdb['id'];
             }
         } elseif ($tvmaze) {
-            $defaults['cover'] = $tvmaze['poster_url'] ?? $sourceLogo;
+            $defaults['cover'] = $tvmaze['poster_url'] ?? $standIns['cover'] ?? $sourceLogo;
+            if (isset($standIns['backdrop_path'])) {
+                $defaults['backdrop_path'] = $standIns['backdrop_path'];
+            }
             $defaults['plot'] = $tvmaze['overview'] ?? null;
             $defaults['release_date'] = $tvmaze['premiered'] ?? null;
             // Persist the TVMaze blob so that a later upgrade (or de-dup) can
             // see we already have a TVMaze identity for this series.  Stored
             // under a wrapper key to leave room for future TMDB enrichment to
             // merge in alongside without overwriting.
-            $defaults['metadata'] = ['tvmaze' => $tvmaze];
+            $defaults['metadata'] = ['tvmaze' => $tvmaze, ...($standIns['metadata'] ?? [])];
         } elseif ($sourceLogo) {
-            $defaults['cover'] = $sourceLogo;
+            $defaults = [...$defaults, ...$this->seriesArtworkAttributes($sourceLogo)];
         }
 
         // Prefer matching by tmdb_id when available — this is stable across
@@ -556,15 +763,25 @@ class DvrVodIntegrationService
                 ['playlist_id' => $playlistId, 'source_series_id' => null, 'name' => $name],
                 $defaults
             ));
+
+            if ($tmdbId !== null) {
+                $this->applySeriesTitleLogo($series, (int) $tmdbId);
+            }
         }
 
         if (! $series->wasRecentlyCreated) {
             // Update metadata if we now have TMDB data and didn't before
             if ($tmdb && empty($series->tmdb_id)) {
                 $series->cover = $tmdb['poster_url'] ?? $series->cover;
+                // Only replace a stand-in (or missing) backdrop, and only with one.
+                $replacesBackdrop = ! empty($tmdb['backdrop_url'])
+                    && DvrLibraryFallback::replaceable($series->metadata, 'backdrop_path', $series->backdrop_path);
+                if ($replacesBackdrop) {
+                    $series->backdrop_path = [$tmdb['backdrop_url']];
+                }
                 $series->plot = $tmdb['overview'] ?? $series->plot;
                 $series->release_date = $tmdb['first_air_date'] ?? $tmdb['release_date'] ?? $series->release_date;
-                $series->metadata = $tmdb;
+                $series->metadata = $this->upgradedSeriesMetadata($series->metadata, $tmdb, $replacesBackdrop);
                 // Upgrade the display name to the canonical TMDB name
                 $series->name = $name;
 
@@ -573,6 +790,10 @@ class DvrVodIntegrationService
                 }
 
                 $series->save();
+
+                if ($tmdbId !== null) {
+                    $this->applySeriesTitleLogo($series, (int) $tmdbId);
+                }
             } elseif ($tvmaze && empty($series->tmdb_id)) {
                 // TVMaze data arrived for a series that has no TMDB identity.
                 // Upgrade the canonical name to TVMaze's (passed in via $name,
@@ -602,8 +823,11 @@ class DvrVodIntegrationService
                     $changed = true;
                 }
 
-                if (empty($series->cover)) {
-                    $series->cover = $tvmaze['poster_url'] ?? $sourceLogo ?? $series->cover;
+                if (DvrLibraryFallback::replaceable($series->metadata, 'cover', $series->cover)) {
+                    $series->cover = $tvmaze['poster_url'] ?? $series->cover ?? $sourceLogo;
+                    if (! empty($tvmaze['poster_url'])) {
+                        $series->metadata = DvrLibraryFallback::release($series->metadata ?? [], ['cover']);
+                    }
                     $changed = true;
                 }
                 if (empty($series->plot)) {
@@ -618,9 +842,10 @@ class DvrVodIntegrationService
                 if ($changed) {
                     $series->save();
                 }
-            } elseif ($sourceLogo && empty($series->cover)) {
-                // Backfill the source channel logo if the series has no cover yet
-                $series->cover = $sourceLogo;
+            } elseif ($sourceLogo && (empty($series->cover) || $series->cover === $sourceLogo)) {
+                // Backfill artwork if the series has no cover yet, or only the bare
+                // channel logo an earlier integration used as its cover.
+                $series->fill($this->seriesArtworkAttributes($sourceLogo, $series->metadata));
                 $series->save();
             }
         }

@@ -216,6 +216,11 @@ return [
         'c37d08a52506',
         'bf81dd0fb63f',
 
+        // PlaylistUrlService::credentialRoute(): 'm3ucredential'.$key.'token'
+        // is an inert placeholder swapped for the rawurlencode()d credential
+        // after route() runs. Not a secret.
+        '233f9c384b05',
+
         // ── Command Injection ────────────────────────────────────────────────
         // GitInfoService::getFromGitCommands — $basePath is base_path() which
         // resolves to the server's own deployment directory; no user input

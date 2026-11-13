@@ -7,6 +7,7 @@ use App\Enums\DvrRecordingStatus;
 use App\Enums\DvrRuleType;
 use App\Events\DvrRecordingStatusEvent;
 use App\Notifications\Notification as AppNotification;
+use App\Services\PlaylistUrlService;
 use App\Services\ShowMetadataService;
 use App\Support\EpisodeNumberParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -477,6 +479,43 @@ class DvrRecording extends Model
     }
 
     /**
+     * When this was recorded: the programme's own start, else when recording
+     * actually began, else when it was scheduled to.
+     */
+    public function recordedAt(): ?Carbon
+    {
+        return $this->programme_start ?? $this->actual_start ?? $this->scheduled_start;
+    }
+
+    /**
+     * Display name of the channel this was recorded from.
+     */
+    public function sourceChannelName(): ?string
+    {
+        return $this->channel?->title ?? $this->channel?->name;
+    }
+
+    /**
+     * "Recorded Thu, Nov 12, 2026 7:00 PM on ESPN+ 58." - when (in the app's
+     * timezone) and from which channel this was recorded. Used as the library
+     * synopsis when nothing better exists, and on DVR badges in the panel.
+     */
+    public function recordedNote(): ?string
+    {
+        $recordedAt = $this->recordedAt();
+        if (! $recordedAt) {
+            return null;
+        }
+
+        $date = $recordedAt->copy()->setTimezone(config('app.timezone'))->locale(app()->getLocale())->isoFormat('llll');
+        $channel = $this->sourceChannelName();
+
+        return $channel
+            ? __('Recorded :date on :channel.', ['date' => $date, 'channel' => $channel])
+            : __('Recorded :date.', ['date' => $date]);
+    }
+
+    /**
      * Decide whether this recording is TV content (series/episode) rather than a movie.
      *
      * Priority order (first match wins):
@@ -659,10 +698,10 @@ class DvrRecording extends Model
             'playlist_id' => $playlist?->id,
             'title' => $this->display_title,
             'display_title' => $this->display_title,
-            'url' => route('dvr.recording.stream', array_merge($routeParams, ['format' => $format])),
+            'url' => PlaylistUrlService::credentialRoute('dvr.recording.stream', array_merge($routeParams, ['format' => $format])),
             'format' => $format,
             'type' => 'channel',
-            'edl_url' => route('dvr.recording.edl', $routeParams),
+            'edl_url' => PlaylistUrlService::credentialRoute('dvr.recording.edl', $routeParams),
         ];
     }
 

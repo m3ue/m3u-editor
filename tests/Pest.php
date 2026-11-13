@@ -165,3 +165,24 @@ function createEligiblePlexDvrIntegration(int $userId): MediaServerIntegration
         ]);
     });
 }
+
+/**
+ * A grayscale PNG of a few KB that declares [$side] x [$side] pixels, for
+ * checking that oversized images are refused before GD decodes them.
+ */
+function oversizedPng(int $side = 4200): string
+{
+    $deflate = deflate_init(ZLIB_ENCODING_DEFLATE);
+    $row = str_repeat("\0", $side + 1);
+    $data = '';
+    for ($y = 0; $y < $side; $y++) {
+        $data .= deflate_add($deflate, $row, ZLIB_NO_FLUSH);
+    }
+    $data .= deflate_add($deflate, '', ZLIB_FINISH);
+    $chunk = fn (string $type, string $body): string => pack('N', strlen($body)).$type.$body.pack('N', crc32($type.$body));
+
+    return "\x89PNG\r\n\x1a\n"
+        .$chunk('IHDR', pack('NNCCCCC', $side, $side, 8, 0, 0, 0, 0))
+        .$chunk('IDAT', $data)
+        .$chunk('IEND', '');
+}

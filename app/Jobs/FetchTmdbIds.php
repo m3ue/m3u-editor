@@ -13,6 +13,7 @@ use App\Services\GenreGroupReclassifyService;
 use App\Services\SyncPipelineService;
 use App\Services\TmdbService;
 use App\Settings\GeneralSettings;
+use App\Support\DvrLibraryFallback;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batch;
 use Illuminate\Bus\Batchable;
@@ -535,7 +536,8 @@ class FetchTmdbIds implements ShouldQueue
         // A full TMDB details fetch always writes related_tmdb (even as []), so its presence
         // means TMDB has already been asked. Without this, titles TMDB has no poster or
         // overview for never satisfy plot + cover and are re-fetched on every sync.
-        $hasMetadata = (! empty($info['plot']) && ! empty($info['cover_big']))
+        // A DVR recording's stand-in poster (see DvrLibraryFallback) doesn't count.
+        $hasMetadata = (! empty($info['plot']) && ! DvrLibraryFallback::replaceable($info, 'cover_big'))
             || array_key_exists('related_tmdb', $info);
 
         // Media-server syncs (Plex/Emby) can leave plot/cover populated while
@@ -641,7 +643,12 @@ class FetchTmdbIds implements ShouldQueue
             return;
         }
 
-        $title = $this->cleanTitleForSearch($channel->title_custom ?? $channel->title ?? $channel->name);
+        // A DVR movie's library title carries the air date ("Title (Nov 12, 2026)") so
+        // repeat recordings stay apart; search by the recording's own title instead.
+        $title = $this->cleanTitleForSearch($channel->title_custom
+            ?? ($channel->dvr_recording_id ? $channel->dvrRecording?->title : null)
+            ?? $channel->title
+            ?? $channel->name);
         $year = $channel->year
             ?? $channel->info['year']
             ?? TmdbService::extractYearFromTitle($title);
@@ -715,19 +722,26 @@ class FetchTmdbIds implements ShouldQueue
                     $info['imdb_id'] = $details['imdb_id'];
                 }
 
-                // Populate cover image if not already set
-                if (! empty($details['poster_url']) && empty($info['cover_big'])) {
+                // Populate cover image if not already set (or only a DVR stand-in)
+                if (! empty($details['poster_url']) && DvrLibraryFallback::replaceable($info, 'cover_big')) {
                     $info['cover_big'] = $details['poster_url'];
+                    $info = DvrLibraryFallback::release($info, ['cover_big']);
+                    if (DvrLibraryFallback::isFallback($info, 'movie_image')) {
+                        $info['movie_image'] = $details['poster_url'];
+                        $info = DvrLibraryFallback::release($info, ['movie_image']);
+                    }
                 }
 
-                // Populate plot/description if not already set
-                if (! empty($details['overview']) && empty($info['plot'])) {
+                // Populate plot/description if not already set (or only a DVR stand-in)
+                if (! empty($details['overview']) && DvrLibraryFallback::replaceable($info, 'plot')) {
                     $info['plot'] = $details['overview'];
+                    $info = DvrLibraryFallback::release($info, ['plot']);
                 }
 
-                // Populate genre if not already set (treat 'Uncategorized' as empty)
-                if (! empty($details['genres']) && (empty($info['genre']) || ($info['genre'] ?? '') === 'Uncategorized')) {
+                // Populate genre if not already set (treat 'Uncategorized' and a DVR stand-in as empty)
+                if (! empty($details['genres']) && (DvrLibraryFallback::replaceable($info, 'genre') || ($info['genre'] ?? '') === 'Uncategorized')) {
                     $info['genre'] = $details['genres'];
+                    $info = DvrLibraryFallback::release($info, ['genre']);
 
                     // Update the channel's group to match the primary TMDB genre
                     if ($this->autoCreateGroups) {
@@ -779,11 +793,13 @@ class FetchTmdbIds implements ShouldQueue
                 // Populate backdrop path
                 if (! empty($details['backdrop_url'])) {
                     $info['backdrop_path'] = [$details['backdrop_url']];
+                    $info = DvrLibraryFallback::release($info, ['backdrop_path']);
                 }
 
                 // Populate transparent title logo (clearlogo)
-                if (! empty($details['logo_url']) && (empty($info['clearlogo']) || $this->overwriteExisting)) {
+                if (! empty($details['logo_url']) && (DvrLibraryFallback::replaceable($info, 'clearlogo') || $this->overwriteExisting)) {
                     $info['clearlogo'] = $details['logo_url'];
+                    $info = DvrLibraryFallback::release($info, ['clearlogo']);
                 }
 
                 // Populate cast if available
@@ -840,12 +856,16 @@ class FetchTmdbIds implements ShouldQueue
                 }
             }
 
+            // Update logo/logo_internal from TMDB poster if they're empty (or the
+            // logo is a DVR recording's stand-in poster)
+            if (! empty($info['cover_big']) && ! DvrLibraryFallback::isFallback($info, 'cover_big')
+                && DvrLibraryFallback::replaceable($info, 'logo', $channel->logo)) {
+                $updateData['logo'] = $info['cover_big'];
+                $info = DvrLibraryFallback::release($info, ['logo']);
+            }
+
             $updateData['info'] = $info;
 
-            // Update logo/logo_internal from TMDB poster if they're empty
-            if (! empty($info['cover_big']) && empty($channel->logo)) {
-                $updateData['logo'] = $info['cover_big'];
-            }
             if (! empty($info['cover_big']) && empty($channel->logo_internal)) {
                 $updateData['logo_internal'] = $info['cover_big'];
             }
@@ -933,7 +953,8 @@ class FetchTmdbIds implements ShouldQueue
         $seriesMetadataArr = is_array($series->metadata) ? $series->metadata : [];
         // related_tmdb is written by every full TMDB details fetch (see the VOD equivalent), so
         // series TMDB has no poster or overview for still count as enriched.
-        $hasMetadata = (! empty($series->plot) && ! empty($series->cover))
+        // A DVR series' stand-in poster (see DvrLibraryFallback) doesn't count.
+        $hasMetadata = (! empty($series->plot) && ! DvrLibraryFallback::replaceable($seriesMetadataArr, 'cover', $series->cover))
             || array_key_exists('related_tmdb', $seriesMetadataArr);
 
         // Media-server syncs (Plex/Emby) can leave plot/cover populated while
@@ -1137,9 +1158,11 @@ class FetchTmdbIds implements ShouldQueue
                 }
                 $updateData['metadata'] = $metadata;
 
-                // Populate cover image if not already set
-                if (! empty($details['poster_url']) && empty($series->cover)) {
+                // Populate cover image if not already set (or only a DVR stand-in)
+                if (! empty($details['poster_url']) && DvrLibraryFallback::replaceable($metadata, 'cover', $series->cover)) {
                     $updateData['cover'] = $details['poster_url'];
+                    $metadata = DvrLibraryFallback::release($metadata, ['cover']);
+                    $updateData['metadata'] = $metadata;
                 }
 
                 // Populate plot/description if not already set
@@ -1199,11 +1222,14 @@ class FetchTmdbIds implements ShouldQueue
                 // Populate backdrop path
                 if (! empty($details['backdrop_url'])) {
                     $updateData['backdrop_path'] = json_encode([$details['backdrop_url']]);
+                    $metadata = DvrLibraryFallback::release($metadata, ['backdrop_path']);
+                    $updateData['metadata'] = $metadata;
                 }
 
                 // Populate transparent title logo (clearlogo)
-                if (! empty($details['logo_url']) && (empty($metadata['clearlogo']) || $this->overwriteExisting)) {
+                if (! empty($details['logo_url']) && (DvrLibraryFallback::replaceable($metadata, 'clearlogo') || $this->overwriteExisting)) {
                     $metadata['clearlogo'] = $details['logo_url'];
+                    $metadata = DvrLibraryFallback::release($metadata, ['clearlogo']);
                     $updateData['metadata'] = $metadata;
                 }
 
@@ -1400,14 +1426,18 @@ class FetchTmdbIds implements ShouldQueue
                     }
 
                     if (! empty($episodeData['overview'])) {
+                        // A DVR episode's EPG description or "Recorded ..." note is a stand-in.
+                        $plotIsFallback = DvrLibraryFallback::isFallback($info, 'plot');
+
                         // Set the dedicated plot column
-                        if (empty($episode->plot) || $this->overwriteExisting) {
+                        if (empty($episode->plot) || $plotIsFallback || $this->overwriteExisting) {
                             $updateData['plot'] = $episodeData['overview'];
                         }
 
                         // Also store in the info array for backward compatibility
-                        if (empty($info['plot'] ?? null) || $this->overwriteExisting) {
+                        if (empty($info['plot'] ?? null) || $plotIsFallback || $this->overwriteExisting) {
                             $info['plot'] = $episodeData['overview'];
+                            $info = DvrLibraryFallback::release($info, ['plot']);
                             $updateData['info'] = $info;
                         }
                     }
@@ -1423,6 +1453,7 @@ class FetchTmdbIds implements ShouldQueue
 
                         $info = $updateData['info'] ?? $episode->info ?? [];
                         $info['movie_image'] = $stillUrl;
+                        $info = DvrLibraryFallback::release($info, ['movie_image']);
                         $updateData['info'] = $info;
                     }
 

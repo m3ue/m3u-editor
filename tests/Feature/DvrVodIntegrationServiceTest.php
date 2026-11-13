@@ -163,7 +163,7 @@ it('creates a VOD channel when there is no TMDB metadata and no season is set', 
 
     expect($channel)->not->toBeNull()
         ->and($channel->is_vod)->toBeTrue()
-        ->and($channel->name)->toBe('Unknown Show — Jun 15, 2025')
+        ->and($channel->name)->toBe('Unknown Show (Jun 15, 2025)')
         ->and($channel->info)->toBeArray()
         ->and($channel->info['plot'])->toBe('Recorded event description')
         ->and($channel->info['tmdb_id'])->toBeNull();
@@ -299,7 +299,7 @@ it('appends recording date to episode title when no season/episode numbers and n
 
     $episode = Episode::where('dvr_recording_id', $recording->id)->firstOrFail();
 
-    expect($episode->title)->toBe('CNN News — Apr 21, 2026');
+    expect($episode->title)->toBe('CNN News (Apr 21, 2026)');
 });
 
 it('uses tvmaze metadata as fallback for series name and cover when tmdb is absent', function () {
@@ -502,7 +502,7 @@ it('uses scheduled_start as date fallback when programme_start is null', functio
 
     $channel = Channel::where('dvr_recording_id', $recording->id)->firstOrFail();
 
-    expect($channel->name)->toBe('Late Night Show — Nov 8, 2025');
+    expect($channel->name)->toBe('Late Night Show (Nov 8, 2025)');
 });
 
 // ── Fix #3: date-based episode numbers when episode is null ───────────────────

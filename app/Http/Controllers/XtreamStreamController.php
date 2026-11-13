@@ -586,7 +586,7 @@ class XtreamStreamController extends Controller
             return null;
         }
 
-        return Redirect::to(route('cached-content.stream', [
+        return Redirect::to(PlaylistUrlService::credentialRoute('cached-content.stream', [
             'username' => $username,
             'password' => $password,
             'uuid' => $cached->uuid,

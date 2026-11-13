@@ -13,6 +13,7 @@ use App\Filament\Resources\VodResource\Pages;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Filament\Resources\Vods\Pages\ViewVod;
 use App\Filament\Tables\CacheStateColumn;
+use App\Filament\Tables\DvrSourceColumn;
 use App\Filament\Tables\ProbeStatusColumn;
 use App\Forms\Components\TmdbSearchResults;
 use App\Jobs\ChannelFindAndReplace;
@@ -224,6 +225,7 @@ class VodResource extends Resource implements CopilotResource
                 })
                 ->extraAttributes(['style' => 'min-width: 350px;'])
                 ->toggleable(),
+            DvrSourceColumn::make(fn ($record): bool => (bool) $record->dvr_recording_id),
             TextInputColumn::make('sort')
                 ->label(__('Sort Order'))
                 ->rules(['min:0'])

@@ -154,4 +154,30 @@ class PlaylistUrlService
             'context' => $playlist,
         ];
     }
+
+    /**
+     * A named route's URL with `username` / `password` path segments that are
+     * always valid. route() substitutes values into the URI before encoding
+     * them, so a password containing `{x}` reads as an unfilled `{x}`
+     * placeholder and throws. The credentials go in as inert tokens and are
+     * swapped for their rawurlencode()d values afterwards.
+     *
+     * @param  array<string, mixed>  $parameters
+     */
+    public static function credentialRoute(string $name, array $parameters): string
+    {
+        $replacements = [];
+
+        foreach (['username', 'password'] as $key) {
+            if (! isset($parameters[$key])) {
+                continue;
+            }
+
+            $token = 'm3ucredential'.$key.'token';
+            $replacements[$token] = rawurlencode((string) $parameters[$key]);
+            $parameters[$key] = $token;
+        }
+
+        return strtr(route($name, $parameters), $replacements);
+    }
 }

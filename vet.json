@@ -206,16 +206,16 @@
             "hash": "tree-v2:0a26ef0d0502ddbe57b37e7af3a65ddf1d3b9d2684741c75f3fdd8f6305864cd"
         },
         "laravel/framework": {
-            "version": "v13.34.0",
-            "hash": "tree-v2:dd40bf79f1cde41e1107ae364ffbcd14879ac783109e2849c644868450705bc5"
+            "version": "v13.42.0",
+            "hash": "tree-v2:e83d2ceff9e16e7a221314e401371505fbe3c0bfbf56f0af76230eb7846852fd"
         },
         "laravel/horizon": {
             "version": "v5.47.2",
             "hash": "tree-v2:89ce8f8fce588365063239cca2798d0f61e4b9752f6bc8255c608b97c4f3a9ab"
         },
         "laravel/prompts": {
-            "version": "v0.3.22",
-            "hash": "tree-v2:6e9c301dd528b44952cf87472ee49cd9f9a2c1aac7bb26d7d105ca779fdbdad8"
+            "version": "v0.3.27",
+            "hash": "tree-v2:232313d19ffc3c32af1ed4f6657b57789ff194520d875263331f8ea0b2d306b1"
         },
         "laravel/reverb": {
             "version": "v1.10.2",

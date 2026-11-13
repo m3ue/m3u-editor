@@ -849,7 +849,7 @@ class PlaylistAlias extends Model
                 'playlist_id', // Foreign key on Series table
                 'merged_playlist_id', // Local key on PlaylistAlias table
                 'playlist_id' // Local key on merged_playlist_playlist
-            )->where('merged_playlist_playlist.include_series', true)
+            )->where(MergedPlaylist::includesSeriesFromSource('series'))
                 ->where(MergedPlaylist::onlyUnmatchedSeries('series'));
 
             if ($this->hasCategoryFilter()) {

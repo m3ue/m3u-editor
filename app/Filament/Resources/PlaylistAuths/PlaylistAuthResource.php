@@ -93,6 +93,10 @@ class PlaylistAuthResource extends Resource implements CopilotResource
             //     $query->with('playlists');
             // })
             ->columns([
+                TextColumn::make('id')
+                    ->searchable()
+                    ->toggleable()
+                    ->sortable(),
                 TextColumn::make('name')
                     ->searchable()
                     ->sortable(),

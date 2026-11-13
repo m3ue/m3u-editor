@@ -974,6 +974,33 @@ it('picks the language-ranked clearlogo from getMovieDetails', function () {
     expect($details['logo_url'])->toBe('https://image.tmdb.org/t/p/w500/en-high.png');
 });
 
+it('picks the PNG rendition of an SVG clearlogo', function () {
+    Cache::flush();
+    Http::fake([
+        'https://api.themoviedb.org/3/movie/793447*' => Http::response([
+            'id' => 793447,
+            'title' => 'The Moon and Back',
+            'credits' => ['cast' => [], 'crew' => []],
+            'videos' => ['results' => []],
+            'external_ids' => [],
+            'images' => ['logos' => [['file_path' => '/vector.svg', 'iso_639_1' => 'en', 'vote_average' => 5.0]]],
+        ], 200),
+    ]);
+
+    $details = (new TmdbService($this->settings))->getMovieDetails(793447);
+
+    expect($details['logo_url'])->toBe('https://image.tmdb.org/t/p/w500/vector.png');
+});
+
+it('swaps only TMDB SVG logo URLs for their PNG rendition', function (?string $url, ?string $expected) {
+    expect(TmdbService::rasterLogoUrl($url))->toBe($expected);
+})->with([
+    'tmdb svg' => ['https://image.tmdb.org/t/p/w500/logo.svg', 'https://image.tmdb.org/t/p/w500/logo.png'],
+    'tmdb png' => ['https://image.tmdb.org/t/p/w500/logo.png', 'https://image.tmdb.org/t/p/w500/logo.png'],
+    'other host svg' => ['https://logos.example.com/logo.svg', 'https://logos.example.com/logo.svg'],
+    'null' => [null, null],
+]);
+
 it('returns a null clearlogo when TMDB carries no logos', function () {
     Cache::flush();
     Http::fake([
