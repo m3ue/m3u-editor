@@ -557,11 +557,11 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),
 
-                Fieldset::make(__('Media Server Library Refresh'))
+                Fieldset::make(__('Media Server Library Scan'))
                     ->columnSpanFull()
                     ->schema([
                         Toggle::make('refresh_media_server')
-                            ->label(__('Refresh media server library after sync'))
+                            ->label(__('Scan media server library after sync'))
                             ->helperText(__('Automatically trigger a library scan on your media server after .strm files are synced'))
                             ->inline(false)
                             ->live(),
@@ -576,15 +576,15 @@ class StreamFileSettingResource extends Resource implements CopilotResource
                             )
                             ->searchable()
                             ->required()
-                            ->helperText(__('Select which media server to refresh (Jellyfin, Emby, or Plex)'))
+                            ->helperText(__('Select which media server to scan (Jellyfin, Emby, or Plex). Servers connected with a username and password are not listed, since scans require an admin API key.'))
                             ->hidden(fn ($get) => ! $get('refresh_media_server')),
                         TextInput::make('refresh_delay_seconds')
-                            ->label(__('Delay before refresh (seconds)'))
+                            ->label(__('Delay before scan (seconds)'))
                             ->numeric()
                             ->default(5)
                             ->minValue(0)
                             ->maxValue(300)
-                            ->helperText(__('Wait this many seconds after sync completes before triggering the library refresh'))
+                            ->helperText(__('Wait this many seconds after sync completes before triggering the library scan'))
                             ->hidden(fn ($get) => ! $get('refresh_media_server')),
                     ])
                     ->hidden(fn ($get) => ! $get('enabled')),

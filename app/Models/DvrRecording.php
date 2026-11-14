@@ -289,6 +289,23 @@ class DvrRecording extends Model
     }
 
     /**
+     * Poster of the library item this recording became: the series cover for
+     * an episode, the movie's poster otherwise. Null until the recording is
+     * in the library. May be a relative path (generated DVR art).
+     */
+    public function libraryPoster(): ?string
+    {
+        $cover = $this->vodEpisode?->series?->cover;
+        if (! empty($cover)) {
+            return $cover;
+        }
+
+        $logo = $this->vodChannel?->logo;
+
+        return ! empty($logo) ? $logo : null;
+    }
+
+    /**
      * Resolve the channel icon URL.
      * Prefers custom EPG icon, then standard EPG icon, then channel logo.
      */

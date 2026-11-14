@@ -84,7 +84,7 @@ class RefreshMediaServerLibraryJob implements ShouldBeUnique, ShouldQueue
             if ($this->notify) {
                 Notification::make()
                     ->success()
-                    ->title('Media Server Library Refresh')
+                    ->title('Media Server Library Scan')
                     ->body("Library scan triggered on \"{$this->integration->name}\".")
                     ->broadcast($this->integration->user)
                     ->sendToDatabase($this->integration->user);
@@ -98,7 +98,7 @@ class RefreshMediaServerLibraryJob implements ShouldBeUnique, ShouldQueue
             if ($this->notify) {
                 Notification::make()
                     ->danger()
-                    ->title('Media Server Library Refresh Failed')
+                    ->title('Media Server Library Scan Failed')
                     ->body("Failed to trigger library scan on \"{$this->integration->name}\": {$result['message']}")
                     ->broadcast($this->integration->user)
                     ->sendToDatabase($this->integration->user);

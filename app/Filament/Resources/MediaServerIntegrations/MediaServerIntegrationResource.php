@@ -369,7 +369,7 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->inline()
                             ->live()
                             ->helperText(fn (callable $get) => $get('auth_method') === 'user'
-                                ? __('Sign in as a regular server user. No admin access needed, but library refresh and Managed Libraries require an admin API key.')
+                                ? __('Sign in with any server user account. Syncing and scheduled syncs work fully with a regular user. An admin API key is only needed for Managed Libraries and for the "Scan media server library after sync" option in Stream File Settings.')
                                 : __('Use an API key created by a server administrator.'))
                             ->visible(fn (callable $get) => in_array($get('type'), ['emby', 'jellyfin'], true)),
 

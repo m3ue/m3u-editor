@@ -4786,7 +4786,7 @@ class XtreamApiController extends Controller
 
         $query = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->with(['channel', 'dvrSetting', 'recordingRule'])
+            ->with(['channel.epgChannel', 'dvrSetting', 'recordingRule', 'vodChannel', 'vodEpisode.series'])
             ->orderByDesc('scheduled_start')
             // Tie-breaker so limit/offset pages stay stable when recordings
             // share a start time (a series rule can schedule several airings
@@ -4825,7 +4825,7 @@ class XtreamApiController extends Controller
         $recording = DvrRecording::whereIn('dvr_setting_id', $dvrSettingIds)
             ->where('uuid', $uuid)
             ->when($playlistAuth, fn ($q) => $q->where('playlist_auth_id', $playlistAuth->id))
-            ->with(['channel', 'dvrSetting', 'recordingRule'])
+            ->with(['channel.epgChannel', 'dvrSetting', 'recordingRule', 'vodChannel', 'vodEpisode.series'])
             ->first();
 
         if (! $recording) {
@@ -5681,6 +5681,19 @@ class XtreamApiController extends Controller
      * setting advertises an EDL that was never produced (rule off, setting on)
      * and hides one that was (rule on, setting off).
      */
+    /**
+     * An image path from a DVR recording as an absolute URL: stored URLs pass
+     * through, relative paths (generated DVR art) get the Xtream base URL.
+     */
+    private function dvrImageUrl(?string $path, string $baseUrl): ?string
+    {
+        if (empty($path)) {
+            return null;
+        }
+
+        return filter_var($path, FILTER_VALIDATE_URL) ? $path : $baseUrl.'/'.ltrim($path, '/');
+    }
+
     private function dvrEdlUrl(DvrRecording $recording, string $username, string $password): ?string
     {
         if ($recording->status !== DvrRecordingStatus::Completed || ! $recording->shouldRunComskip()) {
@@ -5726,6 +5739,8 @@ class XtreamApiController extends Controller
             'status' => $recording->status->value,
             'channel_name' => $recording->channel?->title ?? $recording->channel?->name,
             'channel_id' => $recording->channel_id,
+            'channel_icon' => $this->dvrImageUrl($recording->channel_icon, $baseUrl),
+            'poster' => $this->dvrImageUrl($recording->libraryPoster(), $baseUrl),
             'scheduled_start' => $recording->scheduled_start?->toIso8601String(),
             'scheduled_end' => $recording->scheduled_end?->toIso8601String(),
             'actual_start' => $recording->actual_start?->toIso8601String(),
