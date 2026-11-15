@@ -935,9 +935,6 @@ class ProfileService
                 'provider_info_updated_at' => null,
             ]);
 
-            Cache::forget("playlist_profile:{$primaryProfile->id}:provider_info");
-            Cache::forget("pool_status_{$playlist->id}");
-
             // Fetch the new account's info, which also re-applies the expiry check.
             RefreshPlaylistProfiles::dispatch(profileId: $primaryProfile->id);
 

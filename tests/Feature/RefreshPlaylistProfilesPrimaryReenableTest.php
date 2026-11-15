@@ -6,15 +6,20 @@
  * provider stops reporting the account as expired (issue #1831).
  */
 
+use App\Events\PlaylistCreated;
+use App\Events\PlaylistUpdated;
 use App\Jobs\RefreshPlaylistProfiles;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
-    Event::fake();
+    // Fake only the playlist events (their listener would create a primary profile and
+    // start an import); model events stay live so the provider info cache hook runs.
+    Event::fake([PlaylistCreated::class, PlaylistUpdated::class]);
     config(['cache.default' => 'array']);
 
     $this->user = User::factory()->create();
@@ -31,16 +36,24 @@ beforeEach(function () {
 
 function fakeProviderExpiry(int $expiresAtTimestamp): void
 {
+    fakeProviderUserInfo([
+        'auth' => 1,
+        'status' => 'Active',
+        'exp_date' => (string) $expiresAtTimestamp,
+        'max_connections' => '2',
+        'active_cons' => '0',
+    ]);
+}
+
+/**
+ * @param  array<string, mixed>  $userInfo
+ */
+function fakeProviderUserInfo(array $userInfo): void
+{
     Http::preventStrayRequests();
     Http::fake([
         'provider.test/player_api.php*' => Http::response([
-            'user_info' => [
-                'auth' => 1,
-                'status' => 'Active',
-                'exp_date' => (string) $expiresAtTimestamp,
-                'max_connections' => '2',
-                'active_cons' => '0',
-            ],
+            'user_info' => $userInfo,
             'server_info' => [],
         ]),
     ]);
@@ -96,6 +109,53 @@ it('re-enables a primary that older releases disabled for an unlimited (exp_date
         'username' => 'user',
         'password' => 'pass',
     ]);
+
+    (new RefreshPlaylistProfiles(profileId: $primary->id))->handle();
+
+    expect($primary->refresh()->enabled)->toBeTrue();
+});
+
+it('keeps the primary disabled when the provider drops exp_date but reports the account as not authenticated', function () {
+    fakeProviderUserInfo(['auth' => 0]);
+
+    $primary = PlaylistProfile::factory()->for($this->playlist)->for($this->user)->primary()->disabled()->create([
+        'url' => 'http://provider.test',
+        'username' => 'user',
+        'password' => 'pass',
+    ]);
+
+    (new RefreshPlaylistProfiles(profileId: $primary->id))->handle();
+
+    expect($primary->refresh()->enabled)->toBeFalse();
+});
+
+it('keeps the primary disabled when the provider reports a banned status without an exp_date', function () {
+    fakeProviderUserInfo(['auth' => 1, 'status' => 'Banned']);
+
+    $primary = PlaylistProfile::factory()->for($this->playlist)->for($this->user)->primary()->disabled()->create([
+        'url' => 'http://provider.test',
+        'username' => 'user',
+        'password' => 'pass',
+    ]);
+
+    (new RefreshPlaylistProfiles(profileId: $primary->id))->handle();
+
+    expect($primary->refresh()->enabled)->toBeFalse();
+});
+
+it('checks expiry against the fresh provider info, not a stale cached copy', function () {
+    fakeProviderExpiry(now()->addMonth()->timestamp);
+
+    $primary = PlaylistProfile::factory()->for($this->playlist)->for($this->user)->primary()->disabled()->create([
+        'url' => 'http://provider.test',
+        'username' => 'user',
+        'password' => 'pass',
+    ]);
+
+    // A page view in the last minute cached the old, expired info.
+    Cache::put("playlist_profile:{$primary->id}:provider_info", [
+        'user_info' => ['auth' => 1, 'status' => 'Expired', 'exp_date' => (string) now()->subDay()->timestamp],
+    ], 60);
 
     (new RefreshPlaylistProfiles(profileId: $primary->id))->handle();
 
