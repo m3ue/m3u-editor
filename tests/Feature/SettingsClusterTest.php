@@ -109,10 +109,13 @@ it('only shows forward-only alert toggles when an alert channel is enabled', fun
             'discord_alerts_enabled' => false,
             'slack_alerts_enabled' => false,
             'telegram_alerts_enabled' => false,
+            'email_alerts_enabled' => false,
         ])
         ->assertFormFieldHidden('alerts_on_sync_invalidated')
         ->assertFormFieldVisible('alerts_on_subscription_expiring')
-        ->fillForm(['slack_alerts_enabled' => true])
+        ->fillForm(['email_alerts_enabled' => true])
+        ->assertFormFieldVisible('alerts_on_sync_invalidated')
+        ->fillForm(['email_alerts_enabled' => false, 'slack_alerts_enabled' => true])
         ->assertFormFieldVisible('alerts_on_sync_invalidated');
 });
 
