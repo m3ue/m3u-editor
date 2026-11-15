@@ -345,6 +345,12 @@ class GeneralSettings extends Settings
 
     public ?string $telegram_chat_id = null;
 
+    /** Send alerts by email, using the shared SMTP settings (Settings > SMTP) */
+    public ?bool $email_alerts_enabled = false;
+
+    /** @var array<int, string>|null Email addresses that receive alerts */
+    public ?array $email_alerts_recipients = null;
+
     /** Forward queued job failures to enabled alert channels */
     public ?bool $alerts_on_job_failed = false;
 

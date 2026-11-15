@@ -12,6 +12,7 @@ use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageNavigationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageProxySettings;
+use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Clusters\Settings\Pages\ManageSyncSettings;
 use App\Filament\Clusters\Settings\Pages\ManageTvAppSettings;
 use BackedEnum;
@@ -47,6 +48,7 @@ class SettingsCluster extends Cluster
             ManageSyncSettings::class,
             ManageAssetSettings::class,
             ManageBackupSettings::class,
+            ManageSmtpSettings::class,
             ManageApiSettings::class,
             ManageCacheSettings::class,
             ManageIntegrationSettings::class,

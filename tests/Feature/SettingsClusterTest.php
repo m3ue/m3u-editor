@@ -10,6 +10,7 @@ use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageNavigationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageProxySettings;
+use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Clusters\Settings\Pages\ManageSyncSettings;
 use App\Filament\Clusters\Settings\Pages\ManageTvAppSettings;
 use App\Filament\Clusters\Settings\SettingsCluster;
@@ -18,7 +19,6 @@ use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
 use App\Jobs\RestartQueue;
 use App\Models\User;
 use App\Settings\GeneralSettings;
-use Filament\Actions\Testing\TestAction;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Bus;
@@ -32,6 +32,7 @@ $allPages = [
     ManageSyncSettings::class,
     ManageAssetSettings::class,
     ManageBackupSettings::class,
+    ManageSmtpSettings::class,
     ManageApiSettings::class,
     ManageCacheSettings::class,
     ManageIntegrationSettings::class,
@@ -70,11 +71,13 @@ it('saves each page independently without wiping keys owned by other pages', fun
     $settings->tmdb_rate_limit = 40;
     $settings->save();
 
+    Livewire::test(ManageSmtpSettings::class)
+        ->fillForm(['smtp_host' => 'smtp.example.com'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
     Livewire::test(ManageAlertSettings::class)
-        ->fillForm([
-            'discord_alerts_enabled' => true,
-            'smtp_host' => 'smtp.example.com',
-        ])
+        ->fillForm(['discord_alerts_enabled' => true])
         ->call('save')
         ->assertHasNoFormErrors();
 
@@ -118,10 +121,6 @@ it('hides the proxy page when the proxy integration is disabled', function () {
         ->and(ManageProxySettings::shouldRegisterNavigation())->toBeFalse();
 });
 
-it('places SMTP settings in the Alerts email tab', function () {
-    expect(activeSettingsTab(ManageAlertSettings::class, 'email'))->toBe(4);
-});
-
 it('shows only the header actions that belong to each settings sub-page', function (string $page, array $expected) {
     $maintenanceActions = ['test_websocket', 'clear_expired_logo_cache', 'clear_logo_cache', 'reset_queue'];
 
@@ -142,6 +141,7 @@ it('shows only the header actions that belong to each settings sub-page', functi
     'sync' => [ManageSyncSettings::class, ['reset_queue']],
     'assets' => [ManageAssetSettings::class, ['manage_assets', 'clear_expired_logo_cache', 'clear_logo_cache']],
     'backups' => [ManageBackupSettings::class, ['manage_backups']],
+    'smtp' => [ManageSmtpSettings::class, ['send_test_email']],
     'api' => [ManageApiSettings::class, ['manage_api_keys', 'view_api_docs']],
     'cache' => [ManageCacheSettings::class, ['manage_cached_items']],
     'integrations' => [ManageIntegrationSettings::class, []],
@@ -171,13 +171,10 @@ it('only links to cached items while caching is enabled', function () {
         ->assertActionHasUrl('manage_cached_items', CachedContentFileResource::getUrl());
 });
 
-it('sends the SMTP test email from the Alerts email tab using the form state', function () {
-    Livewire::test(ManageAlertSettings::class)
+it('sends the SMTP test email from the page header using the form state', function () {
+    Livewire::test(ManageSmtpSettings::class)
         ->fillForm(['smtp_host' => null, 'smtp_port' => null])
-        ->callAction(
-            TestAction::make('send_test_email')->schemaComponent('email-settings'),
-            ['to_email' => 'admin@example.com'],
-        )
+        ->callAction('send_test_email', ['to_email' => 'admin@example.com'])
         ->assertNotified(__('Missing SMTP Fields'));
 });
 

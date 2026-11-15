@@ -1,7 +1,10 @@
 <?php
 
 use App\Filament\Clusters\Settings\Pages\ManageAlertSettings;
+use App\Mail\AlertMail;
 use App\Models\User;
+use App\Services\AlertService;
+use App\Settings\GeneralSettings;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Livewire;
@@ -10,34 +13,77 @@ beforeEach(function () {
     $this->actingAs(User::factory()->admin()->create());
 });
 
-it('sends a test email when no SMTP authentication is configured', function () {
-    Mail::fake();
+function configureSavedSmtp(?string $host = 'relay.example.com', ?int $port = 25): void
+{
+    $settings = app(GeneralSettings::class);
+    $settings->smtp_host = $host;
+    $settings->smtp_port = $port;
+    $settings->save();
+}
 
+it('saves the email alert toggle and recipients', function () {
     Livewire::test(ManageAlertSettings::class)
         ->fillForm([
-            'smtp_host' => 'relay.example.com',
-            'smtp_port' => 25,
-            'smtp_username' => null,
-            'smtp_password' => null,
-            'smtp_from_address' => 'no-reply@example.com',
-            'smtp_encryption' => null,
+            'email_alerts_enabled' => true,
+            'email_alerts_recipients' => ['owner@example.com', 'ops@example.com'],
         ])
-        ->callAction(
-            TestAction::make('send_test_email')->schemaComponent('email-settings'),
-            ['to_email' => 'recipient@example.com'],
-        )
-        ->assertNotified(__('Test Email Sent'));
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $settings = app(GeneralSettings::class);
+    $settings->refresh();
+
+    expect($settings->email_alerts_enabled)->toBeTrue()
+        ->and($settings->email_alerts_recipients)->toBe(['owner@example.com', 'ops@example.com']);
 });
 
-it('still requires host and port before sending a test email', function () {
+it('rejects invalid recipient addresses', function () {
     Livewire::test(ManageAlertSettings::class)
         ->fillForm([
-            'smtp_host' => null,
-            'smtp_port' => null,
+            'email_alerts_enabled' => true,
+            'email_alerts_recipients' => ['not-an-email'],
         ])
-        ->callAction(
-            TestAction::make('send_test_email')->schemaComponent('email-settings'),
-            ['to_email' => 'recipient@example.com'],
-        )
-        ->assertNotified(__('Missing SMTP Fields'));
+        ->call('save')
+        ->assertHasFormErrors(['email_alerts_recipients.0']);
+});
+
+it('requires a recipient when email alerts are enabled', function () {
+    Livewire::test(ManageAlertSettings::class)
+        ->fillForm([
+            'email_alerts_enabled' => true,
+            'email_alerts_recipients' => [],
+        ])
+        ->call('save')
+        ->assertHasFormErrors(['email_alerts_recipients']);
+});
+
+it('sends a test alert email to the entered recipients', function () {
+    Mail::fake();
+    configureSavedSmtp();
+
+    Livewire::test(ManageAlertSettings::class)
+        ->fillForm([
+            'email_alerts_enabled' => true,
+            'email_alerts_recipients' => ['owner@example.com'],
+        ])
+        ->callAction(TestAction::make('test_email_alert')->schemaComponent('email-alerts'))
+        ->assertNotified(__('Test Alert Sent'));
+
+    Mail::assertSent(AlertMail::class, fn (AlertMail $mail): bool => $mail->hasTo('owner@example.com')
+        && $mail->emailSubject === AlertService::EMAIL_SUBJECT);
+});
+
+it('warns instead of sending a test alert when smtp is not configured', function () {
+    Mail::fake();
+    configureSavedSmtp(host: null, port: null);
+
+    Livewire::test(ManageAlertSettings::class)
+        ->fillForm([
+            'email_alerts_enabled' => true,
+            'email_alerts_recipients' => ['owner@example.com'],
+        ])
+        ->callAction(TestAction::make('test_email_alert')->schemaComponent('email-alerts'))
+        ->assertNotified(__('SMTP Not Configured'));
+
+    Mail::assertNothingSent();
 });

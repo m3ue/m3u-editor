@@ -2,12 +2,10 @@
 
 namespace App\Services;
 
-use App\Mail\AlertMail;
+use App\Jobs\SendAlertEmail;
 use App\Notifications\TelegramAlert;
 use App\Settings\GeneralSettings;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
 use Spatie\DiscordAlerts\Facades\DiscordAlert;
 use Spatie\SlackAlerts\Facades\SlackAlert;
@@ -15,13 +13,18 @@ use Throwable;
 
 class AlertService
 {
-    public function __construct(private readonly GeneralSettings $settings) {}
+    public const EMAIL_SUBJECT = 'm3u editor alert';
+
+    public function __construct(
+        private readonly GeneralSettings $settings,
+        private readonly SmtpMailService $smtp,
+    ) {}
 
     /**
-     * Send a message to all enabled alert channels and an optional email recipient.
+     * Send a message to all enabled alert channels (Discord, Slack, Telegram and/or Email).
      * Silently ignores failures to avoid cascading errors.
      */
-    public function send(string $message, ?string $email = null, ?string $subject = null): void
+    public function send(string $message): void
     {
         if ($this->settings->discord_alerts_enabled && ! empty($this->settings->discord_webhook_url)) {
             try {
@@ -48,13 +51,9 @@ class AlertService
             }
         }
 
-        if ($email && $this->smtpConfigured()) {
+        if ($this->emailConfigured()) {
             try {
-                $this->configureSmtp();
-                Mail::to($email)->send(new AlertMail(
-                    emailSubject: $subject ?? 'm3u editor alert',
-                    body: $message,
-                ));
+                SendAlertEmail::dispatch($this->emailRecipients(), self::EMAIL_SUBJECT, $message);
             } catch (Throwable) {
                 // Silently ignore.
             }
@@ -64,12 +63,12 @@ class AlertService
     /**
      * Returns true if at least one alert channel is configured and enabled.
      */
-    public function isEnabled(?string $email = null): bool
+    public function isEnabled(): bool
     {
         return ($this->settings->discord_alerts_enabled && ! empty($this->settings->discord_webhook_url))
             || ($this->settings->slack_alerts_enabled && ! empty($this->settings->slack_webhook_url))
             || $this->telegramConfigured()
-            || ($email && $this->smtpConfigured());
+            || $this->emailConfigured();
     }
 
     /**
@@ -82,21 +81,25 @@ class AlertService
             && ! empty($this->settings->telegram_chat_id);
     }
 
-    private function smtpConfigured(): bool
+    /**
+     * Returns true if email alerts are enabled, have at least one recipient,
+     * and the shared SMTP settings are filled in.
+     */
+    private function emailConfigured(): bool
     {
-        return ! empty($this->settings->smtp_host)
-            && ! empty($this->settings->smtp_port);
+        return $this->settings->email_alerts_enabled
+            && $this->emailRecipients() !== []
+            && $this->smtp->isConfigured();
     }
 
-    private function configureSmtp(): void
+    /**
+     * @return array<int, string>
+     */
+    private function emailRecipients(): array
     {
-        Config::set('mail.default', 'smtp');
-        Config::set('mail.from.address', $this->settings->smtp_from_address ?? 'no-reply@m3u-editor.dev');
-        Config::set('mail.from.name', 'm3u editor');
-        Config::set('mail.mailers.smtp.host', $this->settings->smtp_host);
-        Config::set('mail.mailers.smtp.username', $this->settings->smtp_username);
-        Config::set('mail.mailers.smtp.password', $this->settings->smtp_password);
-        Config::set('mail.mailers.smtp.port', $this->settings->smtp_port);
-        Config::set('mail.mailers.smtp.encryption', $this->settings->smtp_encryption);
+        return array_values(array_filter(
+            array_map('trim', (array) ($this->settings->email_alerts_recipients ?? [])),
+            fn (string $address): bool => $address !== '',
+        ));
     }
 }

@@ -2,6 +2,7 @@
 
 use App\Filament\Clusters\Settings\Pages\ManageAlertSettings;
 use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
+use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Pages\M3uProxyStreamMonitor;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Models\Playlist;
@@ -96,27 +97,11 @@ it('marks webhook url inputs as privacy sensitive', function (string $field) {
 })->with(['discord_webhook_url', 'slack_webhook_url']);
 
 it('marks the smtp username input as privacy sensitive', function () {
-    $flatten = function ($components) use (&$flatten): array {
-        $fields = [];
-
-        foreach ($components as $component) {
-            $fields[] = $component;
-
-            if (method_exists($component, 'getChildComponents')) {
-                $fields = array_merge($fields, $flatten($component->getChildComponents()));
-            }
-        }
-
-        return $fields;
-    };
-
-    $page = Livewire::test(ManageAlertSettings::class);
-    $field = collect($flatten($page->instance()->form->getComponents()))
-        ->first(fn ($component): bool => method_exists($component, 'getName') && $component->getName() === 'smtp_username');
-
-    expect($field)->not->toBeNull()
-        ->and((string) $field->getExtraInputAttributeBag()->get('class'))
-        ->toContain('privacy-sensitive');
+    Livewire::test(ManageSmtpSettings::class)
+        ->assertFormFieldExists('smtp_username', fn ($component): bool => str_contains(
+            (string) $component->getExtraInputAttributeBag()->get('class'),
+            'privacy-sensitive',
+        ));
 });
 
 it('shows stream monitor urls unblurred by the legacy toggle when privacy mode is on', function () {
