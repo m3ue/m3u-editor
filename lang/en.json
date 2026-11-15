@@ -7672,5 +7672,14 @@
     "{1} :count league selected|[2,*] :count leagues selected": "{1} :count league selected|[2,*] :count leagues selected",
     "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.": "{1}:matched of :total channel matched. Review and apply below.|[2,*]:matched of :total channels matched. Review and apply below.",
     "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.": "{1}:name was already pointing at that replacement channel and has been unset.|[2,*]:count source channels were pointing at that replacement channel and have been unset.",
-    "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers."
+    "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.": "⚠️ IPTV WARNING: This will analyze each stream to determine resolution, which may cause rate limiting or blocking with IPTV providers.",
+    ":subscription expired on :date.": ":subscription expired on :date.",
+    ":subscription expires in :days day, on :date.|:subscription expires in :days days, on :date.": ":subscription expires in :days day, on :date.|:subscription expires in :days days, on :date.",
+    "Choose how many days before the provider expiry date the warning should be sent.": "Choose how many days before the provider expiry date the warning should be sent.",
+    "Creates an in-app notification and forwards it to enabled alert channels when an Xtream subscription is close to expiring.": "Creates an in-app notification and forwards it to enabled alert channels when an Xtream subscription is close to expiring.",
+    "days before expiry": "days before expiry",
+    "Notify on expiring subscriptions": "Notify on expiring subscriptions",
+    "Subscription expired": "Subscription expired",
+    "Subscription expiring soon": "Subscription expiring soon",
+    "Subscription expiry warning": "Subscription expiry warning"
 }

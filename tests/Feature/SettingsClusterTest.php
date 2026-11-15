@@ -88,6 +88,21 @@ it('saves each page independently without wiping keys owned by other pages', fun
         ->and((int) $fresh->tmdb_rate_limit)->toBe(40);
 });
 
+it('saves subscription expiry notification settings from the alerts page', function () {
+    Livewire::test(ManageAlertSettings::class)
+        ->fillForm([
+            'alerts_on_subscription_expiring' => true,
+            'subscription_expiry_warning_days' => 14,
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $settings = app(GeneralSettings::class)->refresh();
+
+    expect((bool) $settings->alerts_on_subscription_expiring)->toBeTrue()
+        ->and((int) $settings->subscription_expiry_warning_days)->toBe(14);
+});
+
 it('resolves the custom date format from the virtual fields on the general page', function () {
     Livewire::test(ManageGeneralSettings::class)
         ->fillForm([
