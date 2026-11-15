@@ -3,7 +3,7 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
-use App\Mail\AlertMail;
+use App\Jobs\SendAlertEmail;
 use App\Notifications\TelegramAlert;
 use App\Services\AlertService;
 use App\Services\SmtpMailService;
@@ -21,7 +21,6 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\HtmlString;
 use Spatie\DiscordAlerts\Facades\DiscordAlert;
@@ -350,12 +349,12 @@ HTML))
                                                 }
 
                                                 try {
-                                                    $smtp->apply();
-
-                                                    Mail::to($recipients)->send(new AlertMail(
+                                                    // Send inline through the same path queued alerts use, so errors surface here.
+                                                    (new SendAlertEmail(
+                                                        recipients: $recipients,
                                                         emailSubject: AlertService::EMAIL_SUBJECT,
                                                         body: '[TEST] This is a test alert from m3u-editor. Your email alert integration is working correctly.',
-                                                    ));
+                                                    ))->handle($smtp);
 
                                                     Notification::make()
                                                         ->title(__('Test Alert Sent'))

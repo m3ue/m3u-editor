@@ -330,7 +330,7 @@ class GeneralSettings extends Settings
 
     public ?array $copilot_quick_actions = null;
 
-    // Alerts - Slack / Discord / Telegram integration
+    // Alerts - Slack / Discord / Telegram / Email integration
     public ?bool $discord_alerts_enabled = false;
 
     public ?string $discord_webhook_url = null;
