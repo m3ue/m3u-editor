@@ -5,13 +5,15 @@ namespace App\Mail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Envelope;
+use Illuminate\Mail\Markdown;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\HtmlString;
 
 /**
- * Plain-text alert email. Alert messages are forwarded log lines and job
- * failures (often with code fences, underscores and URLs), so they are sent
- * as text rather than markdown to keep them intact.
+ * Alert email. Alert messages are forwarded log lines and job failures (often
+ * with code fences, underscores and URLs), so the text part carries the body
+ * verbatim and the branded HTML part shows it in a preformatted block instead
+ * of parsing it as markdown.
  */
 class AlertMail extends Mailable
 {
@@ -30,16 +32,23 @@ class AlertMail extends Mailable
     }
 
     /**
-     * Send the body as the text/plain part only, with no Blade view.
+     * Build the branded HTML part and the verbatim text/plain part.
      *
-     * A text view would need unescaped output to avoid HTML entities in a
-     * plain-text body; passing the string straight to the mailer's text part
-     * keeps it verbatim and never renders it as HTML.
+     * The text part is the raw string handed to the mailer (no Blade view), so
+     * it is never HTML-escaped or rendered. The HTML part is rendered through
+     * the markdown mail layout directly rather than via Content(markdown:),
+     * because that would also derive the text part from the markdown template.
      *
-     * @return array{text: HtmlString}
+     * @return array{html: HtmlString, text: HtmlString}
      */
     protected function buildView(): array
     {
-        return ['text' => new HtmlString($this->body)];
+        $markdown = app(Markdown::class);
+        $markdown->theme($this->theme ?? config('mail.markdown.theme', 'default'));
+
+        return [
+            'html' => $markdown->render('mail.alert', ['body' => $this->body]),
+            'text' => new HtmlString($this->body),
+        ];
     }
 }

@@ -42,6 +42,19 @@ function emailAlertMockSettings(array $overrides = []): GeneralSettings
     return $settings;
 }
 
+/**
+ * The alert body as a mail client shows it: the decoded contents of the
+ * html part's message block.
+ */
+function emailAlertHtmlBlockText(string $html): ?string
+{
+    if (! preg_match('/<pre class="message-block"[^>]*>(.*?)<\/pre>/s', $html, $matches)) {
+        return null;
+    }
+
+    return html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5);
+}
+
 function emailAlertConfiguredSettings(array $overrides = []): GeneralSettings
 {
     return emailAlertMockSettings(array_merge([
@@ -113,15 +126,18 @@ it('skips sending when smtp was cleared after the job was queued', function () {
     Mail::assertNothingSent();
 });
 
-it('renders the alert body as plain text without escaping or markdown', function () {
-    $body = "[JOB FAILED] App\\Jobs\\Some_Job: \"boom\" <tag>\n```\n{\"queue\": \"default\"}\n```";
+it('renders the alert body in the html part escaped and without markdown', function () {
+    $body = "[JOB FAILED] App\\Jobs\\Some_Job: \"boom\" <tag> **not bold**\n```\n{\"queue\": \"default\"}\n```";
 
     $rendered = (new AlertMail('Subject', $body))->render();
 
-    expect(trim($rendered))->toBe($body);
+    expect(emailAlertHtmlBlockText($rendered))->toBe($body)
+        ->and($rendered)->not->toContain('<tag>')
+        ->and($rendered)->not->toContain('<strong>')
+        ->and($rendered)->not->toContain('<code>');
 });
 
-it('delivers the alert as a text-only message with the body unchanged', function () {
+it('delivers the alert with the text part unchanged and a branded html part', function () {
     $body = "[ERROR] Sync failed for \"News & Sports\" <tag>\n```\n{\"queue\": \"default\"}\n```";
 
     Mail::mailer('array')->to('owner@example.com')->send(new AlertMail('Subject', $body));
@@ -129,7 +145,8 @@ it('delivers the alert as a text-only message with the body unchanged', function
     $email = Mail::mailer('array')->getSymfonyTransport()->messages()->last()->getOriginalMessage();
 
     expect($email->getTextBody())->toBe($body)
-        ->and($email->getHtmlBody())->toBeNull();
+        ->and($email->getHtmlBody())->toContain('M3U Editor')
+        ->and(emailAlertHtmlBlockText($email->getHtmlBody()))->toBe($body);
 });
 
 it('rebuilds the smtp mailer so changed settings take effect in a long-running worker', function () {

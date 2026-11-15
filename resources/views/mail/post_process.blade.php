@@ -1,19 +1,24 @@
+{{--
+    The variables table is a single HTML block (no blank lines inside), so
+    CommonMark passes it through untouched and values such as file paths or
+    names with underscores are never turned into markdown emphasis.
+--}}
 <x-mail::message>
-<div style="text-align: center;">
-    <img src="https://raw.githubusercontent.com/sparkison/m3u-editor/master/public/logo.png" alt="M3U Proxy Editor Logo" style="width: 80px; height: auto; margin-bottom: 20px; auto;">
-</div>
-
-# Sync completed
+# {{ __('Sync completed') }}
 
 ## {{ $body }}
 
 @if (!empty($variables))
-### Variables:
+### {{ __('Variables') }}
 
+<table class="details" role="presentation">
 @foreach ($variables as $key => $value)
-- <strong>{{ $key }}:</strong> {{ $value }}</li>
-
+<tr>
+<th>{{ $key }}</th>
+<td>{{ $value }}</td>
+</tr>
 @endforeach
+</table>
 @endif
 
 </x-mail::message>

@@ -3,6 +3,7 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Mail\SmtpTestMail;
 use App\Services\SmtpMailService;
 use BackedEnum;
 use Exception;
@@ -69,10 +70,7 @@ class ManageSmtpSettings extends BaseSettingsPage
                         // Test the entered (possibly unsaved) values, not the saved settings
                         $smtp->apply($formState);
 
-                        Mail::raw('This is a test email to verify your SMTP settings.', function ($message) use ($data) {
-                            $message->to($data['to_email'])
-                                ->subject('Test Email from m3u editor');
-                        });
+                        Mail::to($data['to_email'])->send(new SmtpTestMail);
 
                         Notification::make()
                             ->success()

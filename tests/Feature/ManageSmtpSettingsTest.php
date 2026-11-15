@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
+use App\Mail\SmtpTestMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Livewire;
@@ -27,9 +28,7 @@ it('sends a test email when no SMTP authentication is configured', function () {
         ->callAction('send_test_email', ['to_email' => 'recipient@example.com'])
         ->assertNotified(__('Test Email Sent'));
 
-    // Mail::fake()'s raw() is a no-op (unlike send()/mailable assertions), so
-    // reaching the success notification is itself proof the guard let the
-    // no-auth configuration through to Mail::raw() without throwing.
+    Mail::assertSent(SmtpTestMail::class, fn (SmtpTestMail $mail): bool => $mail->hasTo('recipient@example.com'));
 });
 
 it('still requires host and port before sending a test email', function () {
