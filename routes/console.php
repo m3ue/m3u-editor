@@ -114,6 +114,10 @@ $inProcess('m3u-proxy:register-webhook')
 $inProcess('app:refresh-playlist-profiles')
     ->everyFifteenMinutes();
 
+// Notify playlist owners when Xtream subscriptions are nearing expiry
+$inProcess('app:check-subscription-expirations')
+    ->dailyAt('09:00');
+
 if (config('plugins.enabled', true)) {
     // Run scheduled plugin invocations. Kept as its own process: it loads plugin code to
     // ask each plugin what's due, and a plugin that exits or runs out of memory must not

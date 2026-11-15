@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Services\ProfileService;
-use Carbon\Carbon;
+use App\Services\SubscriptionExpiryService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -147,19 +147,10 @@ class RefreshPlaylistProfiles implements ShouldQueue
      */
     protected function checkExpirationWarning(PlaylistProfile $profile): void
     {
-        $info = $profile->provider_info;
+        $expiresAt = SubscriptionExpiryService::expiresAt($profile->provider_info);
 
-        if (! $info || ! isset($info['user_info']['exp_date'])) {
+        if (! $expiresAt) {
             return;
-        }
-
-        $expDate = $info['user_info']['exp_date'];
-
-        // If exp_date is a Unix timestamp
-        if (is_numeric($expDate)) {
-            $expiresAt = Carbon::createFromTimestamp($expDate);
-        } else {
-            $expiresAt = Carbon::parse($expDate);
         }
 
         $daysUntilExpiry = now()->diffInDays($expiresAt, false);
