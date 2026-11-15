@@ -8,6 +8,7 @@ use App\Mail\PostProcessMail;
 use App\Models\Epg;
 use App\Models\PostProcess;
 use App\Models\PostProcessLog;
+use App\Services\SmtpMailService;
 use App\Settings\GeneralSettings;
 use App\Support\PrivateNetworkGuard;
 use Exception;
@@ -15,7 +16,6 @@ use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -119,14 +119,7 @@ class RunPostProcess implements ShouldQueue
 
                 // Send email using the configured email service
                 $to = explode(',', $metadata['path']);
-                Config::set('mail.default', 'smtp');
-                Config::set('mail.from.address', $settings->smtp_from_address ?? 'no-reply@m3u-editor.dev');
-                Config::set('mail.from.name', 'm3u editor');
-                Config::set('mail.mailers.smtp.host', $settings->smtp_host);
-                Config::set('mail.mailers.smtp.username', $settings->smtp_username);
-                Config::set('mail.mailers.smtp.password', $settings->smtp_password);
-                Config::set('mail.mailers.smtp.port', $settings->smtp_port);
-                Config::set('mail.mailers.smtp.encryption', $settings->smtp_encryption);
+                app(SmtpMailService::class)->apply();
                 Mail::to($to)
                     ->send(new PostProcessMail(
                         emailSubject: $metadata['subject'] ?? "Sync completed for \"{$name}\"",

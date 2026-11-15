@@ -3,6 +3,7 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Services\SmtpMailService;
 use BackedEnum;
 use Exception;
 use Filament\Actions\Action;
@@ -11,7 +12,6 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 
 class ManageSmtpSettings extends BaseSettingsPage
@@ -48,7 +48,7 @@ class ManageSmtpSettings extends BaseSettingsPage
                         ->placeholder(__('Enter To Email Address'))
                         ->helperText(__('A test email will be sent to this address using the entered SMTP settings.')),
                 ])
-                ->action(function (array $data): void {
+                ->action(function (array $data, SmtpMailService $smtp): void {
                     try {
                         // Get SMTP settings from the form state
                         $formState = $this->form->getState();
@@ -56,7 +56,7 @@ class ManageSmtpSettings extends BaseSettingsPage
                         // Username/password are only required if the provider needs
                         // authentication (requiredWith in the form below pairs them),
                         // so the test action must accept the same no-auth configuration.
-                        if (empty($formState['smtp_host']) || empty($formState['smtp_port'])) {
+                        if (! $smtp->isConfigured($formState)) {
                             Notification::make()
                                 ->danger()
                                 ->title(__('Missing SMTP Fields'))
@@ -66,15 +66,8 @@ class ManageSmtpSettings extends BaseSettingsPage
                             return;
                         }
 
-                        // Configure mail settings temporarily
-                        Config::set('mail.default', 'smtp');
-                        Config::set('mail.from.address', $formState['smtp_from_address'] ?? 'no-reply@m3u-editor.dev');
-                        Config::set('mail.from.name', 'm3u editor');
-                        Config::set('mail.mailers.smtp.host', $formState['smtp_host']);
-                        Config::set('mail.mailers.smtp.username', $formState['smtp_username'] ?? null);
-                        Config::set('mail.mailers.smtp.password', $formState['smtp_password'] ?? null);
-                        Config::set('mail.mailers.smtp.port', $formState['smtp_port']);
-                        Config::set('mail.mailers.smtp.encryption', $formState['smtp_encryption']);
+                        // Test the entered (possibly unsaved) values, not the saved settings
+                        $smtp->apply($formState);
 
                         Mail::raw('This is a test email to verify your SMTP settings.', function ($message) use ($data) {
                             $message->to($data['to_email'])

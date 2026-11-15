@@ -2,6 +2,7 @@
 
 namespace App\Listeners;
 
+use App\Jobs\SendAlertEmail;
 use App\Notifications\TelegramAlert;
 use App\Services\AlertService;
 use App\Settings\GeneralSettings;
@@ -33,6 +34,7 @@ class AlertOnJobFailed
         if (str_contains($jobName, TelegramAlert::class)
             || str_contains($jobName, SendToDiscordChannelJob::class)
             || str_contains($jobName, SendToSlackChannelJob::class)
+            || str_contains($jobName, SendAlertEmail::class)
         ) {
             return;
         }

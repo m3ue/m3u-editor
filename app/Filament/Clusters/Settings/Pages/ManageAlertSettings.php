@@ -3,10 +3,14 @@
 namespace App\Filament\Clusters\Settings\Pages;
 
 use App\Filament\Clusters\Settings\Pages\Concerns\BaseSettingsPage;
+use App\Jobs\SendAlertEmail;
 use App\Notifications\TelegramAlert;
+use App\Services\AlertService;
+use App\Services\SmtpMailService;
 use BackedEnum;
 use Exception;
 use Filament\Actions\Action;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -42,7 +46,7 @@ class ManageAlertSettings extends BaseSettingsPage
 
     public function form(Schema $schema): Schema
     {
-        $hasAlertChannel = fn (Get $get): bool => (bool) $get('discord_alerts_enabled') || (bool) $get('slack_alerts_enabled') || (bool) $get('telegram_alerts_enabled');
+        $hasAlertChannel = fn (Get $get): bool => (bool) $get('discord_alerts_enabled') || (bool) $get('slack_alerts_enabled') || (bool) $get('telegram_alerts_enabled') || (bool) $get('email_alerts_enabled');
 
         return $schema
             ->components([
@@ -306,6 +310,94 @@ HTML))
                                             ->placeholder(__('e.g. 123456789 or -100123456789'))
                                             ->helperText(__('The ID of the chat, group or channel to send alerts to.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('telegram_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                    ]),
+                            ]),
+                        Tab::make(__('Email'))
+                            ->id('email')
+                            ->icon('heroicon-m-envelope')
+                            ->schema([
+                                Section::make(__('Email'))
+                                    ->key('email-alerts')
+                                    ->description(__('Send alerts by email using the shared SMTP settings.'))
+                                    ->headerActions([
+                                        Action::make('test_email_alert')
+                                            ->label(__('Send test alert'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled') && ! empty($get('email_alerts_recipients')))
+                                            ->action(function (Get $get, SmtpMailService $smtp): void {
+                                                $recipients = array_values(array_filter((array) $get('email_alerts_recipients')));
+
+                                                if ($recipients === []) {
+                                                    Notification::make()
+                                                        ->title(__('No Recipients'))
+                                                        ->body(__('Please add at least one email recipient first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                if (! $smtp->isConfigured()) {
+                                                    Notification::make()
+                                                        ->title(__('SMTP Not Configured'))
+                                                        ->body(__('Configure the SMTP settings under Settings > SMTP first.'))
+                                                        ->warning()
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    // Send inline through the same path queued alerts use, so errors surface here.
+                                                    (new SendAlertEmail(
+                                                        recipients: $recipients,
+                                                        emailSubject: AlertService::EMAIL_SUBJECT,
+                                                        body: '[TEST] This is a test alert from m3u-editor. Your email alert integration is working correctly.',
+                                                    ))->handle($smtp);
+
+                                                    Notification::make()
+                                                        ->title(__('Test Alert Sent'))
+                                                        ->body(__('Check your inbox for the test message.'))
+                                                        ->success()
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->title(__('Failed to Send Alert'))
+                                                        ->body(__('Could not send the test alert. Check your SMTP settings and recipients and try again.'))
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->schema([
+                                        Toggle::make('email_alerts_enabled')
+                                            ->label(__('Enable email alerts'))
+                                            ->helperText(__('When enabled, error-level log entries will be emailed to the recipients below.'))
+                                            ->live(),
+                                        Callout::make(__('Uses the shared SMTP settings'))
+                                            ->description(__('Email is sent through the SMTP server configured under Settings > SMTP.'))
+                                            ->info()
+                                            ->actions([
+                                                Action::make('open_smtp_settings')
+                                                    ->label(__('SMTP settings'))
+                                                    ->icon('heroicon-m-arrow-top-right-on-square')
+                                                    ->color('gray')
+                                                    ->size('sm')
+                                                    ->url(fn (): string => ManageSmtpSettings::getUrl()),
+                                            ])
+                                            ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled'))
+                                            ->columnSpanFull(),
+                                        TagsInput::make('email_alerts_recipients')
+                                            ->label(__('Recipients'))
+                                            ->placeholder(__('Add an email address'))
+                                            ->helperText(__('Email addresses that receive alerts. Press Enter after each address.'))
+                                            ->extraInputAttributes(['class' => 'privacy-sensitive'])
+                                            ->nestedRecursiveRules(['email'])
+                                            ->requiredIf('email_alerts_enabled', true)
+                                            ->visible(fn (Get $get): bool => (bool) $get('email_alerts_enabled'))
                                             ->columnSpanFull(),
                                     ]),
                             ]),

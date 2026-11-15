@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SendAlertEmail;
 use App\Notifications\TelegramAlert;
 use App\Settings\GeneralSettings;
 use Illuminate\Support\Facades\Crypt;
@@ -12,10 +13,15 @@ use Throwable;
 
 class AlertService
 {
-    public function __construct(private readonly GeneralSettings $settings) {}
+    public const EMAIL_SUBJECT = 'm3u editor alert';
+
+    public function __construct(
+        private readonly GeneralSettings $settings,
+        private readonly SmtpMailService $smtp,
+    ) {}
 
     /**
-     * Send a message to all enabled alert channels (Discord, Slack and/or Telegram).
+     * Send a message to all enabled alert channels (Discord, Slack, Telegram and/or Email).
      * Silently ignores failures to avoid cascading errors.
      */
     public function send(string $message): void
@@ -44,6 +50,14 @@ class AlertService
                 // Silently ignore.
             }
         }
+
+        if ($this->emailConfigured()) {
+            try {
+                SendAlertEmail::dispatch($this->emailRecipients(), self::EMAIL_SUBJECT, $message);
+            } catch (Throwable) {
+                // Silently ignore.
+            }
+        }
     }
 
     /**
@@ -53,7 +67,8 @@ class AlertService
     {
         return ($this->settings->discord_alerts_enabled && ! empty($this->settings->discord_webhook_url))
             || ($this->settings->slack_alerts_enabled && ! empty($this->settings->slack_webhook_url))
-            || $this->telegramConfigured();
+            || $this->telegramConfigured()
+            || $this->emailConfigured();
     }
 
     /**
@@ -64,5 +79,27 @@ class AlertService
         return $this->settings->telegram_alerts_enabled
             && ! empty($this->settings->telegram_bot_token)
             && ! empty($this->settings->telegram_chat_id);
+    }
+
+    /**
+     * Returns true if email alerts are enabled, have at least one recipient,
+     * and the shared SMTP settings are filled in.
+     */
+    private function emailConfigured(): bool
+    {
+        return $this->settings->email_alerts_enabled
+            && $this->emailRecipients() !== []
+            && $this->smtp->isConfigured();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function emailRecipients(): array
+    {
+        return array_values(array_filter(
+            array_map('trim', (array) ($this->settings->email_alerts_recipients ?? [])),
+            fn (string $address): bool => $address !== '',
+        ));
     }
 }
