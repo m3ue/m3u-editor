@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\RefreshPlaylistProfiles;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -922,11 +923,23 @@ class ProfileService
             $primaryProfile->username !== $newUsername ||
             $primaryProfile->password !== $newPassword
         ) {
+            // The stored provider info (and an auto-disable after it reported the
+            // subscription expired) belonged to the previous account. The primary has
+            // no enable toggle in the UI, so a stale disable would otherwise be permanent.
             $primaryProfile->update([
                 'url' => $newUrl,
                 'username' => $newUsername,
                 'password' => $newPassword,
+                'enabled' => true,
+                'provider_info' => null,
+                'provider_info_updated_at' => null,
             ]);
+
+            Cache::forget("playlist_profile:{$primaryProfile->id}:provider_info");
+            Cache::forget("pool_status_{$playlist->id}");
+
+            // Fetch the new account's info, which also re-applies the expiry check.
+            RefreshPlaylistProfiles::dispatch(profileId: $primaryProfile->id);
 
             Log::info('Synced primary profile credentials to playlist xtream_config', [
                 'playlist_id' => $playlist->id,

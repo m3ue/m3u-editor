@@ -148,14 +148,22 @@ class RefreshPlaylistProfiles implements ShouldQueue
     protected function checkExpirationWarning(PlaylistProfile $profile): void
     {
         $expiresAt = SubscriptionExpiryService::expiresAt($profile->provider_info);
+        $daysUntilExpiry = $expiresAt ? now()->diffInDays($expiresAt, false) : null;
+        $isExpired = $daysUntilExpiry !== null && $daysUntilExpiry <= 0;
+
+        // The primary profile has no enable toggle in the UI, so the only way it is
+        // disabled is the expiry auto-disable below. Undo that once the provider stops
+        // reporting it as expired (renewed, or credentials changed), or it stays off.
+        if ($profile->is_primary && ! $profile->enabled && ! $isExpired) {
+            $profile->update(['enabled' => true]);
+            Log::info("Re-enabled primary profile {$profile->id}: subscription no longer reported as expired");
+        }
 
         if (! $expiresAt) {
             return;
         }
 
-        $daysUntilExpiry = now()->diffInDays($expiresAt, false);
-
-        if ($daysUntilExpiry <= 0) {
+        if ($isExpired) {
             Log::warning("Profile {$profile->id} has EXPIRED", [
                 'name' => $profile->name,
                 'expired_at' => $expiresAt->toDateString(),

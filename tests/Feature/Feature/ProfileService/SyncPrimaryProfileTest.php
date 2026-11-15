@@ -9,6 +9,7 @@
  * - Does not issue an unnecessary DB write when credentials are already current
  */
 
+use App\Jobs\RefreshPlaylistProfiles;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Models\User;
@@ -137,4 +138,74 @@ it('does nothing when xtream_config is not set on the playlist', function () {
     ProfileService::syncPrimaryProfile($playlist);
 
     expect($playlist->profiles()->where('is_primary', true)->exists())->toBeFalse();
+});
+
+it('re-enables an auto-disabled primary and clears the old account info when credentials change', function () {
+    $playlist = Playlist::factory()->create([
+        'user_id' => $this->user->id,
+        'profiles_enabled' => true,
+        'xtream' => true,
+        'xtream_config' => [
+            'url' => 'http://new.provider.cc:8080',
+            'username' => 'newuser',
+            'password' => 'newpass',
+        ],
+    ]);
+
+    // The old account expired, so the refresh job auto-disabled the primary.
+    $primaryProfile = PlaylistProfile::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Primary Account',
+        'url' => 'http://old.provider.cc:80',
+        'username' => 'olduser',
+        'password' => 'oldpass',
+        'max_streams' => 1,
+        'priority' => 0,
+        'enabled' => false,
+        'is_primary' => true,
+        'provider_info' => ['user_info' => ['exp_date' => (string) now()->subDay()->timestamp, 'max_connections' => '1']],
+        'provider_info_updated_at' => now(),
+    ]);
+
+    ProfileService::syncPrimaryProfile($playlist);
+
+    $primaryProfile->refresh();
+
+    expect($primaryProfile->enabled)->toBeTrue()
+        ->and($primaryProfile->provider_info)->toBe([])
+        ->and($primaryProfile->provider_info_updated_at)->toBeNull();
+
+    Queue::assertPushed(RefreshPlaylistProfiles::class, fn (RefreshPlaylistProfiles $job) => $job->profileId === $primaryProfile->id);
+});
+
+it('leaves a disabled primary alone when credentials have not changed', function () {
+    $playlist = Playlist::factory()->create([
+        'user_id' => $this->user->id,
+        'profiles_enabled' => true,
+        'xtream' => true,
+        'xtream_config' => [
+            'url' => 'http://provider.cc:8080',
+            'username' => 'user',
+            'password' => 'pass',
+        ],
+    ]);
+
+    $primaryProfile = PlaylistProfile::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Primary Account',
+        'url' => 'http://provider.cc:8080',
+        'username' => 'user',
+        'password' => 'pass',
+        'max_streams' => 1,
+        'priority' => 0,
+        'enabled' => false,
+        'is_primary' => true,
+    ]);
+
+    ProfileService::syncPrimaryProfile($playlist);
+
+    expect($primaryProfile->refresh()->enabled)->toBeFalse();
+    Queue::assertNotPushed(RefreshPlaylistProfiles::class);
 });
