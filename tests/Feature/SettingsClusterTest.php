@@ -10,7 +10,6 @@ use App\Filament\Clusters\Settings\Pages\ManageGeneralSettings;
 use App\Filament\Clusters\Settings\Pages\ManageIntegrationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageNavigationSettings;
 use App\Filament\Clusters\Settings\Pages\ManageProxySettings;
-use App\Filament\Clusters\Settings\Pages\ManageSmtpSettings;
 use App\Filament\Clusters\Settings\Pages\ManageSyncSettings;
 use App\Filament\Clusters\Settings\Pages\ManageTvAppSettings;
 use App\Filament\Clusters\Settings\SettingsCluster;
@@ -33,7 +32,6 @@ $allPages = [
     ManageSyncSettings::class,
     ManageAssetSettings::class,
     ManageBackupSettings::class,
-    ManageSmtpSettings::class,
     ManageApiSettings::class,
     ManageCacheSettings::class,
     ManageIntegrationSettings::class,
@@ -120,9 +118,8 @@ it('hides the proxy page when the proxy integration is disabled', function () {
         ->and(ManageProxySettings::shouldRegisterNavigation())->toBeFalse();
 });
 
-it('moves SMTP settings into Alerts and hides the standalone SMTP navigation item', function () {
-    expect(ManageSmtpSettings::shouldRegisterNavigation())->toBeFalse()
-        ->and(activeSettingsTab(ManageAlertSettings::class, 'email'))->toBe(4);
+it('places SMTP settings in the Alerts email tab', function () {
+    expect(activeSettingsTab(ManageAlertSettings::class, 'email'))->toBe(4);
 });
 
 it('shows only the header actions that belong to each settings sub-page', function (string $page, array $expected) {
@@ -145,7 +142,6 @@ it('shows only the header actions that belong to each settings sub-page', functi
     'sync' => [ManageSyncSettings::class, ['reset_queue']],
     'assets' => [ManageAssetSettings::class, ['manage_assets', 'clear_expired_logo_cache', 'clear_logo_cache']],
     'backups' => [ManageBackupSettings::class, ['manage_backups']],
-    'smtp' => [ManageSmtpSettings::class, ['send_test_email']],
     'api' => [ManageApiSettings::class, ['manage_api_keys', 'view_api_docs']],
     'cache' => [ManageCacheSettings::class, ['manage_cached_items']],
     'integrations' => [ManageIntegrationSettings::class, []],
