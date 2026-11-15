@@ -84,9 +84,10 @@ class AssetInventoryService
             $seenKeys[] = $this->uniqueKey($row['disk'], $row['path']);
         }
 
-        if (! empty($rows)) {
+        // Batched to stay under the bound-parameter limit (SQLite 32766, Postgres 65535) on large logo caches
+        foreach (array_chunk($rows, 500) as $batch) {
             Asset::query()->upsert(
-                $rows,
+                $batch,
                 ['disk', 'path'],
                 ['source', 'name', 'extension', 'mime_type', 'size_bytes', 'is_image', 'last_modified_at', 'updated_at']
             );

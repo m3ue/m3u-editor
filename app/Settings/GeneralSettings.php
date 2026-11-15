@@ -360,6 +360,12 @@ class GeneralSettings extends Settings
     /** Forward invalidated playlist syncs to enabled alert channels */
     public ?bool $alerts_on_sync_invalidated = false;
 
+    /** Notify playlist owners before an Xtream provider subscription expires */
+    public ?bool $alerts_on_subscription_expiring = false;
+
+    /** Number of days before expiry that a subscription warning is sent */
+    public ?int $subscription_expiry_warning_days = 7;
+
     /**
      * TV App notification channels available for subscription.
      * Each entry: ['name' => 'channel_slug', 'label' => 'Optional display label'].

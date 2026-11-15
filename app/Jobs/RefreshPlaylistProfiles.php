@@ -5,7 +5,7 @@ namespace App\Jobs;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Services\ProfileService;
-use Carbon\Carbon;
+use App\Services\SubscriptionExpiryService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -147,24 +147,25 @@ class RefreshPlaylistProfiles implements ShouldQueue
      */
     protected function checkExpirationWarning(PlaylistProfile $profile): void
     {
-        $info = $profile->provider_info;
+        $expiresAt = SubscriptionExpiryService::expiresAt($profile->provider_info);
+        $daysUntilExpiry = $expiresAt ? now()->diffInDays($expiresAt, false) : null;
+        $isExpired = $daysUntilExpiry !== null && $daysUntilExpiry <= 0;
 
-        if (! $info || ! isset($info['user_info']['exp_date'])) {
+        // The primary profile has no enable toggle in the UI, so the only way it is
+        // disabled is the expiry auto-disable below. Undo that once the provider stops
+        // reporting it as expired (renewed, or credentials changed), or it stays off.
+        // A missing exp_date alone is not enough: the account must also be reported as
+        // working, so a dead account that drops exp_date is not routed to again.
+        if ($profile->is_primary && ! $profile->enabled && ! $isExpired && $this->providerReportsActiveAccount($profile)) {
+            $profile->update(['enabled' => true]);
+            Log::info("Re-enabled primary profile {$profile->id}: subscription no longer reported as expired");
+        }
+
+        if (! $expiresAt) {
             return;
         }
 
-        $expDate = $info['user_info']['exp_date'];
-
-        // If exp_date is a Unix timestamp
-        if (is_numeric($expDate)) {
-            $expiresAt = Carbon::createFromTimestamp($expDate);
-        } else {
-            $expiresAt = Carbon::parse($expDate);
-        }
-
-        $daysUntilExpiry = now()->diffInDays($expiresAt, false);
-
-        if ($daysUntilExpiry <= 0) {
+        if ($isExpired) {
             Log::warning("Profile {$profile->id} has EXPIRED", [
                 'name' => $profile->name,
                 'expired_at' => $expiresAt->toDateString(),
@@ -181,5 +182,18 @@ class RefreshPlaylistProfiles implements ShouldQueue
                 'expires_at' => $expiresAt->toDateString(),
             ]);
         }
+    }
+
+    /**
+     * Whether the provider's user_info positively reports a working account:
+     * authenticated (auth = 1) and not in an expired, banned or disabled status.
+     */
+    protected function providerReportsActiveAccount(PlaylistProfile $profile): bool
+    {
+        $userInfo = $profile->provider_info['user_info'] ?? [];
+        $status = strtolower((string) ($userInfo['status'] ?? 'active'));
+
+        return (int) ($userInfo['auth'] ?? 0) === 1
+            && ! in_array($status, ['expired', 'banned', 'disabled'], true);
     }
 }

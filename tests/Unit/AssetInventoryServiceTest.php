@@ -23,6 +23,19 @@ it('indexes existing cached and uploaded files from storage', function () {
     expect(Asset::query()->where('disk', 'public')->where('path', 'placeholder.png')->where('source', 'placeholder')->exists())->toBeTrue();
 });
 
+it('indexes a logo cache larger than the database bound-parameter limit', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+
+    // 11 columns per row puts 3,000 rows past SQLite's 32,766 bound-parameter limit in a single upsert
+    foreach (range(1, 3000) as $index) {
+        Storage::disk('local')->put("cached-logos/logo-{$index}.png", 'logo');
+    }
+
+    expect(app(AssetInventoryService::class)->sync())->toBe(3000)
+        ->and(Asset::query()->where('disk', 'local')->count())->toBe(3000);
+});
+
 it('prunes records for files removed from storage', function () {
     Storage::fake('local');
 
