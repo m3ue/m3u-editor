@@ -38,6 +38,19 @@ class PlaylistProfile extends Model
     ];
 
     /**
+     * Drop the cached provider info whenever the stored copy changes, so readers
+     * (the expiry check right after a refresh in particular) never see the old value.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (PlaylistProfile $profile): void {
+            if ($profile->wasChanged('provider_info')) {
+                Cache::forget("playlist_profile:{$profile->id}:provider_info");
+            }
+        });
+    }
+
+    /**
      * Get the playlist that owns this profile.
      */
     public function playlist(): BelongsTo
