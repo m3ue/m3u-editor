@@ -42,6 +42,8 @@ class ManageAlertSettings extends BaseSettingsPage
 
     public function form(Schema $schema): Schema
     {
+        $hasAlertChannel = fn (Get $get): bool => (bool) $get('discord_alerts_enabled') || (bool) $get('slack_alerts_enabled') || (bool) $get('telegram_alerts_enabled');
+
         return $schema
             ->components([
                 Tabs::make()
@@ -316,13 +318,16 @@ HTML))
                                     ->schema([
                                         Toggle::make('alerts_on_job_failed')
                                             ->label(__('Notify on queued job failures'))
-                                            ->helperText(__('Sends an alert whenever a queued job (import, sync, probe, etc.) fails permanently after all retry attempts.')),
+                                            ->helperText(__('Sends an alert whenever a queued job (import, sync, probe, etc.) fails permanently after all retry attempts.'))
+                                            ->visible($hasAlertChannel),
                                         Toggle::make('alerts_on_import_failed')
                                             ->label(__('Notify on playlist import failures'))
-                                            ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.')),
+                                            ->helperText(__('Sends an alert when a playlist sync fails entirely, e.g. all provider URLs were unreachable.'))
+                                            ->visible($hasAlertChannel),
                                         Toggle::make('alerts_on_sync_invalidated')
                                             ->label(__('Notify on invalidated playlist syncs'))
-                                            ->helperText(__('Sends an alert when a playlist sync is canceled because it would have removed more channels, groups or series than the invalidation threshold allows.')),
+                                            ->helperText(__('Sends an alert when a playlist sync is canceled because it would have removed more channels, groups or series than the invalidation threshold allows.'))
+                                            ->visible($hasAlertChannel),
                                         Toggle::make('alerts_on_subscription_expiring')
                                             ->label(__('Notify on expiring subscriptions'))
                                             ->helperText(__('Creates an in-app notification and forwards it to enabled alert channels when an Xtream subscription is close to expiring.'))

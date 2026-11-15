@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\UpdateXtreamStats;
 use App\Models\Playlist;
 use App\Models\PlaylistProfile;
 use App\Models\User;
@@ -15,7 +16,6 @@ beforeEach(function () {
     Bus::fake();
     NotificationFacade::fake();
     Http::preventStrayRequests();
-    Cache::flush();
 });
 
 function enableSubscriptionExpiryAlerts(int $warningDays = 7): void
@@ -64,9 +64,13 @@ it('creates one in-app alert and forwards it to configured alert channels', func
     app()->instance(AlertService::class, $alertService);
 
     $this->artisan('app:check-subscription-expirations')->assertSuccessful();
+
+    // The default cache store (embedded Redis) does not persist across restarts
+    Cache::flush();
     $this->artisan('app:check-subscription-expirations')->assertSuccessful();
 
     NotificationFacade::assertSentToTimes($user, DatabaseNotification::class, 1);
+    Bus::assertNotDispatched(UpdateXtreamStats::class);
     NotificationFacade::assertSentTo(
         $user,
         DatabaseNotification::class,
@@ -90,7 +94,7 @@ it('uses the warning window configured in the alerts pane', function () {
     NotificationFacade::assertNotSentTo($user, DatabaseNotification::class);
 });
 
-it('checks enabled provider profiles when playlist pooling is enabled', function () {
+it('checks each provider profile when playlist pooling is enabled', function () {
     enableSubscriptionExpiryAlerts();
     $user = User::factory()->create();
     $playlist = Playlist::factory()->for($user)->create([
@@ -154,4 +158,32 @@ it('sends a separate alert after the subscription has expired', function () {
         DatabaseNotification::class,
         fn (DatabaseNotification $notification): bool => $notification->data['title'] === 'Subscription expired',
     );
+});
+
+it('alerts for an expired provider profile that was auto-disabled', function () {
+    enableSubscriptionExpiryAlerts();
+    $user = User::factory()->create();
+    $playlist = Playlist::factory()->for($user)->create([
+        'xtream' => true,
+        'profiles_enabled' => true,
+    ]);
+    $profile = PlaylistProfile::factory()->forPlaylist($playlist)->create([
+        'name' => 'Expired account',
+        'enabled' => false,
+        'provider_info' => [
+            'user_info' => [
+                'exp_date' => now()->subHour()->getTimestamp(),
+            ],
+        ],
+    ]);
+
+    $alertService = Mockery::mock(AlertService::class);
+    $alertService->shouldReceive('send')
+        ->once()
+        ->with(Mockery::on(fn (string $message): bool => str_contains($message, 'Subscription expired') && str_contains($message, $profile->name)));
+    app()->instance(AlertService::class, $alertService);
+
+    $this->artisan('app:check-subscription-expirations')->assertSuccessful();
+
+    NotificationFacade::assertSentToTimes($user, DatabaseNotification::class, 1);
 });

@@ -23,7 +23,9 @@ use Livewire\Livewire;
 const GIF_POLYGLOT_BYTES = "GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x01\x44\x00\x3b";
 
 beforeEach(function () {
+    // The Assets page indexes cached logos on the local disk too, so fake it to keep real files out
     Storage::fake('public');
+    Storage::fake('local');
     $this->user = User::factory()->create(['is_admin' => true]);
     $this->actingAs($this->user);
 });
