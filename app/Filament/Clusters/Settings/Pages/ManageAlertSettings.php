@@ -7,6 +7,7 @@ use App\Notifications\TelegramAlert;
 use BackedEnum;
 use Exception;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -16,7 +17,9 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\HtmlString;
 use Spatie\DiscordAlerts\Facades\DiscordAlert;
@@ -305,6 +308,113 @@ HTML))
                                             ->helperText(__('The ID of the chat, group or channel to send alerts to.'))
                                             ->visible(fn (Get $get): bool => (bool) $get('telegram_alerts_enabled'))
                                             ->columnSpanFull(),
+                                    ]),
+                            ]),
+                        Tab::make(__('Email'))
+                            ->id('email')
+                            ->icon('heroicon-m-envelope')
+                            ->schema([
+                                Section::make(__('Email'))
+                                    ->key('email-settings')
+                                    ->description(__('Send alerts and application emails using SMTP.'))
+                                    ->headerActions([
+                                        Action::make('send_test_email')
+                                            ->label(__('Send test email'))
+                                            ->icon('heroicon-o-paper-airplane')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->modalWidth('md')
+                                            ->schema([
+                                                TextInput::make('to_email')
+                                                    ->label(__('To Email Address'))
+                                                    ->email()
+                                                    ->required()
+                                                    ->placeholder(__('Enter To Email Address'))
+                                                    ->helperText(__('A test email will be sent to this address using the entered SMTP settings.')),
+                                            ])
+                                            ->action(function (array $data, Get $get): void {
+                                                $smtpHost = $get('smtp_host');
+                                                $smtpPort = $get('smtp_port');
+
+                                                if (empty($smtpHost) || empty($smtpPort)) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Missing SMTP Fields'))
+                                                        ->body(__('Please fill in all required SMTP fields before sending a test email.'))
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    Config::set('mail.default', 'smtp');
+                                                    Config::set('mail.from.address', $get('smtp_from_address') ?? 'no-reply@m3u-editor.dev');
+                                                    Config::set('mail.from.name', 'm3u editor');
+                                                    Config::set('mail.mailers.smtp.host', $smtpHost);
+                                                    Config::set('mail.mailers.smtp.username', $get('smtp_username'));
+                                                    Config::set('mail.mailers.smtp.password', $get('smtp_password'));
+                                                    Config::set('mail.mailers.smtp.port', $smtpPort);
+                                                    Config::set('mail.mailers.smtp.encryption', $get('smtp_encryption'));
+
+                                                    Mail::raw('This is a test email to verify your SMTP settings.', function ($message) use ($data) {
+                                                        $message->to($data['to_email'])
+                                                            ->subject('Test Email from m3u editor');
+                                                    });
+
+                                                    Notification::make()
+                                                        ->success()
+                                                        ->title(__('Test Email Sent'))
+                                                        ->body('Test email sent successfully to '.$data['to_email'])
+                                                        ->send();
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Error Sending Test Email'))
+                                                        ->body($e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])
+                                    ->columns(2)
+                                    ->schema([
+                                        TextInput::make('smtp_host')
+                                            ->extraInputAttributes(['class' => 'privacy-sensitive'])
+                                            ->label(__('SMTP Host'))
+                                            ->placeholder(__('Enter SMTP Host'))
+                                            ->requiredWith('smtp_port')
+                                            ->helperText(__('Required to send emails.')),
+                                        TextInput::make('smtp_port')
+                                            ->label(__('SMTP Port'))
+                                            ->placeholder(__('Enter SMTP Port'))
+                                            ->requiredWith('smtp_host')
+                                            ->numeric()
+                                            ->helperText(__('Required to send emails.')),
+                                        TextInput::make('smtp_username')
+                                            ->extraInputAttributes(['class' => 'privacy-sensitive'])
+                                            ->label(__('SMTP Username'))
+                                            ->placeholder(__('Enter SMTP Username'))
+                                            ->requiredWith('smtp_password')
+                                            ->helperText(__('Required to send emails, if your provider requires authentication.')),
+                                        TextInput::make('smtp_password')
+                                            ->label(__('SMTP Password'))
+                                            ->revealable()
+                                            ->placeholder(__('Enter SMTP Password'))
+                                            ->requiredWith('smtp_username')
+                                            ->password()
+                                            ->helperText(__('Required to send emails, if your provider requires authentication.')),
+                                        Select::make('smtp_encryption')
+                                            ->label(__('SMTP Encryption'))
+                                            ->options([
+                                                'tls' => 'TLS',
+                                                'ssl' => 'SSL',
+                                                null => 'None',
+                                            ])
+                                            ->placeholder(__('Select encryption type (optional)')),
+                                        TextInput::make('smtp_from_address')
+                                            ->label(__('SMTP From Address'))
+                                            ->placeholder(__('Enter SMTP From Address'))
+                                            ->email()
+                                            ->helperText(__('The "From" email address for outgoing emails. Defaults to no-reply@m3u-editor.dev.')),
                                     ]),
                             ]),
                         Tab::make(__('Additional Notifications'))

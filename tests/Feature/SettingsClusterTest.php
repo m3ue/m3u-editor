@@ -19,6 +19,7 @@ use App\Filament\Resources\CachedContentFiles\CachedContentFileResource;
 use App\Jobs\RestartQueue;
 use App\Models\User;
 use App\Settings\GeneralSettings;
+use Filament\Actions\Testing\TestAction;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Bus;
@@ -71,13 +72,11 @@ it('saves each page independently without wiping keys owned by other pages', fun
     $settings->tmdb_rate_limit = 40;
     $settings->save();
 
-    Livewire::test(ManageSmtpSettings::class)
-        ->fillForm(['smtp_host' => 'smtp.example.com'])
-        ->call('save')
-        ->assertHasNoFormErrors();
-
     Livewire::test(ManageAlertSettings::class)
-        ->fillForm(['discord_alerts_enabled' => true])
+        ->fillForm([
+            'discord_alerts_enabled' => true,
+            'smtp_host' => 'smtp.example.com',
+        ])
         ->call('save')
         ->assertHasNoFormErrors();
 
@@ -119,6 +118,11 @@ it('hides the proxy page when the proxy integration is disabled', function () {
 
     expect(ManageProxySettings::canAccess())->toBeFalse()
         ->and(ManageProxySettings::shouldRegisterNavigation())->toBeFalse();
+});
+
+it('moves SMTP settings into Alerts and hides the standalone SMTP navigation item', function () {
+    expect(ManageSmtpSettings::shouldRegisterNavigation())->toBeFalse()
+        ->and(activeSettingsTab(ManageAlertSettings::class, 'email'))->toBe(4);
 });
 
 it('shows only the header actions that belong to each settings sub-page', function (string $page, array $expected) {
@@ -171,10 +175,13 @@ it('only links to cached items while caching is enabled', function () {
         ->assertActionHasUrl('manage_cached_items', CachedContentFileResource::getUrl());
 });
 
-it('sends the SMTP test email from the page header using the form state', function () {
-    Livewire::test(ManageSmtpSettings::class)
+it('sends the SMTP test email from the Alerts email tab using the form state', function () {
+    Livewire::test(ManageAlertSettings::class)
         ->fillForm(['smtp_host' => null, 'smtp_port' => null])
-        ->callAction('send_test_email', ['to_email' => 'admin@example.com'])
+        ->callAction(
+            TestAction::make('send_test_email')->schemaComponent('email-settings'),
+            ['to_email' => 'admin@example.com'],
+        )
         ->assertNotified(__('Missing SMTP Fields'));
 });
 
@@ -215,7 +222,8 @@ it('opens the Integrations page on the tab named in ?tab=', function () {
 it('opens the Alerts page on the tab named in ?tab=', function () {
     expect(activeSettingsTab(ManageAlertSettings::class, 'discord'))->toBe(1)
         ->and(activeSettingsTab(ManageAlertSettings::class, 'slack'))->toBe(2)
-        ->and(activeSettingsTab(ManageAlertSettings::class, 'telegram'))->toBe(3);
+        ->and(activeSettingsTab(ManageAlertSettings::class, 'telegram'))->toBe(3)
+        ->and(activeSettingsTab(ManageAlertSettings::class, 'email'))->toBe(4);
 });
 
 it('deep-links resolve to the tabbed Integrations page', function () {
