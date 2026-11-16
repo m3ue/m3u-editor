@@ -3,6 +3,9 @@
 use App\Filament\Resources\PlaylistAliases\Pages\CreatePlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\EditPlaylistAlias;
 use App\Filament\Resources\PlaylistAliases\Pages\ListPlaylistAliases;
+use App\Models\Channel;
+use App\Models\CustomPlaylist;
+use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\User;
@@ -17,7 +20,7 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->actingAs($this->user);
 
-    $this->playlist = Playlist::factory()->for($this->user)->createQuietly(['xtream_config' => null]);
+    $this->playlist = Playlist::factory()->for($this->user)->createQuietly(['url' => null, 'xtream_config' => null]);
     $this->alias = PlaylistAlias::create([
         'name' => 'Provider Alias',
         'uuid' => fake()->uuid(),
@@ -182,3 +185,119 @@ it('opens the alias on the full edit page for its owner only', function () {
     $this->actingAs(User::factory()->create());
     $this->get(EditPlaylistAlias::getUrl(['record' => $alias]))->assertNotFound();
 });
+
+it('swaps m3u credentials after creating a direct alias from the prefilled provider', function (string $m3uUrl) {
+    $this->playlist->updateQuietly([
+        'url' => $m3uUrl,
+        'xtream_config' => null,
+    ]);
+
+    $component = Livewire::test(CreatePlaylistAlias::class)
+        ->fillForm(['source_type' => 'playlist', 'source_id' => $this->playlist->id]);
+
+    $entries = $component->get('data.xtream_config');
+
+    expect(array_column($entries, 'url'))->toBe(['http://m3u-provider.example.com:8080']);
+
+    $key = array_key_first($entries);
+
+    $component
+        ->fillForm([
+            'name' => 'Direct M3U Alias',
+            "xtream_config.{$key}.username" => 'newuser',
+            "xtream_config.{$key}.password" => 'newpass',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $channel = Channel::factory()->createQuietly([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'group_id' => null,
+        'url' => 'http://m3u-provider.example.com:8080/live/olduser/oldpass/1234.ts',
+    ]);
+    $alias = PlaylistAlias::where('name', 'Direct M3U Alias')->sole();
+
+    expect($alias->transformChannelUrl($channel))
+        ->toBe('http://m3u-provider.example.com:8080/live/newuser/newpass/1234.ts');
+})->with([
+    'credentials in source url' => 'http://m3u-provider.example.com:8080/get.php?username=olduser&password=oldpass&type=m3u_plus&output=ts',
+    'credential-less source url' => 'http://m3u-provider.example.com:8080/get.php?type=m3u_plus&output=ts',
+]);
+
+it('swaps m3u and xtream credentials after creating a multi-source alias', function (string $sourceType) {
+    $m3uSource = Playlist::factory()->for($this->user)->createQuietly([
+        'name' => 'M3U Live',
+        'url' => 'http://m3u-provider.example.com:8080/get.php?username=m3uold&password=m3uoldpass&type=m3u_plus&output=ts',
+        'xtream' => false,
+        'xtream_config' => null,
+    ]);
+    $xtreamSource = Playlist::factory()->for($this->user)->createQuietly([
+        'name' => 'Xtream VOD',
+        'xtream' => true,
+        'xtream_config' => [
+            'url' => 'http://xtream-provider.example.com:8080',
+            'username' => 'xtreamold',
+            'password' => 'xtreamoldpass',
+        ],
+    ]);
+    $m3uLive = Channel::factory()->createQuietly([
+        'playlist_id' => $m3uSource->id,
+        'user_id' => $this->user->id,
+        'group_id' => null,
+        'is_vod' => false,
+        'url' => 'http://m3u-provider.example.com:8080/live/m3uold/m3uoldpass/1234.ts',
+    ]);
+    $xtreamVod = Channel::factory()->createQuietly([
+        'playlist_id' => $xtreamSource->id,
+        'user_id' => $this->user->id,
+        'group_id' => null,
+        'is_vod' => true,
+        'url' => 'http://xtream-provider.example.com:8080/movie/xtreamold/xtreamoldpass/9999.mp4',
+    ]);
+
+    if ($sourceType === 'merged_playlist') {
+        $source = MergedPlaylist::factory()->for($this->user)->create();
+        $source->playlists()->attach([
+            $m3uSource->id => ['include_live' => true, 'include_vod' => false, 'include_series' => false],
+            $xtreamSource->id => ['include_live' => false, 'include_vod' => true, 'include_series' => true],
+        ]);
+    } else {
+        $source = CustomPlaylist::factory()->for($this->user)->create();
+        $source->channels()->attach([$m3uLive->id, $xtreamVod->id]);
+    }
+
+    $component = Livewire::test(CreatePlaylistAlias::class)
+        ->fillForm(['source_type' => $sourceType, 'source_id' => $source->id]);
+
+    $entries = $component->get('data.xtream_config');
+    $providerUrls = collect($entries)->pluck('url')->sort()->values()->all();
+
+    expect($providerUrls)->toBe([
+        'http://m3u-provider.example.com:8080',
+        'http://xtream-provider.example.com:8080',
+    ]);
+
+    foreach ($entries as $key => $entry) {
+        $prefix = $entry['url'] === 'http://m3u-provider.example.com:8080' ? 'm3u' : 'xtream';
+        $component->fillForm([
+            "xtream_config.{$key}.username" => "{$prefix}new",
+            "xtream_config.{$key}.password" => "{$prefix}newpass",
+        ]);
+    }
+
+    $component
+        ->fillForm(['name' => "Multi-source {$sourceType} Alias"])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $alias = PlaylistAlias::where('name', "Multi-source {$sourceType} Alias")->sole();
+
+    expect($alias->transformChannelUrl($m3uLive))
+        ->toBe('http://m3u-provider.example.com:8080/live/m3unew/m3unewpass/1234.ts')
+        ->and($alias->transformChannelUrl($xtreamVod))
+        ->toBe('http://xtream-provider.example.com:8080/movie/xtreamnew/xtreamnewpass/9999.mp4');
+})->with([
+    'merged playlist' => 'merged_playlist',
+    'custom playlist' => 'custom_playlist',
+]);

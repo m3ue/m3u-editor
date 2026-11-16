@@ -1885,9 +1885,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // Pre-fill with the playlist's existing xtream config URL if available
+        // Pre-fill with the playlist's provider URL if available
         $playlist = Playlist::find($playlistId);
-        self::setProviderEntries($set, [$playlist?->xtream_config['url'] ?? '']);
+        self::setProviderEntries($set, [$playlist?->getProviderUrlForAlias() ?? '']);
     }
 
     /**
@@ -1925,7 +1925,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // One entry per source playlist that exposes an Xtream URL
+        // One entry per source playlist with a provider URL
         self::setProviderEntries($set, array_map(
             fn (array $source): string => $source['url'] ?? '',
             $mergedPlaylist->getSourcePlaylistsForAlias()

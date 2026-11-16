@@ -119,7 +119,7 @@ class MergedPlaylist extends Model
     }
 
     /**
-     * Source playlists that expose an Xtream API URL, shaped for the PlaylistAlias
+     * Source playlists with provider URLs, shaped for the PlaylistAlias
      * credential-swap form. Mirrors CustomPlaylist::getSourcePlaylistsForAlias().
      *
      * @return array<int, array{id: int, name: string, url: string}>
@@ -129,7 +129,7 @@ class MergedPlaylist extends Model
         return $this->playlists()
             ->get()
             ->map(function (Playlist $playlist): array {
-                $url = $playlist->xtream_config['url'] ?? null;
+                $url = $playlist->getProviderUrlForAlias();
 
                 return [
                     'id' => $playlist->id,
