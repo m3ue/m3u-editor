@@ -1858,10 +1858,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
      * reactivity of fields inside the item on the create form, e.g. the URL
      * replacement toggle.
      *
+     * Duplicate URLs collapse to one entry: sources sharing a provider would
+     * otherwise get one entry each, and only the first would ever match.
+     *
      * @param  array<int, string>  $urls
      */
     protected static function setProviderEntries(Set $set, array $urls): void
     {
+        $urls = collect($urls)->filter()->unique(fn (string $url): string => strtolower($url))->all();
+
         $entries = [];
         foreach ($urls ?: [''] as $url) {
             $entries[(string) Str::uuid()] = [
@@ -1885,9 +1890,9 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // Pre-fill with the playlist's existing xtream config URL if available
+        // Pre-fill with the playlist's provider URL if available
         $playlist = Playlist::find($playlistId);
-        self::setProviderEntries($set, [$playlist?->xtream_config['url'] ?? '']);
+        self::setProviderEntries($set, [$playlist?->getProviderUrlForAlias() ?? '']);
     }
 
     /**
@@ -1925,7 +1930,7 @@ class PlaylistAliasResource extends Resource implements CopilotResource
             return;
         }
 
-        // One entry per source playlist that exposes an Xtream URL
+        // One entry per source playlist with a provider URL
         self::setProviderEntries($set, array_map(
             fn (array $source): string => $source['url'] ?? '',
             $mergedPlaylist->getSourcePlaylistsForAlias()

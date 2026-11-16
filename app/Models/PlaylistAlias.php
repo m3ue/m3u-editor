@@ -1672,7 +1672,7 @@ class PlaylistAlias extends Model
      *
      * @return array{url: string, username: string, password: string}|null
      */
-    private static function parseXtreamStreamUrl(string $url): ?array
+    public static function parseXtreamStreamUrl(string $url): ?array
     {
         // Prefixed form: http(s)://domain:port/(live|series|movie)/username/password/<stream>
         if (preg_match('#^(https?://[^/]+)/(?:live|series|movie)/([^/]+)/([^/]+)/.+$#', $url, $matches)) {

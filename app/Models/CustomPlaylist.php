@@ -316,7 +316,7 @@ class CustomPlaylist extends Model
     }
 
     /**
-     * Get source playlists with their xtream config info for alias configuration.
+     * Get source playlists with their provider URLs for alias configuration.
      * Returns an array of playlists with their URL base for matching.
      *
      * @return array<int, array{id: int, name: string, url: string|null}>
@@ -325,7 +325,7 @@ class CustomPlaylist extends Model
     {
         return $this->getSourcePlaylists()
             ->map(function (Playlist $playlist) {
-                $url = $playlist->xtream_config['url'] ?? null;
+                $url = $playlist->getProviderUrlForAlias();
 
                 return [
                     'id' => $playlist->id,
