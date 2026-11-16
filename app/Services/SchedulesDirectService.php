@@ -2000,6 +2000,10 @@ class SchedulesDirectService
             // Write XML footer
             fwrite($file, "</tv>\n");
             $completed = true;
+        } catch (SchedulesDirectTokenExpiredException $e) {
+            // Expected once a day when the token lapses: syncEpgData() logs in
+            // again and retries, and the retry logs its own error if it fails too.
+            throw $e;
         } catch (Exception $e) {
             Log::error('Failed to stream process to XMLTV', [
                 'epg_id' => $epg->id,

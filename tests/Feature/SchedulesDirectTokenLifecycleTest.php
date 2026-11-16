@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification as NotificationFacade;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -245,6 +246,37 @@ it('recovers from a mid-sync TOKEN_EXPIRED (4006) with exactly one re-authentica
         ->filter(fn ($pair) => str_contains($pair[0]->url(), '/20141201/token'))
         ->count();
     expect($tokenCalls)->toBe(1);
+});
+
+it('does not log an error when a 4006 during XMLTV streaming is recovered by the re-authentication', function () {
+    Storage::fake('local');
+    Log::spy();
+
+    Http::fake([
+        'json.schedulesdirect.org/20141201/token' => Http::response([
+            'code' => 0,
+            'token' => 'reissued-token',
+            'tokenExpires' => now()->addDay()->timestamp,
+        ]),
+        'json.schedulesdirect.org/20141201/lineups/*' => Http::response([
+            'map' => [['stationID' => '12345', 'channel' => '1.1']],
+            'stations' => [['stationID' => '12345', 'name' => 'Test Channel', 'callsign' => 'TEST']],
+        ]),
+        'json.schedulesdirect.org/20141201/schedules' => Http::sequence()
+            ->push(['code' => 4006, 'message' => 'Token has expired.'], 200)
+            ->push([['stationID' => '12345', 'programs' => []]], 200),
+        'json.schedulesdirect.org/20141201/programs' => Http::response([]),
+    ]);
+
+    $epg = sdEpg([
+        'sd_token' => 'stale-token',
+        'sd_token_expires_at' => now()->addHours(6),
+    ]);
+
+    (new SchedulesDirectService)->syncEpgData($epg);
+
+    expect($epg->fresh()->sd_token)->toBe('reissued-token');
+    Log::shouldNotHaveReceived('error');
 });
 
 it('clears the stored token and raises a typed exception on 4006', function () {
