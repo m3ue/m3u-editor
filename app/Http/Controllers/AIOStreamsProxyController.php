@@ -3,15 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ImageProfile;
-use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
 use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
-use App\Models\PlaylistAuth;
+use App\Models\PlaylistAlias;
 use App\Services\AIOStreamsAuthorizationService;
 use App\Services\AIOStreamsService;
 use App\Services\TmdbService;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -35,15 +35,67 @@ class AIOStreamsProxyController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        return $this->catalogResponse(
+            $integration,
+            $type,
+            $catalogId,
+            (int) $request->input('skip', 0),
+            $request->filled('search') ? (string) $request->input('search') : null,
+            $request->filled('genre') ? (string) $request->input('genre') : null,
+        );
+    }
+
+    /**
+     * Proxy a stream list request.
+     * Route: GET /{username}/{password}/aiostreams/{integration}/stream/{type}/{id}.json
+     */
+    public function stream(Request $request, string $username, string $password, int $integrationId, string $type, string $id): JsonResponse
+    {
+        $integration = $this->resolveIntegration($username, $password, $integrationId);
+
+        if (! $integration) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        return $this->streamResponse(
+            $integration,
+            $type,
+            $id,
+            fn (array $rawUrlsByIndex): array => MediaServerProxyController::generateAioStreamsLiveProxyUrls($integration->id, $rawUrlsByIndex),
+        );
+    }
+
+    /**
+     * Proxy a meta request.
+     * Route: GET /{username}/{password}/aiostreams/{integration}/meta/{type}/{id}.json
+     */
+    public function meta(Request $request, string $username, string $password, int $integrationId, string $type, string $id): JsonResponse
+    {
+        $playlist = null;
+        $integration = $this->resolveIntegration($username, $password, $integrationId, $playlist);
+
+        if (! $integration) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        return $this->metaResponse($integration, $playlist, $type, $id);
+    }
+
+    /**
+     * One page of a catalog from an already-authorized integration. Shared by the
+     * path-style route above and player_api.php's get_aiostreams_catalog action.
+     */
+    public function catalogResponse(MediaServerIntegration $integration, string $type, string $catalogId, int $skip = 0, ?string $search = null, ?string $genre = null): JsonResponse
+    {
         $extraParts = [];
-        if ($request->has('skip') && (int) $request->skip > 0) {
-            $extraParts[] = 'skip='.(int) $request->skip;
+        if ($skip > 0) {
+            $extraParts[] = 'skip='.$skip;
         }
-        if ($request->has('search') && filled($request->search)) {
-            $extraParts[] = 'search='.rawurlencode($request->search);
+        if (filled($search)) {
+            $extraParts[] = 'search='.rawurlencode($search);
         }
-        if ($request->has('genre') && filled($request->genre)) {
-            $extraParts[] = 'genre='.rawurlencode($request->genre);
+        if (filled($genre)) {
+            $extraParts[] = 'genre='.rawurlencode($genre);
         }
 
         $path = "catalog/{$type}/{$catalogId}";
@@ -51,7 +103,7 @@ class AIOStreamsProxyController extends Controller
             $path .= '/'.implode('&', $extraParts);
         }
 
-        $cacheKey = "aiostreams.catalog.{$integrationId}.{$type}.{$catalogId}.".md5(implode(',', $extraParts));
+        $cacheKey = "aiostreams.catalog.{$integration->id}.{$type}.{$catalogId}.".md5(implode(',', $extraParts));
 
         $data = Cache::remember($cacheKey, 60, function () use ($integration, $path) {
             $response = Http::timeout(20)->get("{$integration->manifest_base_url}/{$path}.json");
@@ -67,17 +119,15 @@ class AIOStreamsProxyController extends Controller
     }
 
     /**
-     * Proxy a stream list request.
-     * Route: GET /{username}/{password}/aiostreams/{integration}/stream/{type}/{id}.json
+     * The stream candidates for one title from an already-authorized integration,
+     * each raw URL swapped for a playback URL built by $playbackUrls. Shared by the
+     * path-style route above (signed /aiostreams-media/ URLs) and player_api.php's
+     * get_aiostreams_streams action (Xtream /movie/ and /series/ URLs).
+     *
+     * @param  Closure(array<int|string, string>): array<int|string, string>  $playbackUrls
      */
-    public function stream(Request $request, string $username, string $password, int $integrationId, string $type, string $id): JsonResponse
+    public function streamResponse(MediaServerIntegration $integration, string $type, string $id, Closure $playbackUrls): JsonResponse
     {
-        $integration = $this->resolveIntegration($username, $password, $integrationId);
-
-        if (! $integration) {
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-
         // Debrid addons only resolve IMDb IDs to streams, not TMDB IDs.
         // When the catalog returns a TMDB ID (e.g. "tmdb:603"), resolve it to
         // an IMDb ID via the meta lookup before requesting streams.
@@ -94,7 +144,7 @@ class AIOStreamsProxyController extends Controller
             // nginx's default 60s fastcgi_read_timeout). Reuses the same meta
             // resolution (with public Stremio-addon fallback) as meta().
             $imdbId = Cache::remember(
-                "aiostreams.imdb.{$integrationId}.{$type}.{$tmdbId}",
+                "aiostreams.imdb.{$integration->id}.{$type}.{$tmdbId}",
                 now()->addWeek(),
                 fn () => AIOStreamsService::make($integration)->fetchMeta($type, $tmdbId)['meta']['imdb_id'] ?? null
             );
@@ -104,7 +154,7 @@ class AIOStreamsProxyController extends Controller
             }
         }
 
-        // Streams are not cached — always fetch fresh to get current availability
+        // Streams are not cached - always fetch fresh to get current availability
         $response = Http::timeout(30)->get("{$integration->manifest_base_url}/stream/{$type}/{$resolvedId}.json");
 
         if (! $response->successful()) {
@@ -114,7 +164,7 @@ class AIOStreamsProxyController extends Controller
         $data = $response->json();
 
         // Never hand a raw resolved URL (often carrying the debrid account's own
-        // auth token) back to the caller — proxy every candidate the same way the
+        // auth token) back to the caller - proxy every candidate the same way the
         // browse UI and synced Channels/Episodes do. There's no durable row behind
         // this call, so it goes through the short-lived cache-token "live" proxy.
         // A stream list can hold dozens of candidates, so this is batched into one
@@ -129,9 +179,7 @@ class AIOStreamsProxyController extends Controller
                 }
             }
 
-            $proxiedUrlsByIndex = MediaServerProxyController::generateAioStreamsLiveProxyUrls($integrationId, $rawUrlsByIndex);
-
-            foreach ($proxiedUrlsByIndex as $index => $proxiedUrl) {
+            foreach ($playbackUrls($rawUrlsByIndex) as $index => $proxiedUrl) {
                 $data['streams'][$index]['url'] = $proxiedUrl;
             }
         }
@@ -140,19 +188,14 @@ class AIOStreamsProxyController extends Controller
     }
 
     /**
-     * Proxy a meta request.
-     * Route: GET /{username}/{password}/aiostreams/{integration}/meta/{type}/{id}.json
+     * Meta for one title from an already-authorized integration. Shared by the
+     * path-style route above and player_api.php's get_aiostreams_meta action.
+     *
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null  $playlist  The authenticated playlist, for its enable_logo_proxy setting.
      */
-    public function meta(Request $request, string $username, string $password, int $integrationId, string $type, string $id): JsonResponse
+    public function metaResponse(MediaServerIntegration $integration, $playlist, string $type, string $id): JsonResponse
     {
-        $playlist = null;
-        $integration = $this->resolveIntegration($username, $password, $integrationId, $playlist);
-
-        if (! $integration) {
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-
-        $cacheKey = "aiostreams.meta.{$integrationId}.{$type}.{$id}";
+        $cacheKey = "aiostreams.meta.{$integration->id}.{$type}.{$id}";
 
         // Delegates to AIOStreamsService::fetchMeta(), which falls back to the
         // public Stremio meta addons (Cinemeta / Kitsu / TMDB) when the operator's
@@ -230,46 +273,14 @@ class AIOStreamsProxyController extends Controller
      * playlist is ever returned, never an arbitrary integration ID owned by the same
      * user (see #1384). Mirrors the authorization Xtream's feature advertisement uses.
      *
-     * @param  Playlist|MergedPlaylist|CustomPlaylist|null  $playlist
-     *                                                                 Out-param set to the caller's effective playlist when authentication
-     *                                                                 succeeds, so callers can read playlist-level settings (e.g.
-     *                                                                 enable_logo_proxy) without a second authenticate() round trip.
+     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias|null  $playlist
+     *                                                                               Out-param set to the caller's effective playlist when authentication
+     *                                                                               succeeds, so callers can read playlist-level settings (e.g.
+     *                                                                               enable_logo_proxy) without a second authenticate() round trip.
      */
     private function resolveIntegration(string $username, string $password, int $integrationId, &$playlist = null): ?MediaServerIntegration
     {
-        if (! config('services.aiostreams.enabled', true)) {
-            return null;
-        }
-
-        $auth = PlaylistFacade::authenticate($username, $password);
-
-        if (! $auth || $auth[0] === null || $auth[1] === 'none') {
-            return null;
-        }
-
-        [$playlist, $authMethod] = $auth;
-
-        $playlistAuth = $authMethod === 'playlist_auth'
-            ? PlaylistAuth::where('username', $username)
-                ->where('password', $password)
-                ->where('enabled', true)
-                ->first()
-            : null;
-
-        if ($playlistAuth && $playlistAuth->isExpired()) {
-            return null;
-        }
-
-        $authService = app(AIOStreamsAuthorizationService::class);
-
-        if (! $authService->isAuthorizedForIntegration($playlist, $authMethod, $playlistAuth, $integrationId)) {
-            return null;
-        }
-
-        return MediaServerIntegration::where('id', $integrationId)
-            ->where('type', 'aiostreams')
-            ->where('enabled', true)
-            ->whereNotNull('manifest_url')
-            ->first();
+        return app(AIOStreamsAuthorizationService::class)
+            ->authorizedIntegrationForCredentials($username, $password, $integrationId, $playlist);
     }
 }

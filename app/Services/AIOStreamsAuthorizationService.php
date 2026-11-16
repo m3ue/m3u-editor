@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Facades\PlaylistFacade;
 use App\Models\CustomPlaylist;
+use App\Models\MediaServerIntegration;
 use App\Models\MergedPlaylist;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
@@ -73,5 +75,62 @@ class AIOStreamsAuthorizationService
         $effectivePlaylist = $this->resolveEffectivePlaylist($playlist);
 
         return $effectivePlaylist?->aiostreams_integration_id === $integrationId;
+    }
+
+    /**
+     * The AIOStreams integration an already-authenticated caller may reach, or
+     * null when AIOStreams is turned off, the caller isn't authorized for this
+     * integration ID, or the integration can't serve requests (disabled, wrong
+     * type, no manifest URL).
+     */
+    public function authorizedIntegration($playlist, string $authMethod, ?PlaylistAuth $playlistAuth, int $integrationId): ?MediaServerIntegration
+    {
+        if (! config('services.aiostreams.enabled', true)) {
+            return null;
+        }
+
+        if (! $this->isAuthorizedForIntegration($playlist, $authMethod, $playlistAuth, $integrationId)) {
+            return null;
+        }
+
+        return MediaServerIntegration::where('id', $integrationId)
+            ->where('type', 'aiostreams')
+            ->where('enabled', true)
+            ->whereNotNull('manifest_url')
+            ->first();
+    }
+
+    /**
+     * authorizedIntegration() for a raw username/password pair, for routes that
+     * carry the credentials themselves rather than going through player_api.php.
+     *
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias|null  $playlist
+     *                                                                               Out-param set to the authenticated playlist when authentication
+     *                                                                               succeeds, so callers can read playlist-level settings (e.g.
+     *                                                                               enable_logo_proxy) without a second authenticate() round trip.
+     */
+    public function authorizedIntegrationForCredentials(string $username, string $password, int $integrationId, &$playlist = null): ?MediaServerIntegration
+    {
+        if (! config('services.aiostreams.enabled', true)) {
+            return null;
+        }
+
+        $auth = PlaylistFacade::authenticate($username, $password);
+
+        if (! $auth || $auth[0] === null || $auth[1] === 'none') {
+            return null;
+        }
+
+        [$playlist, $authMethod] = $auth;
+
+        $playlistAuth = $authMethod === 'playlist_auth'
+            ? app(XtreamLoginAuthenticator::class)->activePlaylistAuth($username, $password)
+            : null;
+
+        if ($authMethod === 'playlist_auth' && ! $playlistAuth) {
+            return null;
+        }
+
+        return $this->authorizedIntegration($playlist, $authMethod, $playlistAuth, $integrationId);
     }
 }

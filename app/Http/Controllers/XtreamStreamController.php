@@ -12,6 +12,7 @@ use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistAuth;
+use App\Services\AIOStreamsAuthorizationService;
 use App\Services\CachedContentDispatchService;
 use App\Services\MediaSourcePreferenceService;
 use App\Services\PlaylistCredentialResolver;
@@ -317,6 +318,10 @@ class XtreamStreamController extends Controller
      */
     public function handleVod(Request $request, string $username, string $password, string $streamId, ?string $format = null)
     {
+        if (str_starts_with($streamId, 'aio-')) {
+            return $this->handleAioStreamsPlayback($request, $username, $password, $streamId);
+        }
+
         // Validate that streamId is numeric to prevent database errors
         if (! is_numeric($streamId)) {
             return response()->json(['error' => 'Invalid stream ID'], 400);
@@ -379,6 +384,10 @@ class XtreamStreamController extends Controller
      */
     public function handleSeries(Request $request, string $username, string $password, string|int $streamId, ?string $format = null)
     {
+        if (is_string($streamId) && str_starts_with($streamId, 'aio-')) {
+            return $this->handleAioStreamsPlayback($request, $username, $password, $streamId);
+        }
+
         // Validate that streamId is numeric to prevent database errors
         if (! is_numeric($streamId)) {
             return response()->json(['error' => 'Invalid stream ID'], 400);
@@ -420,6 +429,32 @@ class XtreamStreamController extends Controller
         }
 
         return response()->json(['error' => 'Unauthorized or stream not found'], 403);
+    }
+
+    /**
+     * Play an AIOStreams stream candidate handed out by player_api.php's
+     * get_aiostreams_streams action (see
+     * MediaServerProxyController::generateAioStreamsXtreamPlaybackUrls()). Every
+     * request, Range requests included, re-checks that the credentials may still
+     * use the integration the token belongs to, so disabling a viewer or
+     * unassigning the integration stops playback at once.
+     */
+    private function handleAioStreamsPlayback(Request $request, string $username, string $password, string $streamId)
+    {
+        $parsed = MediaServerProxyController::parseAioStreamsXtreamStreamId($streamId);
+        if (! $parsed) {
+            return response()->json(['error' => 'Invalid stream ID'], 400);
+        }
+
+        [$integrationId, $token] = $parsed;
+
+        $integration = app(AIOStreamsAuthorizationService::class)
+            ->authorizedIntegrationForCredentials($username, $password, $integrationId);
+        if (! $integration) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        return app(MediaServerProxyController::class)->streamAioStreamsLiveToken($request, $integration->id, $token);
     }
 
     /**

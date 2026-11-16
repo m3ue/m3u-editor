@@ -799,6 +799,72 @@ class MediaServerProxyController extends Controller
      */
     public static function generateAioStreamsLiveProxyUrls(int $integrationId, array $resolvedUrls): array
     {
+        $urlsByKey = [];
+
+        foreach (static::storeAioStreamsLiveTokens($integrationId, $resolvedUrls) as $key => $token) {
+            $urlsByKey[$key] = ProxyFacade::getBaseUrl().URL::signedRoute(
+                'aiostreams-media.live.stream',
+                ['integration' => $integrationId, 'item' => $token, 'v' => static::currentUrlVersion()],
+                absolute: false
+            );
+        }
+
+        return $urlsByKey;
+    }
+
+    /**
+     * The Xtream-style form of generateAioStreamsLiveProxyUrls(), for
+     * player_api.php's get_aiostreams_streams action: each candidate plays from
+     * /movie/{username}/{password}/aio-{integration}-{token}.{ext} (or /series/
+     * for series), so it reaches the server on the same path, and under the same
+     * per-request credential check, as the rest of a client's Xtream playback.
+     * Hosts that only let known Xtream paths past an auth gateway (ElfHosted, for
+     * one) block the signed /aiostreams-media/ route. Same cached tokens, so the
+     * resolved upstream URL still never appears in the URL.
+     *
+     * @param  array<int|string, string>  $resolvedUrls  Keyed however the caller likes; the same keys come back in the result.
+     * @return array<int|string, string>
+     */
+    public static function generateAioStreamsXtreamPlaybackUrls(int $integrationId, array $resolvedUrls, string $username, string $password, string $type): array
+    {
+        $routePrefix = $type === 'series' ? 'series' : 'movie';
+        $baseUrl = ProxyFacade::getBaseUrl();
+        $urlSafeUser = rawurlencode($username);
+        $urlSafePass = rawurlencode($password);
+        $urlsByKey = [];
+
+        foreach (static::storeAioStreamsLiveTokens($integrationId, $resolvedUrls) as $key => $token) {
+            $extension = static::aioStreamsPlaybackExtension($resolvedUrls[$key]);
+            $urlsByKey[$key] = "{$baseUrl}/{$routePrefix}/{$urlSafeUser}/{$urlSafePass}/aio-{$integrationId}-{$token}.{$extension}";
+        }
+
+        return $urlsByKey;
+    }
+
+    /**
+     * Split an Xtream stream id minted by generateAioStreamsXtreamPlaybackUrls()
+     * back into its integration id and live token, or null when it isn't one.
+     *
+     * @return array{0: int, 1: string}|null
+     */
+    public static function parseAioStreamsXtreamStreamId(string $streamId): ?array
+    {
+        if (! preg_match('/^aio-(\d+)-([A-Za-z0-9]{40})$/', $streamId, $matches)) {
+            return null;
+        }
+
+        return [(int) $matches[1], $matches[2]];
+    }
+
+    /**
+     * Cache each resolved URL under a fresh random token in one write, returning
+     * the tokens under the caller's keys. See generateAioStreamsLiveProxyUrls().
+     *
+     * @param  array<int|string, string>  $resolvedUrls
+     * @return array<int|string, string>
+     */
+    private static function storeAioStreamsLiveTokens(int $integrationId, array $resolvedUrls): array
+    {
         if ($resolvedUrls === []) {
             return [];
         }
@@ -814,17 +880,20 @@ class MediaServerProxyController extends Controller
 
         Cache::putMany($cacheValues, now()->addHours(self::AIOSTREAMS_LIVE_TOKEN_CACHE_HOURS));
 
-        $urlsByKey = [];
+        return $tokensByKey;
+    }
 
-        foreach ($tokensByKey as $key => $token) {
-            $urlsByKey[$key] = ProxyFacade::getBaseUrl().URL::signedRoute(
-                'aiostreams-media.live.stream',
-                ['integration' => $integrationId, 'item' => $token, 'v' => static::currentUrlVersion()],
-                absolute: false
-            );
-        }
+    /**
+     * File extension for an Xtream playback URL: the resolved URL's own video
+     * extension when it has one, else mkv (what debrid hosts serve most often).
+     * Only a hint for players that sniff the URL; the proxy relays the upstream
+     * Content-Type either way.
+     */
+    private static function aioStreamsPlaybackExtension(string $resolvedUrl): string
+    {
+        $extension = strtolower(pathinfo(parse_url($resolvedUrl, PHP_URL_PATH) ?? '', PATHINFO_EXTENSION));
 
-        return $urlsByKey;
+        return static::mimeForUrl($resolvedUrl) !== 'application/octet-stream' ? $extension : 'mkv';
     }
 
     /**
@@ -955,6 +1024,18 @@ class MediaServerProxyController extends Controller
             return $staleResponse;
         }
 
+        return $this->streamAioStreamsLiveToken($request, $integration, $item);
+    }
+
+    /**
+     * Stream the resolved AIOStreams URL cached under a live token. The caller has
+     * already authorized the request: the signed /aiostreams-media/ route by its
+     * signature, Xtream /movie/ and /series/ playback (see
+     * XtreamStreamController::handleAioStreamsPlayback()) by the caller's
+     * credentials.
+     */
+    public function streamAioStreamsLiveToken(Request $request, int $integration, string $token): StreamedResponse|JsonResponse
+    {
         try {
             set_time_limit(0);
             ignore_user_abort(true);
@@ -963,7 +1044,7 @@ class MediaServerProxyController extends Controller
                 return $errorResponse;
             }
 
-            $resolvedUrl = Cache::get(static::aioStreamsLiveCacheKey($integration, $item));
+            $resolvedUrl = Cache::get(static::aioStreamsLiveCacheKey($integration, $token));
 
             return $this->proxyResolvedUrl($request, $resolvedUrl, (string) $integration);
         } catch (\Exception $e) {

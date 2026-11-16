@@ -84,6 +84,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Spatie\Tags\Tag;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -119,6 +120,17 @@ class XtreamApiController extends Controller
 
     /** A team's follow key: "{sport}/{league}:{team id}". */
     private const string SPORTS_TEAM_KEY_PATTERN = '/^([a-z0-9-]+\/[a-z0-9._-]+):([A-Za-z0-9-]+)$/';
+
+    /**
+     * AIOStreams lookups served over player_api.php, so a client only ever needs
+     * the Xtream paths a reverse proxy or auth gateway already lets through. The
+     * path-style /{username}/{password}/aiostreams/ routes stay for older clients.
+     */
+    private const AIOSTREAMS_ACTIONS = [
+        'get_aiostreams_catalog',
+        'get_aiostreams_meta',
+        'get_aiostreams_streams',
+    ];
 
     private const DVR_ACTIONS = [
         'get_dvr_recordings',
@@ -2344,6 +2356,8 @@ class XtreamApiController extends Controller
                 'toggle_sports_follow' => $this->toggleSportsFollow($request, $playlist, $authMethod, $username, $password),
                 'sync_sports_follows' => $this->syncSportsFollows($request, $playlist, $authMethod, $username, $password),
             };
+        } elseif (in_array($action, self::AIOSTREAMS_ACTIONS, true)) {
+            return $this->aiostreamsAction($request, $action, $playlist, $authMethod, $playlistAuth, $username, $password);
         } elseif (in_array($action, self::DVR_ACTIONS, true)) {
             $dvrPlaylist = $this->resolveDvrPlaylist($playlist);
 
@@ -2373,6 +2387,65 @@ class XtreamApiController extends Controller
         } else {
             return response()->json(['error' => 'Invalid action parameter'], 400);
         }
+    }
+
+    /**
+     * The AIOStreams lookups (`get_aiostreams_catalog`, `get_aiostreams_meta`,
+     * `get_aiostreams_streams`), answering exactly as the path-style
+     * /{username}/{password}/aiostreams/ routes do. The one difference is that
+     * stream candidates play from Xtream /movie/ and /series/ URLs rather than the
+     * signed /aiostreams-media/ route, so a client never needs a path outside the
+     * Xtream ones (see MediaServerProxyController::generateAioStreamsXtreamPlaybackUrls()).
+     *
+     * @param  Playlist|CustomPlaylist|MergedPlaylist|PlaylistAlias  $playlist
+     */
+    private function aiostreamsAction(Request $request, string $action, $playlist, string $authMethod, ?PlaylistAuth $playlistAuth, string $username, string $password): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'integration_id' => ['required', 'integer'],
+            'type' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'catalog_id' => [Rule::requiredIf($action === 'get_aiostreams_catalog'), 'string', 'regex:/^[^\/]+$/'],
+            'id' => [Rule::requiredIf($action !== 'get_aiostreams_catalog'), 'string', 'regex:/^[^\/]+$/'],
+            'skip' => ['nullable', 'integer', 'min:0'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'genre' => ['nullable', 'string', 'max:255'],
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Invalid parameters', 'fields' => $validator->errors()->keys()], 422);
+        }
+
+        $integration = app(AIOStreamsAuthorizationService::class)
+            ->authorizedIntegration($playlist, $authMethod, $playlistAuth, (int) $request->input('integration_id'));
+        if (! $integration) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $proxy = app(AIOStreamsProxyController::class);
+        $type = (string) $request->input('type');
+
+        return match ($action) {
+            'get_aiostreams_catalog' => $proxy->catalogResponse(
+                $integration,
+                $type,
+                (string) $request->input('catalog_id'),
+                (int) $request->input('skip', 0),
+                $request->filled('search') ? (string) $request->input('search') : null,
+                $request->filled('genre') ? (string) $request->input('genre') : null,
+            ),
+            'get_aiostreams_meta' => $proxy->metaResponse($integration, $playlist, $type, (string) $request->input('id')),
+            'get_aiostreams_streams' => $proxy->streamResponse(
+                $integration,
+                $type,
+                (string) $request->input('id'),
+                fn (array $rawUrlsByIndex): array => MediaServerProxyController::generateAioStreamsXtreamPlaybackUrls(
+                    $integration->id,
+                    $rawUrlsByIndex,
+                    $username,
+                    $password,
+                    $type,
+                ),
+            ),
+        };
     }
 
     /**
@@ -4424,7 +4497,7 @@ class XtreamApiController extends Controller
      * Build the AIOStreams payload for the auth response.
      * Returns an array of integration configs with their catalog lists.
      *
-     * @return array<int, array{id: int, name: string, catalogs: array<int, array{id: string, type: string, name: string}>}>
+     * @return array<int, array{id: int, name: string, logo: ?string, catalogs: array<int, array{id: string, type: string, name: string}>, actions: array{catalog: string, meta: string, streams: string}}>
      */
     private function resolveAIOStreamsData($playlist, array $features): array
     {
@@ -4449,6 +4522,15 @@ class XtreamApiController extends Controller
                 'name' => $integration->name,
                 'logo' => $integration->aiostreams_logo,
                 'catalogs' => $this->filterAIOStreamsCatalogs($integration),
+                // player_api.php actions for catalog/meta/streams lookups. Clients
+                // that find these use them in place of the path-style
+                // /{username}/{password}/aiostreams/ routes, which an auth gateway
+                // in front of the server may not let through.
+                'actions' => [
+                    'catalog' => 'get_aiostreams_catalog',
+                    'meta' => 'get_aiostreams_meta',
+                    'streams' => 'get_aiostreams_streams',
+                ],
             ],
         ];
     }
