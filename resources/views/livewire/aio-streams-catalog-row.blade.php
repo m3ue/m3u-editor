@@ -31,6 +31,20 @@
                     @include('livewire.partials.aiostreams-card', ['item' => $item])
                 @endforeach
             </div>
+
+            @if ($hasMore)
+                <div class="mt-4 flex justify-center border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <x-filament::button
+                        color="gray"
+                        size="sm"
+                        icon="heroicon-o-chevron-down"
+                        wire:click="loadMore"
+                        wire:target="loadMore"
+                    >
+                        {{ __('Load more') }}
+                    </x-filament::button>
+                </div>
+            @endif
         @endif
     </x-filament::section>
 </div>
