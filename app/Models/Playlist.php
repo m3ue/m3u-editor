@@ -554,8 +554,9 @@ class Playlist extends Model
     /**
      * Get the provider base URL used to configure credential swapping on an alias.
      *
-     * Xtream imports store the URL explicitly. M3U imports derive it from their
-     * source URL, including sources whose URL does not contain credentials.
+     * Xtream imports store the URL explicitly. M3U imports take it from one of their
+     * stream URLs, since that is what the alias matches against, and only when the
+     * stream URL is Xtream-shaped (the only shape whose credentials can be swapped).
      */
     public function getProviderUrlForAlias(): ?string
     {
@@ -564,14 +565,9 @@ class Playlist extends Model
             return rtrim($xtreamUrl, '/');
         }
 
-        $m3uUrl = trim((string) $this->url);
-        if (! preg_match('#^https?://[^/?\#]+#i', $m3uUrl)) {
-            return null;
-        }
+        $streamUrl = $this->channels()->whereNotNull('url')->value('url');
 
-        $credentials = PlaylistProfile::parseM3uUrlCredentials($m3uUrl);
-
-        return $credentials['url'] ?? PlaylistProfile::providerBaseUrl($m3uUrl);
+        return $streamUrl ? PlaylistAlias::parseXtreamStreamUrl($streamUrl)['url'] ?? null : null;
     }
 
     /**

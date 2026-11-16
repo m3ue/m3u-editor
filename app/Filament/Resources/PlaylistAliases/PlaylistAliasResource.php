@@ -1858,10 +1858,15 @@ class PlaylistAliasResource extends Resource implements CopilotResource
      * reactivity of fields inside the item on the create form, e.g. the URL
      * replacement toggle.
      *
+     * Duplicate URLs collapse to one entry: sources sharing a provider would
+     * otherwise get one entry each, and only the first would ever match.
+     *
      * @param  array<int, string>  $urls
      */
     protected static function setProviderEntries(Set $set, array $urls): void
     {
+        $urls = collect($urls)->filter()->unique(fn (string $url): string => strtolower($url))->all();
+
         $entries = [];
         foreach ($urls ?: [''] as $url) {
             $entries[(string) Str::uuid()] = [
