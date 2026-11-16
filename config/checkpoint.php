@@ -435,6 +435,17 @@ return [
         // ['html_input' => 'strip'], so only CommonMark-generated HTML is emitted.
         'de53226d18d1',
 
+        // resources/views/vendor/mail/html/{layout,message}.blade.php: stock
+        // Laravel mail templates (published unchanged apart from styling).
+        // $head/$header/$subcopy/$footer are component slots holding HTML the
+        // mail components already rendered; the content that reaches them
+        // (mail/alert, mail/post_process, mail/smtp_test) is escaped with {{ }}.
+        'bab84a53bda7',
+        '93f37a90313f',
+        '36900666b825',
+        '05404b984556',
+        '56a903076fc3',
+
         // ── Environment (local dev / CI) ─────────────────────────────────────
         // APP_DEBUG=true, APP_ENV=local, SESSION_SECURE_COOKIE off — expected
         // in local development. CI uses .env.example which sets production
