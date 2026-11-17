@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Http\Controllers\MediaServerProxyController;
+use App\Jobs\FetchTmdbIds;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
@@ -17,6 +18,7 @@ use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
 use App\Services\AIOStreamsService;
+use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
@@ -750,6 +752,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         ResolveAioStreamsChannel::dispatch($channel->id);
         NotifyAioStreamsResolutionComplete::dispatch([$channel->id], [], $integration->user_id, $channel->title ?? $channel->name)
             ->delay(now()->addSeconds(15));
+        $this->queueTmdbEnrichment($integration, channel: $channel);
 
         Notification::make()->success()->title(__('Added - resolving stream, check back shortly'))->send();
     }
@@ -771,11 +774,15 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        if ($this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult)->wasRecentlyCreated === false) {
+        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+
+        if ($series->wasRecentlyCreated === false) {
             Notification::make()->warning()->title(__('Already added to library'))->send();
 
             return;
         }
+
+        $this->queueTmdbEnrichment($integration, series: $series);
 
         Notification::make()->success()->title(__('Series added - add individual episodes to resolve their streams'))->send();
     }
@@ -810,6 +817,8 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             NotifyAioStreamsResolutionComplete::dispatch([], [$episodeRow->id], $integration->user_id, $series->name)
                 ->delay(now()->addSeconds(15));
         }
+
+        $this->queueTmdbEnrichment($integration, series: $series);
 
         Notification::make()->success()->title(__('Episode added - resolving stream, check back shortly'))->send();
     }
@@ -891,6 +900,10 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
 
         $this->selectedEpisodes = [];
 
+        if ($added > 0) {
+            $this->queueTmdbEnrichment($integration, series: $series);
+        }
+
         if (! empty($dispatchedIds)) {
             NotifyAioStreamsResolutionComplete::dispatch([], $dispatchedIds, $integration->user_id, $series->name)
                 ->delay(now()->addSeconds(15));
@@ -906,6 +919,34 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         } else {
             Notification::make()->warning()->title(__('Selected episodes are already in the library'))->send();
         }
+    }
+
+    /**
+     * Queue the same TMDB enrichment the rest of the library gets (rich cast with
+     * photos, clearlogo, trailers, certification, season posters, episode stills,
+     * ...) for an item just added from AIOStreams. The browse view shows most of
+     * that because AIOStreamsService::enrichMetaWithTmdb() merges it into the meta
+     * on the fly, but the stored library row only keeps the plain Stremio fields,
+     * so Xtream clients (M3U TV) saw it missing once the item was in the library.
+     *
+     * backfillEnrichment: the Stremio meta already gave the row a plot + poster,
+     * which the bulk job would otherwise treat as "already enriched" and skip. On
+     * a series that's already enriched, a repeat call only looks up the episodes
+     * added since, so calling this on every episode add stays cheap.
+     */
+    private function queueTmdbEnrichment(MediaServerIntegration $integration, ?Channel $channel = null, ?Series $series = null): void
+    {
+        if (! ($integration->aiostreams_tmdb_enrich ?? true) || ! app(TmdbService::class)->isConfigured()) {
+            return;
+        }
+
+        dispatch(new FetchTmdbIds(
+            vodChannelIds: $channel ? [$channel->id] : null,
+            seriesIds: $series ? [$series->id] : null,
+            user: $integration->user,
+            sendCompletionNotification: false,
+            backfillEnrichment: true,
+        ));
     }
 
     /**

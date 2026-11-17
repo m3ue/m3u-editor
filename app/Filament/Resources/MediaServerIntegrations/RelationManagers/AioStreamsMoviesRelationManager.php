@@ -2,11 +2,12 @@
 
 namespace App\Filament\Resources\MediaServerIntegrations\RelationManagers;
 
+use App\Filament\Actions\AioStreamsRescanAction;
 use App\Filament\Resources\Vods\VodResource;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Models\Channel;
-use Filament\Actions\Action;
+use App\Services\AioStreamsCandidateService;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -98,6 +99,7 @@ class AioStreamsMoviesRelationManager extends RelationManager
                         'pending' => 'gray',
                         default => 'gray',
                     })
+                    ->description(fn (Channel $record): ?string => app(AioStreamsCandidateService::class)->isManual($record) ? __('Manually selected') : null)
                     ->toggleable(),
                 TextColumn::make('aio_last_resolved_at')
                     ->label(__('Last Resolved'))
@@ -109,21 +111,7 @@ class AioStreamsMoviesRelationManager extends RelationManager
             ->filters(VodResource::getTableFilters(showPlaylist: false))
             ->recordActions([
                 ...VodResource::getTableActions(),
-                Action::make('rescan')
-                    ->tooltip(__('Rescan for stream candidates'))
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('gray')
-                    ->action(function (Channel $record) {
-                        $record->update(['aio_resolution_status' => 'pending']);
-                        ResolveAioStreamsChannel::dispatch($record->id);
-                        NotifyAioStreamsResolutionComplete::dispatch([$record->id], [], $record->user_id, $record->title_custom ?? $record->title ?? $record->name)
-                            ->delay(now()->addSeconds(15));
-
-                        Notification::make()->success()->title(__('Rescanning stream, check back shortly'))->send();
-                    })
-                    ->button()
-                    ->hiddenLabel()
-                    ->size('sm'),
+                AioStreamsRescanAction::make(),
             ], position: RecordActionsPosition::BeforeCells)
             ->toolbarActions([
                 BulkAction::make('rescan')

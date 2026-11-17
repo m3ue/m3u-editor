@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Series\RelationManagers;
 
+use App\Filament\Actions\AioStreamsRescanAction;
 use App\Filament\Tables\CacheStateColumn;
 use App\Filament\Tables\DvrSourceColumn;
 use App\Filament\Tables\ProbeStatusColumn;
@@ -178,6 +179,8 @@ class EpisodesRelationManager extends RelationManager
                     ->icon('heroicon-m-information-circle')
                     ->button()
                     ->tooltip(__('Episode Details')),
+                AioStreamsRescanAction::make()
+                    ->visible(fn (Episode $record): bool => $record->is_custom && (bool) $record->aio_item_id && $record->aio_resolution_status !== 'scheduled'),
                 Action::make('cache_now')
                     ->label(__('Cache Now'))
                     ->tooltip(__('Cache Now'))

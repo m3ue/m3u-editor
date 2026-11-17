@@ -77,6 +77,8 @@ class FetchTmdbIds implements ShouldQueue
      * @param  User|null  $user  The user to notify upon completion
      * @param  Collection|array|null  $vodGroupIds  VOD group IDs to process (merged parents expand to children)
      * @param  Collection|array|null  $seriesCategoryIds  Series category IDs to process (merged parents expand to children)
+     * @param  bool  $backfillEnrichment  Hold every item to the on-demand bar (see processVodChannel()), so items whose
+     *                                    provider already supplied a plot/cover still get TMDB cast_list/clearlogo/etc.
      */
     public function __construct(
         public Collection|array|null $vodChannelIds = null,
@@ -95,6 +97,7 @@ class FetchTmdbIds implements ShouldQueue
         public ?SyncRunPhase $completionPhase = null,
         public Collection|array|null $vodGroupIds = null,
         public Collection|array|null $seriesCategoryIds = null,
+        public bool $backfillEnrichment = false,
     ) {
         // Legacy support: convert Collections to arrays
         if ($this->vodChannelIds instanceof Collection) {
@@ -321,6 +324,7 @@ class FetchTmdbIds implements ShouldQueue
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
+                    backfillEnrichment: $this->backfillEnrichment,
                 ));
             });
     }
@@ -353,6 +357,7 @@ class FetchTmdbIds implements ShouldQueue
                     user: $this->user,
                     isChunkJob: true,
                     sendCompletionNotification: false,
+                    backfillEnrichment: $this->backfillEnrichment,
                 ));
             });
     }
@@ -505,7 +510,7 @@ class FetchTmdbIds implements ShouldQueue
                 }
 
                 try {
-                    $this->processVodChannel($tmdb, $channel);
+                    $this->processVodChannel($tmdb, $channel, $this->backfillEnrichment);
                 } catch (\Exception $e) {
                     $this->errorCount++;
                     Log::error('FetchTmdbIds: Error processing VOD channel', [
@@ -923,7 +928,7 @@ class FetchTmdbIds implements ShouldQueue
                 }
 
                 try {
-                    $this->processSingleSeries($tmdb, $series);
+                    $this->processSingleSeries($tmdb, $series, $this->backfillEnrichment);
                 } catch (\Exception $e) {
                     $this->errorCount++;
                     Log::error('FetchTmdbIds: Error processing series', [
