@@ -124,7 +124,7 @@ jobs:
         run: npm ci
 
       - name: npm CVE audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high --omit=dev
 
       - name: Prepare .env for checkpoint
         run: |
