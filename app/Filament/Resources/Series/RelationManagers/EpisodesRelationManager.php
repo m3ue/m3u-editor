@@ -7,9 +7,11 @@ use App\Filament\Tables\DvrSourceColumn;
 use App\Filament\Tables\ProbeStatusColumn;
 use App\Jobs\ProbeStreamsChunk;
 use App\Jobs\ProbeStreamsComplete;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Models\Episode;
 use App\Services\CachedContentDispatchService;
 use App\Services\LogoCacheService;
+use App\Services\PlaylistService;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
@@ -325,6 +327,27 @@ class EpisodesRelationManager extends RelationManager
                         ->modalIcon('heroicon-o-signal')
                         ->modalDescription(__('Probe the selected episodes with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                         ->modalSubmitActionLabel(__('Start probing')),
+                    Actions\BulkAction::make('cache_selected')
+                        ->label(__('Cache selected episodes'))
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->color('gray')
+                        ->visible(fn (): bool => app(CachedContentDispatchService::class)->isEnabled())
+                        ->fetchSelectedRecords(false)
+                        ->action(function (Builder $recordsQuery): void {
+                            QueueCachedContentDownloads::dispatch('episodes', PlaylistService::selectedRecordIds($recordsQuery), auth()->id());
+                        })->after(function () {
+                            Notification::make()
+                                ->success()
+                                ->title(__('Caching started'))
+                                ->body(__('Cache downloads are being queued in the background. You will be notified once the process is complete.'))
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalIcon('heroicon-o-arrow-down-tray')
+                        ->modalHeading(__('Cache selected episodes?'))
+                        ->modalDescription(__('Queue background downloads of the selected episodes to local storage, or request them from Sonarr if Sonarr is set up for caching. Episodes that are already cached, queued, or have no cacheable source URL are skipped.'))
+                        ->modalSubmitActionLabel(__('Cache episodes')),
                 ]),
             ]);
     }

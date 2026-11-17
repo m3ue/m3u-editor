@@ -4,6 +4,7 @@ use App\Enums\CachedContentFileStatus;
 use App\Enums\CacheDispatchResult;
 use App\Filament\Resources\Vods\Pages\ListVod;
 use App\Jobs\DownloadCachedContentFile;
+use App\Jobs\QueueCachedContentDownloads;
 use App\Jobs\RequestArrEpisode;
 use App\Models\ArrIntegration;
 use App\Models\CachedContentFile;
@@ -421,6 +422,74 @@ it('caches the missing episodes from the provider on Cache all episodes when Son
         ->and($counts[CacheDispatchResult::Queued->value])->toBe(1)
         ->and(cvaSentTo('GET', '/series/lookup'))->toBe(1)
         ->and(cvaSentTo('POST', '/series'))->toBe(0);
+});
+
+it('adds the series to Sonarr with only the chosen seasons monitored on Cache seasons', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'sonarr');
+    Http::fake([
+        'sonarr.test/api/v3/series/lookup*' => Http::response(cvaSeriesLookup()),
+        'sonarr.test/api/v3/series' => Http::response(['id' => 9]),
+    ]);
+
+    $series = cvaSeries($playlist);
+    cvaEpisode($series, 1, 1);
+    cvaEpisode($series, 1, 2);
+    cvaEpisode($series, 2, 1);
+
+    $counts = cvaService()->dispatchSeries($series, [2]);
+
+    expect($counts[CacheDispatchResult::SentToArr->value])->toBe(1)
+        ->and(CachedContentFile::query()->count())->toBe(0);
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && collect($request['seasons'])->pluck('monitored', 'seasonNumber')->all() === [0 => false, 1 => false, 2 => true]);
+});
+
+it('only checks the chosen seasons on Cache seasons when Sonarr already has the series', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'sonarr');
+    Http::fake([
+        'sonarr.test/api/v3/series/lookup*' => Http::response(cvaSeriesLookup(libraryId: 9)),
+        'sonarr.test/api/v3/episode*' => Http::response([
+            ['seasonNumber' => 2, 'episodeNumber' => 1, 'hasFile' => true],
+        ]),
+    ]);
+
+    $series = cvaSeries($playlist);
+    $outside = cvaEpisode($series, 1, 1);
+    cvaEpisode($series, 2, 1);
+    $missing = cvaEpisode($series, 2, 2);
+
+    $counts = cvaService()->dispatchSeries($series, [2]);
+
+    expect($counts[CacheDispatchResult::InArrLibrary->value])->toBe(1)
+        ->and($counts[CacheDispatchResult::Queued->value])->toBe(1)
+        ->and($missing->cachedContentFile()->exists())->toBeTrue()
+        ->and($outside->cachedContentFile()->exists())->toBeFalse()
+        ->and(cvaSentTo('POST', '/series'))->toBe(0);
+});
+
+it('asks Sonarr for each selected episode on its own, never adding the whole series', function () {
+    $playlist = cvaPlaylist();
+    cvaArr($playlist, 'sonarr');
+    Http::fake([
+        'sonarr.test/api/v3/series/lookup*' => Http::response(cvaSeriesLookup()),
+        'sonarr.test/api/v3/series' => Http::response(['id' => 9]),
+    ]);
+
+    $series = cvaSeries($playlist);
+    $first = cvaEpisode($series, 1, 1);
+    $second = cvaEpisode($series, 1, 2);
+    cvaEpisode($series, 2, 1);
+
+    (new QueueCachedContentDownloads('episodes', [$first->id, $second->id], $playlist->user_id))
+        ->handle(cvaService());
+
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && collect($request['seasons'])->every(fn (array $season): bool => $season['monitored'] === false));
+    Bus::assertDispatchedTimes(RequestArrEpisode::class, 2);
+    Bus::assertDispatched(RequestArrEpisode::class, fn (RequestArrEpisode $job): bool => $job->seasonNumber === 1 && $job->episodeNumber === 2);
 });
 
 // --- Dynamic groups ---

@@ -60,6 +60,7 @@ class ViewSeries extends ViewRecord
                 ->slideOver()
                 ->color('gray')
                 ->icon('heroicon-s-pencil'),
+            SeriesResource::getCacheSeasonsAction(),
             Actions\Action::make('toggle_enabled')
                 ->label(fn () => $this->record->enabled ? 'Disable Series' : 'Enable Series')
                 ->icon(fn () => $this->record->enabled ? 'heroicon-o-x-circle' : 'heroicon-o-check-circle')

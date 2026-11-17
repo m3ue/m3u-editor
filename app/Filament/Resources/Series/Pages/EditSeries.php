@@ -105,6 +105,7 @@ class EditSeries extends EditRecord
                     ->modalIcon('heroicon-o-x-circle')
                     ->modalDescription(__('Disable the series episodes now?'))
                     ->modalSubmitActionLabel(__('Yes, disable now')),
+                SeriesResource::getCacheSeasonsAction(),
 
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')

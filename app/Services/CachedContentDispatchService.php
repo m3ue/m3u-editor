@@ -162,12 +162,14 @@ class CachedContentDispatchService
 
     /**
      * Queue every episode of a series, or add the whole series to Sonarr
-     * when it handles caching. Returns how many items ended up in each
-     * result bucket.
+     * when it handles caching. `$onlySeasons` limits both to those season
+     * numbers (Sonarr then monitors only them). Returns how many items
+     * ended up in each result bucket.
      *
+     * @param  array<int, int>|null  $onlySeasons
      * @return array<string, int> keyed by CacheDispatchResult value
      */
-    public function dispatchSeries(Series $series): array
+    public function dispatchSeries(Series $series, ?array $onlySeasons = null): array
     {
         $counts = $this->emptyCounts();
 
@@ -177,21 +179,28 @@ class CachedContentDispatchService
             return $counts;
         }
 
+        $episodes = fn () => $series->episodes()
+            ->when($onlySeasons !== null, fn ($query) => $query->whereIn('season', $onlySeasons));
+
         // reorder(): the relation sorts by episode_num, which Postgres
         // rejects alongside DISTINCT.
-        $seasons = $series->episodes()->reorder()->whereNotNull('season')->distinct()->pluck('season')
+        $seasons = $episodes()->reorder()->whereNotNull('season')->distinct()->pluck('season')
             ->map(fn ($season): int => (int) $season)
             ->all();
 
+        if ($onlySeasons !== null && $seasons === []) {
+            return $counts;
+        }
+
         if ($this->arr->requestSeries($series, $seasons)) {
-            $counts[CacheDispatchResult::SentToArr->value] = $series->episodes()->count();
+            $counts[CacheDispatchResult::SentToArr->value] = $episodes()->count();
 
             return $counts;
         }
 
         $playlist = $series->playlist;
 
-        foreach ($series->episodes()->orderBy('season')->orderBy('episode_num')->cursor() as $episode) {
+        foreach ($episodes()->reorder()->orderBy('season')->orderBy('episode_num')->cursor() as $episode) {
             // cursor() can't eager load; the series and its playlist are the
             // same for every episode, so hand them over directly.
             $episode->setRelation('series', $series);

@@ -347,6 +347,8 @@ class SeriesResource extends Resource implements CopilotResource
             ->modalHeading(__('Cache all episodes?'))
             ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode of ":name" to local storage, or add the series to Sonarr if Sonarr is set up for caching. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
             ->modalSubmitActionLabel(__('Cache all episodes'))
+            ->disabled(fn (Series $record): bool => ! self::hasEpisodesToCache($record))
+            ->tooltip(fn (Series $record): ?string => self::hasEpisodesToCache($record) ? null : __('No episodes to cache yet. Run Fetch Provider Metadata first.'))
             ->action(function (Series $record): void {
                 $counts = app(CachedContentDispatchService::class)->dispatchSeries($record);
                 CachedContentDispatchService::summaryNotification($counts)->send();
@@ -380,6 +382,68 @@ class SeriesResource extends Resource implements CopilotResource
                     ->send();
             })
             ->deselectRecordsAfterCompletion();
+    }
+
+    /**
+     * Season-scoped variant of `getCacheAllEpisodesAction()`: queues only the
+     * episodes of the chosen seasons, and a series added to Sonarr monitors
+     * only those seasons.
+     */
+    public static function getCacheSeasonsAction(): Action
+    {
+        return Action::make('cache_seasons')
+            ->label(__('Cache seasons'))
+            ->icon('heroicon-o-arrow-down-tray')
+            ->color('gray')
+            ->visible(fn (Series $record): bool => app(CachedContentDispatchService::class)->isEnabled()
+                && filled($record->playlist_id))
+            ->modalIcon('heroicon-o-arrow-down-tray')
+            ->modalHeading(__('Cache seasons'))
+            ->modalDescription(fn (Series $record): string => __('Queue background downloads of every episode in the selected seasons of ":name" to local storage, or request them from Sonarr if Sonarr is set up for caching. Episodes that are already cached or queued are skipped.', ['name' => $record->name]))
+            ->modalSubmitActionLabel(__('Cache seasons'))
+            ->disabled(fn (Series $record): bool => ! self::hasEpisodesToCache($record))
+            ->tooltip(fn (Series $record): ?string => self::hasEpisodesToCache($record) ? null : __('No episodes to cache yet. Run Fetch Provider Metadata first.'))
+            ->schema([
+                CheckboxList::make('seasons')
+                    ->label(__('Seasons'))
+                    ->required()
+                    ->columns(2)
+                    ->options(fn (Series $record): array => $record->episodes()
+                        ->reorder()
+                        ->whereNotNull('season')
+                        ->selectRaw('season, count(*) as episode_count')
+                        ->groupBy('season')
+                        ->orderBy('season')
+                        ->toBase()
+                        ->get()
+                        ->mapWithKeys(fn (object $row): array => [
+                            (int) $row->season => trans_choice('Season :season (:count episode)|Season :season (:count episodes)', (int) $row->episode_count, [
+                                'season' => (int) $row->season,
+                                'count' => (int) $row->episode_count,
+                            ]),
+                        ])
+                        ->all()),
+            ])
+            ->action(function (Series $record, array $data): void {
+                $seasons = array_map('intval', $data['seasons'] ?? []);
+                $counts = app(CachedContentDispatchService::class)->dispatchSeries($record, $seasons);
+                CachedContentDispatchService::summaryNotification($counts)->send();
+            });
+    }
+
+    /**
+     * Whether the series has any episodes for the cache actions to queue. A
+     * series whose metadata hasn't been fetched yet has none. Uses the
+     * `episodes_count` the series table already loads when its Episodes
+     * column is visible, so the list page needs no extra query per row.
+     */
+    private static function hasEpisodesToCache(Series $record): bool
+    {
+        $loadedCount = $record->getAttributes()['episodes_count'] ?? null;
+
+        return $loadedCount !== null
+            ? (int) $loadedCount > 0
+            : $record->episodes()->exists();
     }
 
     public static function getTableActions(): array
@@ -637,6 +701,7 @@ class SeriesResource extends Resource implements CopilotResource
                     ->modalIcon('heroicon-o-signal')
                     ->modalDescription(__('Probe all episodes of this series with ffprobe to collect stream metadata (codec, resolution, bitrate, HDR). This data enables Trash Guide naming with stream-stat-based detection.'))
                     ->modalSubmitActionLabel(__('Start probing')),
+                self::getCacheSeasonsAction(),
                 self::getCacheAllEpisodesAction(),
                 DeleteAction::make()
                     ->modalIcon('heroicon-o-trash')
