@@ -6,6 +6,7 @@ use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
 use App\Models\Series;
+use App\Models\SeriesFailover;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
@@ -92,8 +93,18 @@ class SeriesFailoverLinker
      */
     public function linkEpisodesForSeries(Series $series): int
     {
-        $failoverSeries = $series->failoverSeries()->get(['series.id']);
+        return $this->linkEpisodes($series, $series->failoverSeries()->get(['series.id'])->values());
+    }
 
+    /**
+     * Pair a series against the given failover series (in order). The whole series is
+     * paired so duplicate keys are judged the same way as a full merge, but with
+     * $onlyEpisodeId only that episode's links are written.
+     *
+     * @param  Collection<int, Series>  $failoverSeries
+     */
+    protected function linkEpisodes(Series $series, Collection $failoverSeries, ?int $onlyEpisodeId = null): int
+    {
         if ($failoverSeries->isEmpty()) {
             return 0;
         }
@@ -103,6 +114,10 @@ class SeriesFailoverLinker
 
         foreach ($failoverSeries as $index => $failover) {
             foreach ($this->pairEpisodes($masterEpisodes, $this->episodesForSeries($failover->id)) as [$masterEpisode, $failoverEpisode]) {
+                if ($onlyEpisodeId !== null && $masterEpisode->id !== $onlyEpisodeId) {
+                    continue;
+                }
+
                 $this->linkEpisode($masterEpisode, $failoverEpisode, $index + 1, $series->user_id);
                 $linked++;
             }
@@ -136,7 +151,12 @@ class SeriesFailoverLinker
      */
     public function repairEpisode(Episode $episode): void
     {
-        if (! $episode->series_id || $episode->failovers()->exists()) {
+        // Most episodes belong to series without failover series: one query, then out.
+        if (! $episode->series_id || ! SeriesFailover::where('series_id', $episode->series_id)->exists()) {
+            return;
+        }
+
+        if ($episode->failovers()->exists()) {
             return;
         }
 
@@ -150,16 +170,20 @@ class SeriesFailoverLinker
             return;
         }
 
-        $series->failoverSeries()
-            ->whereDoesntHave('episodes')
-            ->get()
+        $failoverSeries = $series->failoverSeries()->withExists('episodes')->get()->values();
+
+        // Backups with no episodes yet get one fetch per cooldown, however many of the
+        // series' episodes are played.
+        $failoverSeries
+            ->reject(fn (Series $backup): bool => (bool) $backup->episodes_exists)
+            ->filter(fn (Series $backup): bool => Cache::add('series-failover-fetch:'.$backup->id, true, self::REPAIR_COOLDOWN_SECONDS))
             ->each(fn (Series $backup) => dispatch(new ProcessM3uImportSeriesEpisodes(
                 playlistSeries: $backup,
                 notify: false,
                 sync_stream_files: false,
             )));
 
-        $this->linkEpisodesForSeries($series);
+        $this->linkEpisodes($series, $failoverSeries, onlyEpisodeId: $episode->id);
     }
 
     public function linkEpisode(Episode $master, Episode $failover, int $sortOrder, int $userId): void

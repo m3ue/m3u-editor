@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\SeriesFailoverLinker;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Livewire\Livewire;
 
@@ -177,4 +178,38 @@ it('hides failover series for AIOStreams series', function () {
 
     Livewire::test(EditSeries::class, ['record' => $a['series']->getRouteKey()])
         ->assertFormFieldHidden('failovers');
+});
+
+it('checks a series without failovers in a single query at play time', function () {
+    $a = seriesFailoverLinkerMakeSeries($this->user, $this->primary, [[1, 1]]);
+    $episode = $a['episodes'][0]->fresh();
+
+    DB::enableQueryLog();
+    app(SeriesFailoverLinker::class)->repairEpisode($episode);
+
+    expect(DB::getQueryLog())->toHaveCount(1);
+});
+
+it('only links the played episode at play time', function () {
+    $a = seriesFailoverLinkerMakeSeries($this->user, $this->primary, [[1, 1], [1, 2]]);
+    $b = seriesFailoverLinkerMakeSeries($this->user, $this->backup, [[1, 1], [1, 2]]);
+    seriesFailoverLinkerQuietLink($a['series'], $b['series']);
+
+    app(SeriesFailoverLinker::class)->repairEpisode($a['episodes'][1]);
+
+    expect($a['episodes'][1]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][1]->id]);
+    $this->assertDatabaseCount('episode_failovers', 1);
+});
+
+it('queues one fetch per empty backup series however many episodes are played', function () {
+    $a = seriesFailoverLinkerMakeSeries($this->user, $this->primary, [[1, 1], [1, 2], [1, 3]]);
+    $b = seriesFailoverLinkerMakeSeries($this->user, $this->backup, [], ['enabled' => false]);
+    seriesFailoverLinkerQuietLink($a['series'], $b['series']);
+
+    $linker = app(SeriesFailoverLinker::class);
+    foreach ($a['episodes'] as $episode) {
+        $linker->repairEpisode($episode);
+    }
+
+    Bus::assertDispatchedTimes(ProcessM3uImportSeriesEpisodes::class, 1);
 });

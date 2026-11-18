@@ -121,7 +121,10 @@ class MergeEpisodes implements ShouldQueue
         $query = Series::query()
             ->select(['id', 'playlist_id', 'tmdb_id', 'tvdb_id'])
             ->where('user_id', $this->user->id)
-            ->whereIn('playlist_id', $this->mergePlaylistIds);
+            ->whereIn('playlist_id', $this->mergePlaylistIds)
+            // AIOStreams series manage their own episode failovers; they still pair
+            // by episode TMDB ID in the ungrouped pass, as before series linking.
+            ->whereNull('aio_integration_id');
 
         $scope($query);
 
@@ -240,16 +243,24 @@ class MergeEpisodes implements ShouldQueue
             return;
         }
 
-        EpisodeFailover::whereIn('episode_id', $groupEpisodeIds)
+        $staleLinkIds = EpisodeFailover::whereIn('episode_id', $groupEpisodeIds)
             ->whereIn('episode_failover_id', $groupEpisodeIds)
             ->get(['id', 'episode_id', 'episode_failover_id'])
             ->reject(fn (EpisodeFailover $link): bool => isset($desiredEpisodePairs[$link->episode_id.':'.$link->episode_failover_id]))
-            ->each(fn (EpisodeFailover $link) => $link->delete());
+            ->pluck('id')
+            ->all();
+
+        if ($staleLinkIds !== []) {
+            EpisodeFailover::whereIn('id', $staleLinkIds)->delete();
+        }
     }
 
     /**
      * Episodes whose series did not match another series can still pair by their own
      * TMDB ID (for example when one provider's series carries the wrong TMDB ID).
+     * Episodes of matched series take part too, so an ungrouped series can attach to
+     * a matched group, but a pair where both series are grouped is left to the
+     * series-level pass.
      */
     protected function linkUngroupedEpisodesByTmdbId(): void
     {
@@ -269,22 +280,43 @@ class MergeEpisodes implements ShouldQueue
             ->when($existingFailoverEpisodeIds !== [], fn ($query) => $query->whereNotIn('id', $existingFailoverEpisodeIds))
             ->orderBy('tmdb_id')
             ->orderBy('id')
-            ->cursor()
-            ->reject(fn (Episode $episode): bool => isset($this->groupedSeriesIds[$episode->series_id]));
+            ->cursor();
 
         $this->eachGroup(
             $episodes,
             fn (Episode $episode): string => (string) (int) $episode->tmdb_id,
             function (Collection $group): void {
+                if ($group->every(fn (Episode $episode): bool => $this->isGrouped($episode))) {
+                    return;
+                }
+
                 $sorted = $this->sortByPlaylistPriority($group);
                 $master = $sorted->first();
 
-                $sortOrder = 1;
+                // Append after any links the series-level pass gave this master, and keep
+                // the order of links that already exist.
+                $sortOrder = (int) EpisodeFailover::where('episode_id', $master->id)->max('sort');
+
                 foreach ($sorted->where('id', '!=', $master->id) as $failover) {
-                    $this->linkEpisode($master, $failover, $sortOrder++);
+                    if ($this->isGrouped($master) && $this->isGrouped($failover)) {
+                        continue;
+                    }
+
+                    $exists = EpisodeFailover::where('episode_id', $master->id)
+                        ->where('episode_failover_id', $failover->id)
+                        ->exists();
+
+                    if (! $exists) {
+                        $this->linkEpisode($master, $failover, ++$sortOrder);
+                    }
                 }
             },
         );
+    }
+
+    protected function isGrouped(Episode $episode): bool
+    {
+        return isset($this->groupedSeriesIds[$episode->series_id]);
     }
 
     /**

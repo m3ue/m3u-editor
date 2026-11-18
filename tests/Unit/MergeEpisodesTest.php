@@ -8,6 +8,7 @@ use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\UnmergeEpisodes;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\SeriesFailover;
@@ -520,4 +521,37 @@ it('makes disabled series linked as a failover eligible for a metadata fetch', f
 
     expect($eligibleIds)->toContain($linkedBackup->id)
         ->not->toContain($unlinkedBackup->id);
+});
+
+it('links a series with the wrong tmdb id to a matched group by episode tmdb id', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $playlistA, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $b = mergeEpisodesMakeSeries($user, $playlistB, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $c = mergeEpisodesMakeSeries($user, $playlistC, ['tmdb_id' => 999], [[1, 1, 5001]]);
+
+    $merge = fn () => runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistB, $playlistC), playlistId: $playlistA->id);
+    $merge();
+    $merge();
+
+    expect($a['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][0]->id, $c['episodes'][0]->id])
+        ->and($b['episodes'][0]->failoverEpisodes()->count())->toBe(0);
+    $this->assertDatabaseCount('episode_failovers', 2);
+});
+
+it('leaves AIOStreams series out of series-level matching', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+    $integration = MediaServerIntegration::factory()->create(['user_id' => $user->id]);
+
+    mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 1200, 'aio_integration_id' => $integration->id], [[1, 1]]);
+    mergeEpisodesMakeSeries($user, $backup, ['tmdb_id' => 1200], [[1, 1]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($backup), playlistId: $primary->id);
+
+    $this->assertDatabaseCount('series_failovers', 0);
 });
