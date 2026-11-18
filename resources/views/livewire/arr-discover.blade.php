@@ -726,11 +726,11 @@
                                 {{-- Show more / Show less footer --}}
                                 <div class="mt-4 border-t border-gray-100 pt-3 text-center dark:border-gray-800">
                                     <button @click="expanded = ! expanded"
-                                    class="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
-                                >
-                                    <span
-                                        x-show="! expanded"
-                                    >{{ __('Show :n more', ['n' => count($remainingItems)]) }}</span>
+                                        class="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+                                    >
+                                        <span
+                                            x-show="! expanded"
+                                        >{{ __('Show :n more', ['n' => count($remainingItems)]) }}</span>
                                         <span x-show="expanded" style="display: none">{{ __('Show less') }}</span>
                                         <x-heroicon-o-chevron-down
                                             class="h-3.5 w-3.5 transition-transform duration-200"
