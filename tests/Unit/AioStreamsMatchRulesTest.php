@@ -35,6 +35,9 @@ it('reads audio languages from the release filename, not the title', function (s
     'untagged original' => ['The.Odyssey.2026.1080p.WEB-DL.DDP5.1.H.264-WHO.mkv', []],
     'subtitle tag is not audio' => ['The.Odyssey.2026.1080p.Blu-ray.Remux.AVC-CiNEPHiLES.UKRsub.mkv', []],
     'language word in the title' => ['The.French.Dispatch.2021.1080p.BluRay.x264.mkv', []],
+    'language word in an episode title' => ['Show.S02E05.The.Finnish.Line.1080p.WEB.h264-GRP.mkv', []],
+    'episode language tag before the resolution' => ['Show.S01E01.FRENCH.1080p.WEB.mkv', ['fr']],
+    'episode multi tags without a resolution' => ['Show.S01E01.MULTi.VFF.HDTV.x264.mkv', ['multi', 'fr']],
 ]);
 
 it('reads the release source, preferring bingeGroup', function (string $filename, ?string $bingeGroup, ?string $expected) {
@@ -48,6 +51,10 @@ it('reads the release source, preferring bingeGroup', function (string $filename
     'webrip' => ['The.Odyssey.2026.1080p.WEBRip.x265-INFINITY.mp4', null, 'webrip'],
     'telesync' => ['New.Movie.2026.1080p.TS.x264.mkv', null, 'telesync'],
     'DTS audio is not telesync' => ['Movie.2026.1080p.BluRay.DTS-HD.MA.5.1.mkv', null, 'bluray'],
+    'source word in a movie title' => ['Cam.2018.1080p.NF.WEB-DL.DDP5.1.x264-NTG.mkv', null, 'web-dl'],
+    'title word is not a source' => ["Charlotte's.Web.2006.1080p.AMZN.DDP5.1.x264.mkv", null, null],
+    'source word in an episode title' => ['Show.S01E03.The.Cam.1080p.WEB-DL.mkv', null, 'web-dl'],
+    'bingeGroup beats the release name' => ['Cam.2018.1080p.x264.mkv', 'aiostreams|1080p|WEB-DL|NTG', 'web-dl'],
 ]);
 
 it('falls back to the filename for a resolution the display text does not state', function () {

@@ -9,6 +9,7 @@ use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Series;
 use App\Models\User;
+use App\Services\AioStreamsCandidateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 
@@ -116,4 +117,63 @@ it('never re-dispatches resolution for already-resolved candidates (debrid ban-a
     Bus::assertNotDispatched(ResolveAioStreamsChannel::class, fn ($job) => $job->channelId === $resolvedChannel->id);
     Bus::assertNotDispatched(ResolveAioStreamsEpisode::class, fn ($job) => $job->episodeId === $resolvedEpisode->id);
     Bus::assertNotDispatched(NotifyAioStreamsResolutionComplete::class);
+});
+
+it('rotates titles that keep failing instead of retrying the same batch forever', function () {
+    Bus::fake();
+
+    $stuck = collect(range(1, 3))->map(fn (int $i) => Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_custom' => true,
+        'aio_integration_id' => $this->integration->id,
+        'aio_resolution_status' => 'failed',
+        'updated_at' => now()->subDays(10 - $i),
+    ]));
+    $waiting = Channel::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_custom' => true,
+        'aio_integration_id' => $this->integration->id,
+        'aio_resolution_status' => 'failed',
+        'updated_at' => now()->subDay(),
+    ]);
+
+    // Another attempt that still finds nothing re-marks the (already failed) rows.
+    $this->travel(1)->minute();
+    $service = app(AioStreamsCandidateService::class);
+    $stuck->each(fn (Channel $channel) => $service->markFailed($channel->fresh()));
+
+    $this->artisan('app:resolve-pending-aiostreams-candidates', ['--limit' => 2]);
+
+    Bus::assertDispatched(ResolveAioStreamsChannel::class, fn ($job) => $job->channelId === $waiting->id);
+});
+
+it('splits the batch so failed movies cannot starve episodes', function () {
+    Bus::fake();
+
+    foreach (range(1, 4) as $i) {
+        Channel::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'is_custom' => true,
+            'aio_integration_id' => $this->integration->id,
+            'aio_resolution_status' => 'failed',
+        ]);
+    }
+    $dueEpisode = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $this->series->id,
+        'is_custom' => true,
+        'aio_item_id' => 'tt9:1:1',
+        'aio_resolution_status' => 'scheduled',
+        'aio_air_date' => now()->subMinute(),
+    ]);
+
+    $this->artisan('app:resolve-pending-aiostreams-candidates', ['--limit' => 4]);
+
+    // Two movies up front, the one due episode, then movies take back the unused slot.
+    Bus::assertDispatchedTimes(ResolveAioStreamsChannel::class, 3);
+    Bus::assertDispatched(ResolveAioStreamsEpisode::class, fn ($job) => $job->episodeId === $dueEpisode->id);
 });

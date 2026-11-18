@@ -35,21 +35,67 @@ class ResolvePendingAioStreamsCandidates extends Command
     {
         $limit = (int) $this->option('limit');
 
-        $channels = Channel::query()
-            ->where('is_custom', true)
-            ->whereNotNull('aio_integration_id')
-            ->where('aio_resolution_status', 'failed')
-            ->orderBy('updated_at')
-            ->limit($limit)
-            ->get();
+        // Both lists are taken oldest-attempt first: every attempt that still
+        // finds nothing moves the item's updated_at (see
+        // AioStreamsCandidateService::markFailed()), so titles that keep
+        // failing rotate to the back instead of taking every slot each hour.
+        // Movies get half the batch up front so a backlog of them can't
+        // starve episodes, then take back whatever episodes don't use.
+        $channels = $this->pendingChannels((int) ceil($limit / 2));
+        $episodes = $this->pendingEpisodes($limit - $channels->count());
+
+        if ($channels->count() + $episodes->count() < $limit) {
+            $channels = $channels->concat(
+                $this->pendingChannels($limit - $channels->count() - $episodes->count(), $channels->pluck('id')->all())
+            );
+        }
 
         foreach ($channels as $channel) {
             ResolveAioStreamsChannel::dispatch($channel->id);
         }
 
-        $remaining = max(0, $limit - $channels->count());
+        foreach ($episodes as $episode) {
+            ResolveAioStreamsEpisode::dispatch($episode->id);
+        }
 
-        $episodes = Episode::query()
+        $this->notifyByUser($channels, $episodes);
+
+        $this->info("Resolving {$channels->count()} channels and {$episodes->count()} episodes.");
+    }
+
+    /**
+     * @param  array<int, int>  $exceptIds
+     * @return Collection<int, Channel>
+     */
+    private function pendingChannels(int $limit, array $exceptIds = []): Collection
+    {
+        if ($limit <= 0) {
+            return new Collection;
+        }
+
+        return Channel::query()
+            ->where('is_custom', true)
+            ->whereNotNull('aio_integration_id')
+            ->where('aio_resolution_status', 'failed')
+            ->when($exceptIds !== [], fn ($query) => $query->whereNotIn('id', $exceptIds))
+            ->orderBy('updated_at')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Failed episodes, plus unaired ('scheduled') ones whose air date has
+     * passed and so are now worth a first attempt.
+     *
+     * @return Collection<int, Episode>
+     */
+    private function pendingEpisodes(int $limit): Collection
+    {
+        if ($limit <= 0) {
+            return new Collection;
+        }
+
+        return Episode::query()
             ->where('is_custom', true)
             ->whereNotNull('aio_item_id')
             ->where(function ($query) {
@@ -59,17 +105,9 @@ class ResolvePendingAioStreamsCandidates extends Command
                             ->where('aio_air_date', '<=', now());
                     });
             })
-            ->orderBy('aio_air_date')
-            ->limit($remaining)
+            ->orderBy('updated_at')
+            ->limit($limit)
             ->get();
-
-        foreach ($episodes as $episode) {
-            ResolveAioStreamsEpisode::dispatch($episode->id);
-        }
-
-        $this->notifyByUser($channels, $episodes);
-
-        $this->info("Resolving {$channels->count()} channels and {$episodes->count()} episodes.");
     }
 
     /**

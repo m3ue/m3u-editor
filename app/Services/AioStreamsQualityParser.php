@@ -113,7 +113,7 @@ class AioStreamsQualityParser
             'seeders' => $stream['seeders'] ?? $this->parseSeeders($haystack),
             'cached' => (bool) ($behaviorHints['cached'] ?? preg_match('/\b(cached|instant)\b/i', $haystack)),
             'source_addon' => $stream['name'] ?? null,
-            'source' => $this->parseSource(($bingeGroup[2] ?? '').' '.$releaseName),
+            'source' => $this->parseSource($bingeGroup[2] ?? '', $releaseName),
             'languages' => $this->parseLanguages($releaseName, (string) ($stream['description'] ?? '')),
             'release_group' => $this->parseReleaseGroup($releaseName, $bingeGroup),
         ];
@@ -153,26 +153,20 @@ class AioStreamsQualityParser
 
     /**
      * Release source, worst-first so a "TS" or "CAM" tag wins over anything
-     * else the name mentions.
+     * else the name mentions. AIOStreams' bingeGroup quality ("BluRay REMUX",
+     * "WEB-DL") is structured, so it's trusted first; the release name is
+     * only read past its title (see releaseTagParts()), so "Cam" (2018) or
+     * "Charlotte's Web" don't read as sources.
      */
-    protected function parseSource(string $text): ?string
+    protected function parseSource(string $bingeGroupQuality, string $releaseName): ?string
     {
-        $patterns = [
-            'cam' => '/\b(HD-?)?CAM(-?RIP)?\b/i',
-            'telesync' => '/\b(HD-?TS|TELESYNC|TS)\b/i',
-            'telecine' => '/\b(HD-?TC|TELECINE)\b/i',
-            'screener' => '/\b(DVD-?SCR|SCREENER|SCR)\b/i',
-            'remux' => '/REMUX/i',
-            'bluray' => '/\b(BLU-?RAY|BD-?RIP|BR-?RIP|BD25|BD50)\b/i',
-            'webrip' => '/\bWEB-?RIP\b/i',
-            'web-dl' => '/\bWEB([-. ]?DL)?\b/i',
-            'hdtv' => '/\b(HDTV|PDTV)\b/i',
-            'dvd' => '/\bDVD(-?RIP|5|9|R)?\b/i',
-        ];
+        [$tags, $titleGap] = $this->releaseTagParts($releaseName);
 
-        foreach ($patterns as $source => $pattern) {
-            if (preg_match($pattern, $text)) {
-                return $source;
+        foreach ([[$bingeGroupQuality, ''], [$tags, $titleGap]] as [$text, $gap]) {
+            foreach (self::SOURCE_PATTERNS as $source => $pattern) {
+                if ($this->hasReleaseTag($pattern, $text, $gap)) {
+                    return $source;
+                }
             }
         }
 
@@ -184,26 +178,22 @@ class AioStreamsQualityParser
      * multi/dual-audio releases). Empty when the release doesn't tag its
      * audio, which by scene convention means the original language.
      *
-     * Language tokens only count after the title part of the name (from the
-     * year / resolution / SxxEyy marker on), so a title such as "The French
-     * Dispatch" isn't read as French audio. Subtitle tags ("UKRsub",
-     * "VOSTFR") don't match the word-bounded tokens. A Cyrillic name is a
-     * Russian release. Flag emoji in the description are the one reliable
-     * display-text signal.
+     * Language tokens only count in the tag part of the name (see
+     * releaseTagParts()), so titles such as "The French Dispatch" or an
+     * episode called "The Finnish Line" aren't read as audio languages.
+     * Subtitle tags ("UKRsub", "VOSTFR") don't match the word-bounded tokens.
+     * A Cyrillic name is a Russian release. Flag emoji in the description
+     * are the one reliable display-text signal.
      *
      * @return array<int, string>
      */
     protected function parseLanguages(string $releaseName, string $description): array
     {
+        [$tags, $titleGap] = $this->releaseTagParts($releaseName);
         $languages = [];
 
-        $tagPart = $releaseName;
-        if (preg_match('/(?<!\d)(19|20)\d{2}(?!\d)|\b\d{3,4}p\b|\bS\d{1,2}E\d{1,3}\b/i', $releaseName, $match, PREG_OFFSET_CAPTURE)) {
-            $tagPart = substr($releaseName, $match[0][1]);
-        }
-
         foreach (self::LANGUAGE_TOKENS as $code => $pattern) {
-            if (preg_match('/(?<![a-z0-9])('.$pattern.')(?![a-z0-9])/i', $tagPart)) {
+            if ($this->hasReleaseTag('/(?<![a-z0-9])('.$pattern.')(?![a-z0-9])/i', $tags, $titleGap)) {
                 $languages[] = $code;
             }
         }
@@ -220,6 +210,84 @@ class AioStreamsQualityParser
 
         return array_values(array_unique($languages));
     }
+
+    /**
+     * Split a release name into the part that carries its tags and, for
+     * episodes, the gap that may hold the episode title.
+     *
+     * - Movies ("Title.2026.MULTi.2160p..."): tags start at the year (or the
+     *   resolution when there's no year); the title before it is ignored.
+     * - Episodes ("Show.S02E05.The.Finnish.Line.1080p..."): tags start at
+     *   the resolution after SxxEyy. The words between SxxEyy and the
+     *   resolution are returned separately: they may be scene tags
+     *   ("Show.S01E01.FRENCH.1080p") or the episode title, which
+     *   hasReleaseTag() tells apart by capitalization.
+     * - No marker at all: the whole name counts, as before.
+     *
+     * @return array{0: string, 1: string} [tags, title gap]
+     */
+    protected function releaseTagParts(string $releaseName): array
+    {
+        $resolution = '/\b\d{3,4}p\b|\b(4K|UHD)\b/i';
+
+        if (preg_match('/\bS\d{1,2}E\d{1,3}\b/i', $releaseName, $match, PREG_OFFSET_CAPTURE)) {
+            $afterEpisode = substr($releaseName, $match[0][1] + strlen($match[0][0]));
+
+            if (preg_match($resolution, $afterEpisode, $resolutionMatch, PREG_OFFSET_CAPTURE)) {
+                return [substr($afterEpisode, $resolutionMatch[0][1]), substr($afterEpisode, 0, $resolutionMatch[0][1])];
+            }
+
+            return ['', $afterEpisode];
+        }
+
+        if (preg_match('/(?<!\d)(19|20)\d{2}(?!\d)/', $releaseName, $match, PREG_OFFSET_CAPTURE)
+            || preg_match($resolution, $releaseName, $match, PREG_OFFSET_CAPTURE)) {
+            return [substr($releaseName, $match[0][1]), ''];
+        }
+
+        return [$releaseName, ''];
+    }
+
+    /**
+     * Whether a tag pattern matches: anywhere in the tag part, or in an
+     * episode's title gap only when written the way scene tags are
+     * (FRENCH, MULTi, iTA, WEB-DL) rather than as a capitalized title word
+     * (Finnish, Cam), which is how episode titles are written.
+     */
+    protected function hasReleaseTag(string $pattern, string $tags, string $titleGap): bool
+    {
+        if ($tags !== '' && preg_match($pattern, $tags)) {
+            return true;
+        }
+
+        if ($titleGap === '' || ! preg_match_all($pattern, $titleGap, $matches)) {
+            return false;
+        }
+
+        foreach ($matches[0] as $token) {
+            if (! preg_match('/^[A-Z][a-z]+$/', $token)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Release source patterns, worst first.
+     */
+    protected const SOURCE_PATTERNS = [
+        'cam' => '/\b(HD-?)?CAM(-?RIP)?\b/i',
+        'telesync' => '/\b(HD-?TS|TELESYNC|TS)\b/i',
+        'telecine' => '/\b(HD-?TC|TELECINE)\b/i',
+        'screener' => '/\b(DVD-?SCR|SCREENER|SCR)\b/i',
+        'remux' => '/REMUX/i',
+        'bluray' => '/\b(BLU-?RAY|BD-?RIP|BR-?RIP|BD25|BD50)\b/i',
+        'webrip' => '/\bWEB-?RIP\b/i',
+        'web-dl' => '/\bWEB([-. ]?DL)?\b/i',
+        'hdtv' => '/\b(HDTV|PDTV)\b/i',
+        'dvd' => '/\bDVD(-?RIP|5|9|R)?\b/i',
+    ];
 
     /**
      * @param  array<int, string>  $bingeGroup

@@ -38,6 +38,11 @@ class AioStreamsCandidateService
      */
     public const MANUAL_CACHE_MINUTES = 30;
 
+    /**
+     * @var array<string, ?AioStreamsMatchProfile>
+     */
+    protected array $profiles = [];
+
     public function __construct(private readonly AioStreamsQualityParser $parser) {}
 
     /**
@@ -72,11 +77,7 @@ class AioStreamsCandidateService
         }
 
         foreach (array_filter($profileIds) as $profileId) {
-            // Scoped to the owner: the override column has no foreign key, and
-            // a profile that no longer exists just falls through to the default.
-            $profile = AioStreamsMatchProfile::query()
-                ->where('user_id', $item->user_id)
-                ->find($profileId);
+            $profile = $this->findProfile($item->user_id, (int) $profileId);
 
             if ($profile) {
                 return $profile;
@@ -84,6 +85,27 @@ class AioStreamsCandidateService
         }
 
         return null;
+    }
+
+    /**
+     * One resolve looks the profile up several times (ranking, failover
+     * depth, resolution status), so lookups are remembered for the life of
+     * this instance - one job or request. Keyed by profile id rather than by
+     * item, so a changed override is still seen. Scoped to the owner: the
+     * override column has no foreign key, and a profile that no longer
+     * exists (or isn't theirs) just falls through to the default.
+     */
+    protected function findProfile(int $userId, int $profileId): ?AioStreamsMatchProfile
+    {
+        $key = "{$userId}:{$profileId}";
+
+        if (! array_key_exists($key, $this->profiles)) {
+            $this->profiles[$key] = AioStreamsMatchProfile::query()
+                ->where('user_id', $userId)
+                ->find($profileId);
+        }
+
+        return $this->profiles[$key];
     }
 
     /**
@@ -115,6 +137,20 @@ class AioStreamsCandidateService
         }
 
         return $ranked;
+    }
+
+    /**
+     * Mark an item as having no usable stream yet. Always moves its
+     * updated_at, which is the hourly pending-candidates sweep's retry
+     * order: re-marking an already-'failed' row with update() is a no-op
+     * that leaves updated_at alone, so titles that keep finding nothing
+     * (e.g. a profile set to leave them unresolved) would otherwise stay at
+     * the front of the queue and starve every other item of a retry slot.
+     */
+    public function markFailed(Channel|Episode $item): void
+    {
+        $item->aio_resolution_status = 'failed';
+        $item->touch();
     }
 
     /**
