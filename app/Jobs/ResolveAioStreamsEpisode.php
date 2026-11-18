@@ -82,6 +82,7 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
         }
 
         $streams = $result['streams'] ?? [];
+        $candidates = new AioStreamsCandidateService($parser);
 
         if (empty($streams)) {
             if ($this->attempt < 3) {
@@ -90,16 +91,24 @@ class ResolveAioStreamsEpisode implements ShouldBeUniqueUntilProcessing, ShouldQ
                 return;
             }
 
-            $episode->update(['aio_resolution_status' => 'failed']);
+            $candidates->markFailed($episode);
 
             return;
         }
 
-        $candidates = new AioStreamsCandidateService($parser);
-
         // Prefers the user's manual pick (re-matched against the fresh results)
-        // over the automatic ranking, so a link refresh doesn't undo it.
-        [$selected, $manualKeys] = $candidates->selectForAutomaticResolution($episode, $parser->rank($streams));
+        // over the item's match profile ranking, so a link refresh doesn't undo it.
+        [$selected, $manualKeys] = $candidates->selectForAutomaticResolution($episode, $streams);
+
+        // Only possible when the item's profile is set to leave it unresolved
+        // rather than fall back: streams exist, but none pass its filters. The
+        // hourly pending-candidates sweep retries 'failed' items, so a matching
+        // release is picked up once one appears.
+        if ($selected === []) {
+            $candidates->markFailed($episode);
+
+            return;
+        }
 
         $candidates->apply($episode, $selected, $manualKeys);
     }

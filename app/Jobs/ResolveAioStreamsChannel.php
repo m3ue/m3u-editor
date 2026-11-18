@@ -87,6 +87,7 @@ class ResolveAioStreamsChannel implements ShouldBeUniqueUntilProcessing, ShouldQ
         }
 
         $streams = $result['streams'] ?? [];
+        $candidates = new AioStreamsCandidateService($parser);
 
         if (empty($streams)) {
             // AIOStreams sometimes returns no results on a first attempt but
@@ -97,16 +98,24 @@ class ResolveAioStreamsChannel implements ShouldBeUniqueUntilProcessing, ShouldQ
                 return;
             }
 
-            $channel->update(['aio_resolution_status' => 'failed']);
+            $candidates->markFailed($channel);
 
             return;
         }
 
-        $candidates = new AioStreamsCandidateService($parser);
-
         // Prefers the user's manual pick (re-matched against the fresh results)
-        // over the automatic ranking, so a link refresh doesn't undo it.
-        [$selected, $manualKeys] = $candidates->selectForAutomaticResolution($channel, $parser->rank($streams));
+        // over the item's match profile ranking, so a link refresh doesn't undo it.
+        [$selected, $manualKeys] = $candidates->selectForAutomaticResolution($channel, $streams);
+
+        // Only possible when the item's profile is set to leave it unresolved
+        // rather than fall back: streams exist, but none pass its filters. The
+        // hourly pending-candidates sweep retries 'failed' items, so a matching
+        // release is picked up once one appears.
+        if ($selected === []) {
+            $candidates->markFailed($channel);
+
+            return;
+        }
 
         $candidates->apply($channel, $selected, $manualKeys);
     }

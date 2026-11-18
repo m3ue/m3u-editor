@@ -101,6 +101,15 @@ class Channel extends Model
         return $this->belongsTo(MediaServerIntegration::class, 'aio_integration_id');
     }
 
+    /**
+     * Per-title AIOStreams auto-selection profile override (no DB foreign key,
+     * see the add_aio_match_profile_columns migration).
+     */
+    public function aioMatchProfile(): BelongsTo
+    {
+        return $this->belongsTo(AioStreamsMatchProfile::class, 'aio_match_profile_id');
+    }
+
     public function streamProfile(): BelongsTo
     {
         return $this->belongsTo(StreamProfile::class);

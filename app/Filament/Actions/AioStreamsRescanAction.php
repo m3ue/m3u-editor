@@ -2,6 +2,7 @@
 
 namespace App\Filament\Actions;
 
+use App\Filament\Resources\AioStreamsMatchProfiles\AioStreamsMatchProfileResource;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsChannel;
 use App\Jobs\ResolveAioStreamsEpisode;
@@ -11,13 +12,16 @@ use App\Services\AioStreamsCandidateService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Text;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard\Step;
+use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\Width;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Log;
@@ -42,8 +46,9 @@ final class AioStreamsRescanAction
             ->modalHeading(__('Rescan for stream candidates'))
             ->modalWidth(Width::FourExtraLarge)
             ->modalSubmitActionLabel(__('Rescan'))
-            ->fillForm([
+            ->fillForm(fn (Channel|Episode $record): array => [
                 'mode' => 'automatic',
+                'profile_id' => $record instanceof Channel ? $record->aio_match_profile_id : null,
                 'candidates' => [],
             ])
             // A wizard rather than a single form: the stream fetch can take many
@@ -75,6 +80,10 @@ final class AioStreamsRescanAction
                             ->inline()
                             ->required()
                             ->live(),
+                        // Movies only: an episode follows its series' profile, which is
+                        // set from the series' own rescan action.
+                        self::profileSelect()
+                            ->visible(fn (Get $get, Channel|Episode $record): bool => $record instanceof Channel && $get('mode') === 'automatic'),
                     ])
                     ->afterValidation(function (Get $get, Set $set, Channel|Episode $record): void {
                         if ($get('mode') !== 'manual' || ! empty($get('candidates'))) {
@@ -113,8 +122,47 @@ final class AioStreamsRescanAction
                     return;
                 }
 
-                self::rescanAutomatically($record);
+                self::rescanAutomatically($record, $data['profile_id'] ?? null);
             });
+    }
+
+    /**
+     * Per-title auto-selection profile override; empty uses the integration's
+     * default for the content type.
+     */
+    public static function profileSelect(): Select
+    {
+        return Select::make('profile_id')
+            ->label(__('Match profile'))
+            ->searchable()
+            ->options(fn (): array => AioStreamsMatchProfileResource::profileOptions())
+            ->placeholder(__('Integration default'))
+            ->helperText(__('Rules for which streams the auto-matcher picks for this title. Manage profiles under AIOStreams Profiles.'));
+    }
+
+    /**
+     * Read-only details for one stream row (manual picker and profile tester):
+     * the parsed tags, why the title's profile would skip it, and the addon's
+     * own description. Reads the row's name/details/tags/excluded state.
+     *
+     * @param  bool  $showExclusion  Off where the caller shows its own outcome badge.
+     * @return array<int, Component>
+     */
+    public static function candidateInfo(bool $showExclusion = true): array
+    {
+        return [
+            Hidden::make('name')->dehydrated(false),
+            Hidden::make('details')->dehydrated(false),
+            Hidden::make('tags')->dehydrated(false),
+            Hidden::make('excluded')->dehydrated(false),
+            Text::make(fn (Get $get): string => __('Excluded by profile: :reason', ['reason' => (string) $get('excluded')]))
+                ->badge()
+                ->color('warning')
+                ->visible(fn (Get $get): bool => $showExclusion && filled($get('excluded'))),
+            Text::make(fn (Get $get): string => (string) $get('tags'))
+                ->weight(FontWeight::Medium),
+            Text::make(fn (Get $get) => AioStreamsCandidateService::detailsHtml($get('details'))),
+        ];
     }
 
     private static function candidatesRepeater(): Repeater
@@ -123,11 +171,9 @@ final class AioStreamsRescanAction
             ->hiddenLabel()
             ->schema([
                 Hidden::make('key'),
-                Hidden::make('name')->dehydrated(false),
-                Hidden::make('details')->dehydrated(false),
                 Toggle::make('selected')
                     ->label(__('Use this stream')),
-                Text::make(fn (Get $get) => AioStreamsCandidateService::detailsHtml($get('details'))),
+                ...self::candidateInfo(),
             ])
             ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
             ->addable(false)
@@ -165,17 +211,22 @@ final class AioStreamsRescanAction
         Notification::make()->success()->title(__(':count stream(s) saved', ['count' => $stored]))->send();
     }
 
-    private static function rescanAutomatically(Channel|Episode $record): void
+    private static function rescanAutomatically(Channel|Episode $record, mixed $profileId = null): void
     {
         app(AioStreamsCandidateService::class)->clearManualSelection($record);
 
-        $record->update(['aio_resolution_status' => 'pending']);
-
         if ($record instanceof Channel) {
+            $record->update([
+                'aio_match_profile_id' => filled($profileId) ? (int) $profileId : null,
+                'aio_resolution_status' => 'pending',
+            ]);
+
             ResolveAioStreamsChannel::dispatch($record->id);
             NotifyAioStreamsResolutionComplete::dispatch([$record->id], [], $record->user_id, $record->title_custom ?? $record->title ?? $record->name)
                 ->delay(now()->addSeconds(15));
         } else {
+            $record->update(['aio_resolution_status' => 'pending']);
+
             ResolveAioStreamsEpisode::dispatch($record->id);
             NotifyAioStreamsResolutionComplete::dispatch([], [$record->id], $record->user_id, $record->title)
                 ->delay(now()->addSeconds(15));

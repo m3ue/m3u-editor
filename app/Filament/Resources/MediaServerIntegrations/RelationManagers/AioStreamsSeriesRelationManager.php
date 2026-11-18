@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MediaServerIntegrations\RelationManagers;
 
+use App\Filament\Actions\AioStreamsRescanAction;
 use App\Filament\Resources\Series\SeriesResource;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
 use App\Jobs\ResolveAioStreamsEpisode;
@@ -119,7 +120,16 @@ class AioStreamsSeriesRelationManager extends RelationManager
                     ->tooltip(__('Rescan episodes for stream candidates'))
                     ->icon('heroicon-o-arrow-path')
                     ->color('gray')
-                    ->action(function (Series $record) {
+                    ->modalHeading(__('Rescan episodes for stream candidates'))
+                    ->modalSubmitActionLabel(__('Rescan'))
+                    ->fillForm(fn (Series $record): array => ['profile_id' => $record->aio_match_profile_id])
+                    ->schema([
+                        AioStreamsRescanAction::profileSelect()
+                            ->helperText(__('Rules for which streams the auto-matcher picks for every episode of this series. Episodes with manually chosen streams keep them.')),
+                    ])
+                    ->action(function (Series $record, array $data) {
+                        $record->update(['aio_match_profile_id' => filled($data['profile_id'] ?? null) ? (int) $data['profile_id'] : null]);
+
                         $episodeIds = self::rescanSeriesEpisodes($record);
 
                         NotifyAioStreamsResolutionComplete::dispatch([], $episodeIds, $record->user_id, $record->name)

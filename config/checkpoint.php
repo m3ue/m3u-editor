@@ -558,6 +558,11 @@ return [
         // MigrateProvider/ProviderMigrationPlanner (never from request input).
         // Same Model::unguard() convention as every model above.
         '102808485cb2', // ProviderMigrationPlanRow
+
+        // AIOStreams match profiles - written only through the user-scoped
+        // AioStreamsMatchProfileResource form (user_id set server-side on create).
+        // Same Model::unguard() convention as every model above.
+        '68cc8f0b9b9a', // AioStreamsMatchProfile
     ],
 
     /*

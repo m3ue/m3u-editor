@@ -7,6 +7,7 @@ use App\Facades\PlaylistFacade;
 use App\Facades\ProxyFacade;
 use App\Filament\Clusters\MediaServers\MediaServersCluster;
 use App\Filament\Concerns\HasCopilotSupport;
+use App\Filament\Resources\AioStreamsMatchProfiles\AioStreamsMatchProfileResource;
 use App\Filament\Resources\MediaServerIntegrations\Pages\CreateMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\EditMediaServerIntegration;
 use App\Filament\Resources\MediaServerIntegrations\Pages\ListMediaServerIntegrations;
@@ -732,6 +733,32 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                             ->default(true),
                     ])
                     ->visible(fn (callable $get) => $get('type') === 'aiostreams' && app(TmdbService::class)->isConfigured()),
+
+                // AIOStreams auto-selection defaults (titles can override these from their rescan action)
+                Section::make(__('Stream Selection'))
+                    ->description(__('Default match profiles for the streams auto-selected when titles are added to your library or rescanned. Without a profile, the built-in ranking is used (cached first, then highest resolution).'))
+                    ->icon('heroicon-o-adjustments-horizontal')
+                    ->schema([
+                        Grid::make(2)->schema([
+                            Select::make('aiostreams_movie_profile_id')
+                                ->label(__('Movies'))
+                                ->options(fn (): array => AioStreamsMatchProfileResource::profileOptions())
+                                ->placeholder(__('Built-in ranking')),
+                            Select::make('aiostreams_series_profile_id')
+                                ->label(__('Series'))
+                                ->options(fn (): array => AioStreamsMatchProfileResource::profileOptions())
+                                ->placeholder(__('Built-in ranking')),
+                        ]),
+                    ])
+                    ->footerActions([
+                        Action::make('manageAioStreamsProfiles')
+                            ->label(__('Manage profiles'))
+                            ->icon('heroicon-o-arrow-top-right-on-square')
+                            ->link()
+                            ->url(fn (): string => AioStreamsMatchProfileResource::getUrl('index'))
+                            ->openUrlInNewTab(),
+                    ])
+                    ->visible(fn (callable $get) => $get('type') === 'aiostreams'),
             ],
             'Schedule' => [
                 Section::make(__('Sync Schedule'))
