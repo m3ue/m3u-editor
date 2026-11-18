@@ -162,6 +162,7 @@ class SystemHealth extends Page
                     $this->entry('os.uptime_seconds', __('Uptime'))
                         ->formatStateUsing(fn (int $state): string => CarbonInterval::seconds($state)->cascade()->forHumans(short: true, parts: 3)),
                     $this->entry('os.ffmpeg_version', 'FFmpeg'),
+                    $this->entry('os.nginx_version', 'NGINX'),
                     $this->toggleEntry('os.comskip', 'Comskip', on: __('Installed'), off: __('Not installed')),
                 ]),
             Section::make(__('Database'))

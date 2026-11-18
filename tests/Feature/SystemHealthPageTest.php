@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -323,4 +324,15 @@ it('treats an unconstrained cgroup as unknown rather than the host total', funct
 
     expect(invade($service)->containerMemory())->toBeNull()
         ->and(invade($service)->containerCpuCount())->toBeNull();
+});
+
+it('reads binary versions printed to stderr, like nginx -v', function () {
+    Process::fake([
+        '*' => Process::result(output: '', errorOutput: "nginx version: nginx/1.30.7\n"),
+    ]);
+
+    expect(invade(app(SystemHealthService::class))->binaryVersion(PHP_BINARY, '/nginx version: nginx\/(\S+)/', '-v'))
+        ->toBe('1.30.7');
+
+    Process::assertRan(fn ($process) => $process->command === [PHP_BINARY, '-v']);
 });

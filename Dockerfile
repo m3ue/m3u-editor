@@ -218,7 +218,9 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     glslang-libs@edge \
     spirv-tools@edge \
     vulkan-loader@edge \
-    nginx \
+    # >=1.30.7 for the Nov 2026 HTTP/2 + resolver CVEs (CVE-2026-123007 et al). The
+    # version constraint also busts the cached apk layer in CI so it gets refetched.
+    "nginx>=1.30.7" \
     # Both full server generations ship side by side so start-container can
     # opt an existing install into PostgreSQL 18 (POSTGRES_VERSION=18) and
     # pg_upgrade it in place - see docker/8.4/pg-cluster.sh. Everything always

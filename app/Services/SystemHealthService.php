@@ -271,6 +271,8 @@ class SystemHealthService
             // is reported here.
             'disk_free' => $this->safe(fn () => (int) disk_free_space(base_path()), null),
             'ffmpeg_version' => $this->binaryVersion((string) config('dvr.ffmpeg_path', '/usr/bin/ffmpeg'), '/ffmpeg version (\S+)/'),
+            // Only the bundled nginx (NGINX_ENABLED) is ours to report on.
+            'nginx_version' => config('app.nginx_enabled') ? $this->binaryVersion('/usr/sbin/nginx', '/nginx version: nginx\/(\S+)/', '-v') : null,
             'comskip' => is_executable((string) config('dvr.comskip_path')),
         ];
     }
@@ -574,16 +576,20 @@ class SystemHealthService
         return is_array($info) ? Arr::get($info, ucfirst($section), $info) : [];
     }
 
-    protected function binaryVersion(string $path, string $pattern): ?string
+    /**
+     * Some binaries (e.g. nginx -v) print their version to stderr, so both
+     * streams are searched.
+     */
+    protected function binaryVersion(string $path, string $pattern, string $flag = '-version'): ?string
     {
         if (! is_executable($path)) {
             return null;
         }
 
-        return $this->safe(function () use ($path, $pattern) {
-            $result = Process::timeout(5)->run([$path, '-version']);
+        return $this->safe(function () use ($path, $pattern, $flag) {
+            $result = Process::timeout(5)->run([$path, $flag]);
 
-            return preg_match($pattern, $result->output(), $match) ? $match[1] : null;
+            return preg_match($pattern, $result->output().$result->errorOutput(), $match) ? $match[1] : null;
         }, null);
     }
 
