@@ -289,6 +289,7 @@ class SyncPipelineService
             SyncRunPhase::SeriesStrm => $this->dispatchSeriesStrm($run, $playlist),
             SyncRunPhase::SeriesProbe => $this->dispatchProbe($run, $playlist, isSeriesProbe: true),
             SyncRunPhase::SeriesStrmPostProbe => $this->dispatchSeriesStrmPostProbe($run, $playlist),
+            SyncRunPhase::SeriesMerge => $this->dispatchSeriesMerge($run, $playlist),
             SyncRunPhase::FindReplace => $this->dispatchFindReplace($run, $playlist),
             SyncRunPhase::ChannelEnableRules => $this->dispatchChannelEnableRules($run, $playlist),
             SyncRunPhase::ChannelMerge => $this->dispatchChannelMerge($run, $playlist),
@@ -425,24 +426,44 @@ class SyncPipelineService
     }
 
     /**
-     * Merge live channels across failover playlists. MergeChannels is a single
-     * synchronous job, so we chain it with CompleteSyncPhase to mark the phase
-     * done once the merge work returns.
+     * Merge Live and VOD channels across failover playlists. Each MergeChannels is
+     * a single synchronous job, so they're chained with CompleteSyncPhase to mark
+     * the phase done once the merge work returns.
      */
     private function dispatchChannelMerge(SyncRun $run, Playlist $playlist): void
     {
-        $mergeJob = SyncListener::getMergeJob($playlist);
+        $mergeJobs = SyncListener::getChannelMergeJobs($playlist);
 
-        // No merge work to do — complete the phase immediately and progress.
-        if (! $mergeJob) {
+        // No merge work to do - complete the phase immediately and progress.
+        if ($mergeJobs === []) {
             $this->completePhase($run->id, SyncRunPhase::ChannelMerge);
 
             return;
         }
 
         $this->chainOrDispatch([
-            $mergeJob,
+            ...$mergeJobs,
             new CompleteSyncPhase($run->id, SyncRunPhase::ChannelMerge),
+        ], $run);
+    }
+
+    /**
+     * Link series and their episodes across failover playlists. MergeEpisodes is a
+     * single synchronous job, chained with CompleteSyncPhase like the channel merge.
+     */
+    private function dispatchSeriesMerge(SyncRun $run, Playlist $playlist): void
+    {
+        $mergeJob = SyncListener::getSeriesMergeJob($playlist);
+
+        if (! $mergeJob) {
+            $this->completePhase($run->id, SyncRunPhase::SeriesMerge);
+
+            return;
+        }
+
+        $this->chainOrDispatch([
+            $mergeJob,
+            new CompleteSyncPhase($run->id, SyncRunPhase::SeriesMerge),
         ], $run);
     }
 
@@ -654,6 +675,10 @@ class SyncPipelineService
 
         $hasSeries = $playlist->series()->where('enabled', true)->exists();
 
+        // Disabled series linked as a failover for another playlist's series still
+        // need their episodes fetched, so there is something to fail over to.
+        $hasSeriesToFetch = $hasSeries || $playlist->series()->linkedAsFailover()->exists();
+
         $tmdbEnabled = (bool) $settings->tmdb_auto_lookup_on_import;
         $lookupScope = $settings->tmdb_auto_lookup_all_new ?? 'enabled';
 
@@ -699,9 +724,9 @@ class SyncPipelineService
             ));
         }
 
-        if ($hasSeries || $probeSeries) {
+        if ($hasSeriesToFetch || $probeSeries) {
             $phases = array_merge($phases, $this->resolvePreStrmPhases(
-                metadataEnabled: $hasSeries && (bool) $playlist->auto_fetch_series_metadata,
+                metadataEnabled: $hasSeriesToFetch && (bool) $playlist->auto_fetch_series_metadata,
                 probeEnabled: $probeSeries,
                 metadataPhase: SyncRunPhase::SeriesMetadata,
                 probePhase: SyncRunPhase::SeriesProbe,
@@ -727,7 +752,7 @@ class SyncPipelineService
 
         // ChannelMerge and LiveProbe operate on live channels and are independent
         // of TMDB; keep them here alongside FindReplace.
-        if ($playlist->auto_merge_channels_enabled ?? false) {
+        if (($playlist->auto_merge_channels_enabled ?? false) || SyncListener::mergesVod($playlist)) {
             $phases[] = SyncRunPhase::ChannelMerge;
         }
 
@@ -747,6 +772,12 @@ class SyncPipelineService
             if ($hasSeries || $hasNewSeries) {
                 $phases[] = SyncRunPhase::SeriesTmdb;
             }
+        }
+
+        // Series merge matches series by TMDB/TVDB ID, so it runs after Group 3,
+        // and after series metadata so new episodes get linked in the same sync.
+        if (SyncListener::mergesSeries($playlist)) {
+            $phases[] = SyncRunPhase::SeriesMerge;
         }
 
         // Media-server source matching: needs the provider TMDB ids from

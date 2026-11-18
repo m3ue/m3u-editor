@@ -1550,7 +1550,7 @@ class PlaylistService
     public static function getMergeAction(bool $groupScoped = false, string $contentType = 'live'): Action
     {
         $action = Action::make('merge')
-            ->label($contentType === 'series' ? __('Merge Episodes') : 'Merge Same ID')
+            ->label($contentType === 'series' ? __('Merge Series') : 'Merge Same ID')
             ->schema(self::getMergeFormSchema($contentType))
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-in')
@@ -1581,7 +1581,7 @@ class PlaylistService
         } else {
             $action
                 ->modalDescription($contentType === 'series'
-                    ? 'Merge all episodes with the same TMDB ID across playlists into a single episode with failover. Episodes without a TMDB ID are matched by series TMDB ID, season, and episode number.'
+                    ? __('Link the same series across playlists, then link their episodes as failovers. Series are matched by TMDB ID (or TVDB ID when TMDB is missing), and episodes by TMDB ID or season and episode number.')
                     : 'Merge all channels with the same ID into a single channel with failover.'
                 )
                 ->action(function (array $data) use ($contentType): void {
@@ -1624,7 +1624,7 @@ class PlaylistService
         $isSeries = $contentType === 'series';
 
         $action = Action::make('unmerge')
-            ->label($isSeries ? __('Unmerge Episodes') : 'Unmerge Same ID')
+            ->label($isSeries ? __('Unmerge Series') : 'Unmerge Same ID')
             ->requiresConfirmation()
             ->icon('heroicon-o-arrows-pointing-out')
             ->color('warning')
@@ -1669,7 +1669,7 @@ class PlaylistService
                         ->default(false),
                 ])
                 ->modalDescription($isSeries
-                    ? 'Unmerge all episodes, removing all failover relationships.'
+                    ? __('Unmerge all series and episodes, removing all failover relationships.')
                     : 'Unmerge all channels with the same ID, removing all failover relationships.'
                 )
                 ->action(function (array $data) use ($isSeries): void {

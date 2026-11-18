@@ -4,13 +4,17 @@ use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
 use App\Jobs\MergeEpisodes;
+use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\UnmergeEpisodes;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
+use App\Models\MediaServerIntegration;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Models\SeriesFailover;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 
@@ -335,4 +339,237 @@ it('keeps an episode that backs up another playlist eligible as a master in its 
         'episode_id' => $episodeB->id,
         'episode_failover_id' => $episodeA->id,
     ]);
+});
+
+/**
+ * @param  array<string, mixed>  $seriesAttributes
+ * @param  array<int, array{0: int, 1: int, 2?: int|null}>  $episodes  season, episode_num, optional tmdb_id
+ * @return array{series: Series, episodes: array<int, Episode>}
+ */
+function mergeEpisodesMakeSeries(User $user, Playlist $playlist, array $seriesAttributes, array $episodes): array
+{
+    $series = Series::factory()->for($user)->createQuietly([
+        'playlist_id' => $playlist->id,
+        'tmdb_id' => null,
+        'tvdb_id' => null,
+        ...$seriesAttributes,
+    ]);
+
+    $created = [];
+    foreach ($episodes as $episode) {
+        $created[] = Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+            'season' => $episode[0],
+            'episode_num' => $episode[1],
+            'tmdb_id' => $episode[2] ?? null,
+        ]);
+    }
+
+    return ['series' => $series, 'episodes' => $created];
+}
+
+function mergeEpisodesPlaylists(Playlist ...$playlists): Collection
+{
+    return collect($playlists)->map(fn (Playlist $playlist): array => ['playlist_failover_id' => $playlist->id]);
+}
+
+it('links series by tmdb id and pairs episodes when only one side has episode tmdb ids', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 500], [[1, 1, 7001], [1, 2, 7002]]);
+    $b = mergeEpisodesMakeSeries($user, $backup, ['tmdb_id' => 500], [[1, 1], [1, 2], [1, 3]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($primary, $backup), playlistId: $primary->id);
+
+    $this->assertDatabaseHas('series_failovers', [
+        'series_id' => $a['series']->id,
+        'series_failover_id' => $b['series']->id,
+        'sort' => 1,
+    ]);
+    expect($a['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][0]->id])
+        ->and($a['episodes'][1]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][1]->id]);
+    $this->assertDatabaseCount('episode_failovers', 2);
+});
+
+it('links series by tvdb id when tmdb id is missing', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $primary, ['tvdb_id' => '81189'], [[2, 5]]);
+    $b = mergeEpisodesMakeSeries($user, $backup, ['tvdb_id' => '81189'], [[2, 5]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($primary, $backup), playlistId: $primary->id);
+
+    $this->assertDatabaseHas('series_failovers', [
+        'series_id' => $a['series']->id,
+        'series_failover_id' => $b['series']->id,
+    ]);
+    $this->assertDatabaseHas('episode_failovers', [
+        'episode_id' => $a['episodes'][0]->id,
+        'episode_failover_id' => $b['episodes'][0]->id,
+    ]);
+});
+
+it('pairs by episode tmdb id across numbering differences and skips conflicting or ambiguous numbers', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 600], [
+        [0, 1, 8001], // special numbered differently by the backup
+        [1, 1, 8002], // backup has a different episode at S1E1
+        [1, 2],       // backup lists S1E2 twice
+    ]);
+    $b = mergeEpisodesMakeSeries($user, $backup, ['tmdb_id' => 600], [
+        [1, 99, 8001],
+        [1, 1, 9999],
+        [1, 2],
+        [1, 2],
+    ]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($primary, $backup), playlistId: $primary->id);
+
+    expect($a['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][0]->id])
+        ->and($a['episodes'][1]->failoverEpisodes()->count())->toBe(0)
+        ->and($a['episodes'][2]->failoverEpisodes()->count())->toBe(0);
+});
+
+it('orders failovers by playlist priority and is stable when run again', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $first = Playlist::factory()->for($user)->createQuietly();
+    $second = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 700], [[1, 1]]);
+    $c = mergeEpisodesMakeSeries($user, $second, ['tmdb_id' => 700], [[1, 1]]);
+    $b = mergeEpisodesMakeSeries($user, $first, ['tmdb_id' => 700], [[1, 1]]);
+
+    $merge = fn () => runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($first, $second), playlistId: $primary->id);
+    $merge();
+    $merge();
+
+    expect($a['series']->failoverSeries()->pluck('series.id')->all())->toBe([$b['series']->id, $c['series']->id])
+        ->and($a['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][0]->id, $c['episodes'][0]->id]);
+    $this->assertDatabaseCount('series_failovers', 2);
+    $this->assertDatabaseCount('episode_failovers', 2);
+});
+
+it('moves links to the new master on a forced re-merge with a different preferred playlist', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $playlistA, ['tmdb_id' => 800], [[1, 1]]);
+    $b = mergeEpisodesMakeSeries($user, $playlistB, ['tmdb_id' => 800], [[1, 1]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistB), playlistId: $playlistA->id);
+
+    // Without force, the existing master stays put.
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistA), playlistId: $playlistB->id);
+    $this->assertDatabaseHas('series_failovers', ['series_id' => $a['series']->id, 'series_failover_id' => $b['series']->id]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistA), playlistId: $playlistB->id, forceCompleteRemerge: true);
+
+    $this->assertDatabaseCount('series_failovers', 1);
+    $this->assertDatabaseHas('series_failovers', ['series_id' => $b['series']->id, 'series_failover_id' => $a['series']->id]);
+    $this->assertDatabaseCount('episode_failovers', 1);
+    $this->assertDatabaseHas('episode_failovers', [
+        'episode_id' => $b['episodes'][0]->id,
+        'episode_failover_id' => $a['episodes'][0]->id,
+    ]);
+});
+
+it('removes series links when unmerging', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 900], [[1, 1]]);
+    mergeEpisodesMakeSeries($user, $backup, ['tmdb_id' => 900], [[1, 1]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($backup), playlistId: $primary->id);
+    $this->assertDatabaseCount('series_failovers', 1);
+
+    runUnmergeEpisodes(user: $user, playlistId: $primary->id);
+
+    $this->assertDatabaseCount('series_failovers', 0);
+    $this->assertDatabaseCount('episode_failovers', 0);
+});
+
+it('makes disabled series linked as a failover eligible for a metadata fetch', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    $primarySeries = Series::factory()->for($user)->createQuietly(['playlist_id' => $primary->id, 'enabled' => true]);
+    $linkedBackup = Series::factory()->for($user)->createQuietly(['playlist_id' => $backup->id, 'enabled' => false]);
+    $unlinkedBackup = Series::factory()->for($user)->createQuietly(['playlist_id' => $backup->id, 'enabled' => false]);
+
+    SeriesFailover::create([
+        'user_id' => $user->id,
+        'series_id' => $primarySeries->id,
+        'series_failover_id' => $linkedBackup->id,
+        'sort' => 1,
+    ]);
+
+    $eligibleIds = ProcessM3uImportSeriesEpisodes::eligibleSeriesQuery($user->id, $backup->id, true)->pluck('id')->all();
+
+    expect($eligibleIds)->toContain($linkedBackup->id)
+        ->not->toContain($unlinkedBackup->id);
+});
+
+it('links a series with the wrong tmdb id to a matched group by episode tmdb id', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $playlistA, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $b = mergeEpisodesMakeSeries($user, $playlistB, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $c = mergeEpisodesMakeSeries($user, $playlistC, ['tmdb_id' => 999], [[1, 1, 5001]]);
+
+    $merge = fn () => runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistB, $playlistC), playlistId: $playlistA->id);
+    $merge();
+    $merge();
+
+    expect($a['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$b['episodes'][0]->id, $c['episodes'][0]->id])
+        ->and($b['episodes'][0]->failoverEpisodes()->count())->toBe(0);
+    $this->assertDatabaseCount('episode_failovers', 2);
+});
+
+it('leaves AIOStreams series out of series-level matching', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+    $integration = MediaServerIntegration::factory()->create(['user_id' => $user->id]);
+
+    mergeEpisodesMakeSeries($user, $primary, ['tmdb_id' => 1200, 'aio_integration_id' => $integration->id], [[1, 1]]);
+    mergeEpisodesMakeSeries($user, $backup, ['tmdb_id' => 1200], [[1, 1]]);
+
+    runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($backup), playlistId: $primary->id);
+
+    $this->assertDatabaseCount('series_failovers', 0);
+});
+
+it('keeps failover flat when a higher priority series with the wrong tmdb id masters a matched group', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $playlistA, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $b = mergeEpisodesMakeSeries($user, $playlistB, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $c = mergeEpisodesMakeSeries($user, $playlistC, ['tmdb_id' => 999], [[1, 1, 5001]]);
+
+    // C is preferred, so its (wrongly identified) series is the master.
+    $merge = fn () => runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistA, $playlistB), playlistId: $playlistC->id);
+    $merge();
+    $merge();
+
+    expect($c['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$a['episodes'][0]->id, $b['episodes'][0]->id]);
 });

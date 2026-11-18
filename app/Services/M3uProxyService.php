@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\URL;
+use Throwable;
 
 class M3uProxyService
 {
@@ -1834,6 +1835,14 @@ class M3uProxyService
     {
         if (empty($this->apiBaseUrl)) {
             throw new Exception('M3U Proxy base URL is not configured');
+        }
+
+        // Link this episode to its series' failover series if a merge hasn't yet (for
+        // example an episode added since the last merge). Never blocks playback.
+        try {
+            app(SeriesFailoverLinker::class)->repairEpisode($episode);
+        } catch (Throwable $e) {
+            Log::warning('Series failover repair failed', ['episode_id' => $episode->id, 'error' => $e->getMessage()]);
         }
 
         // Get episode ID

@@ -55,17 +55,19 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
     ) {}
 
     /**
-     * Enabled series that still need a provider metadata fetch.
+     * Series that still need a provider metadata fetch: enabled series, plus disabled
+     * series linked as a failover for another playlist's series, so their episodes
+     * exist to fail over to.
      *
      * @return Builder<Series>
      */
     public static function eligibleSeriesQuery(?int $userId, ?int $playlistId, bool $overwriteExisting): Builder
     {
         return Series::query()
-            ->where([
-                ['enabled', true],
-                ['user_id', $userId],
-            ])
+            ->where('user_id', $userId)
+            ->where(fn (Builder $query) => $query
+                ->where('enabled', true)
+                ->orWhere(fn (Builder $linked) => $linked->linkedAsFailover()))
             ->when($playlistId, fn (Builder $query) => $query->where('playlist_id', $playlistId))
             ->needsMetadataRefresh($overwriteExisting);
     }

@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -122,6 +123,26 @@ class Series extends Model
     public function enabled_episodes(): HasMany
     {
         return $this->hasMany(Episode::class)->where('enabled', true);
+    }
+
+    public function failovers(): HasMany
+    {
+        return $this->hasMany(SeriesFailover::class);
+    }
+
+    /**
+     * The same series in other playlists, in failover order.
+     */
+    public function failoverSeries(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            Series::class,
+            SeriesFailover::class,
+            'series_id',
+            'id',
+            'id',
+            'series_failover_id'
+        )->orderBy('series_failovers.sort');
     }
 
     /**
@@ -299,6 +320,16 @@ class Series extends Model
         return ! $refresh && $this->last_metadata_fetch && $this->last_modified
             && $this->last_metadata_fetch >= $this->last_modified
             && $this->episodes()->exists();
+    }
+
+    /**
+     * Series linked as a failover for a series in another playlist (see SeriesFailover).
+     */
+    public function scopeLinkedAsFailover(Builder $query): Builder
+    {
+        return $query->whereExists(fn ($links) => $links->selectRaw('1')
+            ->from('series_failovers')
+            ->whereColumn('series_failovers.series_failover_id', 'series.id'));
     }
 
     /**

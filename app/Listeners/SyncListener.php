@@ -8,6 +8,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeEpisodes;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\RunCustomPlaylistProcessing;
@@ -21,6 +22,7 @@ use App\Models\Playlist;
 use App\Models\SyncRun;
 use App\Plugins\PluginHookDispatcher;
 use App\Services\PlaylistService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 
 class SyncListener
@@ -55,6 +57,14 @@ class SyncListener
                     skipMerge: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::ChannelMerge),
                     skipLiveProbe: (bool) $syncRun?->isPhaseComplete(SyncRunPhase::LiveProbe),
                 );
+
+                // Merge series if enabled, unless the pipeline already ran it as a tracked phase
+                if (! $syncRun?->isPhaseComplete(SyncRunPhase::SeriesMerge)) {
+                    $seriesMergeJob = self::getSeriesMergeJob($playlist);
+                    if ($seriesMergeJob) {
+                        dispatch($seriesMergeJob);
+                    }
+                }
 
                 // Skip if the pipeline already ran custom playlist sync as a tracked phase
                 if (! $syncRun?->isPhaseComplete(SyncRunPhase::CustomPlaylistSync)) {
@@ -145,10 +155,8 @@ class SyncListener
      */
     private function dispatchChannelScanJobs(Playlist $playlist, bool $skipMerge = false, bool $skipLiveProbe = false): void
     {
-        // Merge channels first
-        $mergeJob = (! $skipMerge && ($playlist->auto_merge_channels_enabled ?? false))
-            ? self::getMergeJob($playlist)
-            : null;
+        // Merge channels first (Live, then VOD, each when enabled)
+        $mergeJobs = $skipMerge ? [] : self::getChannelMergeJobs($playlist);
 
         // Run scrubbers after merge completes (if enabled).
         // Scrubbers are bundled into the LiveProbe phase when the pipeline runs them,
@@ -169,10 +177,7 @@ class SyncListener
            ))
            : null;
 
-        $chain = [];
-        if ($mergeJob) {
-            $chain[] = $mergeJob;
-        }
+        $chain = $mergeJobs;
         if (count($scrubberJobs) > 0) {
             $chain = array_merge($chain, $scrubberJobs);
         }
@@ -197,34 +202,54 @@ class SyncListener
     }
 
     /**
-     * Build a MergeChannels job from playlist config.
+     * The channel merge jobs a sync runs: Live when auto_merge_channels_enabled is on,
+     * then VOD when auto_merge_config.merge_vod is on.
      *
-     * Public/static so SyncPipelineService can reuse this builder when running
-     * the merge as a tracked pipeline phase. Returns null if the merge would
-     * be a no-op (used to short-circuit dispatch decisions).
+     * @return array<int, MergeChannels>
      */
-    public static function getMergeJob(Playlist $playlist): ?MergeChannels
+    public static function getChannelMergeJobs(Playlist $playlist): array
+    {
+        $jobs = [];
+
+        if ($playlist->auto_merge_channels_enabled ?? false) {
+            $jobs[] = self::getMergeJob($playlist, 'live');
+        }
+
+        if (self::mergesVod($playlist)) {
+            $jobs[] = self::getMergeJob($playlist, 'vod');
+        }
+
+        return $jobs;
+    }
+
+    public static function mergesVod(Playlist $playlist): bool
+    {
+        return (bool) ($playlist->auto_merge_config['merge_vod'] ?? false);
+    }
+
+    public static function mergesSeries(Playlist $playlist): bool
+    {
+        return (bool) ($playlist->auto_merge_config['merge_series'] ?? false);
+    }
+
+    /**
+     * Build a MergeChannels job from playlist config for one content type. Live always
+     * matches by stream ID; VOD uses the configured VOD Merge key.
+     *
+     * Public/static so SyncPipelineService and the channel scrubber can reuse this
+     * builder. Callers decide whether that content type is enabled.
+     */
+    public static function getMergeJob(Playlist $playlist, string $contentType = 'live'): MergeChannels
     {
         $config = $playlist->auto_merge_config ?? [];
         $useResolution = $config['check_resolution'] ?? false;
         $forceCompleteRemerge = $config['force_complete_remerge'] ?? false;
         $preferCatchupAsPrimary = $config['prefer_catchup_as_primary'] ?? false;
         $newChannelsOnly = $config['new_channels_only'] ?? true;
-        $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
-        $failoverPlaylists = $config['failover_playlists'] ?? [];
         $deactivateFailover = (bool) ($playlist->auto_merge_deactivate_failover ?? false);
         $scrubberAwareMasterSelection = (bool) ($config['scrubber_aware_master_selection'] ?? false);
 
-        $playlists = collect([['playlist_failover_id' => $playlist->id]]);
-
-        foreach ($failoverPlaylists as $failover) {
-            $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
-            if ($failoverId && $failoverId != $playlist->id) {
-                $playlists->push(['playlist_failover_id' => $failoverId]);
-            }
-        }
-
-        $effectivePlaylistId = $preferredPlaylistId ? (int) $preferredPlaylistId : $playlist->id;
+        ['playlists' => $playlists, 'playlistId' => $effectivePlaylistId] = self::mergeSources($playlist);
 
         return new MergeChannels(
             user: $playlist->user,
@@ -238,10 +263,56 @@ class SyncListener
             newChannelsOnly: $newChannelsOnly,
             regexPatterns: ! empty($config['regex_patterns'] ?? []) ? $config['regex_patterns'] : null,
             fallbackMergeConfig: PlaylistService::buildMergeFallbackConfig($config),
-            contentType: ($config['merge_key'] ?? 'stream_id') === 'tmdb_id' ? 'vod' : 'live',
-            mergeKey: $config['merge_key'] ?? 'stream_id',
+            contentType: $contentType,
+            mergeKey: $contentType === 'vod' ? ($config['merge_key'] ?? 'stream_id') : 'stream_id',
             scrubberAwareMasterSelection: $scrubberAwareMasterSelection,
         );
+    }
+
+    /**
+     * Build a MergeEpisodes job when the playlist opts in to merging series after sync.
+     * Uses the same preferred and failover playlists as the channel auto-merge, with the
+     * merge's defaults so existing primaries stay stable from sync to sync.
+     */
+    public static function getSeriesMergeJob(Playlist $playlist): ?MergeEpisodes
+    {
+        if (! self::mergesSeries($playlist)) {
+            return null;
+        }
+
+        ['playlists' => $playlists, 'playlistId' => $effectivePlaylistId] = self::mergeSources($playlist);
+
+        return new MergeEpisodes(
+            user: $playlist->user,
+            playlists: $playlists,
+            playlistId: $effectivePlaylistId,
+        );
+    }
+
+    /**
+     * The playlists an auto-merge covers (this playlist plus its failover playlists)
+     * and the playlist preferred as master.
+     *
+     * @return array{playlists: Collection<int, array{playlist_failover_id: int|string}>, playlistId: int}
+     */
+    private static function mergeSources(Playlist $playlist): array
+    {
+        $config = $playlist->auto_merge_config ?? [];
+        $preferredPlaylistId = $config['preferred_playlist_id'] ?? null;
+
+        $playlists = collect([['playlist_failover_id' => $playlist->id]]);
+
+        foreach ($config['failover_playlists'] ?? [] as $failover) {
+            $failoverId = is_array($failover) ? ($failover['playlist_failover_id'] ?? null) : $failover;
+            if ($failoverId && $failoverId != $playlist->id) {
+                $playlists->push(['playlist_failover_id' => $failoverId]);
+            }
+        }
+
+        return [
+            'playlists' => $playlists,
+            'playlistId' => $preferredPlaylistId ? (int) $preferredPlaylistId : $playlist->id,
+        ];
     }
 
     /**

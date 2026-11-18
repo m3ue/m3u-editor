@@ -49,6 +49,7 @@ use Filament\Actions\ViewAction;
 use Filament\Forms;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -209,6 +210,13 @@ class SeriesResource extends Resource implements CopilotResource
                 ->counts('episodes')
                 ->badge()
                 ->toggleable()
+                ->sortable(),
+            TextColumn::make('failovers_count')
+                ->label(__('Failovers'))
+                ->counts('failovers')
+                ->badge()
+                ->tooltip(__('Linked failover series'))
+                ->toggleable(isToggledHiddenByDefault: true)
                 ->sortable(),
             TextColumn::make('cached_episodes_count')
                 ->label(__('Cached'))
@@ -1328,8 +1336,75 @@ class SeriesResource extends Resource implements CopilotResource
                                         ->placeholder(__('/Series')),
                                 ]),
                         ]),
+                    Section::make(__('Failover Series'))
+                        ->columnSpanFull()
+                        ->icon('heroicon-o-arrows-right-left')
+                        ->description(__('The same series in other playlists, tried in order when an episode fails. Episodes are linked by TMDB ID, or by season and episode number.'))
+                        ->collapsible()
+                        ->compact()
+                        ->collapsed()
+                    // AIOStreams series manage their own episode failovers from ranked stream
+                    // candidates, which would conflict with links made here.
+                        ->hidden(fn (?Series $record): bool => $record === null || (bool) $record->aio_integration_id)
+                        ->schema([
+                            Repeater::make('failovers')
+                                ->relationship()
+                                ->hiddenLabel()
+                                ->reorderable()
+                                ->reorderableWithButtons()
+                                ->orderColumn('sort')
+                                ->simple(
+                                    Select::make('series_failover_id')
+                                        ->label(__('Failover Series'))
+                                        ->options(fn (?int $state): array => $state
+                                            ? self::failoverSeriesOptions(Series::query()->whereKey($state))
+                                            : [])
+                                        ->searchable()
+                                        ->getSearchResultsUsing(fn (string $search, Get $get, $livewire): array => self::failoverSeriesOptions(
+                                            Series::query()
+                                                ->where('user_id', auth()->id())
+                                                ->whereNot('id', self::formOwnerSeriesId($livewire))
+                                                ->whereNotIn('id', collect($get('../../failovers') ?? [])->pluck('series_failover_id')->filter()->all())
+                                                ->whereLike('name', "%{$search}%")
+                                                ->limit(50)
+                                        ))
+                                        ->required()
+                                )
+                                ->distinct()
+                                ->addActionLabel(__('Add failover series'))
+                                ->columnSpanFull()
+                                ->defaultItems(0),
+                        ]),
                 ]),
         ];
+    }
+
+    /**
+     * "Series name [Playlist name]" options for the Failover Series picker.
+     *
+     * @param  Builder<Series>  $query
+     * @return array<int, string>
+     */
+    private static function failoverSeriesOptions(Builder $query): array
+    {
+        return $query->with('playlist:id,name')
+            ->get(['id', 'name', 'playlist_id'])
+            ->mapWithKeys(fn (Series $series): array => [
+                $series->id => $series->name.' ['.($series->playlist?->name ?? __('Unknown')).']',
+            ])
+            ->all();
+    }
+
+    /**
+     * The series being edited, whether the form is on the edit page or in an edit
+     * slide-over, so it can be left out of its own failover choices.
+     */
+    private static function formOwnerSeriesId(mixed $livewire): int
+    {
+        $record = method_exists($livewire, 'getRecord') ? $livewire->getRecord() : null;
+        $record ??= method_exists($livewire, 'getMountedAction') ? $livewire->getMountedAction()?->getRecord() : null;
+
+        return $record instanceof Series ? $record->id : 0;
     }
 
     public static function getFormSteps(): array

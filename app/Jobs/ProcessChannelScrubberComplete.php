@@ -109,11 +109,8 @@ class ProcessChannelScrubberComplete implements ShouldQueue
             return;
         }
 
-        $mergeJob = SyncListener::getMergeJob($playlist);
-        if ($mergeJob === null) {
-            return;
-        }
-
+        // Scrubbers only check Live channels, so only the Live merge is rebuilt.
+        $mergeJob = SyncListener::getMergeJob($playlist, 'live');
         $mergeJob->newChannelsOnly = false;
         $mergeJob->forceCompleteRemerge = true;
 

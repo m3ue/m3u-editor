@@ -2428,24 +2428,44 @@ class PlaylistResource extends Resource implements CopilotResource
                 ])->hidden(fn (?Playlist $record): bool => $record !== null && $record->isMediaServerPlaylist()),
 
             Section::make(__('Auto-Merge Processing'))
-                ->description(__('Automatically merge channels with the same stream ID into failover relationships after sync'))
+                ->description(__('After each sync, link duplicates across your playlists as failovers. Turn on each type of content you want merged.'))
                 ->columnSpanFull()
                 ->collapsible()
                 ->collapsed($creating)
                 ->columns(2)
                 ->schema([
-                    Toggle::make('auto_merge_channels_enabled')
-                        ->label(__('Enable auto-merge after sync'))
-                        ->helperText(__('When enabled, channels with the same stream ID will be automatically merged with failover relationships after each sync.'))
+                    Fieldset::make(__('What to merge'))
                         ->columnSpanFull()
-                        ->live()
-                        ->inline(false)
-                        ->default(false),
+                        ->columns(3)
+                        ->schema([
+                            Toggle::make('auto_merge_channels_enabled')
+                                ->label(__('Live channels'))
+                                ->helperText(__('Match Live channels by stream ID.'))
+                                ->live()
+                                ->inline(false)
+                                ->default(false),
+                            Toggle::make('auto_merge_config.merge_vod')
+                                ->label(__('VOD channels'))
+                                ->helperText(__('Match movies by the VOD Merge key below.'))
+                                ->live()
+                                ->inline(false)
+                                ->default(false),
+                            Toggle::make('auto_merge_config.merge_series')
+                                ->label(__('Series'))
+                                ->helperText(__('Match series by TMDB or TVDB ID, then link their episodes.'))
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: __('Series without a TMDB or TVDB ID never match. Disabled series only get IDs when Auto-lookup scope (under TMDB Auto-lookup Settings) is All new or Both, or after Fetch TMDB Metadata, so check that for backup playlists. You can also link series by hand on the Series edit page. Disabled series used as failovers still have their episodes fetched.')
+                                )
+                                ->live()
+                                ->inline(false)
+                                ->default(false),
+                        ]),
 
-                    Fieldset::make(__('Merge source configuration'))
+                    Fieldset::make(__('Merge sources'))
                         ->columnSpanFull()
                         ->columns(2)
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->hidden(fn (Get $get): bool => ! self::autoMergesAnything($get))
                         ->schema([
                             Select::make('auto_merge_config.preferred_playlist_id')
                                 ->label(__('Preferred Playlist (optional)'))
@@ -2453,10 +2473,10 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->searchable()
                                 ->columnSpanFull()
                                 ->placeholder(__('Use this playlist only'))
-                                ->helperText(__('If set, channels from this playlist will be prioritized as master during merge. Leave empty to only merge within this playlist.')),
+                                ->helperText(__('If set, channels, movies, and series from this playlist are preferred as master during merge. Leave empty to prefer this playlist.')),
                             Repeater::make('auto_merge_config.failover_playlists')
                                 ->label(__('Additional Failover Playlists (optional)'))
-                                ->helperText(__('Select additional playlists to include as failover sources. Leave empty to only merge channels within this playlist.'))
+                                ->helperText(__('Playlists to take failovers from, in order. Leave empty to only merge duplicates within this playlist.'))
                                 ->reorderable()
                                 ->reorderableWithButtons()
                                 ->simple(
@@ -2473,10 +2493,27 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->defaultItems(0),
                         ]),
 
-                    Fieldset::make(__('Merge behavior'))
+                    Fieldset::make(__('VOD matching'))
                         ->columnSpanFull()
                         ->columns(2)
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_config.merge_vod'))
+                        ->schema([
+                            Select::make('auto_merge_config.merge_key')
+                                ->label(__('VOD Merge key'))
+                                ->options([
+                                    'stream_id' => 'Stream ID (default)',
+                                    'tmdb_id' => 'TMDB ID',
+                                ])
+                                ->default('stream_id')
+                                ->required()
+                                ->helperText(__('Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.'))
+                                ->columnSpanFull(),
+                        ]),
+
+                    Fieldset::make(__('Live and VOD merge behavior'))
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->hidden(fn (Get $get): bool => ! self::autoMergesChannels($get))
                         ->schema([
                             TagsInput::make('auto_merge_config.regex_patterns')
                                 ->label(__('Regex merge patterns'))
@@ -2487,15 +2524,6 @@ class PlaylistResource extends Resource implements CopilotResource
                                 )
                                 ->helperText(__('Regex patterns for failover grouping. Useful when the same channel has different names within and across providers.'))
                                 ->splitKeys(['Tab', 'Return']),
-                            Select::make('auto_merge_config.merge_key')
-                                ->label(__('VOD Merge key'))
-                                ->options([
-                                    'stream_id' => 'Stream ID (default)',
-                                    'tmdb_id' => 'TMDB ID',
-                                ])
-                                ->default('stream_id')
-                                ->required()
-                                ->helperText(__('Use TMDB ID to merge the same movie across providers when stream IDs differ. VOD channels without a TMDB ID are skipped.')),
                             Toggle::make('auto_merge_config.check_resolution')
                                 ->label(__('Prioritize by resolution'))
                                 ->inline(false)
@@ -2560,7 +2588,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     Fieldset::make(__('Fallback matching for channels without IDs'))
                         ->columnSpanFull()
                         ->columns(2)
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->hidden(fn (Get $get): bool => ! self::autoMergesChannels($get))
                         ->schema([
                             Toggle::make('auto_merge_config.fallback_name_matching_enabled')
                                 ->label(__('Enable name or alias fallback'))
@@ -2599,7 +2627,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     Fieldset::make(__('Advanced Priority Scoring (optional)'))
                         ->columnSpanFull()
                         ->columns(2)
-                        ->hidden(fn (Get $get): bool => ! $get('auto_merge_channels_enabled'))
+                        ->hidden(fn (Get $get): bool => ! self::autoMergesChannels($get))
                         ->schema([
                             Select::make('auto_merge_config.prefer_codec')
                                 ->label(__('Preferred Codec'))
@@ -4245,6 +4273,22 @@ class PlaylistResource extends Resource implements CopilotResource
         }
 
         return $wizard;
+    }
+
+    /**
+     * Whether the auto-merge form has Live or VOD channel merging turned on.
+     */
+    private static function autoMergesChannels(Get $get): bool
+    {
+        return (bool) $get('auto_merge_channels_enabled') || (bool) $get('auto_merge_config.merge_vod');
+    }
+
+    /**
+     * Whether the auto-merge form has any content type turned on.
+     */
+    private static function autoMergesAnything(Get $get): bool
+    {
+        return self::autoMergesChannels($get) || (bool) $get('auto_merge_config.merge_series');
     }
 
     /**
