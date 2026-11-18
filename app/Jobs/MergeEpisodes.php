@@ -7,6 +7,7 @@ use App\Models\EpisodeFailover;
 use App\Models\Series;
 use App\Models\SeriesFailover;
 use App\Models\User;
+use App\Services\SeriesFailoverLinker;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -154,12 +155,14 @@ class MergeEpisodes implements ShouldQueue
                 ->orWhere('series_failover_id', $master->id))
             ->delete();
 
-        $masterEpisodes = $this->episodesForSeries($master->id);
+        $linker = app(SeriesFailoverLinker::class);
+        $masterEpisodes = $linker->episodesForSeries($master->id);
         $desiredEpisodePairs = [];
         $sortOrder = 1;
 
         foreach ($failoverSeries as $failover) {
-            SeriesFailover::updateOrCreate(
+            // Without events: the merge links (and cleans up) episodes itself below.
+            SeriesFailover::withoutEvents(fn () => SeriesFailover::updateOrCreate(
                 [
                     'series_id' => $master->id,
                     'series_failover_id' => $failover->id,
@@ -168,10 +171,10 @@ class MergeEpisodes implements ShouldQueue
                     'user_id' => $this->user->id,
                     'sort' => $sortOrder,
                 ]
-            );
+            ));
             $this->linkedSeriesCount++;
 
-            foreach ($this->pairEpisodes($masterEpisodes, $this->episodesForSeries($failover->id)) as [$masterEpisode, $failoverEpisode]) {
+            foreach ($linker->pairEpisodes($masterEpisodes, $linker->episodesForSeries($failover->id)) as [$masterEpisode, $failoverEpisode]) {
                 $desiredEpisodePairs[$masterEpisode->id.':'.$failoverEpisode->id] = true;
                 $this->linkEpisode($masterEpisode, $failoverEpisode, $sortOrder);
             }
@@ -209,124 +212,9 @@ class MergeEpisodes implements ShouldQueue
         return $this->sortByPlaylistPriority($candidates)->first();
     }
 
-    /**
-     * @return Collection<int, Episode>
-     */
-    protected function episodesForSeries(int $seriesId): Collection
-    {
-        return Episode::query()
-            ->select(['id', 'playlist_id', 'series_id', 'tmdb_id', 'season', 'episode_num', 'enabled'])
-            ->where('series_id', $seriesId)
-            ->get();
-    }
-
-    /**
-     * Pair a failover series' episodes with the master's: by episode TMDB ID when
-     * both have one (survives numbering differences between providers), otherwise
-     * by season and episode number. Ambiguous keys (used twice in one series) and
-     * already-paired episodes are skipped.
-     *
-     * @param  Collection<int, Episode>  $masterEpisodes
-     * @param  Collection<int, Episode>  $failoverEpisodes
-     * @return array<int, array{0: Episode, 1: Episode}>
-     */
-    protected function pairEpisodes(Collection $masterEpisodes, Collection $failoverEpisodes): array
-    {
-        $masterByTmdb = $this->uniqueIndex($masterEpisodes, fn (Episode $episode): ?string => $this->episodeTmdbKey($episode));
-        $masterByNumber = $this->uniqueIndex($masterEpisodes, fn (Episode $episode): ?string => $this->episodeNumberKey($episode));
-        $failoverTmdbCounts = $failoverEpisodes->map(fn (Episode $episode): ?string => $this->episodeTmdbKey($episode))->filter()->countBy();
-        $failoverNumberCounts = $failoverEpisodes->map(fn (Episode $episode): ?string => $this->episodeNumberKey($episode))->filter()->countBy();
-
-        $pairs = [];
-        $pairedMasterIds = [];
-
-        foreach ($failoverEpisodes as $failoverEpisode) {
-            $master = null;
-            $tmdbKey = $this->episodeTmdbKey($failoverEpisode);
-            $numberKey = $this->episodeNumberKey($failoverEpisode);
-
-            if ($tmdbKey !== null && ($failoverTmdbCounts[$tmdbKey] ?? 0) === 1) {
-                $master = $masterByTmdb[$tmdbKey] ?? null;
-            }
-
-            if ($master === null && $numberKey !== null && ($failoverNumberCounts[$numberKey] ?? 0) === 1) {
-                $candidate = $masterByNumber[$numberKey] ?? null;
-                $candidateTmdbKey = $candidate !== null ? $this->episodeTmdbKey($candidate) : null;
-
-                // Don't pair by number when both sides carry conflicting TMDB IDs.
-                $conflictingTmdb = $tmdbKey !== null
-                    && $candidateTmdbKey !== null
-                    && $candidateTmdbKey !== $tmdbKey;
-
-                $master = $conflictingTmdb ? null : $candidate;
-            }
-
-            if ($master === null || isset($pairedMasterIds[$master->id])) {
-                continue;
-            }
-
-            $pairedMasterIds[$master->id] = true;
-            $pairs[] = [$master, $failoverEpisode];
-        }
-
-        return $pairs;
-    }
-
-    /**
-     * Index episodes by a key, leaving out keys that more than one episode shares.
-     *
-     * @param  Collection<int, Episode>  $episodes
-     * @param  callable(Episode): ?string  $keyFor
-     * @return array<string, Episode>
-     */
-    protected function uniqueIndex(Collection $episodes, callable $keyFor): array
-    {
-        $index = [];
-        $duplicates = [];
-
-        foreach ($episodes as $episode) {
-            $key = $keyFor($episode);
-
-            if ($key === null) {
-                continue;
-            }
-
-            if (isset($index[$key])) {
-                $duplicates[$key] = true;
-            }
-
-            $index[$key] = $episode;
-        }
-
-        return array_diff_key($index, $duplicates);
-    }
-
-    protected function episodeTmdbKey(Episode $episode): ?string
-    {
-        return empty($episode->tmdb_id) ? null : (string) (int) $episode->tmdb_id;
-    }
-
-    protected function episodeNumberKey(Episode $episode): ?string
-    {
-        if (empty($episode->season) || empty($episode->episode_num)) {
-            return null;
-        }
-
-        return (int) $episode->season.':'.(int) $episode->episode_num;
-    }
-
     protected function linkEpisode(Episode $master, Episode $failover, int $sortOrder): void
     {
-        EpisodeFailover::updateOrCreate(
-            [
-                'episode_id' => $master->id,
-                'episode_failover_id' => $failover->id,
-            ],
-            [
-                'user_id' => $this->user->id,
-                'sort' => $sortOrder,
-            ]
-        );
+        app(SeriesFailoverLinker::class)->linkEpisode($master, $failover, $sortOrder, $this->user->id);
 
         if ($this->deactivateFailoverEpisodes && $failover->enabled) {
             $failover->update(['enabled' => false]);

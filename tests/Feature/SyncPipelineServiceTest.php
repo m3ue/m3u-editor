@@ -1181,7 +1181,8 @@ it('backfills VOD auto-merge for playlists that auto-merge with the TMDB ID key'
     $migration = require database_path('migrations/2026_11_18_120547_create_series_failovers_table.php');
     (fn () => $this->enableVodAutoMergeForTmdbKeyPlaylists())->call($migration);
 
-    expect($tmdbKey->refresh()->auto_merge_config)->toBe(['merge_key' => 'tmdb_id', 'force_complete_remerge' => true, 'merge_vod' => true])
+    // toEqual, not toBe: Postgres jsonb doesn't keep key order.
+    expect($tmdbKey->refresh()->auto_merge_config)->toEqual(['merge_key' => 'tmdb_id', 'force_complete_remerge' => true, 'merge_vod' => true])
         ->and($tmdbKey->auto_merge_channels_enabled)->toBeTrue()
         ->and($streamIdKey->refresh()->auto_merge_config)->not->toHaveKey('merge_vod')
         ->and($autoMergeOff->refresh()->auto_merge_config)->not->toHaveKey('merge_vod')
