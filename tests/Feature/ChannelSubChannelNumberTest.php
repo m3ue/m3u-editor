@@ -234,7 +234,7 @@ it('clears the pivot minor when custom playlist channels are recounted', functio
 // ---------------------------------------------------------------------------
 
 it('imports tvg-chno sub-channels instead of truncating them', function () {
-    $tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    $tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid('', true).'.sqlite';
     touch($tempJobsDb);
     config(['database.connections.jobs.database' => $tempJobsDb]);
     DB::purge('jobs');
@@ -289,7 +289,7 @@ it('imports tvg-chno sub-channels instead of truncating them', function () {
 });
 
 it('imports Xtream num sub-channels the same way', function () {
-    $tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    $tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid('', true).'.sqlite';
     touch($tempJobsDb);
     config(['database.connections.jobs.database' => $tempJobsDb]);
     DB::purge('jobs');

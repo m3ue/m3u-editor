@@ -281,7 +281,7 @@ it('leaves stream_profile_id null when the channel has no group', function () {
 // ── Import chunk: inject group default; preserve existing on re-import ───────
 
 beforeEach(function () {
-    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid('', true).'.sqlite';
     touch($this->tempJobsDb);
     config(['database.connections.jobs.database' => $this->tempJobsDb]);
     DB::purge('jobs');

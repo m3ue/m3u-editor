@@ -45,12 +45,14 @@ it('registers the listener that drops app SQL functions after a backup reset', f
 });
 
 it('leaves non-pgsql connections alone after a backup reset', function () {
-    $connection = DB::connection()->getName();
-    DB::enableQueryLog();
+    // Use an explicit SQLite connection: CI runs the suite against Postgres, where
+    // the default connection is pgsql and the listener would (correctly) query it.
+    $connection = DB::connection('sqlite_testing');
+    $connection->enableQueryLog();
 
     (new DropPostgresFunctionsAfterBackupReset)->handle(new DatabaseReset(
-        PendingRestore::make(disk: 'local', backup: 'backup.zip', connection: $connection),
+        PendingRestore::make(disk: 'local', backup: 'backup.zip', connection: 'sqlite_testing'),
     ));
 
-    expect(DB::getQueryLog())->toBeEmpty();
+    expect($connection->getQueryLog())->toBeEmpty();
 });

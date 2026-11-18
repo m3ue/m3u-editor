@@ -25,7 +25,7 @@ use App\Services\SimilaritySearchService;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
-    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid('', true).'.sqlite';
     touch($this->tempJobsDb);
     config(['database.connections.jobs.database' => $this->tempJobsDb]);
     DB::purge('jobs');

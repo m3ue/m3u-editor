@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 // Isolate the jobs connection to a temp database so parallel test processes
 // don't interfere with each other via the shared jobs.sqlite file.
 beforeEach(function () {
-    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid().'.sqlite';
+    $this->tempJobsDb = sys_get_temp_dir().'/jobs_test_'.uniqid('', true).'.sqlite';
     touch($this->tempJobsDb);
 
     config(['database.connections.jobs.database' => $this->tempJobsDb]);
