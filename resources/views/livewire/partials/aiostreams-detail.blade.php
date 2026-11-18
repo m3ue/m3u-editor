@@ -272,7 +272,7 @@
                                 @php
                                     $episodeNum = (int) ($episode['episode'] ?? 0);
                                     $episodeKey = "{$detailSelectedSeason}:{$episodeNum}";
-                                    $hasAired = \App\Livewire\AioStreamsBrowse::hasEpisodeAired($episode);
+                                    $hasAired = \App\Services\AioStreamsLibraryService::hasEpisodeAired($episode);
                                 @endphp
                                 <div class="flex w-full items-center gap-3 px-3 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/60">
                                     @if (! $guestMode)
@@ -358,33 +358,14 @@
                     {{ __('Get Sources') }}
                 </x-filament::button>
                 @if (! $guestMode)
-                    <x-filament::button
-                        wire:click="addMovieToLibrary"
-                        wire:loading.attr="disabled"
-                        wire:target="addMovieToLibrary"
-                        icon="heroicon-o-plus-circle"
-                        color="gray"
-                        outlined
-                    >
-                        {{ __('Add to Library') }}
-                    </x-filament::button>
+                    {{ $addToLibraryAction }}
                 @endif
             </div>
         @endif
 
         @if ($isSeries && ! $guestMode)
             <div class="flex-shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/50">
-                <x-filament::button
-                    wire:click="addSeriesToLibrary"
-                    wire:loading.attr="disabled"
-                    wire:target="addSeriesToLibrary"
-                    icon="heroicon-o-plus-circle"
-                    color="gray"
-                    outlined
-                    class="w-full"
-                >
-                    {{ __('Add Series to Library') }}
-                </x-filament::button>
+                {{ $addToLibraryAction }}
             </div>
         @endif
     @endif

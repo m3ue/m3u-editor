@@ -1,4 +1,44 @@
-<div>
+{{--
+    Bulk selection lives in the browser, in a global Alpine store: the cards that
+    render it sit in both this component (search results) and each
+    AioStreamsCatalogRow child, and a store is reachable from all of them however
+    Livewire nests the components. Toggling never costs a server round trip; the
+    selection reaches the server only as the bulkAddToLibrary action's `items`.
+--}}
+<div
+    x-data
+    x-init="
+        Alpine.store('aioSelection', {
+            canSelect: @js(! $guestMode),
+            max: @js(\App\Jobs\AddAioStreamsItemsToLibrary::MAX_ITEMS),
+            items: {},
+            count() {
+                return Object.keys(this.items).length
+            },
+            any() {
+                return this.count() > 0
+            },
+            has(key) {
+                return key in this.items
+            },
+            toggle(item) {
+                const key = item.type + ':' + item.id
+                if (key in this.items) {
+                    delete this.items[key]
+                } else if (this.count() < this.max) {
+                    this.items[key] = item
+                }
+            },
+            clear() {
+                this.items = {}
+            },
+            list() {
+                return Object.values(this.items)
+            },
+        })
+    "
+    x-on:aio-selection-cleared.window="$store.aioSelection.clear()"
+>
     @if (! $this->integration)
         <div class="flex flex-col items-center justify-center py-12 text-center">
             <x-heroicon-o-exclamation-triangle class="h-12 w-12 text-gray-300 dark:text-gray-600" />
@@ -211,6 +251,35 @@
             @endif
         </div>
 
+        @if (! $guestMode)
+            <div
+                x-cloak
+                x-show="$store.aioSelection.any()"
+                x-transition
+                class="fixed inset-x-4 bottom-4 z-30 mx-auto flex max-w-xl flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3 shadow-lg ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10"
+            >
+                <div class="text-sm font-medium text-gray-950 dark:text-white">
+                    <span x-text="@js(__(':count selected')).replace(':count', $store.aioSelection.count())"></span>
+                    <span
+                        x-show="$store.aioSelection.count() >= $store.aioSelection.max"
+                        class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400"
+                        x-text="@js(__('(limit :max per add)')).replace(':max', $store.aioSelection.max)"
+                    ></span>
+                </div>
+                <div class="flex gap-2">
+                    <x-filament::button color="gray" size="sm" x-on:click="$store.aioSelection.clear()">
+                        {{ __('Deselect all') }}
+                    </x-filament::button>
+                    <x-filament::button
+                        size="sm"
+                        icon="heroicon-o-plus-circle"
+                        x-on:click="$wire.mountAction('bulkAddToLibrary', { items: $store.aioSelection.list() })"
+                    >
+                        {{ __('Add to Library') }}
+                    </x-filament::button>
+                </div>
+            </div>
+        @endif
     @endif
 
     <x-filament-actions::modals />

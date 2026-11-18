@@ -27,7 +27,7 @@ use Illuminate\Support\Collection;
  * AIOStreams-added series for this integration — mirrors AioStreamsMoviesRelationManager,
  * reusing SeriesResource's table columns/filters/actions for parity with the default
  * Series table. Resolution status lives per-episode (a series itself has no stream of
- * its own to resolve — see AioStreamsBrowse::findOrCreateAioSeries()), so this shows
+ * its own to resolve - see AioStreamsLibraryService::findOrCreateSeries()), so this shows
  * aggregate episode counts by status rather than a single series-level status.
  */
 class AioStreamsSeriesRelationManager extends RelationManager

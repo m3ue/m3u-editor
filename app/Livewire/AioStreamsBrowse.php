@@ -2,11 +2,11 @@
 
 namespace App\Livewire;
 
+use App\Filament\Actions\AioStreamsRescanAction;
+use App\Filament\Resources\AioStreamsMatchProfiles\AioStreamsMatchProfileResource;
 use App\Http\Controllers\MediaServerProxyController;
-use App\Jobs\FetchTmdbIds;
+use App\Jobs\AddAioStreamsItemsToLibrary;
 use App\Jobs\NotifyAioStreamsResolutionComplete;
-use App\Jobs\ResolveAioStreamsChannel;
-use App\Jobs\ResolveAioStreamsEpisode;
 use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Episode;
@@ -17,18 +17,19 @@ use App\Models\PlaylistAuth;
 use App\Models\PlaylistViewer;
 use App\Models\Series;
 use App\Models\ViewerWatchProgress;
+use App\Services\AioStreamsLibraryService;
 use App\Services\AIOStreamsService;
-use App\Services\TmdbService;
 use Filament\Actions\Action;
 use Filament\Actions\Concerns\InteractsWithActions;
 use Filament\Actions\Contracts\HasActions;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Renderless;
 use Livewire\Component;
@@ -452,85 +453,6 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         ];
     }
 
-    /**
-     * Maps a Stremio meta object (movie or series, from AIOStreamsService::fetchMeta())
-     * onto the Xtream-style `info` json shape VodResource's form/infolist actually reads
-     * (see VodResource.php's "VOD Settings" fieldset) — previously only `plot` was ever
-     * populated here, leaving genre/cast/director/rating/runtime/images blank for every
-     * AIOStreams-added movie regardless of how much metadata AIOStreams returned.
-     *
-     * @param  array<string, mixed>  $meta
-     * @return array<string, mixed>
-     */
-    private function buildAioMetaInfo(array $meta): array
-    {
-        $castNames = collect((array) ($meta['cast'] ?? []))
-            ->map(fn ($member) => is_array($member) ? ($member['name'] ?? null) : $member)
-            ->filter()
-            ->implode(', ');
-
-        $runtimeMinutes = null;
-        if (! empty($meta['runtime']) && preg_match('/(\d+)/', (string) $meta['runtime'], $matches)) {
-            $runtimeMinutes = (int) $matches[1];
-        }
-
-        return array_filter([
-            'name' => $meta['name'] ?? null,
-            'plot' => $meta['description'] ?? null,
-            'description' => $meta['description'] ?? null,
-            'genre' => ! empty($meta['genres']) ? implode(', ', (array) $meta['genres']) : null,
-            'director' => ! empty($meta['director']) ? implode(', ', (array) $meta['director']) : null,
-            'actors' => $castNames ?: null,
-            'cast' => $castNames ?: null,
-            'episode_run_time' => $runtimeMinutes,
-            'release_date' => $meta['releaseInfo'] ?? null,
-            'movie_image' => $meta['poster'] ?? null,
-            'cover_big' => $meta['poster'] ?? null,
-            'backdrop_path' => ! empty($meta['background']) ? [$meta['background']] : null,
-        ], fn ($value) => $value !== null && $value !== '');
-    }
-
-    /**
-     * Extract IMDb/TMDB ids for a Stremio item onto `Channel`/`Series`' own
-     * `imdb_id`/`tmdb_id` columns — previously never populated for AIOStreams-added
-     * content, even though `getImdbId()`/`getTmdbId()`/`getMovieDbIds()` and
-     * `XtreamApiController::resolveFavoriteCrossReference()` already read them.
-     * AIOStreams (Stremio) item ids are the common source: Cinemeta-backed catalogs
-     * use the bare IMDb id ("tt1234567") as the item id, TMDB-backed catalogs use
-     * "tmdb:12345". Neither is guaranteed by the Stremio protocol, so this falls
-     * back to whatever cross-reference fields the meta object itself provides
-     * (`imdb_id`/`moviedb_id`/`tmdb_id`, or a `links` entry categorized "imdb"/"tmdb"/"moviedb").
-     *
-     * @param  array<string, mixed>  $meta
-     * @return array{imdb: ?string, tmdb: ?int}
-     */
-    private function extractAioMovieDbIds(string $itemId, array $meta): array
-    {
-        return AIOStreamsService::extractMovieDbIds($itemId, $meta);
-    }
-
-    /**
-     * An episode with no known release date is treated as already aired — we
-     * can't tell otherwise, and AIOStreams addons won't have streams for it
-     * either way once it's actually requested.
-     *
-     * @param  array<string, mixed>  $episodeVideo
-     */
-    public static function hasEpisodeAired(array $episodeVideo): bool
-    {
-        $released = $episodeVideo['released'] ?? null;
-
-        if (! $released) {
-            return true;
-        }
-
-        try {
-            return Carbon::parse($released)->isPast();
-        } catch (\Exception) {
-            return true;
-        }
-    }
-
     public function showDetailAction(): Action
     {
         return Action::make('showDetail')
@@ -544,7 +466,11 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             // in-flow node at the bottom of the page — force-loading every lazy
             // catalog row along the way. Disabling autofocus removes the trigger.
             ->modalAutofocus(false)
-            ->modalContent(fn () => view('livewire.partials.aiostreams-detail', [
+            ->registerModalActions([
+                fn (): Action => $this->makeAddToLibraryAction(),
+            ])
+            ->modalContent(fn (Action $action) => view('livewire.partials.aiostreams-detail', [
+                'addToLibraryAction' => $action->getModalAction('addToLibrary'),
                 'detailResult' => $this->detailResult,
                 'detailType' => $this->detailType,
                 'detailSeasons' => $this->detailSeasons,
@@ -619,7 +545,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             $episodeVideo = collect($this->detailEpisodesBySeason[$season] ?? [])
                 ->first(fn (array $v) => (int) ($v['episode'] ?? 0) === $episode);
 
-            if ($episodeVideo && ! $this->hasEpisodeAired($episodeVideo)) {
+            if ($episodeVideo && ! AioStreamsLibraryService::hasEpisodeAired($episodeVideo)) {
                 $this->streamsLoading = false;
                 $this->streamsFailed = true;
                 Notification::make()->warning()->title(__('This episode has not aired yet'))->send();
@@ -690,12 +616,156 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
     }
 
     /**
+     * "Add to Library" button for the title open in the detail slide-over. When
+     * the user has match profiles it first asks which one the title should use
+     * (the integration default is preselected); with none it adds straight away,
+     * like before profiles existed.
+     */
+    public function makeAddToLibraryAction(): Action
+    {
+        return Action::make('addToLibrary')
+            ->label(fn (): string => $this->detailType === 'series' ? __('Add Series to Library') : __('Add to Library'))
+            ->icon('heroicon-o-plus-circle')
+            ->color('gray')
+            ->outlined()
+            ->extraAttributes(fn (): array => $this->detailType === 'series' ? ['class' => 'w-full'] : [])
+            // Only movies and series can be stored; other addon types (tv, channel, ...) can only be browsed.
+            ->hidden(fn (): bool => $this->guestMode || ! in_array($this->detailType, ['movie', 'series'], true))
+            ->modalHeading(fn (): string => __('Add ":name" to Library', ['name' => $this->detailResult['name'] ?? __('Unknown')]))
+            ->modalWidth(Width::Medium)
+            ->modalHidden(fn (): bool => ! $this->hasMatchProfiles())
+            ->modalSubmitActionLabel(__('Add to Library'))
+            ->schema([
+                $this->libraryProfileSelect(),
+            ])
+            ->action(function (array $data): void {
+                $profileId = $this->profileIdFromData($data);
+
+                if ($this->detailType === 'series') {
+                    $this->addSeriesToLibrary($profileId);
+                } else {
+                    $this->addMovieToLibrary($profileId);
+                }
+            });
+    }
+
+    /**
+     * Add the titles checked on the catalog/search cards. The selection lives in
+     * the browser (Alpine) and arrives as the action's `items` argument; each
+     * item's meta is fetched by a queued job, since a large selection is many
+     * AIOStreams requests.
+     */
+    public function bulkAddToLibraryAction(): Action
+    {
+        return Action::make('bulkAddToLibrary')
+            ->hidden(fn (): bool => $this->guestMode)
+            ->modalHeading(function (array $arguments): string {
+                $count = count($this->bulkItemsFromArguments($arguments));
+
+                return trans_choice('Add :count title to Library|Add :count titles to Library', $count, ['count' => $count]);
+            })
+            ->modalDescription(__('Titles already in the library are skipped. Streams are resolved in the background.'))
+            ->modalWidth(Width::Medium)
+            ->modalSubmitActionLabel(__('Add to Library'))
+            ->schema(fn (array $arguments): array => [
+                $this->libraryProfileSelect()
+                    ->visible(fn (): bool => $this->hasMatchProfiles())
+                    ->helperText(__('Applies to every selected title. The integration default uses its movie or series profile per title.')),
+                Toggle::make('include_latest_season')
+                    ->label(__('Include latest season'))
+                    ->helperText(__('Also add every episode of each series\' most recent season (up to :max series per add). Otherwise only the series is added, and you pick episodes later.', ['max' => AddAioStreamsItemsToLibrary::MAX_SERIES_WITH_LATEST_SEASON]))
+                    ->default(false)
+                    ->visible(fn (): bool => collect($this->bulkItemsFromArguments($arguments))->contains('type', 'series')),
+            ])
+            ->action(function (array $data, array $arguments, Action $action): void {
+                $integration = $this->integration;
+                $items = $this->bulkItemsFromArguments($arguments);
+
+                if (! $integration || $items === []) {
+                    return;
+                }
+
+                $seriesCount = collect($items)->where('type', 'series')->count();
+
+                if (($data['include_latest_season'] ?? false) && $seriesCount > AddAioStreamsItemsToLibrary::MAX_SERIES_WITH_LATEST_SEASON) {
+                    Notification::make()
+                        ->danger()
+                        ->title(__('Too many series to include their latest season'))
+                        ->body(__(':count series selected, the limit with "Include latest season" is :max. Turn it off or select fewer series.', [
+                            'count' => $seriesCount,
+                            'max' => AddAioStreamsItemsToLibrary::MAX_SERIES_WITH_LATEST_SEASON,
+                        ]))
+                        ->send();
+
+                    $action->halt();
+                }
+
+                AddAioStreamsItemsToLibrary::dispatch(
+                    $integration->id,
+                    $items,
+                    $this->profileIdFromData($data),
+                    (bool) ($data['include_latest_season'] ?? false),
+                );
+
+                $this->dispatch('aio-selection-cleared');
+
+                Notification::make()
+                    ->success()
+                    ->title(trans_choice('Adding :count title to the library|Adding :count titles to the library', count($items), ['count' => count($items)]))
+                    ->body(__('You\'ll get a notification when it\'s done.'))
+                    ->send();
+            });
+    }
+
+    /**
+     * The bulk selection sent from the browser, reduced to valid
+     * `{type, id}` pairs (deduplicated, capped) - names and anything else the
+     * client sent are dropped, the job reads titles from AIOStreams itself.
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<int, array{type: string, id: string}>
+     */
+    private function bulkItemsFromArguments(array $arguments): array
+    {
+        return collect((array) ($arguments['items'] ?? []))
+            ->filter(fn (mixed $item): bool => is_array($item)
+                && in_array($item['type'] ?? null, ['movie', 'series'], true)
+                && is_string($item['id'] ?? null)
+                && filled($item['id']))
+            ->map(fn (array $item): array => ['type' => $item['type'], 'id' => $item['id']])
+            ->unique(fn (array $item): string => "{$item['type']}:{$item['id']}")
+            ->take(AddAioStreamsItemsToLibrary::MAX_ITEMS)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function profileIdFromData(array $data): ?int
+    {
+        return filled($data['profile_id'] ?? null) ? (int) $data['profile_id'] : null;
+    }
+
+    private function libraryProfileSelect(): Select
+    {
+        return AioStreamsRescanAction::profileSelect()
+            ->placeholder(__('Integration default'))
+            ->helperText(__('Rules for which streams the auto-matcher picks. Change it later from the title\'s rescan action.'));
+    }
+
+    private function hasMatchProfiles(): bool
+    {
+        return AioStreamsMatchProfileResource::profileOptions() !== [];
+    }
+
+    /**
      * Add the currently-viewed movie to the integration's library playlist as
-     * a custom VOD channel, then kick off async stream resolution. Admin-only —
+     * a custom VOD channel, then kick off async stream resolution. Admin-only:
      * adding content to a shared playlist is a different trust level than
      * browsing/watching, which guests can already do.
      */
-    public function addMovieToLibrary(): void
+    public function addMovieToLibrary(?int $profileId = null): void
     {
         if ($this->guestMode) {
             return;
@@ -706,53 +776,16 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        $existing = Channel::where('aio_integration_id', $integration->id)
-            ->where('aio_item_id', $this->detailId)
-            ->where('aio_type', 'movie')
-            ->first();
+        $channel = $this->library()->addMovie($integration, $this->detailId, $this->detailResult, $profileId);
 
-        if ($existing) {
+        if (! $channel) {
             Notification::make()->warning()->title(__('Already added to library'))->send();
 
             return;
         }
 
-        $playlist = $integration->getOrCreatePlaylist();
-        $meta = $this->detailResult;
-        $rating = is_numeric($meta['imdbRating'] ?? null) ? (float) $meta['imdbRating'] : null;
-        $movieDbIds = $this->extractAioMovieDbIds($this->detailId, $meta);
-
-        $channel = Channel::create([
-            'user_id' => $integration->user_id,
-            'playlist_id' => $playlist->id,
-            'name' => $meta['name'] ?? 'Unknown',
-            'title' => $meta['name'] ?? null,
-            'logo' => $meta['poster'] ?? null,
-            'is_custom' => true,
-            'is_vod' => true,
-            'enabled' => true,
-            // AIOStreams VODs manage their own internal failover chain and can't be
-            // probed (see VodResource's disabled probe_enabled/can_merge toggles for
-            // aio_integration_id rows) — set both explicitly rather than relying on
-            // column defaults, which default to true.
-            'can_merge' => false,
-            'probe_enabled' => false,
-            'year' => is_numeric($meta['releaseInfo'] ?? null) ? (int) $meta['releaseInfo'] : null,
-            'rating' => $rating,
-            'rating_5based' => $rating ? round($rating / 2, 1) : null,
-            'info' => $this->buildAioMetaInfo($meta),
-            'imdb_id' => $movieDbIds['imdb'],
-            'tmdb_id' => $movieDbIds['tmdb'],
-            'aio_integration_id' => $integration->id,
-            'aio_item_id' => $this->detailId,
-            'aio_type' => 'movie',
-            'aio_resolution_status' => 'pending',
-        ]);
-
-        ResolveAioStreamsChannel::dispatch($channel->id);
         NotifyAioStreamsResolutionComplete::dispatch([$channel->id], [], $integration->user_id, $channel->title ?? $channel->name)
             ->delay(now()->addSeconds(15));
-        $this->queueTmdbEnrichment($integration, channel: $channel);
 
         Notification::make()->success()->title(__('Added - resolving stream, check back shortly'))->send();
     }
@@ -763,7 +796,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
      * user actually adds one, rather than eagerly fetching every episode's
      * streams up front (which would multiply AIOStreams requests per series).
      */
-    public function addSeriesToLibrary(): void
+    public function addSeriesToLibrary(?int $profileId = null): void
     {
         if ($this->guestMode) {
             return;
@@ -774,7 +807,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+        $series = $this->library()->findOrCreateSeries($integration, $this->detailId, $this->detailResult, $profileId);
 
         if ($series->wasRecentlyCreated === false) {
             Notification::make()->warning()->title(__('Already added to library'))->send();
@@ -782,7 +815,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        $this->queueTmdbEnrichment($integration, series: $series);
+        $this->library()->queueTmdbEnrichment($integration, series: $series);
 
         Notification::make()->success()->title(__('Series added - add individual episodes to resolve their streams'))->send();
     }
@@ -803,9 +836,9 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+        $series = $this->library()->findOrCreateSeries($integration, $this->detailId, $this->detailResult);
 
-        $episodeRow = $this->createAioEpisode($series, $season, $episode);
+        $episodeRow = $this->library()->createEpisode($series, $season, $episode, $this->episodeVideo($season, $episode));
 
         if (! $episodeRow) {
             Notification::make()->warning()->title(__('Episode already added'))->send();
@@ -818,7 +851,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
                 ->delay(now()->addSeconds(15));
         }
 
-        $this->queueTmdbEnrichment($integration, series: $series);
+        $this->library()->queueTmdbEnrichment($integration, series: $series);
 
         Notification::make()->success()->title(__('Episode added - resolving stream, check back shortly'))->send();
     }
@@ -877,7 +910,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
             return;
         }
 
-        $series = $this->findOrCreateAioSeries($integration, $this->detailId, $this->detailResult);
+        $series = $this->library()->findOrCreateSeries($integration, $this->detailId, $this->detailResult);
 
         $added = 0;
         $skipped = 0;
@@ -886,7 +919,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         foreach (array_keys($this->selectedEpisodes) as $key) {
             [$season, $episode] = array_map('intval', explode(':', $key));
 
-            $episodeRow = $this->createAioEpisode($series, $season, $episode);
+            $episodeRow = $this->library()->createEpisode($series, $season, $episode, $this->episodeVideo($season, $episode));
 
             if ($episodeRow) {
                 $added++;
@@ -901,7 +934,7 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         $this->selectedEpisodes = [];
 
         if ($added > 0) {
-            $this->queueTmdbEnrichment($integration, series: $series);
+            $this->library()->queueTmdbEnrichment($integration, series: $series);
         }
 
         if (! empty($dispatchedIds)) {
@@ -921,159 +954,23 @@ class AioStreamsBrowse extends Component implements HasActions, HasSchemas
         }
     }
 
+    private function library(): AioStreamsLibraryService
+    {
+        return app(AioStreamsLibraryService::class);
+    }
+
     /**
-     * Queue the same TMDB enrichment the rest of the library gets (rich cast with
-     * photos, clearlogo, trailers, certification, season posters, episode stills,
-     * ...) for an item just added from AIOStreams. The browse view shows most of
-     * that because AIOStreamsService::enrichMetaWithTmdb() merges it into the meta
-     * on the fly, but the stored library row only keeps the plain Stremio fields,
-     * so Xtream clients (M3U TV) saw it missing once the item was in the library.
+     * The Stremio video object for one episode: from the season shown in the
+     * slide-over, else the cached full episode list.
      *
-     * backfillEnrichment: the Stremio meta already gave the row a plot + poster,
-     * which the bulk job would otherwise treat as "already enriched" and skip. On
-     * a series that's already enriched, a repeat call only looks up the episodes
-     * added since, so calling this on every episode add stays cheap.
+     * @return array<string, mixed>|null
      */
-    private function queueTmdbEnrichment(MediaServerIntegration $integration, ?Channel $channel = null, ?Series $series = null): void
+    private function episodeVideo(int $season, int $episode): ?array
     {
-        if (! ($integration->aiostreams_tmdb_enrich ?? true) || ! app(TmdbService::class)->isConfigured()) {
-            return;
-        }
-
-        dispatch(new FetchTmdbIds(
-            vodChannelIds: $channel ? [$channel->id] : null,
-            seriesIds: $series ? [$series->id] : null,
-            user: $integration->user,
-            sendCompletionNotification: false,
-            backfillEnrichment: true,
-        ));
-    }
-
-    /**
-     * Create the custom Episode (+ Season, on demand) row for one episode of
-     * the given series and dispatch its stream resolution job. Returns null
-     * without doing anything if the episode was already added.
-     */
-    private function createAioEpisode(Series $series, int $season, int $episode): ?Episode
-    {
-        $aioItemId = "{$this->detailId}:{$season}:{$episode}";
-
-        if ($series->episodes()->where('aio_item_id', $aioItemId)->exists()) {
-            return null;
-        }
-
-        // Stremio meta doesn't expose per-season posters, so fall back to the
-        // series' own poster rather than leaving the season card blank.
-        $seasonCover = $series->cover_big ?? $series->cover ?? null;
-
-        $seasonRow = $series->seasons()->firstOrCreate(
-            ['season_number' => $season],
-            array_filter([
-                'name' => 'Season '.str_pad((string) $season, 2, '0', STR_PAD_LEFT),
-                'user_id' => $series->user_id,
-                'playlist_id' => $series->playlist_id,
-                'import_batch_no' => Str::orderedUuid()->toString(),
-                'is_custom' => true,
-                'cover' => $seasonCover,
-                'cover_big' => $seasonCover,
-            ], fn ($value) => $value !== null)
-        );
-
-        $episodeVideo = collect($this->detailEpisodesBySeason[$season] ?? [])
+        return collect($this->detailEpisodesBySeason[$season] ?? [])
             ->first(fn (array $v) => (int) ($v['episode'] ?? 0) === $episode)
-            ?? collect(Cache::get($this->episodeCacheKey($this->detailId)) ?? [])
+            ?? collect(Cache::get($this->episodeCacheKey((string) $this->detailId)) ?? [])
                 ->first(fn (array $v) => (int) ($v['season'] ?? 0) === $season && (int) ($v['episode'] ?? 0) === $episode);
-
-        $released = $episodeVideo['released'] ?? $episodeVideo['firstAired'] ?? null;
-        $airDate = null;
-        if ($released) {
-            try {
-                $airDate = Carbon::parse($released);
-            } catch (\Exception) {
-                $airDate = null;
-            }
-        }
-        $hasAired = ! $airDate || $airDate->isPast();
-
-        $plot = $episodeVideo['overview'] ?? null;
-        $thumbnail = $episodeVideo['thumbnail'] ?? null;
-
-        $episodeRow = $series->episodes()->create([
-            'title' => $episodeVideo['title'] ?? $episodeVideo['name'] ?? "Episode {$episode}",
-            'user_id' => $series->user_id,
-            'playlist_id' => $series->playlist_id,
-            'season_id' => $seasonRow->id,
-            'episode_num' => $episode,
-            'season' => $season,
-            'import_batch_no' => Str::orderedUuid()->toString(),
-            'is_custom' => true,
-            'aio_item_id' => $aioItemId,
-            'aio_air_date' => $airDate,
-            // Unaired episodes have no stream (and usually no plot/poster) yet, so
-            // don't surface them as if they were playable until they've actually aired.
-            'enabled' => $hasAired,
-            // AIOStreams episodes manage their own internal failover chain and can't be
-            // probed (see EpisodesRelationManager's disabled probe_enabled toggle) — set
-            // explicitly rather than relying on the column default, which defaults to true.
-            'probe_enabled' => false,
-            'plot' => $plot,
-            'cover' => $thumbnail,
-            'info' => array_filter([
-                'plot' => $plot,
-                'movie_image' => $thumbnail,
-                'cover_big' => $thumbnail,
-                'release_date' => $released,
-            ], fn ($value) => $value !== null && $value !== ''),
-            // Streams can't exist for an episode that hasn't aired yet — resolving
-            // now would just burn the empty-result retry budget and permanently
-            // mark it 'failed'. Leave it 'scheduled' for the upcoming-episodes
-            // command (routes/console.php) to pick up once aio_air_date passes.
-            'aio_resolution_status' => $hasAired ? 'pending' : 'scheduled',
-        ]);
-
-        if ($hasAired) {
-            ResolveAioStreamsEpisode::dispatch($episodeRow->id);
-        }
-
-        return $episodeRow;
-    }
-
-    private function findOrCreateAioSeries(MediaServerIntegration $integration, string $itemId, array $meta): Series
-    {
-        $playlist = $integration->getOrCreatePlaylist();
-        $castNames = collect((array) ($meta['cast'] ?? []))
-            ->map(fn ($member) => is_array($member) ? ($member['name'] ?? null) : $member)
-            ->filter()
-            ->implode(', ');
-        $movieDbIds = $this->extractAioMovieDbIds($itemId, $meta);
-
-        return Series::firstOrCreate(
-            [
-                'aio_integration_id' => $integration->id,
-                'aio_item_id' => $itemId,
-                'aio_type' => 'series',
-            ],
-            array_filter([
-                'name' => $meta['name'] ?? 'Unknown',
-                'plot' => $meta['description'] ?? null,
-                'cover' => $meta['poster'] ?? null,
-                'genre' => ! empty($meta['genres']) ? implode(', ', (array) $meta['genres']) : null,
-                'director' => ! empty($meta['director']) ? implode(', ', (array) $meta['director']) : null,
-                'cast' => $castNames ?: null,
-                'rating' => $meta['imdbRating'] ?? null,
-                'rating_5based' => is_numeric($meta['imdbRating'] ?? null) ? round(((float) $meta['imdbRating']) / 2, 1) : null,
-                'release_date' => $meta['releaseInfo'] ?? null,
-                'backdrop_path' => ! empty($meta['background']) ? [$meta['background']] : null,
-                'imdb_id' => $movieDbIds['imdb'],
-                'tmdb_id' => $movieDbIds['tmdb'],
-                'user_id' => $integration->user_id,
-                'playlist_id' => $playlist->id,
-                'import_batch_no' => Str::orderedUuid()->toString(),
-                'is_custom' => true,
-                'enabled' => true,
-                'aio_resolution_status' => 'resolved',
-            ], fn ($value) => $value !== null && $value !== '')
-        );
     }
 
     public function playChosenStream(int $index): void

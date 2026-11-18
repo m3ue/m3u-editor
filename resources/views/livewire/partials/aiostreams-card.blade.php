@@ -1,12 +1,47 @@
 @php
-    $isSeries = ($item['type'] ?? '') === 'series';
+    $itemType = (string) ($item['type'] ?? 'movie');
+    $isSeries = $itemType === 'series';
+    // Catalog types come straight from the addon manifest (tv, channel, anime,
+    // ...), but only movies and series can be added to the library.
+    $isSelectable = in_array($itemType, ['movie', 'series'], true);
+    $selectionItem = ['type' => $itemType, 'id' => (string) $item['id']];
+    $selectionKey = $itemType.':'.$selectionItem['id'];
+    // Built here rather than with @js() in the attributes: Blade doesn't compile
+    // directives inside a component tag's attributes (the checkbox below).
+    $selectionItemJs = \Illuminate\Support\Js::from($selectionItem);
+    $selectionKeyJs = \Illuminate\Support\Js::from($selectionKey);
 @endphp
+{{--
+    Selection state lives in the `aioSelection` Alpine store (registered in
+    aio-streams-browse.blade.php). While anything is selected, clicking a card
+    toggles it instead of opening the detail slide-over.
+--}}
 <div
     wire:key="item-{{ $item['id'] }}-{{ $item['type'] ?? '' }}"
-    wire:click="$dispatch('openAioDetail', { type: '{{ $item['type'] ?? 'movie' }}', id: '{{ addslashes($item['id']) }}' })"
+    @if ($isSelectable)
+        x-on:click="$store.aioSelection?.canSelect && $store.aioSelection.any() ? $store.aioSelection.toggle({{ $selectionItemJs }}) : $wire.dispatch('openAioDetail', {{ $selectionItemJs }})"
+        x-bind:class="$store.aioSelection?.has({{ $selectionKeyJs }}) && 'ring-4 ring-primary-500'"
+    @else
+        x-on:click="$wire.dispatch('openAioDetail', {{ $selectionItemJs }})"
+    @endif
     class="group relative cursor-pointer overflow-hidden rounded-lg bg-gray-200 shadow-sm transition-shadow duration-200 hover:shadow-xl dark:bg-gray-800"
 >
     <div class="relative aspect-[2/3]">
+        @if ($isSelectable)
+            <template x-if="$store.aioSelection?.canSelect">
+                <label
+                    x-on:click.stop
+                    class="absolute top-1 right-1 z-10 flex cursor-pointer items-center justify-center rounded-md bg-black/60 p-2.5 hover:bg-black/80"
+                    title="{{ __('Select') }}"
+                >
+                    <x-filament::input.checkbox
+                        class="size-5"
+                        x-bind:checked="$store.aioSelection.has({{ $selectionKeyJs }})"
+                        x-on:change="$store.aioSelection.toggle({{ $selectionItemJs }})"
+                    />
+                </label>
+            </template>
+        @endif
         @if (! empty($item['poster']))
             <img
                 src="{{ $item['poster'] }}"
