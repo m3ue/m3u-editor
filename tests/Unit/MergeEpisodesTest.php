@@ -286,3 +286,53 @@ it('exposes ordered failover episodes on the episode model', function () {
 
     $this->assertSame([$early->id, $late->id], $master->failoverEpisodes()->pluck('episodes.id')->all());
 });
+
+it('keeps an episode that backs up another playlist eligible as a master in its own merge', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $episodeFor = function (Playlist $playlist) use ($user): Episode {
+        $series = Series::factory()->for($user)->createQuietly([
+            'playlist_id' => $playlist->id,
+            'tmdb_id' => 4242,
+        ]);
+
+        return Episode::factory()->create([
+            'user_id' => $user->id,
+            'playlist_id' => $playlist->id,
+            'series_id' => $series->id,
+            'tmdb_id' => null,
+            'season' => 1,
+            'episode_num' => 1,
+        ]);
+    };
+
+    $episodeA = $episodeFor($playlistA);
+    $episodeB = $episodeFor($playlistB);
+    $episodeC = $episodeFor($playlistC);
+
+    // Created by B's merge (playlists B + A, B preferred).
+    EpisodeFailover::create([
+        'user_id' => $user->id,
+        'episode_id' => $episodeB->id,
+        'episode_failover_id' => $episodeA->id,
+        'sort' => 1,
+    ]);
+
+    runMergeEpisodes(
+        user: $user,
+        playlists: collect([['playlist_failover_id' => $playlistA->id], ['playlist_failover_id' => $playlistC->id]]),
+        playlistId: $playlistA->id,
+    );
+
+    $this->assertDatabaseHas('episode_failovers', [
+        'episode_id' => $episodeA->id,
+        'episode_failover_id' => $episodeC->id,
+    ]);
+    $this->assertDatabaseHas('episode_failovers', [
+        'episode_id' => $episodeB->id,
+        'episode_failover_id' => $episodeA->id,
+    ]);
+});

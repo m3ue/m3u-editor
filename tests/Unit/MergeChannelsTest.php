@@ -492,3 +492,80 @@ it('rotates a scrubber dead master to a live failover and restores it when live 
         'channel_failover_id' => $secondaryFailover->id,
     ]);
 });
+
+/**
+ * Playlist A is a stable provider with its own backup (C). Playlist B is a shaky
+ * provider that uses A's channel as its failover. A's channel must stay a primary
+ * in A's own merge, and A's merge must not touch B's link to it.
+ *
+ * @return array{user: User, playlistA: Playlist, playlistC: Playlist, channelA: Channel, channelB: Channel, channelC: Channel}
+ */
+function mergeChannelsCrossPlaylistSetup(): array
+{
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $channelAttributes = fn (Playlist $playlist, string $url): array => [
+        'stream_id' => 'shared-stream',
+        'url' => $url,
+        'user_id' => $user->id,
+        'playlist_id' => $playlist->id,
+        'group_id' => null,
+        'enabled' => true,
+    ];
+
+    $channelA = Channel::factory()->create($channelAttributes($playlistA, 'http://provider-a.test/1.ts'));
+    $channelB = Channel::factory()->create($channelAttributes($playlistB, 'http://provider-b.test/1.ts'));
+    $channelC = Channel::factory()->create($channelAttributes($playlistC, 'http://provider-c.test/1.ts'));
+
+    // Created by B's merge (playlists B + A, B preferred).
+    ChannelFailover::create([
+        'user_id' => $user->id,
+        'channel_id' => $channelB->id,
+        'channel_failover_id' => $channelA->id,
+        'sort' => 1,
+    ]);
+
+    return compact('user', 'playlistA', 'playlistC', 'channelA', 'channelB', 'channelC');
+}
+
+it('keeps a channel that backs up another playlist eligible as a master in its own merge', function () {
+    ['user' => $user, 'playlistA' => $playlistA, 'playlistC' => $playlistC, 'channelA' => $channelA, 'channelB' => $channelB, 'channelC' => $channelC] = mergeChannelsCrossPlaylistSetup();
+
+    runMergeChannels(
+        user: $user,
+        playlists: collect([['playlist_failover_id' => $playlistA->id], ['playlist_failover_id' => $playlistC->id]]),
+        playlistId: $playlistA->id,
+    );
+
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $channelA->id,
+        'channel_failover_id' => $channelC->id,
+    ]);
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $channelB->id,
+        'channel_failover_id' => $channelA->id,
+    ]);
+});
+
+it('does not remove another playlist failover link when a channel becomes master in its own merge', function () {
+    ['user' => $user, 'playlistA' => $playlistA, 'playlistC' => $playlistC, 'channelA' => $channelA, 'channelB' => $channelB, 'channelC' => $channelC] = mergeChannelsCrossPlaylistSetup();
+
+    runMergeChannels(
+        user: $user,
+        playlists: collect([['playlist_failover_id' => $playlistA->id], ['playlist_failover_id' => $playlistC->id]]),
+        playlistId: $playlistA->id,
+        forceCompleteRemerge: true,
+    );
+
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $channelA->id,
+        'channel_failover_id' => $channelC->id,
+    ]);
+    $this->assertDatabaseHas('channel_failovers', [
+        'channel_id' => $channelB->id,
+        'channel_failover_id' => $channelA->id,
+    ]);
+});

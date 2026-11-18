@@ -11,6 +11,7 @@ use App\Services\ChannelMergeKeyService;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
@@ -64,6 +65,15 @@ class MergeChannels implements ShouldQueue
     protected array $existingFailoverMasterIds = [];
 
     /**
+     * Playlist IDs taking part in this merge. Only failover links with both ends in
+     * this set belong to the merge, so a channel can be a primary in its own
+     * playlist's merge while it also backs up a channel in another playlist.
+     *
+     * @var array<int>
+     */
+    protected array $mergePlaylistIds = [];
+
+    /**
      * Create a new job instance.
      */
     public function __construct(
@@ -109,6 +119,7 @@ class MergeChannels implements ShouldQueue
         }
 
         $playlistIds = $playlistIds->unique()->values()->toArray();
+        $this->mergePlaylistIds = $playlistIds;
 
         // Create playlist priority lookup for efficient sorting
         $playlistPriority = $playlistIds ? array_flip($playlistIds) : [];
@@ -116,19 +127,14 @@ class MergeChannels implements ShouldQueue
         // Initialize caches for weighted priority system
         $this->initializeCaches($playlistIds);
 
-        // Get existing failover channel IDs to exclude them from being masters
-        $existingFailoverChannelIds = ChannelFailover::where('user_id', $this->user->id)
-            ->whereHas('channelFailover', function ($query) use ($playlistIds) {
-                $query->whereIn('playlist_id', $playlistIds);
-            })
+        // Get existing failover channel IDs to exclude them from being masters.
+        // Links from a master outside this merge belong to another playlist's merge.
+        $existingFailoverChannelIds = $this->mergeOwnedFailoversQuery()
             ->pluck('channel_failover_id')
             ->map(fn (mixed $id): int => (int) $id)
             ->toArray();
 
-        $existingFailoverMasterIds = ChannelFailover::where('user_id', $this->user->id)
-            ->whereHas('channel', function ($query) use ($playlistIds) {
-                $query->whereIn('playlist_id', $playlistIds);
-            })
+        $existingFailoverMasterIds = $this->mergeOwnedFailoversQuery()
             ->pluck('channel_id')
             ->map(fn (mixed $id): int => (int) $id)
             ->toArray();
@@ -598,9 +604,20 @@ class MergeChannels implements ShouldQueue
         return $this->isExistingFailoverTopologyChannel($master);
     }
 
+    /**
+     * Failover links this merge manages: both the master and the failover
+     * channel belong to one of the merge's playlists.
+     */
+    protected function mergeOwnedFailoversQuery(): Builder
+    {
+        return ChannelFailover::where('user_id', $this->user->id)
+            ->whereHas('channel', fn (Builder $query) => $query->whereIn('playlist_id', $this->mergePlaylistIds))
+            ->whereHas('channelFailover', fn (Builder $query) => $query->whereIn('playlist_id', $this->mergePlaylistIds));
+    }
+
     protected function prepareSelectedMaster(Channel $master): void
     {
-        ChannelFailover::where('user_id', $this->user->id)
+        $this->mergeOwnedFailoversQuery()
             ->where('channel_failover_id', $master->id)
             ->delete();
 

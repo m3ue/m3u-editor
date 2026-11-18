@@ -9,6 +9,7 @@ use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
@@ -45,10 +46,11 @@ class MergeEpisodes implements ShouldQueue
         $playlistIds = $playlistIds->filter()->unique()->values()->toArray();
         $playlistPriority = $playlistIds ? array_flip($playlistIds) : [];
 
+        // Links from a master outside this merge belong to another playlist's merge,
+        // so an episode backing up another playlist can still be a master here.
         $existingFailoverEpisodeIds = EpisodeFailover::where('user_id', $this->user->id)
-            ->whereHas('episodeFailover', function ($query) use ($playlistIds) {
-                $query->whereIn('playlist_id', $playlistIds);
-            })
+            ->whereHas('episode', fn (Builder $query) => $query->whereIn('playlist_id', $playlistIds))
+            ->whereHas('episodeFailover', fn (Builder $query) => $query->whereIn('playlist_id', $playlistIds))
             ->pluck('episode_failover_id')
             ->toArray();
 
