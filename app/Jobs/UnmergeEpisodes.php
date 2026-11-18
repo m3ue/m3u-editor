@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
+use App\Models\Series;
+use App\Models\SeriesFailover;
 use App\Models\User;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Queueable;
@@ -55,6 +57,12 @@ class UnmergeEpisodes implements ShouldQueue
                 }
                 EpisodeFailover::whereIn('episode_id', $idsToDelete)->delete();
             }
+
+            $playlistSeriesIds = Series::where('playlist_id', $this->playlistId)
+                ->where('user_id', $this->user->id)
+                ->select('id');
+
+            SeriesFailover::whereIn('series_id', $playlistSeriesIds)->delete();
         } else {
             if ($this->reactivateEpisodes) {
                 $failoverEpisodeIds = EpisodeFailover::where('user_id', $this->user->id)
@@ -69,6 +77,7 @@ class UnmergeEpisodes implements ShouldQueue
             }
 
             EpisodeFailover::where('user_id', $this->user->id)->delete();
+            SeriesFailover::where('user_id', $this->user->id)->delete();
         }
 
         $this->sendCompletionNotification($reactivatedCount);
