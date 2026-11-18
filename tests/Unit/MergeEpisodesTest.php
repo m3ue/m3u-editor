@@ -555,3 +555,21 @@ it('leaves AIOStreams series out of series-level matching', function () {
 
     $this->assertDatabaseCount('series_failovers', 0);
 });
+
+it('keeps failover flat when a higher priority series with the wrong tmdb id masters a matched group', function () {
+    $user = User::factory()->create();
+    $playlistA = Playlist::factory()->for($user)->createQuietly();
+    $playlistB = Playlist::factory()->for($user)->createQuietly();
+    $playlistC = Playlist::factory()->for($user)->createQuietly();
+
+    $a = mergeEpisodesMakeSeries($user, $playlistA, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $b = mergeEpisodesMakeSeries($user, $playlistB, ['tmdb_id' => 100], [[1, 1, 5001]]);
+    $c = mergeEpisodesMakeSeries($user, $playlistC, ['tmdb_id' => 999], [[1, 1, 5001]]);
+
+    // C is preferred, so its (wrongly identified) series is the master.
+    $merge = fn () => runMergeEpisodes(user: $user, playlists: mergeEpisodesPlaylists($playlistA, $playlistB), playlistId: $playlistC->id);
+    $merge();
+    $merge();
+
+    expect($c['episodes'][0]->failoverEpisodes()->pluck('episodes.id')->all())->toBe([$a['episodes'][0]->id, $b['episodes'][0]->id]);
+});

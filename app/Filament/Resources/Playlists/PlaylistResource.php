@@ -2455,7 +2455,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->helperText(__('Match series by TMDB or TVDB ID, then link their episodes.'))
                                 ->hintIcon(
                                     'heroicon-m-question-mark-circle',
-                                    tooltip: __('Series without a TMDB or TVDB ID never match. Disabled series only get IDs when TMDB Auto-lookup scope is All new or Both, or after Fetch TMDB Metadata, so check that for backup playlists. You can also link series by hand on the Series edit page. Disabled series used as failovers still have their episodes fetched.')
+                                    tooltip: __('Series without a TMDB or TVDB ID never match. Disabled series only get IDs when Auto-lookup scope (under TMDB Auto-lookup Settings) is All new or Both, or after Fetch TMDB Metadata, so check that for backup playlists. You can also link series by hand on the Series edit page. Disabled series used as failovers still have their episodes fetched.')
                                 )
                                 ->live()
                                 ->inline(false)

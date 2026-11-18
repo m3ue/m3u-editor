@@ -5359,7 +5359,7 @@
     "Series title for the recording rule (required for schedule_series action)": "记录规则的系列标题（schedule_series 操作所需）",
     "Series title prefix patterns": "系列标题前缀模式",
     "Series to Import": "待导入剧集",
-    "Series without a TMDB or TVDB ID never match. Disabled series only get IDs when TMDB Auto-lookup scope is All new or Both, or after Fetch TMDB Metadata, so check that for backup playlists. You can also link series by hand on the Series edit page. Disabled series used as failovers still have their episodes fetched.": "没有 TMDB 或 TVDB ID 的剧集系列永远不会匹配。已停用的剧集系列只有在自动查找范围为“所有新内容”或“两者”，或执行“获取 TMDB 元数据”后才会获得 ID，请为备用播放列表检查此项。也可以在剧集系列编辑页面手动关联。用作故障转移的已停用剧集系列仍会获取其分集。",
+    "Series without a TMDB or TVDB ID never match. Disabled series only get IDs when Auto-lookup scope (under TMDB Auto-lookup Settings) is All new or Both, or after Fetch TMDB Metadata, so check that for backup playlists. You can also link series by hand on the Series edit page. Disabled series used as failovers still have their episodes fetched.": "没有 TMDB 或 TVDB ID 的剧集系列永远不会匹配。已停用的剧集系列只有在“自动查找范围”（位于“TMDB 自动查找设置”中）为“所有新内容”或“两者”，或执行“获取 TMDB 元数据”后才会获得 ID，请为备用播放列表检查此项。也可以在剧集系列编辑页面手动关联。用作故障转移的已停用剧集系列仍会获取其分集。",
     "Series: Favorites First": "剧集: 收藏优先",
     "Server": "服务器",
     "Server API": "服务器 API",

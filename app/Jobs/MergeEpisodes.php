@@ -302,16 +302,42 @@ class MergeEpisodes implements ShouldQueue
                         continue;
                     }
 
-                    $exists = EpisodeFailover::where('episode_id', $master->id)
-                        ->where('episode_failover_id', $failover->id)
-                        ->exists();
+                    $sortOrder = $this->appendEpisodeLink($master, $failover, $sortOrder);
 
-                    if (! $exists) {
-                        $this->linkEpisode($master, $failover, ++$sortOrder);
+                    // An unmatched master that picks up a matched group's episode also takes
+                    // that episode's own failovers, so the whole group stays reachable from
+                    // the master instead of only through a chain.
+                    if (! $this->isGrouped($master) && $this->isGrouped($failover)) {
+                        foreach ($failover->failoverEpisodes()->whereIn('episodes.playlist_id', $this->mergePlaylistIds)->get(['episodes.id', 'episodes.enabled']) as $groupFailover) {
+                            if ($groupFailover->id !== $master->id) {
+                                $sortOrder = $this->appendEpisodeLink($master, $groupFailover, $sortOrder);
+                            }
+                        }
                     }
                 }
             },
         );
+    }
+
+    /**
+     * Link a failover after the master's existing links, leaving an existing link (and
+     * its order) alone.
+     *
+     * @return int The sort order of the master's last link.
+     */
+    protected function appendEpisodeLink(Episode $master, Episode $failover, int $sortOrder): int
+    {
+        $exists = EpisodeFailover::where('episode_id', $master->id)
+            ->where('episode_failover_id', $failover->id)
+            ->exists();
+
+        if ($exists) {
+            return $sortOrder;
+        }
+
+        $this->linkEpisode($master, $failover, ++$sortOrder);
+
+        return $sortOrder;
     }
 
     protected function isGrouped(Episode $episode): bool
