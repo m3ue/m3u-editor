@@ -221,7 +221,8 @@ class AioStreamsQualityParser
      *   the resolution after SxxEyy. The words between SxxEyy and the
      *   resolution are returned separately: they may be scene tags
      *   ("Show.S01E01.FRENCH.1080p") or the episode title, which
-     *   hasReleaseTag() tells apart by capitalization.
+     *   hasReleaseTag() tells apart by capitalization (and which is dropped
+     *   for all-lowercase names, where it can't).
      * - No marker at all: the whole name counts, as before.
      *
      * @return array{0: string, 1: string} [tags, title gap]
@@ -234,10 +235,16 @@ class AioStreamsQualityParser
             $afterEpisode = substr($releaseName, $match[0][1] + strlen($match[0][0]));
 
             if (preg_match($resolution, $afterEpisode, $resolutionMatch, PREG_OFFSET_CAPTURE)) {
-                return [substr($afterEpisode, $resolutionMatch[0][1]), substr($afterEpisode, 0, $resolutionMatch[0][1])];
+                $tags = substr($afterEpisode, $resolutionMatch[0][1]);
+                $titleGap = substr($afterEpisode, 0, $resolutionMatch[0][1]);
+            } else {
+                [$tags, $titleGap] = ['', $afterEpisode];
             }
 
-            return ['', $afterEpisode];
+            // Capitalization is the only way to tell scene tags from title
+            // words in the gap, so an all-lowercase name gets no gap at all
+            // ("show.s02e03.the.french.connection.720p" isn't French audio).
+            return [$tags, preg_match('/\p{Lu}/u', $releaseName) ? $titleGap : ''];
         }
 
         if (preg_match('/(?<!\d)(19|20)\d{2}(?!\d)/', $releaseName, $match, PREG_OFFSET_CAPTURE)

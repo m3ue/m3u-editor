@@ -85,7 +85,8 @@ class ResolvePendingAioStreamsCandidates extends Command
 
     /**
      * Failed episodes, plus unaired ('scheduled') ones whose air date has
-     * passed and so are now worth a first attempt.
+     * passed and so are now worth a first attempt, of series that still
+     * belong to an AIOStreams integration.
      *
      * @return Collection<int, Episode>
      */
@@ -98,6 +99,11 @@ class ResolvePendingAioStreamsCandidates extends Command
         return Episode::query()
             ->where('is_custom', true)
             ->whereNotNull('aio_item_id')
+            // Deleting an integration nulls its series' aio_integration_id, and
+            // ResolveAioStreamsEpisode returns early for those without marking
+            // anything, so they'd keep their place at the front of the queue
+            // every hour. (The channel query already requires an integration.)
+            ->whereHas('series', fn ($query) => $query->whereNotNull('aio_integration_id'))
             ->where(function ($query) {
                 $query->where('aio_resolution_status', 'failed')
                     ->orWhere(function ($query) {

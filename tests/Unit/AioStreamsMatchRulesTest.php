@@ -38,6 +38,8 @@ it('reads audio languages from the release filename, not the title', function (s
     'language word in an episode title' => ['Show.S02E05.The.Finnish.Line.1080p.WEB.h264-GRP.mkv', []],
     'episode language tag before the resolution' => ['Show.S01E01.FRENCH.1080p.WEB.mkv', ['fr']],
     'episode multi tags without a resolution' => ['Show.S01E01.MULTi.VFF.HDTV.x264.mkv', ['multi', 'fr']],
+    'lowercase episode title' => ['show.s02e03.the.french.connection.720p.hdtv-grp.mkv', []],
+    'lowercase tag after the resolution' => ['show.s02e03.720p.french.hdtv-grp.mkv', ['fr']],
 ]);
 
 it('reads the release source, preferring bingeGroup', function (string $filename, ?string $bingeGroup, ?string $expected) {

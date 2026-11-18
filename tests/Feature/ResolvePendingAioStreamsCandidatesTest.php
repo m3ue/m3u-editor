@@ -30,6 +30,7 @@ beforeEach(function () {
         'user_id' => $this->user->id,
         'playlist_id' => $this->playlist->id,
         'is_custom' => true,
+        'aio_integration_id' => $this->integration->id,
     ]);
 });
 
@@ -176,4 +177,37 @@ it('splits the batch so failed movies cannot starve episodes', function () {
     // Two movies up front, the one due episode, then movies take back the unused slot.
     Bus::assertDispatchedTimes(ResolveAioStreamsChannel::class, 3);
     Bus::assertDispatched(ResolveAioStreamsEpisode::class, fn ($job) => $job->episodeId === $dueEpisode->id);
+});
+
+it('skips episodes whose series lost its integration', function () {
+    Bus::fake();
+
+    $orphanedSeries = Series::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'is_custom' => true,
+        'aio_integration_id' => null,
+    ]);
+    $orphaned = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $orphanedSeries->id,
+        'is_custom' => true,
+        'aio_item_id' => 'tt8:1:1',
+        'aio_resolution_status' => 'failed',
+        'updated_at' => now()->subYear(),
+    ]);
+    $live = Episode::factory()->create([
+        'user_id' => $this->user->id,
+        'playlist_id' => $this->playlist->id,
+        'series_id' => $this->series->id,
+        'is_custom' => true,
+        'aio_item_id' => 'tt8:1:2',
+        'aio_resolution_status' => 'failed',
+    ]);
+
+    $this->artisan('app:resolve-pending-aiostreams-candidates', ['--limit' => 1]);
+
+    Bus::assertDispatched(ResolveAioStreamsEpisode::class, fn ($job) => $job->episodeId === $live->id);
+    Bus::assertNotDispatched(ResolveAioStreamsEpisode::class, fn ($job) => $job->episodeId === $orphaned->id);
 });
