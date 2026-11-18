@@ -1,7 +1,10 @@
 <?php
 
+use App\Filament\Pages\Backups;
+use App\Livewire\BackupDestinationListRecords;
 use App\Models\User;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 
 function encodedBackupPath(string $path): string
 {
@@ -64,4 +67,19 @@ it('rejects path traversal sequences', function () {
             'path' => encodedBackupPath('../../etc/passwd'),
         ]))
         ->assertNotFound();
+});
+
+it('renders the Backups page and its backup list for an admin', function () {
+    config(['backup.backup.destination.disks' => ['local']]);
+    Storage::fake('local');
+    Storage::disk('local')->put(config('backup.backup.name').'/2026-11-18-08-00-00.zip', 'backup-payload');
+
+    $this->actingAs(User::factory()->admin()->create())
+        ->get(Backups::getUrl())
+        ->assertOk();
+
+    Livewire::test(BackupDestinationListRecords::class)
+        ->assertOk()
+        ->assertSee('2026-11-18-08-00-00.zip')
+        ->assertSeeHtml('wire:poll.30s');
 });

@@ -162,11 +162,11 @@ class BackupDestinationListRecords extends Component implements HasActions, HasF
     }
 
     #[Computed]
-    public function interval(): string
+    public function interval(): ?string
     {
         /** @var FilamentSpatieLaravelBackupPlugin $plugin */
         $plugin = filament()->getPlugin('filament-spatie-backup');
 
-        return $plugin->getPolingInterval();
+        return $plugin->getPollingInterval();
     }
 }

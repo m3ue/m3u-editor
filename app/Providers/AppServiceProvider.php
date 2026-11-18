@@ -36,6 +36,7 @@ use App\Models\StreamFileSetting;
 use App\Models\StreamProfile;
 use App\Models\User;
 use App\Notifications\Notification as AppNotification;
+use App\Services\AlertService;
 use App\Services\DateFormatService;
 use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
@@ -71,7 +72,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\Looping;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -201,6 +204,17 @@ class AppServiceProvider extends ServiceProvider
         // what's configured, without requiring a worker restart.
         Event::listen(JobProcessing::class, function (): void {
             $this->applyTimezoneFromSettings();
+        });
+
+        // Keep an alert delivery job (Telegram, email, Discord, Slack) that
+        // fails from raising another alert. The worker reports each failed
+        // attempt as an error log after the job's own events have fired, so
+        // the flag is only cleared on success or on the worker's next loop.
+        Event::listen(JobProcessing::class, function (JobProcessing $event): void {
+            AlertService::trackRunningJob($event->job->resolveName());
+        });
+        Event::listen([JobProcessed::class, Looping::class], function (): void {
+            AlertService::trackRunningJob(null);
         });
 
         // Inject Copilot API key from settings into the Laravel AI config
