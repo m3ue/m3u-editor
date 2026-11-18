@@ -17,6 +17,7 @@ enum SyncRunPhase: string
     case SeriesStrm = 'series_strm';
     case SeriesProbe = 'series_probe';
     case SeriesStrmPostProbe = 'series_strm_post_probe';
+    case SeriesMerge = 'series_merge';
 
     case FindReplace = 'find_replace';
     case ChannelEnableRules = 'channel_enable_rules';
@@ -42,6 +43,7 @@ enum SyncRunPhase: string
             self::SeriesStrm => 'Series STRM Files',
             self::SeriesProbe => 'Series Stream Probe',
             self::SeriesStrmPostProbe => 'Series STRM Files (Post-Probe)',
+            self::SeriesMerge => 'Series Merge',
             self::FindReplace => 'Find & Replace / Sort',
             self::ChannelEnableRules => 'Channel Enable/Disable Rules',
             self::ChannelMerge => 'Channel Merge',
@@ -66,7 +68,8 @@ enum SyncRunPhase: string
             self::SeriesTmdb,
             self::SeriesStrm,
             self::SeriesProbe,
-            self::SeriesStrmPostProbe => 'warning',
+            self::SeriesStrmPostProbe,
+            self::SeriesMerge => 'warning',
             self::FindReplace,
             self::ChannelEnableRules,
             self::ChannelMerge,
@@ -97,6 +100,7 @@ enum SyncRunPhase: string
             self::SeriesStrm,
             self::SeriesProbe,
             self::SeriesStrmPostProbe,
+            self::SeriesMerge,
         ]);
     }
 }

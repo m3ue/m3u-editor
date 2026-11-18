@@ -4,11 +4,13 @@ use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
 use App\Jobs\MergeEpisodes;
+use App\Jobs\ProcessM3uImportSeriesEpisodes;
 use App\Jobs\UnmergeEpisodes;
 use App\Models\Episode;
 use App\Models\EpisodeFailover;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Models\SeriesFailover;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
@@ -496,4 +498,26 @@ it('removes series links when unmerging', function () {
 
     $this->assertDatabaseCount('series_failovers', 0);
     $this->assertDatabaseCount('episode_failovers', 0);
+});
+
+it('makes disabled series linked as a failover eligible for a metadata fetch', function () {
+    $user = User::factory()->create();
+    $primary = Playlist::factory()->for($user)->createQuietly();
+    $backup = Playlist::factory()->for($user)->createQuietly();
+
+    $primarySeries = Series::factory()->for($user)->createQuietly(['playlist_id' => $primary->id, 'enabled' => true]);
+    $linkedBackup = Series::factory()->for($user)->createQuietly(['playlist_id' => $backup->id, 'enabled' => false]);
+    $unlinkedBackup = Series::factory()->for($user)->createQuietly(['playlist_id' => $backup->id, 'enabled' => false]);
+
+    SeriesFailover::create([
+        'user_id' => $user->id,
+        'series_id' => $primarySeries->id,
+        'series_failover_id' => $linkedBackup->id,
+        'sort' => 1,
+    ]);
+
+    $eligibleIds = ProcessM3uImportSeriesEpisodes::eligibleSeriesQuery($user->id, $backup->id, true)->pluck('id')->all();
+
+    expect($eligibleIds)->toContain($linkedBackup->id)
+        ->not->toContain($unlinkedBackup->id);
 });

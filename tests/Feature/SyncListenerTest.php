@@ -19,6 +19,7 @@ use App\Events\SyncCompleted;
 use App\Jobs\AutoSyncGroupsToCustomPlaylist;
 use App\Jobs\GenerateEpgCache;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeEpisodes;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\RunCustomPlaylistProcessing;
@@ -142,17 +143,49 @@ it('chains merge job alone when auto-merge is enabled and no recurring scrubbers
     Bus::assertNotDispatched(ProcessChannelScrubber::class);
 });
 
-it('builds a vod tmdb auto-merge job when the playlist merge key is tmdb id', function () {
+it('merges Live by stream ID and VOD by the VOD merge key when both are enabled', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['merge_key' => 'tmdb_id', 'merge_vod' => true],
+    ]);
+
+    $jobs = SyncListener::getChannelMergeJobs($this->playlist->refresh());
+
+    expect($jobs)->toHaveCount(2)
+        ->and($jobs[0]->contentType)->toBe('live')
+        ->and($jobs[0]->mergeKey)->toBe('stream_id')
+        ->and($jobs[1]->contentType)->toBe('vod')
+        ->and($jobs[1]->mergeKey)->toBe('tmdb_id');
+});
+
+it('keeps merging Live by stream ID when only Live is enabled, whatever the VOD merge key', function () {
     $this->playlist->update([
         'auto_merge_channels_enabled' => true,
         'auto_merge_config' => ['merge_key' => 'tmdb_id'],
     ]);
 
-    $job = SyncListener::getMergeJob($this->playlist->refresh());
+    $jobs = SyncListener::getChannelMergeJobs($this->playlist->refresh());
 
-    expect($job)->toBeInstanceOf(MergeChannels::class)
-        ->and($job->contentType)->toBe('vod')
-        ->and($job->mergeKey)->toBe('tmdb_id');
+    expect($jobs)->toHaveCount(1)
+        ->and($jobs[0]->contentType)->toBe('live')
+        ->and($jobs[0]->mergeKey)->toBe('stream_id');
+});
+
+it('merges only VOD when only VOD is enabled', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => false,
+        'auto_merge_config' => ['merge_vod' => true],
+    ]);
+
+    $jobs = SyncListener::getChannelMergeJobs($this->playlist->refresh());
+
+    expect($jobs)->toHaveCount(1)
+        ->and($jobs[0]->contentType)->toBe('vod')
+        ->and($jobs[0]->mergeKey)->toBe('stream_id');
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertChained([MergeChannels::class]);
 });
 
 it('chains merge job before scrubber when both are enabled', function () {
@@ -555,4 +588,52 @@ it('skips custom playlist sync when the SyncRun already completed that phase', f
     event(new SyncCompleted($this->playlist, 'playlist', $run->id));
 
     Bus::assertNotDispatched(AutoSyncGroupsToCustomPlaylist::class);
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Series merge
+// ──────────────────────────────────────────────────────────────────────────────
+
+it('dispatches a series merge after sync when merge_series is enabled', function () {
+    $backup = Playlist::factory()->for($this->user)->createQuietly();
+    $this->playlist->update([
+        'auto_merge_config' => [
+            'merge_series' => true,
+            'failover_playlists' => [['playlist_failover_id' => $backup->id]],
+        ],
+    ]);
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertDispatched(MergeEpisodes::class, fn (MergeEpisodes $job): bool => $job->playlistId === $this->playlist->id
+        && $job->playlists->pluck('playlist_failover_id')->all() === [$this->playlist->id, $backup->id]
+        && $job->forceCompleteRemerge === false
+        && $job->deactivateFailoverEpisodes === false);
+});
+
+it('does not build a series merge job when merge_series is off', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['force_complete_remerge' => true],
+    ]);
+
+    expect(SyncListener::getSeriesMergeJob($this->playlist->refresh()))->toBeNull();
+
+    event(new SyncCompleted($this->playlist));
+
+    Bus::assertNotDispatched(MergeEpisodes::class);
+});
+
+it('skips the series merge when the SyncRun already completed that phase', function () {
+    $this->playlist->update(['auto_merge_config' => ['merge_series' => true]]);
+
+    $run = SyncRun::factory()
+        ->for($this->playlist)
+        ->for($this->user)
+        ->withPhasesCompleted(SyncRunPhase::SeriesMerge)
+        ->create();
+
+    event(new SyncCompleted($this->playlist, 'playlist', $run->id));
+
+    Bus::assertNotDispatched(MergeEpisodes::class);
 });

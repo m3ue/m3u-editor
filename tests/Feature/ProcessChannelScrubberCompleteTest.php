@@ -104,6 +104,29 @@ it('dispatches native merge after a successful scan when enabled', function () {
     expect($scrubber->fresh()->processing)->toBeFalse();
 });
 
+it('rebuilds only the Live merge after a scan even when the VOD merge key is TMDB ID', function () {
+    $this->playlist->update([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => [
+            'merge_key' => 'tmdb_id',
+            'merge_vod' => true,
+        ],
+    ]);
+    $scrubber = ($this->scrubber)(['rebuild_failovers_after_scan' => true]);
+    $log = ($this->logFor)($scrubber);
+
+    (new ProcessChannelScrubberComplete(
+        scrubberId: $scrubber->id,
+        logId: $log->id,
+        batchNo: $scrubber->uuid,
+        start: now()->subSeconds(3),
+    ))->handle();
+
+    Bus::assertDispatchedTimes(MergeChannels::class, 1);
+    Bus::assertDispatched(MergeChannels::class, fn (MergeChannels $job): bool => $job->contentType === 'live'
+        && $job->mergeKey === 'stream_id');
+});
+
 it('does not dispatch native merge when the scrubber completion is stale', function () {
     $this->playlist->update(['auto_merge_channels_enabled' => true]);
     $scrubber = ($this->scrubber)(['rebuild_failovers_after_scan' => true]);

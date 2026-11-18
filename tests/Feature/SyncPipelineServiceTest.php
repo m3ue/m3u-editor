@@ -6,6 +6,7 @@ use App\Enums\SyncRunStatus;
 use App\Events\SyncCompleted;
 use App\Jobs\FetchTmdbIds;
 use App\Jobs\MergeChannels;
+use App\Jobs\MergeEpisodes;
 use App\Jobs\ProbeChannelStreams;
 use App\Jobs\ProbeStreams;
 use App\Jobs\ProcessM3uImport;
@@ -17,6 +18,7 @@ use App\Models\Channel;
 use App\Models\Episode;
 use App\Models\Playlist;
 use App\Models\Series;
+use App\Models\SeriesFailover;
 use App\Models\SyncRun;
 use App\Models\User;
 use App\Services\SyncPipelineService;
@@ -1074,4 +1076,114 @@ it('plans VodProbe for a disabled-only VOD catalogue with include disabled on, e
     $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
 
     expect($run->phases)->toContain(SyncRunPhase::VodProbe->value);
+});
+
+// ── SeriesMerge phase ────────────────────────────────────────────────────────
+
+it('includes SeriesMerge after SeriesTmdb when merge_series is enabled', function () {
+    mockPipelineSettings(tmdb: true);
+    $playlist = makePlaylistWithSeries($this->user, ['auto_merge_config' => ['merge_series' => true]]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    $tmdbPos = array_search(SyncRunPhase::SeriesTmdb->value, $run->phases);
+    $mergePos = array_search(SyncRunPhase::SeriesMerge->value, $run->phases);
+
+    expect($tmdbPos)->not->toBeFalse()
+        ->and($mergePos)->not->toBeFalse()
+        ->and($tmdbPos)->toBeLessThan($mergePos);
+});
+
+it('excludes SeriesMerge when merge_series is off', function () {
+    mockPipelineSettings();
+    $playlist = makePlaylistWithSeries($this->user, ['auto_merge_channels_enabled' => true]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->not->toContain(SyncRunPhase::SeriesMerge->value);
+});
+
+it('dispatchSeriesMerge dispatches MergeEpisodes', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_merge_config' => ['merge_series' => true],
+    ]);
+
+    $run = SyncRun::create([
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'trigger' => 'test',
+        'status' => SyncRunStatus::Running->value,
+        'phases' => [SyncRunPhase::SeriesMerge->value, SyncRunPhase::SyncCompleted->value],
+        'phase_statuses' => (object) [],
+        'context' => ['playlist_id' => $playlist->id],
+        'started_at' => now(),
+    ]);
+
+    $this->service->startRun($run);
+
+    Bus::assertDispatched(MergeEpisodes::class);
+});
+
+it('fetches series metadata when the only series are disabled failover backups', function () {
+    mockPipelineSettings();
+    $primary = makePlaylistWithSeries($this->user);
+    $backup = Playlist::factory()->for($this->user)->create(['auto_fetch_series_metadata' => true]);
+    $backupSeries = Series::factory()->for($backup)->for($this->user)->create(['enabled' => false]);
+
+    $unlinkedRun = $this->service->buildPipeline($backup, app(GeneralSettings::class));
+    expect($unlinkedRun->phases)->not->toContain(SyncRunPhase::SeriesMetadata->value);
+    $unlinkedRun->delete();
+
+    SeriesFailover::create([
+        'user_id' => $this->user->id,
+        'series_id' => $primary->series()->first()->id,
+        'series_failover_id' => $backupSeries->id,
+        'sort' => 1,
+    ]);
+
+    $run = $this->service->buildPipeline($backup, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::SeriesMetadata->value)
+        ->and($run->phases)->not->toContain(SyncRunPhase::SeriesStrm->value);
+});
+
+it('includes ChannelMerge when only VOD auto-merge is enabled', function () {
+    mockPipelineSettings();
+    $playlist = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => false,
+        'auto_merge_config' => ['merge_vod' => true],
+    ]);
+
+    $run = $this->service->buildPipeline($playlist, app(GeneralSettings::class));
+
+    expect($run->phases)->toContain(SyncRunPhase::ChannelMerge->value);
+});
+
+it('backfills VOD auto-merge for playlists that auto-merge with the TMDB ID key', function () {
+    $tmdbKey = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['merge_key' => 'tmdb_id', 'force_complete_remerge' => true],
+    ]);
+    $streamIdKey = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['merge_key' => 'stream_id'],
+    ]);
+    $autoMergeOff = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => false,
+        'auto_merge_config' => ['merge_key' => 'tmdb_id'],
+    ]);
+    $alreadyChosen = Playlist::factory()->for($this->user)->create([
+        'auto_merge_channels_enabled' => true,
+        'auto_merge_config' => ['merge_key' => 'tmdb_id', 'merge_vod' => false],
+    ]);
+
+    $migration = require database_path('migrations/2026_11_18_120547_create_series_failovers_table.php');
+    (fn () => $this->enableVodAutoMergeForTmdbKeyPlaylists())->call($migration);
+
+    expect($tmdbKey->refresh()->auto_merge_config)->toBe(['merge_key' => 'tmdb_id', 'force_complete_remerge' => true, 'merge_vod' => true])
+        ->and($tmdbKey->auto_merge_channels_enabled)->toBeTrue()
+        ->and($streamIdKey->refresh()->auto_merge_config)->not->toHaveKey('merge_vod')
+        ->and($autoMergeOff->refresh()->auto_merge_config)->not->toHaveKey('merge_vod')
+        ->and($alreadyChosen->refresh()->auto_merge_config['merge_vod'])->toBeFalse();
 });

@@ -323,6 +323,16 @@ class Series extends Model
     }
 
     /**
+     * Series linked as a failover for a series in another playlist (see SeriesFailover).
+     */
+    public function scopeLinkedAsFailover(Builder $query): Builder
+    {
+        return $query->whereExists(fn ($links) => $links->selectRaw('1')
+            ->from('series_failovers')
+            ->whereColumn('series_failovers.series_failover_id', 'series.id'));
+    }
+
+    /**
      * Filter to series whose metadata is not fresh, i.e. those that
      * fetchMetadata()/isMetadataFresh() would actually act on. Mirrors
      * isMetadataFresh() as a SQL predicate so batch sync jobs can skip
