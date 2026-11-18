@@ -107,6 +107,16 @@ class MediaServerIntegration extends Model
         return $this->belongsTo(User::class);
     }
 
+    public function aiostreamsMovieProfile(): BelongsTo
+    {
+        return $this->belongsTo(AioStreamsMatchProfile::class, 'aiostreams_movie_profile_id');
+    }
+
+    public function aiostreamsSeriesProfile(): BelongsTo
+    {
+        return $this->belongsTo(AioStreamsMatchProfile::class, 'aiostreams_series_profile_id');
+    }
+
     public function embyLibraryMappings(): HasMany
     {
         return $this->hasMany(EmbyLibraryMapping::class);

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Http\Controllers\MediaServerProxyController;
+use App\Models\AioStreamsMatchProfile;
 use App\Models\Channel;
 use App\Models\ChannelFailover;
 use App\Models\Episode;
@@ -40,39 +41,109 @@ class AioStreamsCandidateService
     public function __construct(private readonly AioStreamsQualityParser $parser) {}
 
     /**
-     * @return array<int, array{parsed: array<string, mixed>, stream: array<string, mixed>}>
+     * The raw streams AIOStreams currently offers for the item.
+     *
+     * @return array<int, array<string, mixed>>
      */
-    public function fetchRanked(Channel|Episode $item): array
+    public function fetchStreams(Channel|Episode $item): array
     {
         $result = $item instanceof Channel
             ? AIOStreamsService::make($item->aioIntegration)->fetchStreams($item->aio_type ?? 'movie', $item->aio_item_id)
             : AIOStreamsService::make($item->series->aioIntegration)->fetchStreams('series', $item->aio_item_id);
 
-        return $this->parser->rank($result['streams'] ?? []);
+        return $result['streams'] ?? [];
+    }
+
+    /**
+     * The auto-selection profile that applies to an item: its own override,
+     * else its integration's default for the content type. A movie's override
+     * lives on the channel; an episode follows its series' override, then the
+     * integration's series default. Null means the built-in default ranking.
+     */
+    public function profileFor(Channel|Episode $item): ?AioStreamsMatchProfile
+    {
+        if ($item instanceof Channel) {
+            $integration = $item->aioIntegration;
+            $profileIds = [$item->aio_match_profile_id, $integration?->aiostreams_movie_profile_id];
+        } else {
+            $series = $item->series;
+            $integration = $series?->aioIntegration;
+            $profileIds = [$series?->aio_match_profile_id, $integration?->aiostreams_series_profile_id];
+        }
+
+        foreach (array_filter($profileIds) as $profileId) {
+            // Scoped to the owner: the override column has no foreign key, and
+            // a profile that no longer exists just falls through to the default.
+            $profile = AioStreamsMatchProfile::query()
+                ->where('user_id', $item->user_id)
+                ->find($profileId);
+
+            if ($profile) {
+                return $profile;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The rules of the item's profile, or none for the built-in ranking.
+     *
+     * @return array<string, mixed>
+     */
+    protected function rulesFor(Channel|Episode $item): array
+    {
+        return $this->profileFor($item)?->getRules() ?? [];
+    }
+
+    /**
+     * Rank the streams by a profile's rules. When the filters rule everything
+     * out, it either falls back to the best available stream (its ordering
+     * preferences still apply) or returns nothing, leaving the item
+     * unresolved until a matching release turns up.
+     *
+     * @param  array<int, array<string, mixed>>  $streams
+     * @param  array<string, mixed>  $rules
+     * @return array<int, array{parsed: array<string, mixed>, stream: array<string, mixed>}>
+     */
+    protected function rankByRules(array $streams, array $rules): array
+    {
+        $ranked = $this->parser->rank($streams, $rules);
+
+        if ($ranked === [] && $streams !== [] && ($rules['when_no_match'] ?? 'best_available') === 'best_available') {
+            return $this->parser->rank($streams, $this->parser->orderingOnly($rules));
+        }
+
+        return $ranked;
     }
 
     /**
      * Pick the candidates to store for an automatic resolution: the user's
      * manual selection (re-matched, in their order) when any of it is still
-     * offered, otherwise the top-N of the automatic ranking. Returns the
-     * selected candidates and the manual keys to keep (null = automatic).
+     * offered, otherwise the top-N of the item's profile ranking. Manual picks
+     * are matched against every stream, not just the ones the profile allows,
+     * so a profile never silently drops a stream the user chose by hand.
+     * Returns the selected candidates (empty = nothing acceptable) and the
+     * manual keys to keep (null = automatic).
      *
-     * @param  array<int, array{parsed: array<string, mixed>, stream: array<string, mixed>}>  $ranked
+     * @param  array<int, array<string, mixed>>  $streams  Raw streams from fetchStreams().
      * @return array{0: array<int, array{parsed: array<string, mixed>, stream: array<string, mixed>}>, 1: ?array<int, string>}
      */
-    public function selectForAutomaticResolution(Channel|Episode $item, array $ranked): array
+    public function selectForAutomaticResolution(Channel|Episode $item, array $streams): array
     {
         $manualKeys = $this->manualKeys($item);
 
         if ($manualKeys !== []) {
-            $matched = $this->selectByKeys($ranked, $manualKeys);
+            $matched = $this->selectByKeys($this->parser->rank($streams), $manualKeys);
 
             if ($matched !== []) {
                 return [$matched, $manualKeys];
             }
         }
 
-        return [array_slice($ranked, 0, max(1, $this->maxCandidates())), null];
+        $rules = $this->rulesFor($item);
+
+        return [array_slice($this->rankByRules($streams, $rules), 0, max(1, $this->maxCandidates($item, $rules))), null];
     }
 
     /**
@@ -151,38 +222,83 @@ class AioStreamsCandidateService
      * Fetch the current streams for the manual picker, park them in the cache
      * and return the Repeater rows (display-only fields + opaque key). The
      * current selection (manual or automatic) is pre-selected and listed
-     * first in its stored order, so the user only has to tweak it.
+     * first in its stored order, so the user only has to tweak it. Every
+     * stream is listed, with its parsed tags and, when the item's profile
+     * would skip it, why - which is how users see what to tune.
      *
-     * @return array<string, array{key: string, selected: bool, name: string, details: string}>
+     * @return array<string, array{key: string, selected: bool, name: string, details: string, tags: string, excluded: ?string}>
      */
     public function loadManualCandidates(Channel|Episode $item): array
     {
-        $ranked = $this->fetchRanked($item);
+        $streams = $this->fetchStreams($item);
+        $explained = $this->parser->explain($streams, $this->rulesFor($item));
 
-        Cache::put($this->manualCacheKey($item), $ranked, now()->addMinutes(self::MANUAL_CACHE_MINUTES));
+        Cache::put($this->manualCacheKey($item), $explained, now()->addMinutes(self::MANUAL_CACHE_MINUTES));
 
         $currentKeys = $this->manualKeys($item);
         if ($currentKeys === []) {
-            [$selected] = $this->selectForAutomaticResolution($item, $ranked);
+            [$selected] = $this->selectForAutomaticResolution($item, $streams);
             $currentKeys = $this->streamKeys($selected);
         }
 
-        $selectedFirst = collect($this->selectByKeys($ranked, $currentKeys));
-        $rest = collect($ranked)->reject(fn (array $c) => in_array(self::streamKey($c['stream']), $currentKeys, true));
+        $selectedFirst = collect($this->selectByKeys($explained, $currentKeys));
+        $rest = collect($explained)->reject(fn (array $c) => in_array(self::streamKey($c['stream']), $currentKeys, true));
 
         return $selectedFirst->concat($rest)
-            ->mapWithKeys(function (array $candidate) use ($currentKeys) {
-                $stream = $candidate['stream'];
-                $key = self::streamKey($stream);
+            ->mapWithKeys(fn (array $candidate) => [(string) Str::uuid() => [
+                ...$this->candidateRow($candidate),
+                'selected' => in_array(self::streamKey($candidate['stream']), $currentKeys, true),
+            ]])
+            ->all();
+    }
 
-                return [(string) Str::uuid() => [
-                    'key' => $key,
-                    'selected' => in_array($key, $currentKeys, true),
-                    'name' => trim(preg_replace('/\s+/', ' ', (string) ($stream['name'] ?? __('Unknown source')))),
-                    'details' => (string) ($stream['description'] ?? $stream['title'] ?? ''),
-                ]];
+    /**
+     * Dry-run a profile's rules against an item's current streams (the
+     * profile tester): every stream in rank order, marked as the primary,
+     * a failover, a lower-ranked match or excluded (with the reason).
+     *
+     * @param  array<string, mixed>  $rules
+     * @return array<string, array{key: string, name: string, details: string, tags: string, excluded: ?string, outcome: string}>
+     */
+    public function previewRules(Channel|Episode $item, array $rules): array
+    {
+        $explained = $this->parser->explain($this->fetchStreams($item), $rules);
+        $maxCandidates = $this->maxCandidates($item, $rules);
+        $allowed = 0;
+
+        return collect($explained)
+            ->mapWithKeys(function (array $candidate) use (&$allowed, $maxCandidates) {
+                $outcome = match (true) {
+                    $candidate['excluded'] !== null => __('Excluded: :reason', ['reason' => $candidate['excluded']]),
+                    $allowed === 0 => __('Primary'),
+                    $allowed < $maxCandidates => __('Failover :number', ['number' => $allowed]),
+                    default => __('Not selected'),
+                };
+
+                if ($candidate['excluded'] === null) {
+                    $allowed++;
+                }
+
+                return [(string) Str::uuid() => [...$this->candidateRow($candidate), 'outcome' => $outcome]];
             })
             ->all();
+    }
+
+    /**
+     * @param  array{parsed: array<string, mixed>, stream: array<string, mixed>, excluded?: ?string}  $candidate
+     * @return array{key: string, name: string, details: string, tags: string, excluded: ?string}
+     */
+    protected function candidateRow(array $candidate): array
+    {
+        $stream = $candidate['stream'];
+
+        return [
+            'key' => self::streamKey($stream),
+            'name' => trim((string) preg_replace('/\s+/u', ' ', AioStreamsQualityParser::normalizeText((string) ($stream['name'] ?? __('Unknown source'))))),
+            'details' => (string) ($stream['description'] ?? $stream['title'] ?? ''),
+            'tags' => AioStreamsQualityParser::describe($candidate['parsed']),
+            'excluded' => $candidate['excluded'] ?? null,
+        ];
     }
 
     /**
@@ -259,7 +375,7 @@ class AioStreamsCandidateService
             'url' => MediaServerProxyController::generateAioStreamsChannelProxyUrl($channel->aio_integration_id, $channel->id),
             'container_extension' => $primary['parsed']['container'] ?? $channel->container_extension,
             'movie_data' => $movieData,
-            'aio_resolution_status' => $this->resolutionStatus($selected, $manualKeys),
+            'aio_resolution_status' => $this->resolutionStatus($channel, $selected, $manualKeys),
             'aio_last_resolved_at' => now(),
         ]);
 
@@ -323,7 +439,7 @@ class AioStreamsCandidateService
             // Re-enable an episode that was disabled at creation for being unaired
             // ('scheduled') - it's now playable now that a stream has resolved.
             'enabled' => true,
-            'aio_resolution_status' => $this->resolutionStatus($selected, $manualKeys),
+            'aio_resolution_status' => $this->resolutionStatus($episode, $selected, $manualKeys),
             'aio_last_resolved_at' => now(),
         ]);
 
@@ -397,17 +513,29 @@ class AioStreamsCandidateService
      * @param  array<int, mixed>  $selected
      * @param  ?array<int, string>  $manualKeys
      */
-    protected function resolutionStatus(array $selected, ?array $manualKeys): string
+    protected function resolutionStatus(Channel|Episode $item, array $selected, ?array $manualKeys): string
     {
         if ($manualKeys) {
             return 'resolved';
         }
 
-        return count($selected) >= $this->maxCandidates() ? 'resolved' : 'partial';
+        return count($selected) >= $this->maxCandidates($item) ? 'resolved' : 'partial';
     }
 
-    protected function maxCandidates(): int
+    /**
+     * How many candidates (primary + failovers) to keep: the profile's own
+     * setting when it has one, else the global setting.
+     *
+     * @param  ?array<string, mixed>  $rules  Rules to use instead of the item's profile (profile tester).
+     */
+    protected function maxCandidates(Channel|Episode $item, ?array $rules = null): int
     {
+        $rules ??= $this->rulesFor($item);
+
+        if (is_numeric($rules['max_candidates'] ?? null) && (int) $rules['max_candidates'] > 0) {
+            return (int) $rules['max_candidates'];
+        }
+
         return app(GeneralSettings::class)->aiostreams_max_failover_candidates ?? 3;
     }
 

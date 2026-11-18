@@ -3,6 +3,7 @@
 namespace App\Filament\Clusters\MediaServers;
 
 use App\Filament\Pages\RequestContent;
+use App\Filament\Resources\AioStreamsMatchProfiles\AioStreamsMatchProfileResource;
 use App\Filament\Resources\ArrIntegrations\ArrIntegrationResource;
 use App\Filament\Resources\MediaServerIntegrations\MediaServerIntegrationResource;
 use BackedEnum;
@@ -33,7 +34,8 @@ class MediaServersCluster extends Cluster
 
     /**
      * Media servers first (the default tab), then Sonarr & Radarr and the
-     * Request Content page that searches them.
+     * Request Content page that searches them, then the AIOStreams match
+     * profiles the AIOStreams media servers use.
      *
      * @return array<class-string>
      */
@@ -43,6 +45,7 @@ class MediaServersCluster extends Cluster
             MediaServerIntegrationResource::class,
             ArrIntegrationResource::class,
             RequestContent::class,
+            AioStreamsMatchProfileResource::class,
         ];
     }
 
