@@ -761,8 +761,8 @@ it('scopes plugin-declared result tables to a run and playlist', function () {
         ->assertOk()
         ->assertSee('Run Results')
         ->assertSee('Included Result')
-        ->assertSee('CSV')
-        ->assertSee('JSON')
+        ->assertSee('/export/csv', false)
+        ->assertSee('/export/json', false)
         ->assertDontSee('Other Run Result')
         ->assertDontSee('Other Playlist Result');
 });
@@ -788,8 +788,10 @@ it('honors plugin-declared export formats for inline tables and downloads', func
         'showHeading' => true,
     ])
         ->assertOk()
-        ->assertSee('CSV')
-        ->assertDontSee('JSON');
+        // Match the export links, not the bare format names: the table's
+        // own markup contains "JSON" (e.g. `JSON.stringify` in Alpine).
+        ->assertSee('/export/csv', false)
+        ->assertDontSee('/export/json', false);
 
     $this->get(route('extension-plugins.tables.export', [
         'plugin' => $plugin,
@@ -829,8 +831,8 @@ it('can disable plugin-declared inline table exports', function () {
         'showHeading' => true,
     ])
         ->assertOk()
-        ->assertDontSee('CSV')
-        ->assertDontSee('JSON');
+        ->assertDontSee('/export/csv', false)
+        ->assertDontSee('/export/json', false);
 
     $this->get(route('extension-plugins.tables.export', [
         'plugin' => $plugin,

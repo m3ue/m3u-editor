@@ -40,6 +40,11 @@ class DynamicGroupRuleActions
             : __('Create VOD Dynamic Group');
 
         return CreateAction::make()
+            // The Dynamic Group resources return false from canCreate() (they
+            // have no create page), and Filament authorizes a page's
+            // CreateAction against that override. This slide-over is the
+            // supported way to create a rule; save() scopes it to the user.
+            ->authorize(true)
             ->label($label)
             ->modalHeading($label)
             ->slideOver()

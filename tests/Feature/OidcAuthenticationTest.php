@@ -3,6 +3,8 @@
 use App\Models\User;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\User as SocialiteUser;
+use SocialiteProviders\Manager\SocialiteWasCalled;
+use SocialiteProviders\OIDC\OIDCExtendSocialite;
 
 function mockOidcUser(array $attributes = []): SocialiteUser
 {
@@ -233,4 +235,23 @@ it('preserves admin status when OIDC syncs profile', function () {
     $admin->refresh();
     expect($admin->is_admin)->toBeTrue()
         ->and($admin->email)->toBe('different@example.com');
+});
+
+// --- Scopes ---
+
+it('requests each configured scope once', function () {
+    // config/services.php must hand Socialite a list: a space-joined string
+    // is cast to a single scope and duplicates the provider defaults.
+    expect(config('services.oidc.scopes'))->toBe(['openid', 'profile', 'email']);
+
+    config()->set('services.oidc.client_id', 'client');
+    config()->set('services.oidc.client_secret', 'secret');
+    config()->set('services.oidc.base_url', 'https://idp.example.com');
+    config()->set('services.oidc.scopes', ['openid', 'profile', 'email', 'groups']);
+    // SocialiteWasCalled fires once at boot, before this test enabled OIDC.
+    (new OIDCExtendSocialite)->handle(app(SocialiteWasCalled::class));
+
+    $scopes = Socialite::driver('oidc')->getScopes();
+
+    expect($scopes)->toEqualCanonicalizing(['openid', 'email', 'profile', 'groups']);
 });

@@ -222,14 +222,11 @@ it('per-row cancel action sets a row-id cancellation flag and deletes the row (n
         'status' => CachedContentFileStatus::Pending,
     ]);
 
-    // Only the row-id flag is written - the fingerprint-scoped helper is
-    // gone. Mockery::mockery teardown unsets this between tests.
-    Cache::shouldReceive('put')
-        ->once()
-        ->withArgs(fn (string $key, mixed $value, mixed $ttl): bool => $key === CachedContentFile::cancellationCacheKey($row->id));
-
-    // Sanity: the fingerprint-scoped helper must not exist on the model.
+    // Only the row-id flag is written - the fingerprint-scoped helper is gone.
+    // Asserted against the real (array) cache rather than a Cache facade
+    // mock: Filament notifications also go through the cache.
     expect(method_exists(CachedContentFile::class, 'pendingCancellationCacheKey'))->toBeFalse();
+    expect(Cache::has(CachedContentFile::cancellationCacheKey($row->id)))->toBeFalse();
 
     $this->actingAs($user);
 
@@ -238,6 +235,7 @@ it('per-row cancel action sets a row-id cancellation flag and deletes the row (n
         ->assertNotified();
 
     expect(CachedContentFile::find($row->id))->toBeNull();
+    expect(Cache::has(CachedContentFile::cancellationCacheKey($row->id)))->toBeTrue();
 });
 
 it('per-row viewError action opens a modal containing the failure message', function () {

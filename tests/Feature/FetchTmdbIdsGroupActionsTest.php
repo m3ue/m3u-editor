@@ -11,18 +11,13 @@ use App\Models\Playlist;
 use App\Models\User;
 use App\Settings\GeneralSettings;
 use Filament\Actions\Testing\TestAction;
-use Illuminate\Cache\ArrayStore;
-use Illuminate\Cache\Repository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
-    Cache::swap(new Repository(new ArrayStore));
-
     Bus::fake();
 
     $this->user = User::factory()->create();

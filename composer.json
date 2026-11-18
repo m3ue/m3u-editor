@@ -21,7 +21,7 @@
         "filament/spatie-laravel-tags-plugin": "^5.0",
         "halaxa/json-machine": "^1.2",
         "intervention/image": "^4.0",
-        "kovah/laravel-socialite-oidc": "^0.7.0",
+        "kovah/laravel-socialite-oidc": "^0.8.0",
         "laravel-notification-channels/telegram": "^7.0",
         "laravel/ai": "^0.11.2",
         "laravel/framework": "^13.0",
@@ -31,7 +31,7 @@
         "laravel/socialite": "^5.26",
         "laravel/tinker": "^3.0",
         "lcobucci/jwt": "^5.6",
-        "predis/predis": "^2.3",
+        "predis/predis": "^3.7.1",
         "shuvroroy/filament-spatie-laravel-backup": "dev-main",
         "sparkison/m3u-parser": "dev-master",
         "spatie/laravel-backup": "^10.0",
@@ -41,7 +41,7 @@
         "spatie/temporary-directory": "^2.3",
         "stechstudio/filament-impersonate": "^5.0",
         "stichoza/google-translate-php": "^5.3",
-        "wnx/laravel-backup-restore": "^1.6"
+        "wnx/laravel-backup-restore": "^2.1"
     },
     "require-dev": {
         "andreapollastri/checkpoint": "^1.1",

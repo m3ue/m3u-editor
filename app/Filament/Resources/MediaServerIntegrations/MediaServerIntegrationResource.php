@@ -742,10 +742,12 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
                         Grid::make(2)->schema([
                             Select::make('aiostreams_movie_profile_id')
                                 ->label(__('Movies'))
+                                ->searchable()
                                 ->options(fn (): array => AioStreamsMatchProfileResource::profileOptions())
                                 ->placeholder(__('Built-in ranking')),
                             Select::make('aiostreams_series_profile_id')
                                 ->label(__('Series'))
+                                ->searchable()
                                 ->options(fn (): array => AioStreamsMatchProfileResource::profileOptions())
                                 ->placeholder(__('Built-in ranking')),
                         ]),

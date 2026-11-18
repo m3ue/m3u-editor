@@ -141,6 +141,16 @@ class Backups extends BaseBackups
         return __('Manage Backups');
     }
 
+    /**
+     * The base page resolves its cluster through the plugin instance, which
+     * needs a registered panel. Filament calls getCluster() while discovering
+     * pages, before any panel exists, so answer it statically here.
+     */
+    public static function getCluster(): ?string
+    {
+        return null;
+    }
+
     public static function getNavigationGroup(): ?string
     {
         return __('Tools');

@@ -130,7 +130,10 @@ return [
         'client_secret' => env('OIDC_CLIENT_SECRET'),
         'base_url' => env('OIDC_ISSUER_URL'),
         'redirect' => '/auth/oidc/callback',
-        'scopes' => implode(' ', array_filter(array_map('trim', explode(',', env('OIDC_SCOPES', 'openid,profile,email'))))),
+        // A list, not a space-joined string: Socialite merges this with the
+        // provider's default scopes via (array) cast, so a string would be
+        // sent as one extra scope and duplicate the defaults.
+        'scopes' => array_values(array_filter(array_map('trim', explode(',', env('OIDC_SCOPES', 'openid,profile,email'))))),
         'auto_redirect' => env('OIDC_AUTO_REDIRECT', false),
         'auto_create_users' => env('OIDC_AUTO_CREATE_USERS', true),
         'button_label' => env('OIDC_BUTTON_LABEL', 'Login with SSO'),

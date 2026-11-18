@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
 
 class RestoreBackup implements ShouldQueue
 {
@@ -62,12 +63,20 @@ class RestoreBackup implements ShouldQueue
                 }
             }
 
-            // Restore the selected backup
-            Artisan::call('backup:restore', [
+            // Restore the selected backup. backup:restore reports its own
+            // failures (missing client, bad archive, import error) through the
+            // exit code rather than by throwing, so check it explicitly.
+            $exitCode = Artisan::call('backup:restore', [
                 '--backup' => $this->backupPath,
                 '--reset' => true, // reset DB before restore?
                 '--no-interaction' => true,
             ]);
+
+            if ($exitCode !== 0) {
+                $output = trim(Artisan::output());
+
+                throw new Exception('backup:restore exited with code '.$exitCode.($output !== '' ? ': '.Str::limit($output, 500) : ''));
+            }
 
             if ($isSqlite) {
                 DB::purge($connectionName);

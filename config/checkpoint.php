@@ -563,6 +563,21 @@ return [
         // AioStreamsMatchProfileResource form (user_id set server-side on create).
         // Same Model::unguard() convention as every model above.
         '68cc8f0b9b9a', // AioStreamsMatchProfile
+
+        // ── NPM CVE Audit ────────────────────────────────────────────────────
+        // GHSA-fc5q-39xc-vjpf (picomatch <= 4.0.7 ReDoS via single-branch
+        // repeated extglobs). Dev/build-time only: reached through vite,
+        // laravel-vite-plugin and sass's @parcel/watcher, never shipped to
+        // production, and glob patterns are never attacker-controlled.
+        // No patched picomatch exists yet (fix PRs open upstream as of
+        // 2026-11-18). Remove these once a fixed picomatch is released.
+        '1aaf6bf7a389', // @parcel/watcher
+        'c2a87121a67e', // fdir
+        '5b07dfde6c7e', // laravel-vite-plugin
+        'c4f94ad19741', // picomatch
+        '42d1222d2ac9', // tinyglobby
+        'fc09beb30b93', // vite
+        '67bfa2e4a2bb', // vite-plugin-full-reload
     ],
 
     /*
