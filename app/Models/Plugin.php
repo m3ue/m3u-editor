@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -37,6 +38,19 @@ class Plugin extends Model
         'last_validated_at' => 'datetime',
         'uninstalled_at' => 'datetime',
     ];
+
+    /**
+     * Enabled, valid plugins that declare the `scheduled` capability: the ones
+     * plugins:run-scheduled asks for due invocations.
+     */
+    public function scopeRunnableScheduled(Builder $query): Builder
+    {
+        return $query
+            ->where('enabled', true)
+            ->where('available', true)
+            ->where('validation_status', 'valid')
+            ->whereJsonContains('capabilities', 'scheduled');
+    }
 
     public function runs(): HasMany
     {

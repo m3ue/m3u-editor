@@ -18,12 +18,7 @@ class RunScheduledPlugins extends Command
         $queued = 0;
         $now = now();
 
-        $plugins = Plugin::query()
-            ->where('enabled', true)
-            ->where('available', true)
-            ->where('validation_status', 'valid')
-            ->whereJsonContains('capabilities', 'scheduled')
-            ->get();
+        $plugins = Plugin::query()->runnableScheduled()->get();
 
         foreach ($plugins as $plugin) {
             foreach ($pluginManager->scheduledInvocations($plugin, $now) as $invocation) {

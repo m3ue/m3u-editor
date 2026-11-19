@@ -2,6 +2,7 @@
 
 use App\Jobs\DvrRetentionCleanup;
 use App\Jobs\SweepArrCacheFailback;
+use App\Models\Plugin;
 use Illuminate\Console\Command;
 use Illuminate\Console\Scheduling\CallbackEvent;
 use Illuminate\Support\Facades\Artisan;
@@ -122,9 +123,19 @@ if (config('plugins.enabled', true)) {
     // Run scheduled plugin invocations. Kept as its own process: it loads plugin code to
     // ask each plugin what's due, and a plugin that exits or runs out of memory must not
     // take down schedule:run and skip the checks after it (e.g. the DVR scheduler tick).
+    // Only started when a plugin could have something due: most installs have no scheduled
+    // plugin, and the check is one indexed query instead of a process boot every minute. If
+    // the check itself fails, the command runs as before so the failure stays visible.
     Schedule::command('plugins:run-scheduled')
         ->everyMinute()
-        ->withoutOverlapping();
+        ->withoutOverlapping()
+        ->when(function (): bool {
+            try {
+                return Plugin::query()->runnableScheduled()->exists();
+            } catch (Throwable) {
+                return true;
+            }
+        });
 
     // Mark abandoned plugin runs stale so operators can resume them.
     $inProcess('plugins:recover-stale-runs')

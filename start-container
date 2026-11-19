@@ -373,8 +373,11 @@ fi
 [ ! -d "${user_plugins_dir}" ] && mkdir -p "${user_plugins_dir}"
 [ ! -d "${plugin_data_dir}" ] && mkdir -p "${plugin_data_dir}"
 
-# Start the scheduler's opcache file cache (docker/8.4/php-scheduler.ini) clean on every boot
+# Start the CLI opcache file cache (docker/8.4/php-scheduler.ini, used by the scheduler and
+# Horizon) clean on every boot. Created here so Horizon, which starts before the first cron
+# run, has the directory; opcache skips the file cache when it is missing.
 rm -rf /tmp/opcache-cli
+mkdir -p /tmp/opcache-cli
 
 # Create environment file if missing
 if [ ! -f "${env_file}" ]; then
