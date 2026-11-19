@@ -36,6 +36,7 @@ it('runs the frequent checks in the scheduler process with a short overlap lock'
     ['app:dvr-scheduler-tick', '* * * * *'],
     ['m3u-proxy:register-webhook', '*/5 * * * *'],
     ['app:refresh-playlist-profiles', '*/15 * * * *'],
+    ['app:start-optional-queue-supervisors', '* * * * *'],
 ]);
 
 it('no longer starts a separate process for the frequent checks', function () {

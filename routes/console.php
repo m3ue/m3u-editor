@@ -3,6 +3,7 @@
 use App\Jobs\DvrRetentionCleanup;
 use App\Jobs\SweepArrCacheFailback;
 use App\Models\Plugin;
+use App\Services\OptionalQueueSupervisors;
 use Illuminate\Console\Command;
 use Illuminate\Console\Scheduling\CallbackEvent;
 use Illuminate\Support\Facades\Artisan;
@@ -111,6 +112,12 @@ Schedule::command('model:prune')->daily();
 $inProcess('m3u-proxy:register-webhook')
     ->everyFiveMinutes();
 
+// Start the Horizon supervisors of optional features (DVR, SchedulesDirect, AIOStreams,
+// plugins, cached content) that Horizon left out at startup, once the feature is used
+// or a job is queued for it. See OptionalQueueSupervisors.
+$inProcess('app:start-optional-queue-supervisors')
+    ->everyMinute();
+
 // Refresh provider profile info (every 15 minutes)
 $inProcess('app:refresh-playlist-profiles')
     ->everyFifteenMinutes();
@@ -169,6 +176,15 @@ if (config('proxy.proxy_integration_enabled', true)) {
         $inProcess('app:dvr-scheduler-tick')->everyMinute();
 
         // DVR retention cleanup — run hourly to enforce keepLast, age, and quota policies
-        Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping();
+        // Only queued while DVR is in use, so an hourly no-op job doesn't start the DVR
+        // queue supervisor on installs that never use DVR. If the check fails, it's queued.
+        Schedule::job(new DvrRetentionCleanup)->hourly()->withoutOverlapping()
+            ->when(function (): bool {
+                try {
+                    return OptionalQueueSupervisors::dvrInUse();
+                } catch (Throwable) {
+                    return true;
+                }
+            });
     }
 }

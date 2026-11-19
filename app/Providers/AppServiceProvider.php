@@ -43,6 +43,7 @@ use App\Services\EpgCacheService;
 use App\Services\GitInfoService;
 use App\Services\NetworkBroadcastService;
 use App\Services\NetworkChannelSyncService;
+use App\Services\OptionalQueueSupervisors;
 use App\Services\PlaylistService;
 use App\Services\ProxyService;
 use App\Services\SortService;
@@ -70,6 +71,7 @@ use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
@@ -224,6 +226,14 @@ class AppServiceProvider extends ServiceProvider
         });
         Event::listen([JobProcessed::class, Looping::class], function (): void {
             AlertService::trackRunningJob(null);
+        });
+
+        // Leave out the Horizon supervisors of optional features nobody uses yet; a
+        // scheduled check starts them once the feature is used. See OptionalQueueSupervisors.
+        Event::listen(CommandStarting::class, function (CommandStarting $event): void {
+            if ($event->command === 'horizon') {
+                app(OptionalQueueSupervisors::class)->leaveOutUnusedSupervisors();
+            }
         });
 
         // Inject Copilot API key from settings into the Laravel AI config

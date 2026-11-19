@@ -390,7 +390,7 @@ it('documents every dedicated plugin supervisor tuning default', function () {
         ->toContain('# HORIZON_PLUGIN_MAX_PROCESSES=1')
         ->toContain('# HORIZON_PLUGIN_MAX_TIME=3600')
         ->toContain('# HORIZON_PLUGIN_MAX_JOBS=50')
-        ->toContain('# HORIZON_PLUGIN_MEMORY=256');
+        ->toContain('# HORIZON_PLUGIN_MEMORY=128');
 });
 
 it('routes manually queued plugin actions through the dedicated worker', function () {

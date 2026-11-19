@@ -200,7 +200,10 @@ $config = [
             // maxTime/maxJobs recycle a worker between jobs (never mid-job) to bound long-running memory growth.
             'maxTime' => $horizonIntEnv('HORIZON_QUEUE_MAX_TIME', 3600), // recycle worker hourly
             'maxJobs' => $horizonIntEnv('HORIZON_QUEUE_MAX_JOBS', 250),
-            'memory' => $horizonIntEnv('HORIZON_QUEUE_MEMORY', 256), // MB
+            // memory recycles a worker after a job leaves it above this many MB. PHP keeps memory
+            // a job used, so a worker would otherwise hold an import's peak until maxTime. It only
+            // decides recycling, not how much a job may use; an idle worker uses about 50 MB.
+            'memory' => $horizonIntEnv('HORIZON_QUEUE_MEMORY', 128), // MB
             'tries' => 3, // Number of times to attempt a job before marking it as failed
             'timeout' => 60 * 125, // Must stay shorter than the retry_after value set in queue.php
             'nice' => 0,
@@ -213,7 +216,7 @@ $config = [
             'maxProcesses' => $horizonIntEnv('HORIZON_PLUGIN_MAX_PROCESSES', 1),
             'maxTime' => $horizonIntEnv('HORIZON_PLUGIN_MAX_TIME', 3600),
             'maxJobs' => $horizonIntEnv('HORIZON_PLUGIN_MAX_JOBS', 50),
-            'memory' => $horizonIntEnv('HORIZON_PLUGIN_MEMORY', 256),
+            'memory' => $horizonIntEnv('HORIZON_PLUGIN_MEMORY', 128),
             'tries' => 1,
             // Must stay shorter than the 'plugin' connection retry_after in config/queue.php.
             'timeout' => $horizonIntEnv('HORIZON_PLUGIN_TIMEOUT', 60 * 60 * 6),
@@ -231,7 +234,7 @@ $config = [
             'maxProcesses' => $horizonIntEnv('HORIZON_SD_MAX_PROCESSES', 1),
             'maxTime' => $horizonIntEnv('HORIZON_SD_MAX_TIME', 3600), // recycle worker hourly
             'maxJobs' => $horizonIntEnv('HORIZON_SD_MAX_JOBS', 250),
-            'memory' => $horizonIntEnv('HORIZON_SD_MEMORY', 256), // MB
+            'memory' => $horizonIntEnv('HORIZON_SD_MEMORY', 128), // MB
             'tries' => 3,
             'timeout' => 60 * 125,
             'nice' => 0,
@@ -248,7 +251,7 @@ $config = [
             // two back-to-back recordings before recycling rather than churning after every job.
             'maxTime' => $horizonIntEnv('HORIZON_DVR_MAX_TIME', 7200),
             'maxJobs' => $horizonIntEnv('HORIZON_DVR_MAX_JOBS', 50),
-            'memory' => $horizonIntEnv('HORIZON_DVR_MEMORY', 256), // MB
+            'memory' => $horizonIntEnv('HORIZON_DVR_MEMORY', 128), // MB
             'tries' => 2, // DVR jobs get fewer retries to avoid duplicate recordings
             'timeout' => 60 * 60, // 1 hour (long-running recordings)
             'nice' => 5,
@@ -269,7 +272,7 @@ $config = [
             'maxProcesses' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_PROCESSES', 2),
             'maxTime' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_TIME', 1800), // recycle every 30 min, jobs are short
             'maxJobs' => $horizonIntEnv('HORIZON_AIOSTREAMS_MAX_JOBS', 300),
-            'memory' => $horizonIntEnv('HORIZON_AIOSTREAMS_MEMORY', 256), // MB
+            'memory' => $horizonIntEnv('HORIZON_AIOSTREAMS_MEMORY', 128), // MB
             'tries' => 1, // jobs handle their own empty-result retry/backoff internally
             'timeout' => 60 * 5,
             'nice' => 5,
@@ -288,7 +291,7 @@ $config = [
             'maxProcesses' => $horizonIntEnv('HORIZON_CACHE_MAX_PROCESSES', env('DB_CONNECTION', 'sqlite') === 'sqlite' ? 1 : 4),
             'maxTime' => $horizonIntEnv('HORIZON_CACHE_MAX_TIME', 3600),
             'maxJobs' => $horizonIntEnv('HORIZON_CACHE_MAX_JOBS', 50),
-            'memory' => $horizonIntEnv('HORIZON_CACHE_MEMORY', 256),
+            'memory' => $horizonIntEnv('HORIZON_CACHE_MEMORY', 128),
             'tries' => 3,
             'timeout' => 60 * 60, // 1 hour - cached files can be multi-GB
             'nice' => 5,
