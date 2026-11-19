@@ -338,6 +338,7 @@ class ProcessM3uImportSeriesEpisodes implements ShouldQueue
                 refresh: $this->overwrite_existing,
                 sync: $shouldSync,
                 dispatchTmdb: $dispatchTmdb,
+                overwrite: $this->overwrite_existing,
             );
         });
 

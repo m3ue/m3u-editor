@@ -14,6 +14,7 @@ use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
 use App\Support\ChannelNumber;
+use App\Support\LocalMetadata;
 use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
@@ -923,17 +924,29 @@ class Channel extends Model
                         Log::warning("Unable to parse release date \"{$dateToParse}\" for VOD {$this->id}");
                     }
                 }
+                // Keep TMDB-only enrichment (cast_list/clearlogo/related_tmdb) the
+                // provider payload never carries, or this refresh would wipe it. With
+                // $preferTmdb, TMDB-owned fields on an enriched row also win over the provider.
+                $info = TmdbEnrichment::preserveOnProviderRefresh(
+                    $this->info,
+                    $movieData['info'] ?? null,
+                    $preferTmdb ? TmdbEnrichment::PREFERRED_VOD_INFO_KEYS : [],
+                );
+                $movieDataUpdate = $movieData['movie_data'] ?? null;
+
+                // With local metadata authoritative, a refresh of an already-fetched title
+                // only fills what is still blank, and the stored added date stays put.
+                if ($playlist->preserve_vod_metadata && $this->last_metadata_fetch) {
+                    $info = LocalMetadata::keepLocal($this->info, $info);
+                    if (is_array($movieDataUpdate) && filled($this->movie_data['added'] ?? null)) {
+                        $movieDataUpdate['added'] = $this->movie_data['added'];
+                    }
+                }
+
                 $update = [
                     'year' => $year,
-                    // Keep TMDB-only enrichment (cast_list/clearlogo/related_tmdb) the
-                    // provider payload never carries, or this refresh would wipe it. With
-                    // $preferTmdb, TMDB-owned fields on an enriched row also win over the provider.
-                    'info' => TmdbEnrichment::preserveOnProviderRefresh(
-                        $this->info,
-                        $movieData['info'] ?? null,
-                        $preferTmdb ? TmdbEnrichment::PREFERRED_VOD_INFO_KEYS : [],
-                    ),
-                    'movie_data' => $movieData['movie_data'] ?? null,
+                    'info' => $info,
+                    'movie_data' => $movieDataUpdate,
                     'last_metadata_fetch' => now(),
                 ];
 

@@ -138,6 +138,13 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 'source_added_at', // provider `added`
             ];
 
+            // With local metadata authoritative, existing rows keep their stored rating,
+            // year and added date; new rows are still inserted with the provider's values.
+            $preserveLocalMetadata = (bool) $playlist?->preserve_vod_metadata;
+            if ($preserveLocalMetadata) {
+                $updateColumns = array_values(array_diff($updateColumns, ['rating', 'rating_5based', 'source_added_at']));
+            }
+
             if ($job->variables['autoSort'] ?? false) {
                 $updateColumns[] = 'sort';
             }
@@ -162,7 +169,7 @@ class ProcessM3uVodImportChunk implements ShouldQueue
                 Channel::upsert(
                     $bulkWithYear->all(),
                     uniqueBy: ['source_id', 'playlist_id', 'is_vod'],
-                    update: [...$updateColumns, 'year'],
+                    update: $preserveLocalMetadata ? $updateColumns : [...$updateColumns, 'year'],
                 );
             }
 

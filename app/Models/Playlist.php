@@ -71,6 +71,8 @@ class Playlist extends Model
         'sort_by_channel_number' => 'boolean',
         'auto_fetch_series_metadata' => 'boolean',
         'auto_sync_series_stream_files' => 'boolean',
+        'preserve_series_metadata' => 'boolean',
+        'preserve_vod_metadata' => 'boolean',
         'auto_merge_channels_enabled' => 'boolean',
         'auto_merge_deactivate_failover' => 'boolean',
         'auto_merge_config' => 'array',

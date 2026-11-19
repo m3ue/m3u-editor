@@ -8,6 +8,7 @@ use App\Jobs\FetchTmdbIds;
 use App\Jobs\SyncSeriesStrmFiles;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\LocalMetadata;
 use App\Support\TmdbEnrichment;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
@@ -352,7 +353,12 @@ class Series extends Model
         });
     }
 
-    public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true, bool $preferTmdb = false)
+    /**
+     * @param  bool  $overwrite  An explicit user request to overwrite existing data, which bypasses
+     *                           the playlist's preserve_series_metadata protection. $refresh alone
+     *                           (e.g. an on-demand Xtream fetch) does not.
+     */
+    public function fetchMetadata($refresh = false, $sync = true, bool $dispatchTmdb = true, bool $preferTmdb = false, bool $overwrite = false)
     {
         // AIOStreams-backed series are resolved via ResolveAioStreamsSeries, not Xtream.
         if ($this->is_custom) {
@@ -411,16 +417,26 @@ class Series extends Model
                     ? Carbon::createFromTimestamp((int) $info['last_modified'], config('app.timezone'))
                     : now()->addDay();
 
+                // With local metadata authoritative, a series fetched before keeps its stored
+                // details, artwork and episode data; the provider only fills what is blank.
+                // last_modified stays provider-driven so new episodes are still picked up.
+                $preserveLocalMetadata = ! $overwrite && $playlist->preserve_series_metadata && $this->last_metadata_fetch !== null;
+
+                // Store raw metadata, keeping TMDB-only enrichment (cast_list/clearlogo/
+                // related_tmdb) the provider payload never carries.
+                $metadata = TmdbEnrichment::preserveOnProviderRefresh(
+                    $this->metadata,
+                    $info,
+                    $preferTmdb ? TmdbEnrichment::PREFERRED_SERIES_METADATA_KEYS : [],
+                );
+                if ($preserveLocalMetadata) {
+                    $metadata = LocalMetadata::keepLocal($this->metadata, $metadata, ['last_modified']);
+                }
+
                 $update = [
                     'last_metadata_fetch' => now(),
                     'last_modified' => $providerLastModified,
-                    // Store raw metadata, keeping TMDB-only enrichment (cast_list/clearlogo/
-                    // related_tmdb) the provider payload never carries.
-                    'metadata' => TmdbEnrichment::preserveOnProviderRefresh(
-                        $this->metadata,
-                        $info,
-                        $preferTmdb ? TmdbEnrichment::PREFERRED_SERIES_METADATA_KEYS : [],
-                    ),
+                    'metadata' => $metadata,
                 ];
                 if ($refresh) {
                     $item = $detail['info'] ?? null;
@@ -457,6 +473,16 @@ class Series extends Model
                                 }
                             }
                         }
+
+                        // Stored detail columns win; the provider only fills blank ones.
+                        if ($preserveLocalMetadata) {
+                            $providerOwnedColumns = ['last_metadata_fetch', 'last_modified', 'metadata'];
+                            foreach (array_keys($update) as $column) {
+                                if (! in_array($column, $providerOwnedColumns, true) && ! blank($this->{$column})) {
+                                    unset($update[$column]);
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -464,6 +490,16 @@ class Series extends Model
                 if (count($eps) > 0) {
                     // Process the series episodes
                     $playlistCategory = $this->category;
+
+                    // Stored episodes, for keeping local/TMDB data over this refresh. One
+                    // series' episodes, so a bounded set; without preserve only the
+                    // TMDB-matched ones are used, so only those are loaded.
+                    $existingEpisodes = $this->episodes()
+                        ->whereNotNull('source_episode_id')
+                        ->when(! $preserveLocalMetadata, fn ($query) => $query->whereNotNull('tmdb_id'))
+                        ->get(['id', 'source_episode_id', 'title', 'added', 'info', 'tmdb_id'])
+                        ->keyBy('source_episode_id');
+
                     foreach ($eps as $season => $episodes) {
                         // Check if the season exists in the playlist
                         $playlistSeason = $this->seasons()
@@ -495,7 +531,7 @@ class Series extends Model
                             // matching season info this time around — otherwise keep
                             // whatever was previously fetched instead of clobbering it
                             // with a generic fallback.
-                            $playlistSeason->update([
+                            $seasonUpdate = [
                                 'new' => false,
                                 'name' => $seasonInfo['name'] ?? $playlistSeason->name,
                                 'source_season_id' => $seasonInfo['id'] ?? $playlistSeason->source_season_id,
@@ -506,7 +542,18 @@ class Series extends Model
                                 'series_id' => $this->id,
                                 'import_batch_no' => $batchNo,
                                 'metadata' => self::mergeSeasonMetadata($playlistSeason->metadata, $seasonInfo),
-                            ]);
+                            ];
+
+                            if ($preserveLocalMetadata) {
+                                foreach (['name', 'cover', 'cover_big'] as $column) {
+                                    if (! blank($playlistSeason->getRawOriginal($column))) {
+                                        unset($seasonUpdate[$column]);
+                                    }
+                                }
+                                $seasonUpdate['metadata'] = LocalMetadata::keepLocal($playlistSeason->metadata, $seasonUpdate['metadata']);
+                            }
+
+                            $playlistSeason->update($seasonUpdate);
                         }
 
                         // Process each episode in the season
@@ -522,6 +569,43 @@ class Series extends Model
                             // absurdly long titles (e.g. a hyphen-joined year list); clamp
                             // so one bad title can't fail the whole episode upsert.
                             $title = Str::limit($title, 255, '');
+                            $added = $ep['added'] ?? null;
+                            $episodeInfo = [
+                                'release_date' => $ep['info']['release_date'] ?? null,
+                                'plot' => $ep['info']['plot'] ?? $seasonInfo['plot'] ?? null,
+                                'duration_secs' => $ep['info']['duration_secs'] ?? null,
+                                'duration' => $ep['info']['duration'] ?? null,
+                                'movie_image' => $ep['info']['movie_image'] ?? null,
+                                'bitrate' => $ep['info']['bitrate'] ?? 0,
+                                'rating' => $ep['info']['rating'] ?? null,
+                                'season' => (int) $season,
+                                'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonTmdbId ?? null,
+                                'cover_big' => $ep['info']['cover_big'] ?? null,
+                            ];
+
+                            $existingEpisode = $existingEpisodes->get((int) $ep['id']);
+                            if ($existingEpisode && $preserveLocalMetadata) {
+                                // Local metadata is authoritative: keep the stored title, added
+                                // date and info; the provider only fills what is still blank.
+                                $title = filled($existingEpisode->title) ? $existingEpisode->title : $title;
+                                // Raw column value: the accessor returns a Carbon, which would be
+                                // written back shifted by the app timezone offset.
+                                $storedAdded = $existingEpisode->getRawOriginal('added');
+                                $added = filled($storedAdded) ? $storedAdded : $added;
+                                // Season placement and stream details describe the file, not the
+                                // presentation, so they follow the provider like the columns do.
+                                $episodeInfo = LocalMetadata::keepLocal(
+                                    $existingEpisode->info,
+                                    $episodeInfo,
+                                    ['season', 'duration_secs', 'duration', 'bitrate'],
+                                );
+                            } elseif ($existingEpisode?->tmdb_id !== null) {
+                                // TMDB-matched episodes are never looked up again (FetchTmdbIds only
+                                // revisits episodes without a tmdb_id), so a blank provider value
+                                // must not wipe the plot/still/air date TMDB filled in.
+                                $episodeInfo = LocalMetadata::fillBlanks($existingEpisode->info, $episodeInfo);
+                            }
+
                             $bulk[] = [
                                 'title' => $title,
                                 'source_episode_id' => (int) $ep['id'],
@@ -533,21 +617,10 @@ class Series extends Model
                                 'episode_num' => (int) $ep['episode_num'],
                                 'container_extension' => $ep['container_extension'],
                                 'custom_sid' => $ep['custom_sid'] ?? null,
-                                'added' => $ep['added'] ?? null,
+                                'added' => $added,
                                 'season' => (int) $season,
                                 'url' => $url,
-                                'info' => json_encode([
-                                    'release_date' => $ep['info']['release_date'] ?? null,
-                                    'plot' => $ep['info']['plot'] ?? $seasonInfo['plot'] ?? null,
-                                    'duration_secs' => $ep['info']['duration_secs'] ?? null,
-                                    'duration' => $ep['info']['duration'] ?? null,
-                                    'movie_image' => $ep['info']['movie_image'] ?? null,
-                                    'bitrate' => $ep['info']['bitrate'] ?? 0,
-                                    'rating' => $ep['info']['rating'] ?? null,
-                                    'season' => (int) $season,
-                                    'tmdb_id' => $ep['info']['tmdb_id'] ?? $seasonTmdbId ?? null,
-                                    'cover_big' => $ep['info']['cover_big'] ?? null,
-                                ]),
+                                'info' => json_encode($episodeInfo),
                             ];
                         }
 

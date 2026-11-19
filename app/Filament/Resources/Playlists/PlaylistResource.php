@@ -2371,6 +2371,16 @@ class PlaylistResource extends Resource implements CopilotResource
                         )
                         ->default(false)
                         ->helperText(__('When enabled, series will be included in the M3U output. It is recommended to enable the "Fetch metadata" option when enabled.')),
+                    Toggle::make('preserve_series_metadata')
+                        ->label(__('Preserve local metadata'))
+                        ->inline(false)
+                        ->columnSpanFull()
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('New series, seasons and episodes still import normally, and removed ones are still cleaned up. Choosing "Overwrite Existing Metadata" on a metadata refresh replaces the stored values.')
+                        )
+                        ->default(false)
+                        ->helperText(__('Keeps stored details, artwork and episode data (manual edits or TMDB) on existing series during provider syncs. The provider only fills blank fields.')),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
 
             Section::make(__('VOD Processing'))
@@ -2407,6 +2417,16 @@ class PlaylistResource extends Resource implements CopilotResource
                         )
                         ->default(false)
                         ->helperText(__('When enabled, VOD channels will be included in the M3U output.')),
+                    Toggle::make('preserve_vod_metadata')
+                        ->label(__('Preserve local metadata'))
+                        ->inline(false)
+                        ->columnSpanFull()
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('New movies still import normally, and removed ones are still cleaned up. Stream URLs keep updating so playback is unaffected.')
+                        )
+                        ->default(false)
+                        ->helperText(__('Keeps stored details, rating, year and added date (manual edits or TMDB) on existing movies during provider syncs.')),
                 ])->hidden(fn (Get $get): bool => ! $get('xtream')),
 
             Section::make(__('Media Server Sources'))
