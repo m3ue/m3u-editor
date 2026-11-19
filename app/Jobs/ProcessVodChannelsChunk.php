@@ -87,6 +87,7 @@ class ProcessVodChannelsChunk implements ShouldQueue
         // progress write below throws "database is locked" instantly.
         $channels = $playlist->channels()
             ->whereIn('id', $this->channelIds)
+            ->orderBy('id')
             ->get();
 
         $totalChannels = count($this->channelIds);

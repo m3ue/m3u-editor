@@ -5,14 +5,13 @@ namespace App\Providers\Filament;
 use App\Http\Middleware\GuestPlaylistAuth;
 use Filament\FontProviders\LocalFontProvider;
 use Filament\Panel;
-use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
 use Filament\Support\Facades\FilamentView;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Support\Facades\Blade;
 
-class GuestPanelPanelProvider extends PanelProvider
+class GuestPanelPanelProvider extends DeferrablePanelProvider
 {
     public function panel(Panel $panel): Panel
     {

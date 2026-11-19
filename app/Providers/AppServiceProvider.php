@@ -12,6 +12,7 @@ use App\Events\EpgUpdated;
 use App\Events\PlaylistCreated;
 use App\Events\PlaylistDeleted;
 use App\Events\PlaylistUpdated;
+use App\Filament\Support\LazyPanelRegistry;
 use App\Http\Middleware\EnsureUserCanUseCopilot;
 use App\Jobs\ProcessChannelScrubber;
 use App\Jobs\SyncMediaServer;
@@ -60,6 +61,7 @@ use Filament\Forms\Components\Field;
 use Filament\Forms\Components\FileUpload;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Notifications\Notification as FilamentNotification;
+use Filament\PanelRegistry;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -111,6 +113,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(AiManager::class, fn ($app) => new PatchedAiManager($app));
 
         $this->app->singleton(GitInfoService::class);
+
+        // Replaces Filament's registry (bound by FilamentServiceProvider, which registers
+        // before app providers) so Horizon, Reverb and the scheduler build panels on first
+        // use instead of at boot. See LazyPanelRegistry.
+        $this->app->singleton(PanelRegistry::class, fn ($app): LazyPanelRegistry => new LazyPanelRegistry(
+            LazyPanelRegistry::shouldDeferPanels($app),
+        ));
 
         // Detect HTTPS before any provider boot() runs, so package providers
         // calling asset() during their boot() get the correct scheme. We can't

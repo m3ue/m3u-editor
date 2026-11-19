@@ -45,7 +45,6 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationBuilder;
 use Filament\Panel;
-use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
 use Filament\Support\Facades\FilamentView;
@@ -60,7 +59,7 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 use ShuvroRoy\FilamentSpatieLaravelBackup\FilamentSpatieLaravelBackupPlugin;
 use Throwable;
 
-class AdminPanelProvider extends PanelProvider
+class AdminPanelProvider extends DeferrablePanelProvider
 {
     public function panel(Panel $panel): Panel
     {
