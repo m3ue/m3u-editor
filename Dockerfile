@@ -235,35 +235,43 @@ RUN echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/rep
     postgresql18-contrib \
     python3 \
     py3-pip \
-    php84-cli \
-    php84-fpm \
-    php84-posix \
-    php84-openssl \
-    php84-sqlite3 \
-    php84-gd \
-    php84-curl \
-    php84-intl \
-    php84-imap \
-    php84-mbstring \
-    php84-xml \
-    php84-zip \
-    php84-bcmath \
-    php84-soap \
-    php84-xmlreader \
-    php84-xmlwriter \
-    php84-iconv \
-    php84-ldap \
-    php84-tokenizer \
-    php84-msgpack \
-    php84-opcache \
-    php84-pdo_sqlite \
-    php84-pdo_pgsql \
-    php84-phar \
-    php84-fileinfo \
-    php84-pecl-igbinary \
-    php84-pecl-imagick \
-    php84-pecl-redis \
-    php84-pcntl && \
+    # PHP from Alpine edge until the 8.4.28 security release (phpAfterShell,
+    # CVE-2026-126714 et al) is backported to 3.24. Every php84 package,
+    # including the base and pecl extensions, must come from edge together so
+    # they share one build. Switch back to the 3.24 packages once it lands.
+    # The >=8.4.28 constraint fails the build until edge has it, and busts the
+    # cached apk layer in CI so it gets refetched (same as nginx below).
+    "php84@edge>=8.4.28" \
+    "php84-common@edge>=8.4.28" \
+    php84-cli@edge \
+    php84-fpm@edge \
+    php84-posix@edge \
+    php84-openssl@edge \
+    php84-sqlite3@edge \
+    php84-gd@edge \
+    php84-curl@edge \
+    php84-intl@edge \
+    php84-imap@edge \
+    php84-mbstring@edge \
+    php84-xml@edge \
+    php84-zip@edge \
+    php84-bcmath@edge \
+    php84-soap@edge \
+    php84-xmlreader@edge \
+    php84-xmlwriter@edge \
+    php84-iconv@edge \
+    php84-ldap@edge \
+    php84-tokenizer@edge \
+    php84-msgpack@edge \
+    php84-opcache@edge \
+    php84-pdo_sqlite@edge \
+    php84-pdo_pgsql@edge \
+    php84-phar@edge \
+    php84-fileinfo@edge \
+    php84-pecl-igbinary@edge \
+    php84-pecl-imagick@edge \
+    php84-pecl-redis@edge \
+    php84-pcntl@edge && \
     if [ "${INSTALL_CLAMAV}" = "true" ]; then \
         apk add --no-cache \
         clamav \
