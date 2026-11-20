@@ -784,7 +784,7 @@ class XtreamApiController extends Controller
                         'added' => (string) $channel->created_at->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => [(int) $channelCategoryId],
-                        'tv_archive' => (! $disableCatchup && ($channel->catchup || $channel->shift)) ? 1 : 0,
+                        'tv_archive' => (! $disableCatchup && ($channel->supportsCatchup() || $channel->shift)) ? 1 : 0,
                         'tv_archive_duration' => $this->resolveTvArchiveDuration($channel, $disableCatchup),
                         'custom_sid' => $channel->stream_id_custom ?? '',
                         'thumbnail' => $streamIcon,
@@ -2164,7 +2164,7 @@ class XtreamApiController extends Controller
                         'start_timestamp' => (string) $startTime->timestamp,
                         'stop_timestamp' => (string) $endTime->timestamp,
                         'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                        'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                        'has_archive' => (! $disableCatchup && $channel->supportsCatchup() && $endTime->lt($now)) ? 1 : 0,
                     ] + $this->epgProgrammeArtwork($programme, $playlist);
                 }
             }
@@ -2192,7 +2192,7 @@ class XtreamApiController extends Controller
             $channels = $playlist->channels()
                 ->where('enabled', true)
                 ->whereIn('channels.id', $streamIds)
-                ->with('epgChannel')
+                ->with(['epgChannel', 'catchupChannel'])
                 ->get()
                 ->keyBy('id');
 
@@ -3056,7 +3056,7 @@ class XtreamApiController extends Controller
                     'start_timestamp' => (string) $startTime->timestamp,
                     'stop_timestamp' => (string) $endTime->timestamp,
                     'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                    'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                    'has_archive' => (! $disableCatchup && $channel->supportsCatchup() && $endTime->lt($now)) ? 1 : 0,
                 ] + $this->epgProgrammeArtwork($programme, $playlist);
                 $count++;
             }
@@ -3194,7 +3194,7 @@ class XtreamApiController extends Controller
                 'start_timestamp' => (string) $startTime->timestamp,
                 'stop_timestamp' => (string) $endTime->timestamp,
                 'now_playing' => ($isCurrentProgramme && $isNowPlaying) ? 1 : 0,
-                'has_archive' => (! $disableCatchup && $channel->catchup && $endTime->lt($now)) ? 1 : 0,
+                'has_archive' => (! $disableCatchup && $channel->supportsCatchup() && $endTime->lt($now)) ? 1 : 0,
             ];
             if ($includeDetails) {
                 $listing += $this->epgProgrammeDetails($programme, $playlist);
@@ -4461,12 +4461,14 @@ class XtreamApiController extends Controller
             return 0;
         }
 
-        if (! $channel->catchup && ! $channel->shift) {
+        if (! $channel->supportsCatchup() && ! $channel->shift) {
             return 0;
         }
 
-        if ($channel->shift) {
-            return (int) ceil($channel->shift / 24);
+        // Its own archive window, else a linked catchup channel's (#1661)
+        $shiftHours = $channel->catchupShiftHours();
+        if ($shiftHours) {
+            return (int) ceil($shiftHours / 24);
         }
 
         return (int) config('dev.default_epg_catchup_days', 7);

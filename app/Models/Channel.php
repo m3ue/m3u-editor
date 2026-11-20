@@ -57,6 +57,7 @@ class Channel extends Model
         'network_id' => 'integer',
         'group_id' => 'integer',
         'stream_profile_id' => 'integer',
+        'catchup_channel_id' => 'integer',
         'extvlcopt' => 'array',
         'kodidrop' => 'array',
         'is_custom' => 'boolean',
@@ -324,6 +325,72 @@ class Channel extends Model
     public function strmFileMappings(): MorphMany
     {
         return $this->morphMany(StrmFileMapping::class, 'syncable');
+    }
+
+    /**
+     * The channel this one borrows catchup from (#1661). Live playback keeps this
+     * channel's own source; only catchup requests are served from the linked one.
+     * Use linkedCatchupChannel() to get it only when the link is actually usable.
+     */
+    public function catchupChannel(): BelongsTo
+    {
+        return $this->belongsTo(Channel::class, 'catchup_channel_id');
+    }
+
+    /**
+     * The linked catchup channel when the link can be used: both are live channels
+     * owned by the same user, the link isn't to itself, and the linked channel has
+     * catchup of its own. Links aren't followed further, so they never chain.
+     */
+    public function linkedCatchupChannel(): ?Channel
+    {
+        if (! $this->catchup_channel_id || $this->catchup_channel_id === $this->id || $this->is_vod) {
+            return null;
+        }
+
+        $linked = $this->catchupChannel;
+        if (! $linked || $linked->user_id !== $this->user_id || $linked->is_vod || empty($linked->catchup)) {
+            return null;
+        }
+
+        return $linked;
+    }
+
+    /**
+     * Whether catchup can be served for this channel, either from its own
+     * catchup or from a usable linked catchup channel.
+     */
+    public function supportsCatchup(): bool
+    {
+        return ! empty($this->catchup) || $this->hasLinkedCatchup();
+    }
+
+    /**
+     * Whether this channel has a usable catchup link. Rows from the playlist output
+     * query (PlaylistGenerateController::getChannelQuery()) carry the link's state as
+     * joined columns, so cursor-streamed output never needs a query per channel.
+     */
+    public function hasLinkedCatchup(): bool
+    {
+        if (array_key_exists('linked_catchup', $this->attributes)) {
+            return ! empty($this->attributes['linked_catchup']);
+        }
+
+        return $this->linkedCatchupChannel() !== null;
+    }
+
+    /**
+     * The archive window in hours. With a usable linked catchup channel, catchup is
+     * always served from it, so its window wins (falling back to this channel's own
+     * only when the linked one has none recorded); otherwise this channel's own.
+     */
+    public function catchupShiftHours(): int
+    {
+        $linkedShift = array_key_exists('linked_catchup', $this->attributes)
+            ? (! empty($this->attributes['linked_catchup']) ? (int) ($this->attributes['linked_catchup_shift'] ?? 0) : 0)
+            : (int) ($this->linkedCatchupChannel()?->shift ?? 0);
+
+        return $linkedShift ?: (int) ($this->shift ?? 0);
     }
 
     public function failoverChannels(): HasManyThrough
