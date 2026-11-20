@@ -72,13 +72,15 @@ class PairDevice extends Page
     }
 
     /**
-     * One empty row, keyed the way Filament keys repeater items.
+     * One empty row, keyed the way Filament keys repeater items and shaped
+     * like a simple repeater's raw item, so the row's select has a
+     * `playlist_auth_id` key to bind to in the browser.
      *
-     * @return array<string, null>
+     * @return array<string, array{playlist_auth_id: null}>
      */
     private static function emptyCredentialRows(): array
     {
-        return [(string) Str::uuid() => null];
+        return [(string) Str::uuid() => ['playlist_auth_id' => null]];
     }
 
     public function content(Schema $schema): Schema

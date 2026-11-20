@@ -264,3 +264,22 @@ it('approves credentials picked through the repeater rows the way the browser se
         ->and($deviceAuth->playlist_auth_id)->toBe($kids->id)
         ->and($deviceAuth->playlist_auth_ids)->toBe([$kids->id, $living->id]);
 });
+
+it('starts and resets the credential rows in the raw shape the select binds to', function () {
+    $admin = User::factory()->admin()->create();
+    $this->actingAs($admin);
+
+    $playlistAuth = PlaylistAuth::factory()->for($admin)->create();
+    DeviceAuthorization::factory()->create(['user_code' => 'XKQP-9F3T']);
+
+    $page = Livewire::test(PairDevice::class);
+
+    expect(array_values($page->get('data.playlist_auth_ids')))->toBe([['playlist_auth_id' => null]]);
+
+    $page->set('data.user_code', 'XKQP9F3T')
+        ->set('data.playlist_auth_ids', credentialRows($playlistAuth->id))
+        ->call('approve')
+        ->assertHasNoFormErrors();
+
+    expect(array_values($page->get('data.playlist_auth_ids')))->toBe([['playlist_auth_id' => null]]);
+});
