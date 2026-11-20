@@ -135,7 +135,8 @@ class PlaylistGenerateController extends Controller
                     $isCustomContext = ($type === 'custom') || ($type === 'alias' && ! empty($playlist->custom_playlist_id));
 
                     $channelNo = $channel->resolveChannelNumber($isCustomContext);
-                    $timeshift = $channel->shift ?? 0;
+                    $timeshift = $channel->catchupShiftHours();
+                    $hasLinkedCatchup = $channel->hasLinkedCatchup();
                     $stationId = $channel->station_id ?? '';
                     $epgShift = $channel->tvg_shift ?? 0;
                     $group = $channel->group ?? '';
@@ -238,7 +239,9 @@ class PlaylistGenerateController extends Controller
                         // epochs) on the live URL: the one catchup form Kodi, TiviMate and
                         // IPTVnator all fill in the same way. The live endpoint turns it into the
                         // provider's own catchup URL. As a complete URL, its mode is "default".
-                        if (($channelProxyEnabled || $useInternalXtreamFormat) && $channel->catchup) {
+                        // A linked catchup channel (#1661) always uses our endpoint, even with
+                        // raw provider URLs: only m3u-editor can resolve the linked channel.
+                        if ($hasLinkedCatchup || (($channelProxyEnabled || $useInternalXtreamFormat) && $channel->catchup)) {
                             $catchupExt = $catchupExtension ?: 'ts';
                             $catchupSource = "{$baseUrl}/live/{$username}/{$password}/{$channel->id}.{$catchupExt}?utc={utc}&lutc={lutc}";
                             $extInf .= " catchup=\"default\" catchup-source=\"{$catchupSource}\"";
@@ -810,6 +813,15 @@ class PlaylistGenerateController extends Controller
             ->selectRaw('parent_groups.id as merged_group_id')
             ->selectRaw('COALESCE(parent_groups.sort_order, groups.sort_order) as group_sort_order')
             ->selectRaw('groups.aed_profile_id as group_aed_profile_id');
+
+        // A usable linked catchup channel (#1661, see Channel::linkedCatchupChannel()),
+        // selected so streamed output can advertise its catchup without a query per row.
+        // A NULL linked_catchup means no link, or one that can't be used. Primary key
+        // subqueries rather than a self-join, so callers' unqualified channel columns
+        // (e.g. group_id) don't become ambiguous.
+        $linkedCatchupSubquery = '(SELECT linked.%s FROM channels linked WHERE linked.id = channels.catchup_channel_id AND linked.id != channels.id AND linked.user_id = channels.user_id AND linked.is_vod = ? AND channels.is_vod = ?)';
+        $query->selectRaw(sprintf($linkedCatchupSubquery, 'catchup').' as linked_catchup', [false, false])
+            ->selectRaw(sprintf($linkedCatchupSubquery, 'shift').' as linked_catchup_shift', [false, false]);
 
         // Join EPG channel data to avoid N+1 queries and select common fields
         $query->leftJoin('epg_channels', 'channels.epg_channel_id', '=', 'epg_channels.id')

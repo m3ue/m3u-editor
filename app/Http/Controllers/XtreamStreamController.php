@@ -541,12 +541,18 @@ class XtreamStreamController extends Controller
     }
 
     /**
-     * The channel to serve catchup from: the requested one, or when it doesn't support catchup,
-     * its first failover that does. This allows an HD primary (no catchup) to fall back to a
-     * lower-res failover for timeshift.
+     * The channel to serve catchup from: its linked catchup channel when one is set and usable
+     * (#1661), else the requested one, or when it doesn't support catchup, its first failover
+     * that does. This allows an HD primary (no catchup) to fall back to a lower-res channel for
+     * timeshift without changing its live playback.
      */
     private function resolveCatchupChannel(Channel $channel): Channel
     {
+        $linkedChannel = $channel->linkedCatchupChannel();
+        if ($linkedChannel) {
+            return $linkedChannel;
+        }
+
         if ($channel->catchup && $channel->catchup != 0) {
             return $channel;
         }

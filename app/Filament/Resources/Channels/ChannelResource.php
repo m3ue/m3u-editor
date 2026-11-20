@@ -30,6 +30,7 @@ use App\Services\LogoCacheService;
 use App\Services\PlaylistService;
 use App\Support\ChannelNumber;
 use App\Traits\HasUserFiltering;
+use Closure;
 use EslamRedaDiv\FilamentCopilot\Contracts\CopilotResource;
 use Exception;
 use Filament\Actions\Action;
@@ -1455,6 +1456,10 @@ class ChannelResource extends Resource implements CopilotResource
                             ->label(__('Group')),
                         IconEntry::make('catchup')
                             ->label(__('Catchup'))
+                            ->state(fn (?Channel $record): bool => (bool) $record?->supportsCatchup())
+                            ->tooltip(fn (?Channel $record): ?string => ($linkedChannel = $record?->linkedCatchupChannel())
+                                ? __('Catchup from :channel', ['channel' => self::catchupChannelLabel($linkedChannel)])
+                                : null)
                             ->boolean()
                             ->trueColor('success')
                             ->falseColor('danger'),
@@ -1924,6 +1929,24 @@ class ChannelResource extends Resource implements CopilotResource
                         ->prefixIcon('heroicon-m-globe-alt')
                         ->url()
                         ->hidden(fn (Get $get) => ! ($get('is_custom') && $get('catchup'))),
+                    Select::make('catchup_channel_id')
+                        ->label(__('Catchup Channel'))
+                        ->hintIcon(
+                            'heroicon-m-question-mark-circle',
+                            tooltip: __('Serve catchup for this channel from another channel that supports it. Live playback still uses this channel\'s own stream.')
+                        )
+                        ->helperText(__('Optional. Takes priority over the Catchup Source and catchup failovers.'))
+                        ->placeholder(__('Search for a channel with catchup'))
+                        ->searchable()
+                        ->nullable()
+                        ->columnSpan(2)
+                        ->getSearchResultsUsing(fn (string $search, ?Channel $record): array => self::catchupChannelOptions($search, $record))
+                        ->getOptionLabelUsing(fn ($value): ?string => self::catchupChannelLabel(Channel::with(['playlist', 'customPlaylist'])->find($value)))
+                        ->rule(fn (?Channel $record) => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                            if ($value && ! self::catchupChannelCandidates($record)->whereKey($value)->exists()) {
+                                $fail(__('Choose one of your live channels that supports catchup.'));
+                            }
+                        }),
                     TextInput::make('proxy_url')
                         ->extraInputAttributes(['class' => 'privacy-sensitive'])
                         ->label(__('Proxy URL'))
@@ -2150,6 +2173,57 @@ class ChannelResource extends Resource implements CopilotResource
                         ->defaultItems(0),
                 ]),
         ];
+    }
+
+    /**
+     * Channels the given channel may borrow catchup from (#1661): the user's own live
+     * channels with catchup, other than itself. Channels that borrow catchup themselves
+     * are left out, since links aren't chained.
+     */
+    private static function catchupChannelCandidates(?Channel $record): Builder
+    {
+        return Channel::query()
+            ->where('channels.user_id', $record?->user_id ?? auth()->id())
+            ->where('channels.is_vod', false)
+            ->whereNotNull('channels.catchup')
+            ->whereNotIn('channels.catchup', ['', '0'])
+            ->whereNull('channels.catchup_channel_id')
+            ->when($record?->id, fn (Builder $query, int $id) => $query->whereKeyNot($id));
+    }
+
+    /**
+     * Search results for the Catchup Channel select, labeled `Title [Playlist]`.
+     *
+     * @return array<int, string>
+     */
+    private static function catchupChannelOptions(string $search, ?Channel $record): array
+    {
+        $searchLower = '%'.mb_strtolower($search).'%';
+
+        return self::catchupChannelCandidates($record)
+            ->with(['playlist', 'customPlaylist'])
+            ->where(function (Builder $query) use ($searchLower): void {
+                $query->whereRaw('LOWER(title) LIKE ?', [$searchLower])
+                    ->orWhereRaw('LOWER(title_custom) LIKE ?', [$searchLower])
+                    ->orWhereRaw('LOWER(name) LIKE ?', [$searchLower])
+                    ->orWhereRaw('LOWER(name_custom) LIKE ?', [$searchLower]);
+            })
+            ->limit(50)
+            ->get()
+            ->mapWithKeys(fn (Channel $channel): array => [$channel->id => self::catchupChannelLabel($channel)])
+            ->all();
+    }
+
+    private static function catchupChannelLabel(?Channel $channel): ?string
+    {
+        if (! $channel) {
+            return null;
+        }
+
+        $displayTitle = $channel->title_custom ?: $channel->title;
+        $playlistName = $channel->getEffectivePlaylist()?->name ?? __('Unknown');
+
+        return "{$displayTitle} [{$playlistName}]";
     }
 
     private static function resolveScrubberStatus(?Channel $record): string
