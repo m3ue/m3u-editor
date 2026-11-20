@@ -30,11 +30,13 @@ class ViewEpgMap extends ViewRecord
         return $schema
             ->schema([
                 // Wrap everything in a polling Grid so the infolist re-renders
-                // every 3 s while a candidate build is running, mirroring the
-                // pattern used by SyncRunResource. When idle the poll stops.
+                // every 3 s while a candidate build or mapping run is active, and
+                // every 10 s otherwise so a run started elsewhere is picked up.
                 Grid::make()
                     ->columnSpanFull()
-                    ->poll(fn ($record): ?string => $record->candidates_building ? '3s' : null)
+                    ->poll(fn ($record): string => $record->candidates_building || in_array($record->status, [Status::Processing, Status::Pending], true)
+                        ? '3s'
+                        : '10s')
                     ->schema([
                         Section::make(__('Building Candidates'))
                             ->compact()

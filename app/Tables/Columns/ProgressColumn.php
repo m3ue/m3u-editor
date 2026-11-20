@@ -13,8 +13,6 @@ class ProgressColumn extends Column
 
     protected ?Closure $progress = null;
 
-    protected string|Closure|null $poll = null;
-
     public function color(string|Closure $callback): static
     {
         $this->color = $callback;
@@ -41,17 +39,5 @@ class ProgressColumn extends Column
         }
 
         return $this->evaluate($this->progress);
-    }
-
-    public function poll(string|Closure $duration): static
-    {
-        $this->poll = $duration;
-
-        return $this;
-    }
-
-    public function getPoll(): ?string
-    {
-        return $this->evaluate($this->poll);
     }
 }

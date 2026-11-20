@@ -147,19 +147,16 @@ class EpgResource extends Resource implements CopilotResource
                     ->label(__('Sync Progress'))
                     ->tooltip(__('Progress of EPG import/sync'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ProgressColumn::make('cache_progress')
                     ->label(__('Cache Progress'))
                     ->tooltip(__('Progress of EPG cache generation'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ProgressColumn::make('sd_progress')
                     ->label(__('SD Progress'))
                     ->tooltip(__('Progress of SchedulesDirect import (if using)'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 IconColumn::make('is_cached')
                     ->label(__('Cached'))

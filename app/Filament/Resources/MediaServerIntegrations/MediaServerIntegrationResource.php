@@ -1493,12 +1493,10 @@ class MediaServerIntegrationResource extends Resource implements CopilotResource
 
                 ProgressColumn::make('movie_progress')
                     ->label(__('Movie Sync'))
-                    ->poll(fn ($record) => $record->status !== 'completed' && $record->status !== 'failed' ? '3s' : null)
                     ->toggleable(),
 
                 ProgressColumn::make('series_progress')
                     ->label(__('Series Sync'))
-                    ->poll(fn ($record) => $record->status !== 'completed' && $record->status !== 'failed' ? '3s' : null)
                     ->toggleable(),
 
                 TextColumn::make('last_synced_at')

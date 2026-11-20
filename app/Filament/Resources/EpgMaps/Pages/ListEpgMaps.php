@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\EpgMaps\Pages;
 
+use App\Filament\Concerns\RefreshesOnSyncActivity;
 use App\Filament\Resources\EpgMaps\EpgMapResource;
 use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Models\Playlist;
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListEpgMaps extends ListRecords
 {
+    use RefreshesOnSyncActivity;
+
     protected static string $resource = EpgMapResource::class;
 
     public function getSubheading(): string|Htmlable|null

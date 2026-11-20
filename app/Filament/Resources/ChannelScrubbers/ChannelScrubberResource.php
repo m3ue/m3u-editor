@@ -83,7 +83,6 @@ class ChannelScrubberResource extends Resource implements CopilotResource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll()
             ->columns([
                 TextColumn::make('name')
                     ->searchable()
@@ -95,7 +94,6 @@ class ChannelScrubberResource extends Resource implements CopilotResource
                     ->color(fn (Status $state) => $state->getColor()),
                 ProgressColumn::make('progress')
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 TextColumn::make('playlist.name')
                     ->label(__('Playlist'))

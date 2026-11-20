@@ -1,7 +1,6 @@
 @php
     $color = $getColor();
     $progress = $getProgress();
-    $poll = $getPoll();
 
     $colorMap = [
         'primary' => 'var(--color-primary-600)',
@@ -16,7 +15,7 @@
     $clamped = min(max((int) $progress, 0), 100);
 @endphp
 
-<div class="flex w-full flex-col gap-1 px-2" @if ($poll) wire:poll.{{ $poll }} @endif>
+<div class="flex w-full flex-col gap-1 px-2">
     <div class="relative h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
         <div
             class="h-full rounded-full transition-[width] duration-300"

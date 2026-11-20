@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Epgs\Pages;
 
+use App\Filament\Concerns\RefreshesOnSyncActivity;
 use App\Filament\Resources\Epgs\EpgResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListEpgs extends ListRecords
 {
+    use RefreshesOnSyncActivity;
+
     protected static string $resource = EpgResource::class;
 
     public function getSubheading(): string|Htmlable|null

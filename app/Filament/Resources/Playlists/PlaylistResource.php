@@ -339,17 +339,14 @@ class PlaylistResource extends Resource implements CopilotResource
                 ProgressColumn::make('progress')
                     ->label(__('Live Sync'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ProgressColumn::make('vod_progress')
                     ->label(__('VOD Sync'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ProgressColumn::make('series_progress')
                     ->label(__('Series Sync'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ToggleColumn::make('enable_proxy')
                     ->label(__('Proxy'))

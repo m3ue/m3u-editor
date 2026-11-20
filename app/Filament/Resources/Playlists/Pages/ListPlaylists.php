@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Playlists\Pages;
 
+use App\Filament\Concerns\RefreshesOnSyncActivity;
 use App\Filament\Resources\Playlists\PlaylistResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListPlaylists extends ListRecords
 {
+    use RefreshesOnSyncActivity;
+
     protected static string $resource = PlaylistResource::class;
 
     protected function getHeaderActions(): array

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MergedEpgs\Pages;
 
+use App\Filament\Concerns\RefreshesOnSyncActivity;
 use App\Filament\Resources\MergedEpgs\MergedEpgResource;
 use App\Jobs\ProcessEpgImport;
 use Filament\Actions\CreateAction;
@@ -10,6 +11,8 @@ use Illuminate\Contracts\Support\Htmlable;
 
 class ListMergedEpgs extends ListRecords
 {
+    use RefreshesOnSyncActivity;
+
     protected static string $resource = MergedEpgResource::class;
 
     public function getSubheading(): string|Htmlable|null

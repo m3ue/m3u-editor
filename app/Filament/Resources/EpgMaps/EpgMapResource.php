@@ -84,7 +84,6 @@ class EpgMapResource extends Resource implements CopilotResource
     public static function table(Table $table): Table
     {
         return $table
-            ->poll()
             ->columns([
                 TextColumn::make('name')
                     ->searchable()
@@ -97,7 +96,6 @@ class EpgMapResource extends Resource implements CopilotResource
                 ProgressColumn::make('progress')
                     ->tooltip(__('Processing progress of the current or most recent mapping run. This is not the share of channels that were mapped.'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 TextColumn::make('group_ids')
                     ->label(__('Groups'))

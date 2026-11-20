@@ -133,7 +133,6 @@ class MergedEpgResource extends Resource implements CopilotResource
                     ->label(__('Sync Progress'))
                     ->tooltip(__('Progress of merged EPG import/sync'))
                     ->sortable()
-                    ->poll(fn ($record) => $record->status === Status::Processing || $record->status === Status::Pending ? '3s' : null)
                     ->toggleable(),
                 ToggleColumn::make('auto_sync')
                     ->label(__('Auto Sync'))
